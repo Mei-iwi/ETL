@@ -1,0 +1,32 @@
+[
+  {
+    "id": "user-1",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "is_active": true,
+    "email": "user1@example.invalid",
+    "hashed_password": "DEMO_NON_AUTHENTICATING_HASH",
+    "full_name": "Demo User 1",
+    "role_id": "role-1"
+  },
+  {
+    "id": "user-2",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "is_active": true,
+    "email": "user2@example.invalid",
+    "hashed_password": "DEMO_NON_AUTHENTICATING_HASH",
+    "full_name": "Demo User 2",
+    "role_id": "role-2"
+  },
+  {
+    "id": "user-3",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "is_active": true,
+    "email": "user3@example.invalid",
+    "hashed_password": "DEMO_NON_AUTHENTICATING_HASH",
+    "full_name": "Demo User 3",
+    "role_id": "role-3"
+  }
+]

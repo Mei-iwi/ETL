@@ -1,0 +1,17 @@
+[
+  {
+    "resource_id": "resource-1",
+    "grade_level_id": "grade-1",
+    "updated_at": "2026-01-01T00:00:00Z"
+  },
+  {
+    "resource_id": "resource-2",
+    "grade_level_id": "grade-2",
+    "updated_at": "2026-01-01T00:00:00Z"
+  },
+  {
+    "resource_id": "resource-3",
+    "grade_level_id": "grade-3",
+    "updated_at": "2026-01-01T00:00:00Z"
+  }
+]
