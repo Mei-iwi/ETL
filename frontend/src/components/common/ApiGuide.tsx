@@ -10,6 +10,7 @@ const endpoints = [
   { name: '4. Tạo OCR job', method: 'POST', path: '/admin/resource-versions/{version_id}/ocr-jobs', hint: 'Dùng Version ID trả về từ bước 3. Sau đó chạy worker bằng terminal.' },
   { name: '5. Hậu xử lý', method: 'POST', path: '/admin/resource-versions/{version_id}/postprocess', hint: 'Chạy sau khi OCR job đạt COMPLETED hoặc COMPLETED_WITH_ERRORS.' },
   { name: '6. Xem trạng thái ETL', method: 'GET', path: '/admin/resource-versions/{version_id}/etl-status', hint: 'Xem tiến độ OCR, lịch sử hậu xử lý và số content units. Có thể chạy lại để cập nhật.' },
+  { name: '7. Xem Content Units', method: 'GET', path: '/admin/resource-versions/{version_id}/content-units', hint: 'Đọc 50 đơn vị nội dung đầu tiên và văn bản đã chuẩn hóa. Màn hình Content Units hỗ trợ tìm kiếm, phân trang và tải lại.' },
 ] as const;
 
 export function ApiGuide() {
@@ -37,7 +38,8 @@ export function ApiGuide() {
       else if (step === 2) response = await api.ingestResource(resourceId.trim(), bucket.trim(), objectKey.trim());
       else if (step === 3) response = await api.createOcrJob(versionId.trim());
       else if (step === 4) response = await api.runPostprocess(versionId.trim());
-      else response = await api.getEtlStatus(versionId.trim());
+      else if (step === 5) response = await api.getEtlStatus(versionId.trim());
+      else response = await api.getContentUnits(versionId.trim());
       setResult(response);
       if (response.ok && step === 2 && response.data?.version?.id) setVersionId(response.data.version.id);
       // Read the status once after writes to populate the existing workflow screens.
@@ -54,7 +56,7 @@ export function ApiGuide() {
   const missing = step === 2 ? !resourceId.trim() || !bucket.trim() || !objectKey.trim() : step >= 3 ? !versionId.trim() : false;
   return <div className="card api-guide">
     <div className="card-header"><div>
-      <div className="card-title">Thử đầy đủ 6 API</div>
+      <div className="card-title">Thử đầy đủ 7 API</div>
       <div className="card-subtitle">Chọn bước, kiểm tra request rồi gửi. Các lệnh POST thực hiện thay đổi trong CSDL.</div>
     </div></div>
     <div className="api-steps">{endpoints.map((item, index) => <button key={item.path} type="button" className={`btn ${step === index ? 'btn-primary' : 'btn-secondary'} btn-sm`} disabled={busy} onClick={() => { setStep(index); setResult(null); }}>{item.name}</button>)}</div>

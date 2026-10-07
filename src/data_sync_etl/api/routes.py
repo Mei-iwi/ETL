@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter()
@@ -67,3 +67,16 @@ def postprocess(id: ResourceId, request: Request):
 @router.get("/admin/resource-versions/{id}/etl-status")
 def status(id: ResourceId, request: Request):
     return services(request).orchestrator.status(id)
+
+
+@router.get("/admin/resource-versions/{id}/content-units")
+def content_units(
+    id: ResourceId,
+    request: Request,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    search: Annotated[str, Query(max_length=200)] = "",
+):
+    return services(request).orchestrator.content_units(
+        id, offset=offset, limit=limit, search=search
+    )
