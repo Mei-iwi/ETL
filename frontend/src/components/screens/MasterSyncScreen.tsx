@@ -34,7 +34,7 @@ export const MasterSyncScreen: React.FC = () => {
           <div>
             <h1 className="page-title">Master Data Sync</h1>
             <p className="page-description">
-              Synchronize master data snapshots into PostgreSQL.
+              Đồng bộ từ fixtures/source vào PostgreSQL. Lần đầu chọn All Streams + Full; các lần sau dùng Incremental. Xem request/response tại System & Health.
             </p>
           </div>
         </div>
@@ -109,8 +109,8 @@ export const MasterSyncScreen: React.FC = () => {
       {/* Checkpoints Table (As requested: table instead of 4 cards!) */}
       <div className="section-panel">
         <div className="section-panel-header">
-          <div className="section-panel-title">Checkpoints (sync_checkpoints)</div>
-          <span className="hash-pill">4 streams</span>
+          <div className="section-panel-title">Checkpoints (mô phỏng; API chưa trả về)</div>
+          <span className="hash-pill">Checkpoint thật chưa có API đọc</span>
         </div>
 
         <div className="table-wrapper" style={{ margin: 0, border: 'none', borderRadius: 0 }}>
@@ -154,7 +154,7 @@ export const MasterSyncScreen: React.FC = () => {
       {/* Sync Runs Table (Scannable, clean, typography normal, no neon numbers) */}
       <div className="section-panel">
         <div className="section-panel-header">
-          <div className="section-panel-title">Sync Runs (sync_runs)</div>
+          <div className="section-panel-title">Sync Runs (kết quả trong phiên; thời gian theo trình duyệt)</div>
           <span className="hash-pill">{syncRuns.length} runs</span>
         </div>
 

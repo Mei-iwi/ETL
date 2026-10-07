@@ -21,8 +21,8 @@ export const IngestionScreen: React.FC = () => {
 
   const [resourceId, setResourceId] = useState<string>('resource-1');
   const [bucket, setBucket] = useState<string>('input');
-  const [objectKey, setObjectKey] = useState<string>('book_toan1_v3.pdf');
-  const [uploadedBy, setUploadedBy] = useState<string>('operator-1');
+  const [objectKey, setObjectKey] = useState<string>('book.pdf');
+  const [uploadedBy, setUploadedBy] = useState<string>('');
   const [hashOverride, setHashOverride] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [lastResult, setLastResult] = useState<IngestionResult | null>(null);
@@ -92,13 +92,17 @@ export const IngestionScreen: React.FC = () => {
           <div>
             <h1 className="page-title">Resource Ingestion</h1>
             <p className="page-description">
-              Ingest PDF binaries into object storage, compute streaming SHA-256, and produce immutable physical versions (<code className="mono">resource_versions</code>).
+              Tiếp nhận PDF đã có trong storage và tạo phiên bản. Chưa hỗ trợ chọn file upload từ trình duyệt.
             </p>
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
+      <div className="notice-box" style={{ marginBottom: 16 }}>
+        <div>1. Chạy Master Sync → 2. Đặt tệp tại <code>storage/{bucket || 'input'}/{objectKey || 'book.pdf'}</code> → 3. Nhấn tiếp nhận.
+        <br />Uploaded By có thể để trống. Danh sách Resource ID là mẫu; chế độ Live cho phép nhập ID đã đồng bộ.</div>
+      </div>
+      <div className="ingestion-grid">
         {/* Form Container */}
         <div className="card">
           <div className="card-header">
@@ -120,7 +124,7 @@ export const IngestionScreen: React.FC = () => {
               <label className="form-label">
                 <span>Resource ID <span className="required">*</span></span>
               </label>
-              <select
+              {isLiveMode ? <input className="form-input mono" value={resourceId} maxLength={30} onChange={e => setResourceId(e.target.value)} disabled={isSubmitting} aria-label="Resource ID" /> : <select
                 className="form-select mono"
                 value={resourceId}
                 onChange={(e) => setResourceId(e.target.value)}
@@ -131,7 +135,7 @@ export const IngestionScreen: React.FC = () => {
                     {r.id} — {r.title}
                   </option>
                 ))}
-              </select>
+              </select>}
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px' }}>
@@ -181,7 +185,7 @@ export const IngestionScreen: React.FC = () => {
             </div>
 
             {/* Test Simulation Controls */}
-            <div
+            {!isLiveMode && <div
               style={{
                 background: 'var(--bg-app)',
                 border: '1px solid var(--border-default)',
@@ -225,6 +229,7 @@ export const IngestionScreen: React.FC = () => {
               />
             </div>
 
+            }
             {errorMessage && (
               <div className="notice-box warning" style={{ marginBottom: '14px' }}>
                 <Warning size={16} color="var(--status-error)" style={{ flexShrink: 0 }} />
@@ -239,7 +244,7 @@ export const IngestionScreen: React.FC = () => {
               style={{ width: '100%', height: '38px', justifyContent: 'center' }}
             >
               <UploadSimple size={15} />
-              {isSubmitting ? 'Ingesting...' : 'Ingest Resource Version'}
+              {isSubmitting ? 'Đang tiếp nhận…' : 'Tiếp nhận PDF / tạo phiên bản'}
             </button>
           </form>
         </div>
@@ -366,9 +371,9 @@ export const IngestionScreen: React.FC = () => {
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
-                    onClick={() => setActiveScreen('ocr')}
+                    onClick={() => setActiveScreen(isLiveMode ? 'health' : 'ocr', { versionId: lastResult.version.id })}
                   >
-                    Proceed to OCR
+                    Tiếp tục: tạo OCR job
                   </button>
                 </div>
               </div>

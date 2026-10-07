@@ -985,3 +985,14 @@ code, pre, .mono {
     padding: 16px;
   }
 }
+
+/* Small workflow additions; reuse the existing design tokens. */
+.ingestion-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
+.api-guide { margin-bottom: 20px; padding: 16px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); }
+.api-guide .card-title { font-weight: 600; font-size: 15px; }
+.api-guide .card-subtitle { color: var(--text-secondary); margin: 6px 0 12px; }
+.api-steps { display: flex; flex-wrap: wrap; gap: 8px; }
+.api-fields { border: 0; padding: 0; margin: 16px 0; display: flex; flex-wrap: wrap; gap: 12px; }
+.api-fields label { display: grid; gap: 6px; flex: 1; min-width: 160px; }
+.api-json { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; padding: 12px; margin: 12px 0; background: var(--bg-app); border: 1px solid var(--border-default); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 12px; }
+@media (max-width: 900px) { .ingestion-grid { grid-template-columns: 1fr; } }

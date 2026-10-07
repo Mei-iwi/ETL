@@ -2,6 +2,7 @@ import React from 'react';
 import { EtlProvider, useEtl } from './context/EtlContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
+import { ApiBanner } from './components/common/ApiBanner';
 
 // Screens
 import { OverviewScreen } from './components/screens/OverviewScreen';
@@ -53,6 +54,7 @@ const AppContent: React.FC = () => {
       {/* Main Operational Area */}
       <div className="main-wrapper">
         <Header />
+        <ApiBanner />
 
         <main className="main-content">
           {renderActiveScreen()}

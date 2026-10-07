@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { ApiGuide } from '../common/ApiGuide';
 import { useEtl } from '../../context/EtlContext';
 import { StatusBadge } from '../common/StatusBadge';
-import { api } from '../../services/apiClient';
 import {
   ArrowClockwise,
-  Play,
 } from '@phosphor-icons/react';
 
 export const SystemHealthScreen: React.FC = () => {
@@ -13,55 +12,15 @@ export const SystemHealthScreen: React.FC = () => {
     backendStatus,
     checkBackendHealth,
     apiBaseUrl,
-    versions,
+    isLiveMode,
   } = useEtl();
-
-  const [testingEndpoint, setTestingEndpoint] = useState<string>('/health');
-  const [probeResult, setProbeResult] = useState<any>(null);
-  const [isProbing, setIsProbing] = useState<boolean>(false);
-
-  const testEndpoints = [
-    { label: 'GET /health', path: '/health' },
-    { label: 'POST /admin/sync/master', path: '/admin/sync/master' },
-    {
-      label: 'POST /admin/resources/resource-1/versions/ingest',
-      path: '/admin/resources/resource-1/versions/ingest',
-    },
-    {
-      label: 'GET /admin/resource-versions/{id}/etl-status',
-      path: '/admin/resource-versions/ver-01JJ8A01A01B01C01D01E00001/etl-status',
-    },
-  ];
-
-  const handleRunProbe = async (endpointPath: string) => {
-    setIsProbing(true);
-    setTestingEndpoint(endpointPath);
-    try {
-      if (endpointPath === '/health') {
-        const res = await api.getHealth();
-        setProbeResult(res);
-      } else if (endpointPath === '/admin/sync/master') {
-        const res = await api.runMasterSync('resources', false);
-        setProbeResult(res);
-      } else if (endpointPath.includes('/ingest')) {
-        const res = await api.ingestResource('resource-1', 'input', 'sample.pdf', 'tester');
-        setProbeResult(res);
-      } else if (endpointPath.includes('/etl-status')) {
-        const vId = versions[0] ? versions[0].id : 'ver-01JJ8A01A01B01C01D01E00001';
-        const res = await api.getEtlStatus(vId);
-        setProbeResult(res);
-      }
-    } finally {
-      setIsProbing(false);
-    }
-  };
 
   const components = [
     {
       name: 'PostgreSQL Database',
       status: backendStatus === 'connected' ? 'CONNECTED' : 'DISCONNECTED',
       engine: 'PostgreSQL 16 (psycopg3)',
-      details: health.postgres.detail || 'Connected on port 5432 with autocommit session engine.',
+      details: health.postgres.detail || 'Kiểm tra qua GET /health.',
     },
     {
       name: 'FastAPI Web API',
@@ -71,20 +30,20 @@ export const SystemHealthScreen: React.FC = () => {
     },
     {
       name: 'Source Adapter (Sync)',
-      status: 'ACTIVE',
+      status: 'UNKNOWN',
       engine: 'SOURCE_ADAPTER=json',
       details: 'Reads streaming mock JSON fixtures. Note: SOURCE_ADAPTER=production is BLOCKED_SOURCE_MAPPING.',
     },
     {
       name: 'OCR Runtime Engine',
-      status: 'ACTIVE',
+      status: 'UNKNOWN',
       engine: 'OCR_ENGINE=native (PyMuPDF)',
-      details: 'Extracts native document text layer. Note: OCR_ENGINE=scan is BLOCKED_OCR_RUNTIME (Tesseract/PaddleOCR unbundled).',
+      details: 'Extracts native document text layer. Note: Scanned PDF OCR is not integrated (Tesseract/PaddleOCR unbundled).',
     },
     {
       name: 'Admin API Access',
-      status: 'DISABLED',
-      engine: 'ADMIN_ENABLED=false (Default)',
+      status: 'UNKNOWN',
+      engine: 'Chưa xác định; kiểm tra bằng API admin',
       details: 'Write endpoints under /admin/* reject with HTTP 403 Forbidden unless ADMIN_ENABLED=true in .env.',
     },
   ];
@@ -155,89 +114,7 @@ export const SystemHealthScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* Live API Contract Probe */}
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Live API Contract Probe</div>
-            <div className="card-subtitle">
-              Dispatch actual HTTP requests to backend to inspect status code, headers, and payloads
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
-          {testEndpoints.map((ep) => (
-            <button
-              key={ep.path}
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => handleRunProbe(ep.path)}
-              disabled={isProbing}
-            >
-              <Play size={12} /> {ep.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Probe Response View */}
-        <div style={{ background: 'var(--bg-app)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-default)', padding: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Endpoint:</span>
-              <code className="mono" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                {testingEndpoint}
-              </code>
-            </div>
-
-            {probeResult && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>HTTP Status:</span>
-                <span
-                  className="mono"
-                  style={{
-                    fontWeight: 700,
-                    color:
-                      probeResult.status === 200
-                        ? 'var(--status-success)'
-                        : probeResult.status === 403
-                        ? 'var(--status-warning)'
-                        : 'var(--status-error)',
-                  }}
-                >
-                  {probeResult.status}
-                </span>
-                {probeResult.correlationId && (
-                  <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    X-Correlation-ID: {probeResult.correlationId.substring(0, 14)}...
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-
-          <pre
-            className="mono"
-            style={{
-              padding: '12px',
-              background: 'var(--bg-surface)',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: '12px',
-              border: '1px solid var(--border-default)',
-              minHeight: '100px',
-              maxHeight: '300px',
-              overflowY: 'auto',
-              color: 'var(--text-primary)',
-            }}
-          >
-            {isProbing
-              ? 'Dispatching request to backend server...'
-              : probeResult
-              ? JSON.stringify(probeResult, null, 2)
-              : 'Select an endpoint probe above to inspect live API contract response.'}
-          </pre>
-        </div>
-      </div>
+      <ApiGuide key={isLiveMode ? 'live' : 'prototype'} />
     </div>
   );
 };
