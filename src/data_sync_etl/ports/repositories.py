@@ -3,6 +3,7 @@ from typing import Any, Protocol
 
 
 class Repository(Protocol):
+    def content_units(self, version_id: str, *, offset=0, limit=50, search="") -> dict: ...
     def get(self, table: str, key: Any, *, lock=False) -> dict | None: ...
     def find(
         self,

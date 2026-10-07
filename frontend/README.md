@@ -75,7 +75,11 @@ Kết quả được xuất ra thư mục `frontend/dist/`.
 - **Master Sync**: lần đầu chọn All Streams + Full, sau đó dùng Incremental. Bảng runs ghi kết quả các lần chạy trong phiên; thời gian theo trình duyệt. Backend chưa có API đọc checkpoint/lịch sử đầy đủ.
 - **Ingestion**: đặt PDF tại `storage/input/book.pdf`, nhập Resource ID thật, bucket `input`, object key `book.pdf`; Uploaded By có thể để trống. Chưa có upload tệp từ trình duyệt. Hash simulation chỉ hiện trong chế độ mô phỏng.
 - Kết quả `CREATED` hoặc `NO_CHANGE` đều có Version ID. Nút **Tiếp tục: tạo OCR job** mở bảng thử API và điền sẵn ID.
-- **System Health** có form cho đủ 6 endpoint: health, master sync, ingest, create OCR job, postprocess, ETL status. Xem method/path/body trước khi gửi; kết quả có HTTP status, payload và correlation ID. Các POST thực hiện ghi dữ liệu thật.
+- **System Health** có form cho đủ 7 endpoint: health, master sync, ingest, create OCR job, postprocess, ETL status, content units. Xem method/path/body trước khi gửi; kết quả có HTTP status, payload và correlation ID. Các POST thực hiện ghi dữ liệu thật.
 - Sau khi tạo OCR job, chạy `etl run-ocr-worker --worker-id worker-1` trong terminal. Chọn API ETL status để cập nhật job, rồi hậu xử lý khi job terminal.
-- Nếu đã chạy bằng CLI, dán Version ID vào bước **Xem trạng thái ETL** để đưa phiên bản/job vào giao diện. Nội dung từng trang và danh mục đầy đủ chưa có API đọc; giao diện không tự lấy dữ liệu này.
+- Nếu đã chạy bằng CLI, dán Version ID vào bước **Xem trạng thái ETL** để đưa phiên bản/job vào giao diện. Màn hình **Content Units** đọc văn bản thật theo Version ID, hỗ trợ tìm kiếm, phân trang 50 dòng và Tải lại. Có thể dán Version ID trực tiếp sau reload. Danh mục đầy đủ chưa có API đọc.
 - Worker/recovery chỉ chạy bằng CLI; các nút mô phỏng tắt trong Live. Chuyển chế độ xóa thông báo và kết quả trong bộ nhớ giao diện, không xóa CSDL. Sau reload, dùng ETL status với ID đã lưu để đọc lại.
+
+## API đọc Content Units
+
+`GET /admin/resource-versions/{id}/content-units?offset=0&limit=50&search=` yêu cầu bật admin. `limit` từ 1 đến 100; `offset` không âm; `search` tối đa 200 ký tự, tìm theo Unit ID hoặc văn bản. Response gồm `items`, `total` (số dòng khớp), `offset`, `limit`; mỗi item kết hợp metadata content_units và text/page_result_id từ content_unit_texts. Không cần migration.

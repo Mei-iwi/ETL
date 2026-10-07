@@ -1,11 +1,17 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from data_sync_etl.db.models import MODELS, OcrPageTask, SyncCheckpoint
+from data_sync_etl.db.models import (
+    MODELS,
+    ContentUnit,
+    ContentUnitText,
+    OcrPageTask,
+    SyncCheckpoint,
+)
 from data_sync_etl.domain.core import now
 
 STREAMS = {
@@ -25,6 +31,34 @@ def utc(value):
 class SQLAlchemyRepository:
     def __init__(self, session):
         self.session = session
+
+    def content_units(self, version_id, *, offset=0, limit=50, search=""):
+        conditions = [ContentUnit.resource_version_id == version_id]
+        if search:
+            conditions.append(
+                or_(
+                    ContentUnit.id.icontains(search, autoescape=True),
+                    ContentUnitText.text.icontains(search, autoescape=True),
+                )
+            )
+        joined = (
+            select(ContentUnit, ContentUnitText)
+            .join(ContentUnitText, ContentUnitText.content_unit_id == ContentUnit.id)
+            .where(*conditions)
+        )
+        total = self.session.scalar(select(func.count()).select_from(joined.subquery()))
+        rows = self.session.execute(
+            joined.order_by(ContentUnit.sequence_no, ContentUnit.id).offset(offset).limit(limit)
+        )
+        return {
+            "items": [
+                {**self._dict(unit), "text": body.text, "page_result_id": body.page_result_id}
+                for unit, body in rows
+            ],
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+        }
 
     def _dict(self, row):
         return {

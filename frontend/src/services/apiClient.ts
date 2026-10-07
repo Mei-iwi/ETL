@@ -1,3 +1,5 @@
+import type { ContentUnit } from '../types/etl';
+
 export interface ApiResponse<T> {
   ok: boolean;
   status: number;
@@ -143,6 +145,13 @@ export class ApiService {
   async getEtlStatus(versionId: string) {
     return this.request<any>(
       `/admin/resource-versions/${encodeURIComponent(versionId)}/etl-status`
+    );
+  }
+
+  async getContentUnits(versionId: string, offset = 0, limit = 50, search = '') {
+    const query = new URLSearchParams({ offset: String(offset), limit: String(limit), search });
+    return this.request<{ items: ContentUnit[]; total: number; offset: number; limit: number }>(
+      `/admin/resource-versions/${encodeURIComponent(versionId)}/content-units?${query}`
     );
   }
 }

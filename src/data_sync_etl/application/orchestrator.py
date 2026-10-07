@@ -64,3 +64,9 @@ class EtlOrchestrator:
                     "content_units", {"resource_version_id": version_id}
                 ),
             }
+
+    def content_units(self, version_id, *, offset=0, limit=50, search=""):
+        with self.uow() as repo:
+            if not repo.get("resource_versions", version_id):
+                raise DomainError("Resource version not found")
+            return repo.content_units(version_id, offset=offset, limit=limit, search=search)
