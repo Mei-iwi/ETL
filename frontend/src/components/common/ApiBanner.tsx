@@ -33,15 +33,15 @@ export const ApiBanner: React.FC = () => {
         <div className="theme-toggle" style={{ height: '26px' }}>
           <button
             type="button"
-            className={`theme-btn ${!isLiveMode ? 'active' : ''}`}
+            className={`btn ${!isLiveMode ? 'btn-primary' : 'btn-secondary'} btn-sm`}
             onClick={() => setIsLiveMode(false)}
             style={{ padding: '2px 8px', fontSize: '11.5px' }}
           >
-            Prototype Store
+            Mô phỏng (không ghi CSDL)
           </button>
           <button
             type="button"
-            className={`theme-btn ${isLiveMode ? 'active' : ''}`}
+            className={`btn ${isLiveMode ? 'btn-primary' : 'btn-secondary'} btn-sm`}
             onClick={() => {
               setIsLiveMode(true);
               checkBackendHealth();
@@ -75,7 +75,8 @@ export const ApiBanner: React.FC = () => {
               onChange={(e) => setApiBaseUrl(e.target.value)}
               className="form-input mono"
               style={{ height: '26px', padding: '2px 8px', fontSize: '11px', width: '180px' }}
-              placeholder="http://127.0.0.1:8000"
+              aria-label="API Base URL"
+              placeholder="Để trống: dùng proxy Vite"
             />
             <button
               type="button"
@@ -83,13 +84,13 @@ export const ApiBanner: React.FC = () => {
               style={{ height: '26px' }}
               onClick={checkBackendHealth}
             >
-              Probe
+              Kiểm tra kết nối
             </button>
           </div>
         )}
 
         <span style={{ color: 'var(--text-muted)' }}>
-          Admin API: <code className="mono">ADMIN_ENABLED=false</code> (default 403)
+          {isLiveMode ? 'API thật · Danh mục vẫn là mẫu · Admin cần ADMIN_ENABLED=true' : 'Dữ liệu mẫu · không xử lý PDF thật'}
         </span>
       </div>
     </div>

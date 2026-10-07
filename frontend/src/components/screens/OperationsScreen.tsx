@@ -9,6 +9,7 @@ import {
 
 export const OperationsScreen: React.FC = () => {
   const {
+    isLiveMode,
     pageTasks,
     triggerWorkerOnce,
     triggerRecoverStaleTasks,
@@ -55,7 +56,7 @@ export const OperationsScreen: React.FC = () => {
               type="button"
               className="btn btn-secondary"
               onClick={handleRecoverStale}
-              disabled={isRecovering}
+              disabled={isRecovering || isLiveMode}
             >
               <ShieldWarning size={15} />
               {isRecovering ? 'Recovering...' : 'Recover Stale Tasks'}
@@ -64,7 +65,7 @@ export const OperationsScreen: React.FC = () => {
               type="button"
               className="btn btn-primary"
               onClick={handleRunWorkerOnce}
-              disabled={isProcessing || pendingTasks.length === 0}
+              disabled={isLiveMode || isProcessing || pendingTasks.length === 0}
             >
               <Play size={15} />
               {isProcessing ? 'Processing...' : `Run Worker Once (${pendingTasks.length} queued)`}
@@ -73,6 +74,7 @@ export const OperationsScreen: React.FC = () => {
         </div>
       </div>
 
+      {isLiveMode && <p className="notice-box">Worker và recovery chưa có API. Dùng các lệnh CLI bên dưới; các nút mô phỏng đã tắt.</p>}
       {/* CLI Daemon Reference */}
       <div
         style={{
@@ -126,7 +128,7 @@ export const OperationsScreen: React.FC = () => {
             type="button"
             className="btn btn-primary btn-sm"
             onClick={handleRunWorkerOnce}
-            disabled={isProcessing || pendingTasks.length === 0}
+            disabled={isLiveMode || isProcessing || pendingTasks.length === 0}
           >
             <Play size={13} />
             {isProcessing ? 'Executing...' : `Claim & Process 1 Task (${pendingTasks.length} Pending)`}
@@ -136,7 +138,7 @@ export const OperationsScreen: React.FC = () => {
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={handleRecoverStale}
-            disabled={isRecovering}
+            disabled={isRecovering || isLiveMode}
           >
             <ShieldWarning size={13} />
             Scan & Recover Stale Leases

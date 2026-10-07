@@ -80,14 +80,14 @@ export const Header: React.FC = () => {
             }}
             title="Switch execution store / API runtime"
           >
-            <option value="mock">Prototype Store (Local)</option>
+            <option value="mock">Mô phỏng (không ghi CSDL)</option>
             <option value="live">FastAPI Live API (8000)</option>
           </select>
         </div>
 
         {/* Admin Policy Notice */}
         <span className="admin-status-note" title="Write endpoints under /admin/* reject with HTTP 403 Forbidden unless ADMIN_ENABLED=true">
-          ADMIN_ENABLED=false
+          Admin cần bật trong .env
         </span>
 
         {/* Minimalist Theme Toggle Icon Button */}

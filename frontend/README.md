@@ -67,3 +67,15 @@ Giao diện sẽ chạy tại: **`http://localhost:3000/`** (hoặc port do Vite
 npm run build
 ```
 Kết quả được xuất ra thư mục `frontend/dist/`.
+
+## Thao tác với backend thật
+
+- Khởi động backend trên `127.0.0.1:8000`, bật `ADMIN_ENABLED=true` trong `.env` và restart backend.
+- Chọn **Live Backend API** trên thanh kết nối. Để trống API Base URL để dùng proxy Vite; nhấn **Kiểm tra kết nối**.
+- **Master Sync**: lần đầu chọn All Streams + Full, sau đó dùng Incremental. Bảng runs ghi kết quả các lần chạy trong phiên; thời gian theo trình duyệt. Backend chưa có API đọc checkpoint/lịch sử đầy đủ.
+- **Ingestion**: đặt PDF tại `storage/input/book.pdf`, nhập Resource ID thật, bucket `input`, object key `book.pdf`; Uploaded By có thể để trống. Chưa có upload tệp từ trình duyệt. Hash simulation chỉ hiện trong chế độ mô phỏng.
+- Kết quả `CREATED` hoặc `NO_CHANGE` đều có Version ID. Nút **Tiếp tục: tạo OCR job** mở bảng thử API và điền sẵn ID.
+- **System Health** có form cho đủ 6 endpoint: health, master sync, ingest, create OCR job, postprocess, ETL status. Xem method/path/body trước khi gửi; kết quả có HTTP status, payload và correlation ID. Các POST thực hiện ghi dữ liệu thật.
+- Sau khi tạo OCR job, chạy `etl run-ocr-worker --worker-id worker-1` trong terminal. Chọn API ETL status để cập nhật job, rồi hậu xử lý khi job terminal.
+- Nếu đã chạy bằng CLI, dán Version ID vào bước **Xem trạng thái ETL** để đưa phiên bản/job vào giao diện. Nội dung từng trang và danh mục đầy đủ chưa có API đọc; giao diện không tự lấy dữ liệu này.
+- Worker/recovery chỉ chạy bằng CLI; các nút mô phỏng tắt trong Live. Chuyển chế độ xóa thông báo và kết quả trong bộ nhớ giao diện, không xóa CSDL. Sau reload, dùng ETL status với ID đã lưu để đọc lại.

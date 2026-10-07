@@ -129,8 +129,8 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedJobId, setSelectedJobId] = useState<string | null>('job-01JJ8J01A01B01C01D01E00001');
 
   // Backend live mode settings
-  const [isLiveMode, setIsLiveMode] = useState<boolean>(false);
-  const [apiBaseUrl, setApiBaseUrlState] = useState<string>('http://127.0.0.1:8000');
+  const [isLiveMode, setLiveModeState] = useState<boolean>(false);
+  const [apiBaseUrl, setApiBaseUrlState] = useState<string>('');
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected' | 'admin_disabled' | 'db_error'>('checking');
   const [lastCorrelationId, setLastCorrelationId] = useState<string | null>(null);
   const [health, setHealth] = useState<SystemHealth>(INITIAL_HEALTH);
@@ -171,7 +171,6 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const setApiBaseUrl = (url: string) => {
     setApiBaseUrlState(url);
     api.setBaseUrl(url);
-    checkBackendHealth();
   };
 
   const checkBackendHealth = async () => {
@@ -209,6 +208,22 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     checkBackendHealth();
   }, []);
 
+  const setIsLiveMode = (value: boolean) => {
+    if (value === isLiveMode) return;
+    setLiveModeState(value);
+    setNotifications([]);
+    setVersions(value ? [] : INITIAL_VERSIONS);
+    setOcrJobs(value ? [] : INITIAL_JOBS);
+    setPageTasks(value ? [] : INITIAL_PAGE_TASKS);
+    setPageResults(value ? [] : INITIAL_PAGE_RESULTS);
+    setContentUnits(value ? [] : INITIAL_CONTENT_UNITS);
+    setStageRuns(value ? [] : INITIAL_STAGE_RUNS);
+    setSyncRuns(value ? [] : INITIAL_SYNC_RUNS);
+    setCheckpoints(value ? [] : INITIAL_CHECKPOINTS);
+    setSelectedVersionId(null);
+    setSelectedJobId(null);
+  };
+
   // Action: Master Sync
   const triggerMasterSync = async (
     stream: MasterStream,
@@ -224,6 +239,14 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addNotification('error', `Sync Thất Bại (HTTP ${res.status})`, res.error || 'Lỗi khi gọi API');
         return { ok: false, message: res.error || 'Failed' };
       }
+      const runs: SyncRun[] = Object.entries(res.data || {}).map(([name, counts]) => ({
+        id: counts.run_id, stream_name: name as MasterStream,
+        started_at: startTime, finished_at: new Date().toISOString(), status: 'COMPLETED',
+        records_read: counts.records_read, inserted: counts.inserted, updated: counts.updated,
+        skipped: counts.skipped, failed: counts.failed,
+        checkpoint_before: null, checkpoint_after: null, error_message: null,
+      }));
+      setSyncRuns(prev => [...runs, ...prev.filter(r => !runs.some(n => n.id === r.id))]);
       addNotification('success', 'Master Sync Thành Công', `Stream: ${stream} (${full ? 'Full' : 'Incremental'})`);
       return { ok: true, message: 'Sync completed via backend API' };
     }
@@ -315,7 +338,11 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addNotification('error', `Ingest Thất Bại (HTTP ${res.status})`, res.error || 'Lỗi API');
         throw new Error(res.error);
       }
-      return res.data as IngestionResult;
+      const result = res.data as IngestionResult;
+      setVersions(prev => [result.version, ...prev.filter(v => v.id !== result.version.id)]);
+      setSelectedVersionId(result.version.id);
+      addNotification('success', `Ingest: ${result.action}`, `Version ${result.version.version_number} | ${result.version.id}`);
+      return result;
     }
 
     // Prototype Mode: Faithful domain logic
@@ -400,6 +427,11 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addNotification('error', `Tạo OCR Job Thất Bại (HTTP ${res.status})`, res.error || 'Lỗi');
         return { ok: false, message: res.error || 'Failed' };
       }
+      if (res.data) {
+        setOcrJobs(prev => [res.data!, ...prev.filter(j => j.id !== res.data!.id)]);
+        setSelectedJobId(res.data.id);
+      }
+      addNotification('success', 'OCR job', 'Đã tạo hoặc lấy lại job. Chạy worker bằng CLI.');
       return { ok: true, job: res.data, message: 'Job created via backend' };
     }
 
@@ -463,6 +495,7 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const triggerWorkerOnce = async (
     workerId: string
   ): Promise<{ ok: boolean; task?: OCRPageTask; message: string }> => {
+    if (isLiveMode) return { ok: false, message: 'Chạy worker bằng CLI; chưa có API worker.' };
     // Find next pending task
     const pendingTaskIndex = pageTasks.findIndex((t) => t.status === 'PENDING');
     if (pendingTaskIndex === -1) {
@@ -549,6 +582,7 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     recoveredCount: number;
     message: string;
   }> => {
+    if (isLiveMode) return { ok: false, recoveredCount: 0, message: 'Chạy recover-stale-ocr-tasks bằng CLI.' };
     // Detect tasks that are RUNNING but heartbeat has expired (> 120s)
     let count = 0;
     setPageTasks((prev) =>
@@ -588,6 +622,8 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addNotification('error', `Postprocess Thất Bại (HTTP ${res.status})`, res.error || 'Lỗi');
         return { ok: false, message: res.error || 'Failed' };
       }
+      await fetchEtlStatus(versionId);
+      addNotification('success', 'Hậu xử lý hoàn tất', `${res.data?.content_unit_count ?? 0} content units`);
       return { ok: true, message: 'Postprocess finished on backend' };
     }
 
@@ -671,7 +707,21 @@ export const EtlProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isLiveMode) {
       const res = await api.getEtlStatus(versionId);
       if (res.correlationId) setLastCorrelationId(res.correlationId);
-      return res.data;
+      if (!res.ok) {
+        addNotification('error', `ETL status (HTTP ${res.status})`, res.error || 'Không đọc được trạng thái');
+        return null;
+      }
+      const data = res.data;
+      if (data?.version) {
+        setVersions(prev => [data.version, ...prev.filter(v => v.id !== data.version.id)]);
+        setSelectedVersionId(data.version.id);
+      }
+      if (data?.ocr_job) {
+        setOcrJobs(prev => [data.ocr_job, ...prev.filter(j => j.id !== data.ocr_job.id)]);
+        setSelectedJobId(data.ocr_job.id);
+      }
+      if (data?.stage_runs) setStageRuns(prev => [...data.stage_runs, ...prev.filter(s => s.resource_version_id !== versionId)]);
+      return data;
     }
     const version = versions.find((v) => v.id === versionId);
     if (!version) return null;
