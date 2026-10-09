@@ -18,6 +18,34 @@ def test_health_admin_disabled(container):
         assert client.post("/admin/sync/master", json={"full": True}).status_code == 403
 
 
+def test_system_capabilities(container):
+    
+    with TestClient(create_app(container)) as client:
+        response = client.get(
+            '/api/v1/system/capabilities'
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data['api_version'] == 'v1'
+    assert data['formats'][0]['extension'] == '.pdf'
+    assert data['processing']['scanned_pdf_ocr'] is False
+    assert data['processing']['fake_ocr_demo'] is True
+    assert(
+        data['processing']['chunking']['size_words']
+        == container.settings.chunk_size_words
+    )
+    assert data['representations']['bag_of_words'] is True
+    assert data['representations']['vector']['semantic'] is False
+    assert data['retrieval']['modes'] == [
+        'keyword',
+        'vector',
+        'hybrid'
+    ]
+    assert data['storage']['mongodb_enabled'] is False
+    assert 'database_url' not in response.text
+
 def test_api_and_validation_redaction(container):
     container.settings.admin_enabled = True
     with TestClient(create_app(container)) as client:
