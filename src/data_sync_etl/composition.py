@@ -11,6 +11,8 @@ from data_sync_etl.application.ocr import OCRPipeline
 from data_sync_etl.application.orchestrator import EtlOrchestrator
 from data_sync_etl.application.postprocess import Postprocessor
 from data_sync_etl.application.sync import MasterSync
+from data_sync_etl.application.capabilities import CapabilityService
+
 from data_sync_etl.config import Settings
 from data_sync_etl.db.session import make_engine, sessions
 from data_sync_etl.domain.core import DomainError
@@ -38,6 +40,13 @@ class Container:
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
+        self.capabilities = CapabilityService(
+            chunk_size_words = self.settings.chunk_size_words,
+            chunk_overlap_words=self.settings.chunk_overlap_words,
+            vector_dimension = self.settings.vector_dimension,
+            ocr_engine=self.settings.ocr_engine,
+
+        )
         self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size)
         self.ingestion = ResourceIngestion(self.uow, self.storage)
         self.ocr = OCRPipeline(
@@ -53,3 +62,4 @@ class Container:
             self.sync, self.ingestion, self.ocr, self.postprocess, self.uow
         )
         self.worker = OCRWorker(self.ocr)
+
