@@ -1,8 +1,11 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
-from data_sync_etl.api.resource_schemas import ResouceListResponse
+
+from data_sync_etl.api.resource_schemas import CreateResourceResponse, ResouceListResponse
+from data_sync_etl.application.ingest_resource import IngestResourceCommand
+
 #Swagger Tags
 TAG_SYSTEM: str = 'System'
 TAG_MASTER: str = 'Learning Resource Ingestion and Management'
@@ -11,7 +14,7 @@ TAG_INDEXING: str = 'Data Chunking and Representation'
 TAG_SEARCH: str = 'Learning Resource Retrieval and Search'
 TAG_EVALUATION: str = 'Experimentation and Evaluation'
 #Router
-router = APIRouter(prefix='/api/v1')
+router = APIRouter()
 ResourceId = Annotated[str, Path(min_length=1, max_length=30)]
 
 
@@ -68,9 +71,9 @@ def system_capabilities(request: Request):
 )
 def list_resources(
     request: Request,
-    page: Annotated[int, Query(ge=1)],
-    size: Annotated[int, Query(ge=1, le=100)],
-    q: Annotated[str | None, Query(max_length=200)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    size: Annotated[int, Query(ge=1, le=100)] = 20,
+    q: Annotated[str | None, Query(max_length=200)] = None,
     subject_id: Annotated[
         str | None, Query(max_length=30)
     ] = None,
@@ -92,6 +95,70 @@ def list_resources(
         )
     )
     return ResouceListResponse.model_validate(result)
+
+
+@router.post(
+    "/resources",
+    tags=[TAG_MASTER],
+    status_code=201,
+    summary="Tiếp nhận học liệu và Metadata đa định dạng",
+    response_model=CreateResourceResponse,
+)
+def create_resource(
+    request: Request,
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str, Form(min_length=1, max_length=500)],
+    resource_type_code: Annotated[str, Form(min_length=1, max_length=50)],
+    provider_id: Annotated[str, Form(min_length=1, max_length=30)],
+    provider_name: Annotated[str, Form(min_length=1, max_length=255)],
+    provider_type: Annotated[str, Form(max_length=30)] = "INTERNAL",
+    resource_type_name_vi: Annotated[str | None, Form(max_length=150)] = None,
+    subject_id: Annotated[str | None, Form(max_length=30)] = None,
+    grade_level_id: Annotated[str | None, Form(max_length=30)] = None,
+    publication_status: Annotated[str, Form(max_length=30)] = "PUBLISHED",
+    uploaded_by: Annotated[str | None, Form(max_length=30)] = None,
+) -> CreateResourceResponse:
+    file_bytes_len = file.size
+    if file_bytes_len is None:
+        file.file.seek(0, 2)
+        file_bytes_len = file.file.tell()
+        file.file.seek(0)
+
+    filename = file.filename or "unknown"
+    declared_mime = file.content_type or "application/octet-stream"
+
+    cmd = IngestResourceCommand(
+        title=title,
+        resource_type_code=resource_type_code,
+        provider_id=provider_id,
+        provider_name=provider_name,
+        filename=filename,
+        file_stream=file.file,
+        file_size=file_bytes_len,
+        declared_mime=declared_mime,
+        provider_type=provider_type,
+        resource_type_name_vi=resource_type_name_vi,
+        subject_id=subject_id,
+        grade_level_id=grade_level_id,
+        publication_status=publication_status,
+        uploaded_by=uploaded_by,
+    )
+    result = request.app.state.container.resource_ingest.execute(cmd)
+    return CreateResourceResponse(
+        id=result.id,
+        title=result.title,
+        resource_type_code=result.resource_type_code,
+        media_category=result.media_category,
+        mime_type=result.mime_type,
+        file_name=result.file_name,
+        file_size=result.file_size,
+        source_hash=result.source_hash,
+        initial_version_id=result.initial_version_id,
+        version_number=result.version_number,
+        lifecycle_status=result.lifecycle_status,
+        created_at=result.created_at,
+    )
+
 
 @router.post("/admin/sync/master")
 def sync(body: SyncInput, request: Request):

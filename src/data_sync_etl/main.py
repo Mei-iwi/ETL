@@ -61,6 +61,7 @@ def create_app(container=None):
         )
 
     app.include_router(router)
+    app.include_router(router, prefix="/api/v1")
     return app
 
 
