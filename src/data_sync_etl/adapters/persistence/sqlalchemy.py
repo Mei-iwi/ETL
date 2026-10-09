@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import delete, func, or_, select, text, exists
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -11,6 +11,11 @@ from data_sync_etl.db.models import (
     ContentUnitText,
     OcrPageTask,
     SyncCheckpoint,
+    MasterLearningResource,
+    MasterGradeLevel,
+    ResourceGradeLevel,
+    ResourceSubject,
+    Subject
 )
 from data_sync_etl.domain.core import now
 
@@ -150,6 +155,84 @@ class SQLAlchemyRepository:
 
     def health(self):
         self.session.execute(text("SELECT 1"))
+
+    def list_resources(
+            self,
+            *,
+            keyword: str | None,
+            subject_id: str | None,
+            grade_level_id: str | None,
+            resource_type_code: str | None,
+            offset: int,
+            limit: int
+    ) -> tuple[list[dict], int]:
+        resouce = MasterLearningResource
+
+        conditions = [
+            resouce.is_active.is_(True),
+            resouce.deleted_at.is_(None),
+            resouce.publication_status == 'PUBLISHED',
+        ]
+
+        if keyword and keyword.strip():
+            term = keyword.strip()
+
+            term = (
+                term.replace('\\', '\\\\')
+                    .replace('%', '\\%')
+                    .replace('_', '\\_')
+            )
+
+            conditions.append(
+                resouce.title.ilike(f'%{term}%', escape='\\')
+            )
+
+        if subject_id:
+            conditions.append(
+                exists().where(
+                    ResourceSubject.resource_id == resouce.id,
+                    ResourceSubject.subject_id == subject_id,
+                    Subject.id == ResourceSubject.subject_id,
+                    Subject.is_active.is_(True),
+                    Subject.deleted_at.is_(None),
+                )
+            )
+
+        if grade_level_id: 
+            conditions.append(
+                exists().where(
+                    ResourceGradeLevel.resource_id == resouce.id,
+                    ResourceGradeLevel.grade_level_id == grade_level_id,
+                    MasterGradeLevel.id == ResourceGradeLevel.grade_level_id,
+                    MasterGradeLevel.grade_is_active.is_(True),
+                    MasterGradeLevel.grade_deleted_at.is_(None),
+                )
+            )
+        if resource_type_code:
+            conditions.append(
+                resouce.resource_type_code == resource_type_code
+            )
+        total_stmt = (
+            select(func.count())
+            .select_from(resouce)
+            .where(*conditions)
+        )
+
+        total = self.session.scalar(total_stmt) or 0
+
+        stmt = (
+            select(resouce)
+            .where(*conditions)
+            .order_by(
+                resouce.updated_at.desc(),
+                resouce.id.desc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = self.session.scalars(stmt).all()
+
+        return [self._dict(row) for row in rows], int(total)
 
 
 class SQLAlchemyUnitOfWork:

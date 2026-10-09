@@ -23,7 +23,19 @@ class Repository(Protocol):
     def sync_upsert(self, table: str, values: dict) -> str: ...
     def stale_tasks(self, cutoff) -> list[dict]: ...
     def health(self) -> None: ...
+    def list_resources(
+            self,
+            *,
+            keyword: str | None,
+            subject_id: str | None,
+            grade_level_id: str | None,
+            resource_type_code: str | None,
+            offset: int,
+            limit: int,
+    ) -> tuple[list[dict], int]: ...
 
 
 class UnitOfWork(Protocol):
     def __call__(self) -> AbstractContextManager[Repository]: ...
+
+
