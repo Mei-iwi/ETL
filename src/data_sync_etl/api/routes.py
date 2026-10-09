@@ -2,13 +2,14 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
+from data_sync_etl.api.resource_schemas import ResouceListResponse
 #Swagger Tags
-TAG_SYSTEM: str = '0. Hệ thống'
-TAG_MASTER: str = '1. Tiếp nhận và quản lý học liệu'
-TAG_PROCESSING: str = '2. Xử lý và chuẩn hóa dữ liệu'
-TAG_INDEXING: str = '3. Phân đoạn và biểu diễn dữ liệu'
-TAG_SEARCH: str = '4. Truy vấn và tìm kiếm'
-TAG_EVALUATION: str = '5. Thực nghiệm và đánh giá'
+TAG_SYSTEM: str = 'System'
+TAG_MASTER: str = 'Learning Resource Ingestion and Management'
+TAG_PROCESSING: str = 'Multimedia Data Processing and Normalization'
+TAG_INDEXING: str = 'Data Chunking and Representation'
+TAG_SEARCH: str = 'Learning Resource Retrieval and Search'
+TAG_EVALUATION: str = 'Experimentation and Evaluation'
 #Router
 router = APIRouter(prefix='/api/v1')
 ResourceId = Annotated[str, Path(min_length=1, max_length=30)]
@@ -57,6 +58,40 @@ def health(request: Request):
 )
 def system_capabilities(request: Request):
     return request.app.state.container.capabilities.describe()
+
+
+@router.get(
+        '/resources',
+        tags=[TAG_MASTER],
+        summary= 'Lấy danh sách học liệu',
+        response_model=ResouceListResponse,
+)
+def list_resources(
+    request: Request,
+    page: Annotated[int, Query(ge=1)],
+    size: Annotated[int, Query(ge=1, le=100)],
+    q: Annotated[str | None, Query(max_length=200)],
+    subject_id: Annotated[
+        str | None, Query(max_length=30)
+    ] = None,
+    grade_level_id: Annotated[
+        str | None, Query(max_length=30)
+    ] = None,
+    resource_type_code: Annotated[
+        str | None, Query(max_length=50)
+    ] = None
+) -> ResouceListResponse:
+    result = (
+        request.app.state.container.resource_listing.run(
+            page=page,
+            size=size,
+            q=q,
+            subject_id=subject_id,
+            grade_level_id=grade_level_id,
+            resource_type_code=resource_type_code,
+        )
+    )
+    return ResouceListResponse.model_validate(result)
 
 @router.post("/admin/sync/master")
 def sync(body: SyncInput, request: Request):
