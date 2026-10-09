@@ -6,17 +6,18 @@ from data_sync_etl.adapters.ocr.engines import (
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyUnitOfWork
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
+from data_sync_etl.application.capabilities import CapabilityService
+from data_sync_etl.application.ingest_resource import IngestResourceUseCase
 from data_sync_etl.application.ingestion import ResourceIngestion
+from data_sync_etl.application.list_resources import ListResources
 from data_sync_etl.application.ocr import OCRPipeline
 from data_sync_etl.application.orchestrator import EtlOrchestrator
 from data_sync_etl.application.postprocess import Postprocessor
 from data_sync_etl.application.sync import MasterSync
-from data_sync_etl.application.capabilities import CapabilityService
-from data_sync_etl.application.list_resources import ListResources
-
 from data_sync_etl.config import Settings
 from data_sync_etl.db.session import make_engine, sessions
 from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.format_registry import FormatValidatorRegistry
 from data_sync_etl.workers.ocr import OCRWorker
 
 
@@ -50,6 +51,12 @@ class Container:
 
         )
         self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size)
+        self.format_registry = FormatValidatorRegistry()
+        self.resource_ingest = IngestResourceUseCase(
+            uow=self.uow,
+            storage=self.storage,
+            registry=self.format_registry,
+        )
         self.ingestion = ResourceIngestion(self.uow, self.storage)
         self.ocr = OCRPipeline(
             self.uow,

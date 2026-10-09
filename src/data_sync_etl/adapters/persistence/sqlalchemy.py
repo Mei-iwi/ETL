@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, or_, select, text, exists
+from sqlalchemy import delete, exists, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -9,13 +9,13 @@ from data_sync_etl.db.models import (
     MODELS,
     ContentUnit,
     ContentUnitText,
-    OcrPageTask,
-    SyncCheckpoint,
-    MasterLearningResource,
     MasterGradeLevel,
+    MasterLearningResource,
+    OcrPageTask,
     ResourceGradeLevel,
     ResourceSubject,
-    Subject
+    Subject,
+    SyncCheckpoint,
 )
 from data_sync_etl.domain.core import now
 
