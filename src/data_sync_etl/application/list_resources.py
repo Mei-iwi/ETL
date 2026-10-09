@@ -1,5 +1,6 @@
 from data_sync_etl.ports.repositories import UnitOfWork
 
+
 class ListResources:
     def __init__(self, uow: UnitOfWork):
         self.uow = uow
