@@ -25,6 +25,8 @@ from data_sync_etl.config import Settings
 from data_sync_etl.db.session import make_engine, sessions
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.workers.ocr import OCRWorker
+from data_sync_etl.application.get_resource_detail import GetResourceDetail
+
 
 
 def create_source(settings):
@@ -54,6 +56,7 @@ class Container:
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
         self.resource_listing = ListResources(self.uow)
+        self.resource_detail = GetResourceDetail(self.uow)
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
         self.capabilities = CapabilityService(
             chunk_size_words = self.settings.chunk_size_words,
