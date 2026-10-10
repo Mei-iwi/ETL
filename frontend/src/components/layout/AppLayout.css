@@ -1,0 +1,254 @@
+.app-shell {
+    min-height: 100vh;
+    background: #f4f7fb;
+}
+
+.app-main {
+    min-width: 0;
+}
+
+.app-header {
+    min-height: 72px;
+    padding: 0 32px;
+    background-color: white;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 24px;
+    border-bottom: 1px solid #e5eaf1;
+    box-shadow: 0 2px 10px rgb(15 23 42 / 4%);
+}
+
+.header-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+    color: #172554;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-decoration: none;
+}
+
+.header-logo {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    object-fit: cover;
+}
+
+.main-menu {
+    display: flex;
+    align-self: stretch;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 4px;
+    margin-left: 16px;
+    min-width: 0;
+}
+
+.nav-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    position: relative;
+    padding: 0 16px;
+    color: #64748b;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-decoration: none;
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.nav-item svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 1.8;
+    flex-shrink: 0;
+}
+
+.nav-item:hover {
+    color: #2563eb;
+    background-color: #f8fafc;
+}
+
+.nav-item.active {
+    color: #2563eb;
+}
+
+.nav-item.active::after {
+    content: '';
+    position: absolute;
+    right: 16px;
+    bottom: 0;
+    left: 16px;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+    background-color: #2563eb;
+}
+
+.connection-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    margin-left: auto;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.connection-status.checking {
+    color: #a16207;
+    border-color: #fde68a;
+}
+
+.connection-status.online {
+    color: #15803d;
+    border-color: #bbf7d0;
+}
+
+.connection-status.offline {
+    color: #b91c1c;
+    border-color: #fecaca;
+}
+
+.connection-status.offline .status-dot {
+    background-color: #ef4444;
+}
+
+
+
+.app-content {
+    padding: 24px 32px;
+}
+
+@media (max-width: 960px) {
+    .app-header {
+        flex-wrap: wrap;
+        gap: 0 16px;
+        padding: 12px 20px 0;
+    }
+
+    .main-menu {
+        order: 3;
+        width: 100%;
+        height: 52px;
+        margin-left: 0;
+        overflow-x: auto;
+        justify-content: flex-start;
+    }
+
+    .nav-item {
+        padding: 0 14px;
+    }
+
+    .app-content {
+        padding: 20px;
+    }
+}
+
+@media (max-width: 560px) {
+    .app-header {
+        padding-inline: 16px;
+    }
+
+    .header-brand span {
+        font-size: 16px;
+    }
+
+    .header-logo {
+        width: 38px;
+        height: 38px;
+    }
+
+    .connection-status span:last-child {
+        display: none;
+    }
+
+    .connection-status {
+        padding: 10px;
+    }
+
+    .app-content {
+        padding: 16px;
+    }
+}
+
+/* Submenu */
+.sub-menu {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 52px;
+    padding: 6px 32px;
+    overflow-x: auto;
+
+    background-color: #ffffff;
+    border-bottom: 1px solid #e5eaf1;
+    box-shadow: 0 2px 8px rgb(15 23 42 / 3%);
+}
+
+/* Ẩn thanh cuộn nhưng vẫn cho phép cuộn ngang */
+.sub-menu::-webkit-scrollbar {
+    display: none;
+}
+
+.sub-menu {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    min-height: 52px;
+    padding: 6px 32px;
+    overflow-x: auto;
+
+    background-color: #ffffff;
+    border-bottom: 1px solid #e5eaf1;
+}
+
+.sub-menu-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 8px 14px;
+
+    color: #64748b;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    text-decoration: none;
+    white-space: nowrap;
+
+    transition:
+        color 0.2s ease,
+        background-color 0.2s ease,
+        border-color 0.2s ease;
+}
+
+.sub-menu-item:hover {
+    color: #2563eb;
+    background-color: #eff6ff;
+}
+
+.sub-menu-item.active {
+    color: #ffffff;
+    background-color: #2563eb;
+    border-color: #2563eb;
+    box-shadow: 0 2px 6px rgb(37 99 235 / 20%);
+}
+
+.sub-menu-item:focus-visible {
+    outline: 3px solid rgb(37 99 235 / 25%);
+    outline-offset: 2px;
+}
