@@ -19,6 +19,7 @@ from data_sync_etl.application.orchestrator import EtlOrchestrator
 from data_sync_etl.application.postprocess import Postprocessor
 from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
+from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.config import Settings
 from data_sync_etl.db.session import make_engine, sessions
@@ -103,6 +104,10 @@ class Container:
         self.process_version = ProcessResourceVersion(
             self.uow,
             self.ocr,
+        )
+        self.retry_processing_job = RetryProcessingJob(
+            self.uow,
+            max_manual_retries=self.settings.processing_manual_retry_limit,
         )
         self.worker = OCRWorker(
             self.ocr,
