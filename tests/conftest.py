@@ -18,6 +18,24 @@ ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
 
 
+class MemoryDocumentStore:
+    def __init__(self):
+        self.pages = {}
+        self.units = {}
+
+    def upsert_ocr_page(self, document):
+        self.pages[document["_id"]] = document
+
+    def upsert_content_unit(self, document):
+        self.units[document["_id"]] = document
+
+    def reconcile_content_units(self, version_id, unit_ids, generation=None):
+        for key, document in self.units.items():
+            if (document['resource_version_id'] == version_id and key not in unit_ids
+                    and (generation is None or document.get('projection_generation', 0) <= generation)):
+                document['is_current'] = False
+
+
 def pytest_sessionfinish(session, exitstatus):
     if os.environ.get("ETL_REQUIRE_POSTGRES") == "1":
         reporter = session.config.pluginmanager.get_plugin("terminalreporter")
@@ -51,7 +69,7 @@ def container(tmp_path):
         source_adapter="json",
         admin_enabled=False,
     )
-    result = Container(settings, engine)
+    result = Container(settings, engine, MemoryDocumentStore())
     yield result
     engine.dispose()
 
@@ -103,6 +121,7 @@ def pg_container(tmp_path):
                 sync_batch_size=2,
             ),
             engine,
+            MemoryDocumentStore(),
         )
     finally:
         with engine.begin() as connection:
@@ -115,6 +134,24 @@ def pg_container(tmp_path):
 @pytest.fixture
 def pdf_file(container):
     return make_pdf(container)
+
+
+@pytest.fixture
+def mongo_test_database():
+    from pymongo import MongoClient
+
+    uri = os.environ.get('TEST_MONGO_URI')
+    if not uri:
+        pytest.skip('TEST_MONGO_URI required for isolated CLI MongoDB integration')
+    name = 'etl_test_' + uuid4().hex
+    client = MongoClient(uri, serverSelectionTimeoutMS=3000, timeoutMS=10000)
+    try:
+        client.admin.command('ping')
+        yield uri, name
+    finally:
+        assert name.startswith('etl_test_') and len(name) == 41
+        client.drop_database(name)
+        client.close()
 
 
 def make_pdf(container, texts=None, name="sample.pdf"):

@@ -1,7 +1,9 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from hashlib import sha256
+from threading import Lock
 
-from sqlalchemy import delete, func, or_, select, text, exists
+from sqlalchemy import delete, exists, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -9,13 +11,13 @@ from data_sync_etl.db.models import (
     MODELS,
     ContentUnit,
     ContentUnitText,
-    OcrPageTask,
-    SyncCheckpoint,
-    MasterLearningResource,
     MasterGradeLevel,
+    MasterLearningResource,
+    OcrPageTask,
     ResourceGradeLevel,
     ResourceSubject,
-    Subject
+    Subject,
+    SyncCheckpoint,
 )
 from data_sync_etl.domain.core import now
 
@@ -25,6 +27,9 @@ STREAMS = {
     "grades": "master_grade_levels",
     "subjects": "subjects",
 }
+
+# SQLite is a single-process test/development fallback only.
+_PROCESSING_LOCKS = [Lock() for _ in range(64)]
 
 
 def utc(value):
@@ -243,3 +248,27 @@ class SQLAlchemyUnitOfWork:
     def __call__(self):
         with self.sessions.begin() as session:
             yield SQLAlchemyRepository(session)
+
+    @contextmanager
+    def processing_lock(self, version_id: str):
+        key = int.from_bytes(sha256(('etl-finalize:' + version_id).encode()).digest()[:8],
+                             'big', signed=True)
+        with self.sessions() as session:
+            dialect = session.get_bind().dialect.name
+            if dialect == 'postgresql':
+                # Held across all finalization work; transaction/connection loss releases it.
+                with session.begin():
+                    acquired = session.scalar(
+                        text('SELECT pg_try_advisory_xact_lock(:key)'), {'key': key}
+                    )
+                    yield bool(acquired)
+            elif dialect == 'sqlite':
+                lock = _PROCESSING_LOCKS[key % len(_PROCESSING_LOCKS)]
+                acquired = lock.acquire(blocking=False)
+                try:
+                    yield acquired
+                finally:
+                    if acquired:
+                        lock.release()
+            else:
+                raise RuntimeError('Processing locks require PostgreSQL')

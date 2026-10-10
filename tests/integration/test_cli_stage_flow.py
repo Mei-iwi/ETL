@@ -12,7 +12,7 @@ from sqlalchemy import text
 pytestmark = pytest.mark.postgres
 
 
-def test_cli_manual_stages_and_demo_rerun(pg_container):
+def test_cli_manual_stages_and_demo_rerun(pg_container, mongo_test_database):
     container = pg_container
     with container.engine.connect() as connection:
         schema = connection.scalar(text("SELECT current_schema()"))
@@ -28,6 +28,8 @@ def test_cli_manual_stages_and_demo_rerun(pg_container):
         ADMIN_ENABLED="false",
         PYTHONDONTWRITEBYTECODE="1",
         PYTHONUTF8="1",
+        MONGO_URI=mongo_test_database[0],
+        MONGO_DATABASE=mongo_test_database[1],
     )
 
     def cli(*arguments):

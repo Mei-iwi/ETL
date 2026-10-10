@@ -17,7 +17,7 @@ test -f .env || cp .env.example .env
 Sửa `POSTGRES_PASSWORD` và `DATABASE_URL` trong `.env` cho khớp. Sau đó:
 
 ```bash
-docker compose -p etl-master-data up -d --wait postgres
+docker compose -p etl-master-data up -d --wait postgres mongo
 python -m alembic upgrade head
 etl sync-master --stream all --full
 etl demo-run --fixture-resource-id resource-1
@@ -52,9 +52,39 @@ etl recover-stale-ocr-tasks
 etl resume-etl --resource-version-id VERSION_ID
 ```
 
-Ctrl+C dừng worker; `--once` nhận tối đa một task. Worker ghi kết quả attempt vào DB;
+Ctrl+C dừng worker; `--once` nhận tối đa một page task hoặc một finalization còn thiếu.
+Worker ghi kết quả attempt vào DB;
 hãy đọc job/task status để phân biệt OCR thành công, retry hoặc terminal failure.
-`resume-etl` tạo job nếu thiếu, hoặc postprocess nếu terminal; không tự chạy worker.
+`resume-etl` tạo job nếu thiếu, hoặc postprocess nếu OCR thành công toàn bộ; không tự chạy worker.
+
+### Resource Version Processing
+
+`POST /api/v1/resource-versions/{id}/process` yêu cầu `ADMIN_ENABLED=true` trên local development.
+ID là `resource_versions.id`. Request chỉ xác minh phiên bản, kiểm tra PDF/đếm trang khi tạo
+job, và tạo/tái sử dụng OCR job; không recognize, postprocess hoặc ghi MongoDB trong HTTP.
+API giữ `job_id` ổn định và trả `processing_status` độc lập với `job_status`.
+HTTP 202 nghĩa là còn việc cho worker; HTTP 200 trả trạng thái terminal/failed đã ghi nhận,
+không có nghĩa mọi job OCR terminal đều là `CONTENT_READY`. Phiên bản không có trả 404;
+đầu vào/PDF không hợp lệ trả lỗi an toàn, không tạo job giả.
+
+Chạy `etl run-ocr-worker --worker-id worker-1` riêng để OCR và reconcile finalization,
+kể cả khi không còn page task. PostgreSQL giữ trạng thái và kết quả phục hồi;
+MongoDB lưu `ocr_pages.raw_text` cùng provenance và `mongo_content_units`.
+Chỉ OCR thành công tất cả trang và projection thành công mới là `CONTENT_READY`.
+Xem URL `status_url` do response trả về để theo dõi.
+Worker cũng quét task OCR mất heartbeat mỗi `OCR_RECOVERY_INTERVAL_SECONDS` (mặc định 30 giây),
+kể cả khi hàng đợi trống; chỉ task quá `OCR_HEARTBEAT_TIMEOUT_SECONDS` mới được thử lại.
+Lệnh `recover-stale-ocr-tasks` vẫn dùng được để phục hồi thủ công.
+Postprocess thủ công và Finalizer dùng cùng khóa PostgreSQL theo version; khi đang xử lý,
+lệnh thủ công nhận lỗi nghiệp vụ và có thể thử lại sau.
+
+MongoDB lỗi: giữ nguyên dữ liệu PostgreSQL, worker retry tối đa `FINALIZATION_MAX_ATTEMPTS`
+(mặc định 3), cách nhau `FINALIZATION_RETRY_SECONDS` (mặc định 30 giây).
+Sau khi hết lượt, stage FAILED giữ nguyên để điều tra; sửa kết nối rồi chủ động tăng giới hạn
+attempt và khởi động lại worker để cấp thêm lượt. Request lặp không tự reset giới hạn retry.
+Không cần OCR lại PDF. Document upsert giữ ID; unit cũ được đánh dấu `is_current=false`
+sau khi toàn bộ upsert thành công, không xóa lịch sử. Chi tiết khóa/recovery ở
+[status lifecycle](docs/status_lifecycle.md).
 `NO_CHANGE` dừng flow ingest; nếu trước đó process bị ngắt thì resume bằng version ID hiện có.
 Không có lệnh force re-OCR cùng version trong đợt này; `create-ocr-job` lặp lại trả cùng job.
 
@@ -62,7 +92,15 @@ Không có lệnh force re-OCR cùng version trong đợt này; `create-ocr-job`
 
 - `OCR_ENGINE=native` mặc định: lấy native PDF text. Trang scan retry/fail an toàn khi thiếu OCR engine.
 - `OCR_ENGINE=fake`: chỉ demo/test, ghi engine_name=fake; không phải nhận dạng nội dung thật.
-- Tesseract/PaddleOCR chưa tích hợp: **BLOCKED_OCR_RUNTIME**. Không tuyên bố hỗ trợ scan production.
+- `OCR_ENGINE=tesseract`: render trang scan rồi gọi Tesseract qua subprocess (không qua shell),
+  timeout `OCR_TIMEOUT_SECONDS` (mặc định 60). Cài binary và traineddata `vie`, `eng`
+  riêng; Windows đặt `TESSERACT_PATH` thành đường dẫn đầy đủ tới `tesseract.exe`,
+  Linux có thể dùng `tesseract` trong PATH. Đặt `TESSERACT_LANGUAGES=vie+eng`.
+  Kiểm tra `tesseract --version` và `tesseract --list-langs` trước khi chạy worker.
+  Thiếu binary/ngôn ngữ sẽ báo `BLOCKED_OCR_RUNTIME`; không tải tự động.
+  PDF có text layer dùng native; trang có text layer ngắn (<32 ký tự) và ảnh chiếm >=10%
+  trang sẽ kết hợp text native với OCR toàn trang. Confidence của adapter hiện để trống.
+  Chưa xác nhận chất lượng OCR tiếng Việt trên scan thực tế.
 
 ## API local và Swagger
 
@@ -98,6 +136,9 @@ Với `--postgres`, thứ tự chọn URL là environment `TEST_DATABASE_URL` �
 → `DATABASE_URL`. URL environment rỗng/sai bị từ chối, không fallback âm thầm.
 `--db-host` chỉ thay host của URL đã chọn. PostgreSQL test thiếu cấu hình/skip khi đã yêu cầu sẽ làm QA fail.
 Có thể chạy `python -m pytest -q`; khi chạy trực tiếp, test PostgreSQL đọc TEST_DATABASE_URL từ environment.
+Integration PostgreSQL + MongoDB cần thêm `TEST_MONGO_URI` trỏ tới instance test;
+test tạo schema PostgreSQL và database MongoDB tên `etl_test_<random>` rồi chỉ dọn dữ liệu đó.
+Nếu thiếu một trong hai biến, test bị SKIP, không được tính là PASS tích hợp.
 
 Guard từ chối DB/host/environment gắn nhãn prod/production và query override host/search_path.
 Remote test DB cần `ETL_TEST_DB_ALLOW_REMOTE=true` và tài khoản chỉ có quyền trên DB test.
@@ -107,7 +148,7 @@ không downgrade DB dev/public. Thư mục test tạm `.test-tmp` không thuộc
 
 ## Docker runtime và QA
 
-Dockerfile có hai target; Compose dev vẫn chỉ gồm PostgreSQL.
+Dockerfile có hai target; Compose dev gồm PostgreSQL và MongoDB.
 
 ```bash
 docker build --target runtime -t etl-master-data-runtime .

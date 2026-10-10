@@ -37,5 +37,6 @@ class Repository(Protocol):
 
 class UnitOfWork(Protocol):
     def __call__(self) -> AbstractContextManager[Repository]: ...
+    def processing_lock(self, version_id: str) -> AbstractContextManager[bool]: ...
 
 

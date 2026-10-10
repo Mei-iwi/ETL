@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     source_adapter: Literal["json", "production"] = "json"
     ocr_max_retries: int = Field(default=3, ge=1)
     ocr_heartbeat_timeout_seconds: int = Field(default=120, ge=3)
+    ocr_recovery_interval_seconds: int = Field(default=30, ge=1)
+    ocr_timeout_seconds: int = Field(default=60, ge=1)
+    tesseract_path: str = "tesseract"
+    tesseract_languages: str = "vie+eng"
     sync_batch_size: int = Field(default=100, ge=1, le=10000)
 
     chunk_size_words: int = Field(
@@ -34,5 +38,13 @@ class Settings(BaseSettings):
     vector_dimension: int = Field(
         default=256, ge=16, le = 4096
     )
-    ocr_engine: Literal["native", "fake"] = "native"
+    ocr_engine: Literal["native", "fake", "tesseract"] = "native"
     admin_enabled: bool = False
+
+    mongo_uri: str = Field(
+        default='mongodb://127.0.0.1:27017',
+        repr=False,
+    )
+    mongo_database: str = 'etl_content'
+    finalization_max_attempts: int = Field(default=3, ge=1, le=20)
+    finalization_retry_seconds: int = Field(default=30, ge=1, le=3600)

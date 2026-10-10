@@ -9,7 +9,14 @@ class Postprocessor:
     def __init__(self, uow: UnitOfWork, normalizer=normalize_text):
         self.uow, self.normalizer = uow, normalizer
 
-    def run(self, version_id):
+    def run(self, version_id, *, allow_partial=False):
+        with self.uow.processing_lock(version_id) as acquired:
+            if not acquired:
+                raise DomainError("Postprocess already running for this resource version")
+            return self.run_locked(version_id, allow_partial=allow_partial)
+
+    def run_locked(self, version_id, *, allow_partial=False):
+        """Run only while the caller holds the version's processing lock."""
         with flow():
             with self.uow() as repo:
                 if not repo.get("resource_versions", version_id):
@@ -36,6 +43,12 @@ class Postprocessor:
                     if not jobs or jobs[0]["status"] not in ("COMPLETED", "COMPLETED_WITH_ERRORS"):
                         raise DomainError("Postprocess requires a completed OCR job")
                     job = jobs[0]
+                    if not allow_partial and (
+                        job["status"] != "COMPLETED"
+                        or job["failed_pages"]
+                        or job["completed_pages"] != job["total_pages"]
+                    ):
+                        raise DomainError("Postprocess requires all OCR pages to succeed")
                     digest = hashlib.sha256(b"page-text-nfc-v1")
                     count, successful = 0, 0
                     # One page/result at a time, keeping large document text out of a whole-file buffer.
@@ -43,14 +56,21 @@ class Postprocessor:
                         tasks = repo.find(
                             "ocr_page_tasks", {"job_id": job["id"], "page_num": page}, limit=1
                         )
+                        if not tasks:
+                            raise DomainError("OCR page task is missing")
                         task = tasks[0]
                         digest.update(f"{page}:{task['status']}:".encode())
                         if task["status"] != "SUCCEEDED":
+                            if not allow_partial:
+                                raise DomainError("OCR page has not succeeded")
                             continue
                         successful += 1
-                        result = repo.find(
+                        results = repo.find(
                             "ocr_page_results", {"page_task_id": task["id"]}, limit=1
-                        )[0]
+                        )
+                        if not results:
+                            raise DomainError("OCR page result is missing")
+                        result = results[0]
                         normalized = self.normalizer(result["raw_text"])
                         digest.update(hashlib.sha256(normalized.encode()).digest())
                         if result["normalized_text"] != normalized:
@@ -143,6 +163,9 @@ class Postprocessor:
                     coverage=coverage,
                 )
                 return {
+                    "processing_status": "PARTIAL_CONTENT"
+                    if job["failed_pages"]
+                    else "POSTPROCESSED",
                     "content_unit_count": count,
                     "coverage": coverage,
                     "input_fingerprint": fingerprint,

@@ -142,7 +142,9 @@ def test_postprocess_partial_and_empty_page(container):
     for _ in range(3):
         task = container.ocr.claim("w")
         container.ocr.fail(task)
-    result = container.postprocess.run(version["id"])
+    with pytest.raises(DomainError):
+        container.postprocess.run(version["id"])
+    result = container.postprocess.run(version["id"], allow_partial=True)
     assert result["content_unit_count"] == 1
     assert result["coverage"] == {"successful_pages": 2, "total_pages": 3, "failed_pages": 1}
 
@@ -206,7 +208,9 @@ def test_middle_page_gap_preserves_provenance(container):
     container.ocr.fail(second)
     third = container.ocr.claim("w")
     container.ocr.succeed(third, OCRResult("page three"))
-    container.postprocess.run(version["id"])
+    with pytest.raises(DomainError):
+        container.postprocess.run(version["id"])
+    container.postprocess.run(version["id"], allow_partial=True)
     with container.uow() as repo:
         units = repo.find("content_units", {}, order=("sequence_no",))
         assert [u["sequence_no"] for u in units] == [1, 2]

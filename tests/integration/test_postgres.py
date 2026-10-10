@@ -12,6 +12,103 @@ from data_sync_etl.ports.processing import OCRResult
 pytestmark = pytest.mark.postgres
 
 
+def test_finalization_database_lock_and_recovery(pg_container, monkeypatch):
+    from threading import Event
+
+    from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyUnitOfWork
+    from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
+    from data_sync_etl.db.session import sessions
+
+    c = pg_container
+    version = ingest(c)
+    job = c.ocr.create_job(version["id"])
+    for _ in range(3):
+        c.ocr.succeed(c.ocr.claim("w"), OCRResult("Tiếng Việt\nTest"))
+    entered, release = Event(), Event()
+    original = c.mongo_projector.project
+
+    def pause(*args):
+        entered.set()
+        assert release.wait(10)
+        return original(*args)
+
+    monkeypatch.setattr(c.mongo_projector, "project", pause)
+    second = ProcessingFinalizer(
+        SQLAlchemyUnitOfWork(sessions(c.engine)), c.postprocess, c.mongo_projector
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        running = pool.submit(c.processing_finalizer.finalize, job["id"])
+        try:
+            assert entered.wait(10)
+            assert (
+                pool.submit(second.finalize, job["id"]).result(timeout=5)["status"] == "IN_PROGRESS"
+            )
+        finally:
+            release.set()
+        assert running.result(timeout=10)["status"] == "CONTENT_READY"
+    assert second.finalize(job["id"])["status"] == "ALREADY_COMPLETED"
+    with c.uow() as repo:
+        assert repo.count("etl_stage_runs", {"stage": "MONGO_PROJECTION"}) == 1
+
+
+def test_postgres_manual_postprocess_respects_finalizer_lock(pg_container, monkeypatch):
+    from threading import Event
+
+    from data_sync_etl.domain.core import DomainError
+
+    c = pg_container
+    version = ingest(c)
+    job = c.ocr.create_job(version["id"])
+    for _ in range(3):
+        c.ocr.succeed(c.ocr.claim("w"), OCRResult("text"))
+    entered, release = Event(), Event()
+    original = c.mongo_projector.project
+
+    def pause(*args):
+        entered.set()
+        assert release.wait(10)
+        return original(*args)
+
+    monkeypatch.setattr(c.mongo_projector, "project", pause)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        running = pool.submit(c.processing_finalizer.finalize, job["id"])
+        try:
+            assert entered.wait(10)
+            with pytest.raises(DomainError, match="already running"):
+                c.postprocess.run(version["id"])
+        finally:
+            release.set()
+        assert running.result(timeout=10)["status"] == "CONTENT_READY"
+    with c.uow() as repo:
+        assert repo.count("etl_stage_runs", {"stage": "POSTPROCESS"}) == 1
+
+
+def test_postgres_abandoned_projection_recovers(pg_container):
+    c = pg_container
+    version = ingest(c)
+    job = c.ocr.create_job(version["id"])
+    for _ in range(3):
+        c.ocr.succeed(c.ocr.claim("w"), OCRResult("text"))
+    with c.uow.processing_lock(version["id"]) as acquired:
+        assert acquired
+        with c.uow() as repo:
+            old = repo.insert(
+                "etl_stage_runs",
+                {
+                    "resource_version_id": version["id"],
+                    "stage": "MONGO_PROJECTION",
+                    "status": "RUNNING",
+                    "started_at": now(),
+                    "created_at": now(),
+                },
+            )
+    # Owner transaction ended without finalizing: lock is released by PostgreSQL.
+    assert c.worker.once("recovery")
+    with c.uow() as repo:
+        assert repo.get("etl_stage_runs", old["id"])["status"] == "FAILED"
+        assert repo.get("ocr_jobs", job["id"])["completed_pages"] == 3
+
+
 def test_postgres_migrations(pg_container):
     from alembic.config import Config
     from conftest import ROOT
@@ -140,8 +237,15 @@ def test_concurrent_postprocess_and_rollback(pg_container):
     c = pg_container
     version, _ = completed(c)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda _: c.postprocess.run(version["id"]), range(2)))
-    assert results[0] == results[1]
+        futures = [pool.submit(c.postprocess.run, version["id"]) for _ in range(2)]
+        outcomes = []
+        for future in futures:
+            try:
+                outcomes.append(future.result())
+            except DomainError as error:
+                assert "already running" in str(error)
+    assert outcomes
+    assert all(result == c.postprocess.run(version["id"]) for result in outcomes)
     with c.uow() as repo:
         before = repo.find("content_unit_texts", {}, order=("content_unit_id",))
         assert len(before) == 3
