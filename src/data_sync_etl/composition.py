@@ -11,6 +11,8 @@ from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyUnitOfWork
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.application.capabilities import CapabilityService
+from data_sync_etl.application.create_resource import CreateResourceUseCase
+from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.application.ingestion import ResourceIngestion
 from data_sync_etl.application.list_resources import ListResources
 from data_sync_etl.application.mongo_projection import MongoContentProjector
@@ -54,7 +56,9 @@ class Container:
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
         self.resource_listing = ListResources(self.uow)
+        self.format_registry = FormatValidatorRegistry()
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
+        self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry)
         self.capabilities = CapabilityService(
             chunk_size_words = self.settings.chunk_size_words,
             chunk_overlap_words=self.settings.chunk_overlap_words,
