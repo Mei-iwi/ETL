@@ -1,10 +1,13 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
+from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from data_sync_etl.api.processing_schemas import ProcessVersionResponse, RetryProcessingJobResponse
 from data_sync_etl.api.resource_schemas import ResouceListResponse
+from data_sync_etl.api.resource_create_schemas import CreateResourceResponse
+from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.resource import CreateResourceCommand
 from data_sync_etl.domain.core import (
     ProcessingJobNotFound,
     ProcessingRetryConflict,
@@ -100,6 +103,57 @@ def list_resources(
         )
     )
     return ResouceListResponse.model_validate(result)
+
+
+@router.post(
+    "/api/v1/resources",
+    tags=[TAG_MASTER],
+    summary="Tạo học liệu mới và phiên bản đầu tiên",
+    status_code=201,
+    response_model=CreateResourceResponse,
+)
+def create_resource(
+    request: Request,
+    file: UploadFile = File(...),
+    title: str = Form(..., min_length=1, max_length=500),
+    resource_type_code: str = Form(..., min_length=1, max_length=50),
+    provider_id: str = Form(..., min_length=1, max_length=30),
+    provider_name: str = Form(..., min_length=1, max_length=255),
+    provider_type: str = Form("INTERNAL", max_length=30),
+    resource_type_name_vi: str | None = Form(None, max_length=150),
+    subject_id: str | None = Form(None, max_length=30),
+    grade_level_id: str | None = Form(None, max_length=30),
+    publication_status: str = Form("PUBLISHED", max_length=30),
+    uploaded_by: str | None = Form(None, max_length=30),
+) -> CreateResourceResponse:
+    if not file.filename:
+        raise HTTPException(400, "A filename is required")
+    try:
+        stream = file.file
+        stream.seek(0, 2)
+        file_size = stream.tell()
+        stream.seek(0)
+        result = request.app.state.container.resource_create.execute(
+            CreateResourceCommand(
+                title=title,
+                resource_type_code=resource_type_code,
+                provider_id=provider_id,
+                provider_name=provider_name,
+                filename=file.filename,
+                file_stream=stream,
+                file_size=file_size,
+                declared_mime=file.content_type or "",
+                provider_type=provider_type,
+                resource_type_name_vi=resource_type_name_vi,
+                subject_id=subject_id,
+                grade_level_id=grade_level_id,
+                publication_status=publication_status,
+                uploaded_by=uploaded_by,
+            )
+        )
+    except DomainError:
+        raise HTTPException(400, "Invalid resource metadata or file format") from None
+    return CreateResourceResponse.model_validate(result.__dict__)
 
 @router.post(
         '/api/v1/resource-versions/{id}/process',
