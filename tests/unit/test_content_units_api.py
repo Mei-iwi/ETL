@@ -6,12 +6,10 @@ from data_sync_etl.main import create_app
 
 def test_content_units_read_pagination_search_and_version_isolation(container):
     version, _ = completed(container)
-    container.postprocess.run(version["id"])
     other = container.ingestion.run("resource-2", "input", "sample.pdf")["version"]
     container.ocr.create_job(other["id"])
     while container.worker.once("test-worker"):
         pass
-    container.postprocess.run(other["id"])
     container.settings.admin_enabled = True
     path = f"/admin/resource-versions/{version['id']}/content-units"
     with TestClient(create_app(container)) as client:
@@ -36,11 +34,13 @@ def test_content_units_read_pagination_search_and_version_isolation(container):
         assert client.get(path, params={"offset": 10}).json()["items"] == []
     with container.uow() as repo:
         assert repo.count("content_units", {}) == 6
-        assert repo.count("etl_stage_runs", {}) == 2
+        assert repo.count("etl_stage_runs", {"stage": "POSTPROCESS"}) == 2
+        assert repo.count("etl_stage_runs", {"stage": "MONGO_PROJECTION"}) == 2
 
 
-def test_content_units_admin_validation_and_empty_version(container):
-    version, _ = completed(container)
+def test_content_units_admin_validation_and_empty_version(container, pdf_file):
+    container.sync.run(full=True)
+    version = container.ingestion.run("resource-1", "input", "sample.pdf")["version"]
     path = f"/admin/resource-versions/{version['id']}/content-units"
     with TestClient(create_app(container)) as client:
         assert client.get(path).status_code == 403

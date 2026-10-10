@@ -118,13 +118,33 @@ class OCRPipeline:
         native = self.pdf.extract_native_text(path, task["page_num"])
         # Conservative native-text gate; empty/image-only pages need an OCR adapter.
         printable = sum(c.isprintable() or c.isspace() for c in native)
-        if native.strip() and printable / max(len(native), 1) >= 0.98 and "\ufffd" not in native:
+        valid_native = (
+            bool(native.strip())
+            and printable / max(len(native), 1) >= 0.98
+            and "\ufffd" not in native
+        )
+        # A short text layer can be a header over a large scanned page image.
+        mixed_scan = (
+            valid_native
+            and len(native.strip()) < 32
+            and self.pdf.has_significant_image(path, task["page_num"])
+        )
+        if valid_native and not mixed_scan:
             return OCRResult(
                 native, engine_name="native_pdf_text", metadata={"page_num": task["page_num"]}
             ), None
         image = self.storage.image_path(task["id"], task["claim_token"])
         self.pdf.render_page_to_image(path, task["page_num"], image)
-        return self.engine.recognize(image), str(image)
+        result = self.engine.recognize(image)
+        if mixed_scan:
+            result = OCRResult(
+                native + "\n" + result.text,
+                confidence=result.confidence,
+                engine_name=result.engine_name,
+                engine_version=result.engine_version,
+                metadata={**result.metadata, "mixed_native_text": True},
+            )
+        return result, str(image)
 
     def succeed(self, claimed, result, image_path=None):
         with self.uow() as repo:

@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
+
 from data_sync_etl.main import create_app
+
 
 def test_resource_list_pagination(container):
 
@@ -7,8 +9,8 @@ def test_resource_list_pagination(container):
 
     with TestClient(create_app(container)) as client:
         response = client.get(
-            'api/v1/resources',
-            params= {'page': 1, 'size': 2}
+                '/api/v1/resources',
+                params={'page': 1, 'size': 2, 'q': ''}
         )
 
     assert response.status_code == 200
@@ -38,6 +40,8 @@ def test_resource_list_filters(container):
             '/api/v1/resources',
             params = {
                 'q': 'Resource 1',
+                'page': 1,
+                'size': 20,
                 'subject_id': 'subject-1',
                 'grade_level_id': 'grade-1',
                 'resource_type_code': 'HANDOUT'
@@ -72,7 +76,10 @@ def test_resource_list_excludes_inactive(container):
         )
 
     with TestClient(create_app(container)) as client:
-        response = client.get('/api/v1/resources')
+        response = client.get(
+            '/api/v1/resources',
+            params={'page': 1, 'size': 20, 'q': ''},
+        )
 
         assert response.status_code == 200
 

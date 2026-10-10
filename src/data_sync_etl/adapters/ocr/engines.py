@@ -1,3 +1,7 @@
+import shutil
+import subprocess
+from pathlib import Path
+
 import pymupdf
 
 from data_sync_etl.domain.core import DomainError
@@ -23,6 +27,73 @@ class PyMuPDFPDFProcessor:
         with pymupdf.open(path) as pdf:
             return pdf[page_num - 1].get_text()
 
+    def has_significant_image(self, path, page_num):
+        with pymupdf.open(path) as pdf:
+            page = pdf[page_num - 1]
+            area = page.rect.get_area()
+            return any(
+                pymupdf.Rect(item["bbox"]).get_area() >= area * 0.1
+                for item in page.get_image_info()
+            )
+
+
+class TesseractOCREngine:
+    def __init__(self, executable="tesseract", languages="vie+eng", timeout=60):
+        self.executable = executable
+        self.languages = languages
+        self.timeout = timeout
+        self._version = None
+
+    def _runtime(self):
+        executable = shutil.which(self.executable)
+        if not executable and not Path(self.executable).is_file():
+            raise DomainError("BLOCKED_OCR_RUNTIME: Tesseract executable not found")
+        try:
+            version = subprocess.run(
+                [self.executable, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=min(self.timeout, 10),
+                check=True,
+            )
+            languages = subprocess.run(
+                [self.executable, "--list-langs"],
+                capture_output=True,
+                text=True,
+                timeout=min(self.timeout, 10),
+                check=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise DomainError("BLOCKED_OCR_RUNTIME: Tesseract runtime check failed") from None
+        available = set(languages.stdout.splitlines()[1:])
+        if not set(self.languages.split("+")).issubset(available):
+            raise DomainError("BLOCKED_OCR_RUNTIME: required Tesseract language data missing")
+        self._version = version.stdout.splitlines()[0].strip() if version.stdout else "unknown"
+
+    def recognize(self, image_path):
+        if self._version is None:
+            self._runtime()
+        try:
+            result = subprocess.run(
+                [self.executable, str(image_path), "stdout", "-l", self.languages],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self.timeout,
+                check=True,
+            )
+        except subprocess.TimeoutExpired:
+            raise DomainError("Tesseract OCR timed out") from None
+        except (OSError, subprocess.CalledProcessError):
+            raise DomainError("Tesseract OCR failed") from None
+        return OCRResult(
+            result.stdout,
+            engine_name="tesseract",
+            engine_version=self._version,
+            metadata={"languages": self.languages},
+        )
+
 
 class FakeOCREngine:
     """Explicit test/demo engine; never selected by the default configuration."""
@@ -36,4 +107,4 @@ class FakeOCREngine:
 
 class UnconfiguredOCREngine:
     def recognize(self, image_path):
-        raise DomainError("Scanned page requires a configured OCR engine")
+        raise DomainError("BLOCKED_OCR_RUNTIME: scanned page requires a configured OCR engine")

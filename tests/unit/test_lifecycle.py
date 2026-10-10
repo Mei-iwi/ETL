@@ -12,7 +12,10 @@ def test_terminal_job_is_reused_and_no_enqueue_is_claimed(container):
     container.postprocess.run(version["id"])
     with container.uow() as repo:
         assert repo.get("ocr_jobs", job["id"])["postprocess_enqueued_at"] is None
-        stage = repo.find("etl_stage_runs", {"resource_version_id": version["id"]})[0]
+        stage = repo.find(
+            "etl_stage_runs",
+            {"resource_version_id": version["id"], "stage": "POSTPROCESS"},
+        )[0]
         assert stage["status"] == "COMPLETED" and stage["finished_at"] is not None
 
 

@@ -14,5 +14,17 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  mongo:
+    image: mongo:8.0
+    ports:
+      - "127.0.0.1:27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 volumes:
   postgres_data:
+  mongo_data:

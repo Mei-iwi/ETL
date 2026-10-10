@@ -1,3 +1,4 @@
+from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.logging import flow
 
@@ -56,6 +57,7 @@ class EtlOrchestrator:
             )
             return {
                 "resource": resource,
+                "processing_status": processing_state(repo, jobs[0]) if jobs else 'NOT_STARTED',
                 "version": version,
                 "latest_version": latest,
                 "ocr_job": jobs[0] if jobs else None,

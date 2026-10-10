@@ -33,6 +33,10 @@ class DomainError(ValueError):
     """Only static, non-sensitive error messages may cross the public boundary."""
 
 
+class ResourceVersionNotFound(DomainError):
+    pass
+
+
 def now():
     return datetime.now(UTC)
 

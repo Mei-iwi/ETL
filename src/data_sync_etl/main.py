@@ -22,6 +22,8 @@ def create_app(container=None):
             )
         yield
         if container is None:
+            if app.state.container.mongo_client is not None:
+                app.state.container.mongo_client.close()
             app.state.container.engine.dispose()
 
     app = FastAPI(title="Data Sync + ETL (local admin/dev)", lifespan=lifespan)
