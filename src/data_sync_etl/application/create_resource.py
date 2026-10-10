@@ -1,5 +1,3 @@
-from pathlib import PurePath
-
 from data_sync_etl.domain.core import DomainError, new_id, now
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.domain.resource import CreateResourceCommand, CreateResourceResult
