@@ -25,3 +25,7 @@ class ProcessVersionResponse(BaseModel):
         "CONTENT_READY",
     ]
     status_url: str
+
+
+class RetryProcessingJobResponse(ProcessVersionResponse):
+    """Same durable job/status fields returned by the process endpoint."""

@@ -55,3 +55,11 @@ def job_terminal(completed: int, failed: int, total: int):
     if completed + failed != total:
         return JobStatus.RUNNING
     return JobStatus.COMPLETED_WITH_ERRORS if failed else JobStatus.COMPLETED
+
+
+class ProcessingJobNotFound(DomainError):
+    pass
+
+
+class ProcessingRetryConflict(DomainError):
+    pass

@@ -3,9 +3,13 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from data_sync_etl.api.processing_schemas import ProcessVersionResponse
+from data_sync_etl.api.processing_schemas import ProcessVersionResponse, RetryProcessingJobResponse
 from data_sync_etl.api.resource_schemas import ResouceListResponse
-from data_sync_etl.domain.core import ResourceVersionNotFound
+from data_sync_etl.domain.core import (
+    ProcessingJobNotFound,
+    ProcessingRetryConflict,
+    ResourceVersionNotFound,
+)
 
 #Swagger Tags
 TAG_SYSTEM: str = 'System'
@@ -120,6 +124,30 @@ def process_resource_version(
         response.status_code = 200
 
     return ProcessVersionResponse.model_validate(result)
+
+
+@router.post(
+    "/api/v1/processing-jobs/{job_id}/retry",
+    tags=[TAG_PROCESSING],
+    summary="Yêu cầu xử lý lại Processing Job thất bại",
+    status_code=202,
+    response_model=RetryProcessingJobResponse,
+)
+def retry_processing_job(
+    job_id: Annotated[str, Path(min_length=1, max_length=30)],
+    request: Request,
+    response: Response,
+) -> RetryProcessingJobResponse:
+    container = services(request)
+    try:
+        result = container.retry_processing_job.run(job_id)
+    except ProcessingJobNotFound:
+        raise HTTPException(404, "Processing job not found") from None
+    except ProcessingRetryConflict:
+        raise HTTPException(409, "Processing job cannot be retried now") from None
+    if result["action"] not in ("OCR_REQUEUED", "FINALIZATION_REQUEUED"):
+        response.status_code = 200
+    return RetryProcessingJobResponse.model_validate(result)
 
 @router.post("/admin/sync/master")
 def sync(body: SyncInput, request: Request):

@@ -19,6 +19,7 @@ def processing_state(repo, job: dict) -> str:
     )
     post = next((s for s in stages if s["stage"] == "POSTPROCESS"), None)
     projection = next((s for s in stages if s["stage"] == "MONGO_PROJECTION"), None)
+    retry = next((s for s in stages if s["stage"] == "FINALIZATION_RETRY"), None)
     if projection:
         if (
             projection["status"] == "COMPLETED"
@@ -28,7 +29,13 @@ def processing_state(repo, job: dict) -> str:
         ):
             return "CONTENT_READY"
         if projection["status"] == "FAILED":
+            if retry and retry["status"] == "PENDING":
+                return "FINALIZATION_PENDING"
             return "FINALIZATION_FAILED"
         if projection["status"] == "RUNNING":
             return "FINALIZING"
+    if retry and retry["status"] == "PENDING":
+        return "FINALIZATION_PENDING"
+    if post and post["status"] == "FAILED":
+        return "FINALIZATION_FAILED"
     return "FINALIZATION_PENDING"

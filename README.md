@@ -81,10 +81,28 @@ lệnh thủ công nhận lỗi nghiệp vụ và có thể thử lại sau.
 MongoDB lỗi: giữ nguyên dữ liệu PostgreSQL, worker retry tối đa `FINALIZATION_MAX_ATTEMPTS`
 (mặc định 3), cách nhau `FINALIZATION_RETRY_SECONDS` (mặc định 30 giây).
 Sau khi hết lượt, stage FAILED giữ nguyên để điều tra; sửa kết nối rồi chủ động tăng giới hạn
-attempt và khởi động lại worker để cấp thêm lượt. Request lặp không tự reset giới hạn retry.
+attempt hoặc gọi API Retry bên dưới để cấp một chu kỳ thử lại có giới hạn.
 Không cần OCR lại PDF. Document upsert giữ ID; unit cũ được đánh dấu `is_current=false`
 sau khi toàn bộ upsert thành công, không xóa lịch sử. Chi tiết khóa/recovery ở
 [status lifecycle](docs/status_lifecycle.md).
+
+`POST /api/v1/processing-jobs/{job_id}/retry` dùng `ocr_jobs.id`, không cần body và yêu cầu
+`ADMIN_ENABLED=true`. Khi OCR thất bại, API chỉ đưa các trang FAILED về PENDING; kết quả
+trang thành công được giữ nguyên. Khi OCR đã hoàn tất nhưng Postprocess/MongoDB thất bại,
+API ghi `FINALIZATION_RETRY` vào PostgreSQL để worker hiện có nhận qua reconciliation,
+không OCR lại và không ghi MongoDB trong request. `PROCESSING_MANUAL_RETRY_LIMIT` (mặc định 3)
+đếm chung các yêu cầu OCR/Finalization Retry theo resource version; automatic retry có ngân sách
+riêng. Response có `job_id`, `resource_version_id`, `job_status`, `processing_status`, `action`,
+`status_url`: 202 khi xếp lại việc, 200 khi đã xử lý/đang chờ, 404 khi thiếu job, 409 khi
+trạng thái xung đột hoặc hết lượt, 422 khi ID không hợp lệ. Ví dụ:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/processing-jobs/JOB_ID/retry
+```
+
+Dùng `status_url` để theo dõi; kiểm tra `ocr_jobs`, `ocr_page_tasks`, `etl_stage_runs`
+(`OCR_RETRY`, `FINALIZATION_RETRY`, `MONGO_PROJECTION`) trong PostgreSQL và collections
+`ocr_pages`, `mongo_content_units` trong MongoDB. Worker phải đang chạy để thực thi yêu cầu.
 `NO_CHANGE` dừng flow ingest; nếu trước đó process bị ngắt thì resume bằng version ID hiện có.
 Không có lệnh force re-OCR cùng version trong đợt này; `create-ocr-job` lặp lại trả cùng job.
 

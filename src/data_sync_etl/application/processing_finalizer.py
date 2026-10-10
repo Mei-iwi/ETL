@@ -44,6 +44,25 @@ class ProcessingFinalizer:
                 },
                 order=("-created_at", "-id"),
             )
+
+            retry_requests = repo.find(
+                "etl_stage_runs",
+                {
+                    "resource_version_id": version_id,
+                    "stage": "FINALIZATION_RETRY",
+                    "status": "PENDING",
+                },
+                order=("-created_at", "-id"),
+                limit=1,
+            )
+            retry_request = retry_requests[0] if retry_requests else None
+            # The request records the number of projection attempts preceding
+            # this manual cycle, so timestamp ties cannot change its boundary.
+            baseline = int(retry_request["input_fingerprint"], 16) if retry_request else 0
+            if baseline > len(attempts):
+                raise RuntimeError("Invalid finalization retry boundary")
+            cycle_attempts = attempts[: len(attempts) - baseline]
+
             # The database lock is the liveness authority. Once acquired, any
             # RUNNING audit row has lost its owner; no timeout can evict a live owner.
             abandoned = [s for s in attempts if s["status"] == "RUNNING"]
@@ -58,18 +77,28 @@ class ProcessingFinalizer:
                     },
                 )
             failures = 0
-            for attempt in attempts:
+            for attempt in cycle_attempts:
                 if attempt["status"] == "COMPLETED":
                     break
                 failures += 1
             if failures >= self.max_attempts:
+                if retry_request is not None:
+                    repo.update(
+                        "etl_stage_runs",
+                        retry_request["id"],
+                        {
+                            "status": "FAILED",
+                            "finished_at": now(),
+                            "error_message": "Manual finalization retry exhausted",
+                        },
+                    )
                 return {"status": "RETRY_EXHAUSTED"}
             if (
-                attempts
+                cycle_attempts
                 and not abandoned
-                and attempts[0]["status"] == "FAILED"
-                and attempts[0]["finished_at"]
-                and now() < attempts[0]["finished_at"] + timedelta(seconds=self.retry_seconds)
+                and cycle_attempts[0]["status"] == "FAILED"
+                and cycle_attempts[0]["finished_at"]
+                and now() < cycle_attempts[0]["finished_at"] + timedelta(seconds=self.retry_seconds)
             ):
                 return {"status": "RETRY_WAIT"}
             stage = repo.insert(
@@ -121,6 +150,12 @@ class ProcessingFinalizer:
                         "input_fingerprint": projection_fingerprint(job_id, post),
                     },
                 )
+                if retry_request is not None:
+                    repo.update(
+                        "etl_stage_runs",
+                        retry_request["id"],
+                        {"status": "COMPLETED", "finished_at": now()},
+                    )
         except Exception:
             with self.uow() as repo:
                 repo.update(
@@ -132,6 +167,16 @@ class ProcessingFinalizer:
                         "error_message": "Finalization failed; retry from persisted PostgreSQL data",
                     },
                 )
+                if retry_request is not None and failures + 1 >= self.max_attempts:
+                    repo.update(
+                        "etl_stage_runs",
+                        retry_request["id"],
+                        {
+                            "status": "FAILED",
+                            "finished_at": now(),
+                            "error_message": "Manual finalization retry exhausted",
+                        },
+                    )
             event(stage="finalization", job_id=job_id, action="FAILED", run_id=stage["id"])
             raise
         event(stage="finalization", job_id=job_id, action="COMPLETED", run_id=stage["id"])

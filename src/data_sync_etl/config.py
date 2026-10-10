@@ -48,3 +48,4 @@ class Settings(BaseSettings):
     mongo_database: str = 'etl_content'
     finalization_max_attempts: int = Field(default=3, ge=1, le=20)
     finalization_retry_seconds: int = Field(default=30, ge=1, le=3600)
+    processing_manual_retry_limit: int = Field(default=3, ge=1, le=20)
