@@ -1,4 +1,4 @@
-from data_sync_etl.domain.core import DomainError, new_id, now
+from data_sync_etl.domain.core import DomainError, ResourceCreateError, new_id, now
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.domain.resource import CreateResourceCommand, CreateResourceResult
 from data_sync_etl.logging import event, flow
@@ -13,23 +13,39 @@ class CreateResourceUseCase:
         self.format_registry = format_registry
 
     def execute(self, command: CreateResourceCommand) -> CreateResourceResult:
-        command.validate()
-        validator = self.format_registry.find_validator(command.filename)
-        command.file_stream.seek(0)
-        header = command.file_stream.read(16)
-        command.file_stream.seek(0)
-        validator.validate(
-            validator.extension,
-            command.declared_mime,
-            header,
-            command.file_size,
-        )
+        try:
+            command.validate()
+        except DomainError as exc:
+            raise ResourceCreateError(
+                "metadata", "INVALID_METADATA", str(exc)
+            ) from None
 
-        stored = self.storage.save_stream(
-            command.file_stream,
-            max_size_bytes=validator.max_size_bytes,
-            suffix=validator.extension,
-        )
+        try:
+            validator = self.format_registry.find_validator(command.filename)
+            command.file_stream.seek(0)
+            header = command.file_stream.read(16)
+            command.file_stream.seek(0)
+            validator.validate(
+                validator.extension,
+                command.declared_mime,
+                header,
+                command.file_size,
+            )
+        except DomainError as exc:
+            raise ResourceCreateError(
+                "file_validation", "INVALID_FILE", str(exc)
+            ) from None
+
+        try:
+            stored = self.storage.save_stream(
+                command.file_stream,
+                max_size_bytes=validator.max_size_bytes,
+                suffix=validator.extension,
+            )
+        except DomainError as exc:
+            raise ResourceCreateError(
+                "storage", "STORAGE_REJECTED", str(exc)
+            ) from None
         resource_id = new_id()
         version_id = new_id()
         stamp = now()
@@ -104,20 +120,34 @@ class CreateResourceUseCase:
                                 "grade_level_id": command.grade_level_id,
                             },
                         )
-        except DomainError:
+        except ResourceCreateError:
             if stored.created:
                 try:
                     self.storage.delete(stored.bucket, stored.object_key)
                 except Exception:
                     pass
             raise
+        except DomainError as exc:
+            if stored.created:
+                try:
+                    self.storage.delete(stored.bucket, stored.object_key)
+                except Exception:
+                    pass
+            raise ResourceCreateError(
+                "metadata", "INVALID_METADATA", str(exc)
+            ) from None
         except Exception:
             if stored.created:
                 try:
                     self.storage.delete(stored.bucket, stored.object_key)
                 except Exception:
                     pass
-            raise DomainError("Unable to create resource") from None
+            raise ResourceCreateError(
+                "persistence",
+                "PERSISTENCE_ERROR",
+                "Database rejected the resource; verify metadata IDs and database migrations",
+                status_code=503,
+            ) from None
 
         event(
             resource_id=resource_id,

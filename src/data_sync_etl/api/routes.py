@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from data_sync_etl.api.processing_schemas import ProcessVersionResponse, RetryProcessingJobResponse
 from data_sync_etl.api.resource_schemas import ResouceListResponse
 from data_sync_etl.api.resource_create_schemas import CreateResourceResponse
-from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.core import DomainError, ResourceCreateError
 from data_sync_etl.domain.resource import CreateResourceCommand
 from data_sync_etl.domain.core import (
     ProcessingJobNotFound,
@@ -169,8 +169,24 @@ def create_resource(
                 uploaded_by=uploaded_by,
             )
         )
+    except ResourceCreateError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "code": exc.code,
+                "phase": exc.phase,
+                "message": exc.message,
+            },
+        ) from None
     except DomainError:
-        raise HTTPException(400, "Invalid resource metadata or file format") from None
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "RESOURCE_CREATE_FAILED",
+                "phase": "unknown",
+                "message": "Invalid resource metadata or file format",
+            },
+        ) from None
     return CreateResourceResponse.model_validate(result.__dict__)
 
 @router.post(

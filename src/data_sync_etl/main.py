@@ -53,8 +53,26 @@ def create_app(container=None):
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
-        # Do not reflect request input or credentials in validation responses.
-        return JSONResponse(status_code=422, content={"detail": "Invalid request fields"})
+        # Return locations/types only; never reflect submitted values or credentials.
+        fields = []
+        for error in exc.errors():
+            location = [str(part) for part in error.get("loc", ()) if part != "body"]
+            fields.append(
+                {
+                    "field": ".".join(location) or "request",
+                    "type": error.get("type", "invalid"),
+                }
+            )
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": {
+                    "code": "REQUEST_VALIDATION_ERROR",
+                    "message": "One or more request fields are invalid",
+                    "fields": fields,
+                }
+            },
+        )
 
     @app.exception_handler(Exception)
     async def internal_error(request, exc):
