@@ -165,14 +165,9 @@ class CreateResourceUseCase:
                         },
                     )
                     if command.subject_id:
-                        repo.insert(
-                            "resource_subjects",
-                            {
-                                "resource_id": resource_id,
-                                "subject_id": command.subject_id,
-                                "is_primary": True,
-                            },
-                        )
+                        repo.insert("resource_subjects", {
+                            "resource_id": resource_id, "subject_id": command.subject_id, "is_primary": True,
+                        })
                     if command.grade_level_id:
                         repo.insert(
                             "resource_grade_levels",
@@ -191,29 +186,16 @@ class CreateResourceUseCase:
                 stage="ingest", action="RESOURCE_CREATE_PERSISTENCE_FAILED", resource_id=resource_id
             )
             raise ResourceCreateError(
-                "persistence",
-                "PERSISTENCE_ERROR",
+                "persistence", "PERSISTENCE_ERROR",
                 "Database rejected the resource; verify metadata IDs and database migrations",
                 status_code=503,
             ) from None
 
-        event(
-            resource_id=resource_id,
-            resource_version_id=version_id,
-            stage="ingest",
-            action="RESOURCE_CREATED",
-        )
+        event(resource_id=resource_id, resource_version_id=version_id, stage="ingest", action="RESOURCE_CREATED")
         return CreateResourceResult(
-            id=resource_id,
-            title=command.title.strip(),
-            resource_type_code=command.resource_type_code.strip(),
+            id=resource_id, title=command.title.strip(), resource_type_code=command.resource_type_code.strip(),
             media_category=validator.media_category,
             mime_type=command.declared_mime.lower().split(";", 1)[0].strip(),
-            file_name=command.filename,
-            file_size=command.file_size,
-            source_hash=stored.source_hash,
-            initial_version_id=version_id,
-            version_number=1,
-            lifecycle_status="INGESTED",
-            created_at=stamp,
+            file_name=command.filename, file_size=command.file_size, source_hash=stored.source_hash,
+            initial_version_id=version_id, version_number=1, lifecycle_status="INGESTED", created_at=stamp,
         )

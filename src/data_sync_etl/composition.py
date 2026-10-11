@@ -25,6 +25,7 @@ from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.sync import MasterSync
+from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
 from data_sync_etl.config import Settings
 from data_sync_etl.db.session import make_engine, sessions
 from data_sync_etl.domain.core import DomainError
@@ -62,9 +63,10 @@ class Container:
         self.resource_detail = GetResourceDetail(self.uow)
         self.resource_versions = ListResourceVersions(self.uow)
         self.processing_job_detail = GetProcessingJob(self.uow)
-        self.format_registry = FormatValidatorRegistry()
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
+        self.format_registry = FormatValidatorRegistry()
         self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry)
+        self.update_resource_metadata = UpdateResourceMetadataUseCase(self.uow)
         self.capabilities = CapabilityService(
             chunk_size_words = self.settings.chunk_size_words,
             chunk_overlap_words=self.settings.chunk_overlap_words,

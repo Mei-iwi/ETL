@@ -6,7 +6,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from data_sync_etl.api.processing_schemas import ProcessVersionResponse, RetryProcessingJobResponse
 from data_sync_etl.api.resource_create_schemas import CreateResourceResponse
+from data_sync_etl.api.resource_metadata_schemas import (
+    UpdateResourceMetadataRequest,
+    UpdateResourceMetadataResponse,
+)
 from data_sync_etl.api.resource_schemas import ResouceListResponse, ResourceDetailResponse
+from data_sync_etl.application.update_resource_metadata import (
+    InvalidResourceMetadata,
+    ResourceMetadataNotFound,
+    ResourceMetadataPersistenceError,
+)
 from data_sync_etl.domain.core import (
     DomainError,
     ProcessingJobNotFound,
@@ -16,6 +25,7 @@ from data_sync_etl.domain.core import (
     ResourceVersionNotFound,
 )
 from data_sync_etl.domain.resource import CreateResourceCommand
+from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
 
 #Swagger Tags
 TAG_SYSTEM: str = 'System'
@@ -80,7 +90,6 @@ def system_capabilities(request: Request):
         summary= 'Lấy danh sách học liệu',
         response_model=ResouceListResponse,
 )
-
 def list_resources(
     request: Request,
     page: Annotated[int, Query(ge=1)],
@@ -108,21 +117,20 @@ def list_resources(
     )
     return ResouceListResponse.model_validate(result)
 
+
 @router.get(
     "/api/v1/resources/{id}",
     tags=[TAG_MASTER],
     summary="Xem chi tiết học liệu",
     response_model=ResourceDetailResponse,
 )
-def get_resource(
-    id: ResourceId,
-    request: Request,
-) -> ResourceDetailResponse:
+def get_resource(id: ResourceId, request: Request) -> ResourceDetailResponse:
     try:
         data = request.app.state.container.resource_detail.run(id)
         return ResourceDetailResponse.model_validate(data)
     except ResourceNotFound:
         raise HTTPException(status_code=404, detail="Resource not found") from None
+
 
 @router.get(
     "/api/v1/resources/{id}/versions",
@@ -135,24 +143,68 @@ def list_resource_versions(id: ResourceId, request: Request) -> list[dict]:
     except ResourceNotFound:
         raise HTTPException(status_code=404, detail="Resource not found") from None
 
+
 @router.get(
     "/api/v1/processing-jobs/{job_id}",
     tags=[TAG_PROCESSING],
     summary="Xem tiến trình xử lý dữ liệu",
 )
 def get_processing_job(
-    job_id: Annotated[str, Path(min_length=1, max_length=30)],
-    request: Request,
+    job_id: Annotated[str, Path(min_length=1, max_length=30)], request: Request
 ) -> dict:
     try:
         return request.app.state.container.processing_job_detail.run(job_id)
     except ProcessingJobNotFound:
         raise HTTPException(status_code=404, detail="Processing job not found") from None
 
+
+@router.patch(
+    "/api/v1/resources/{id}/metadata",
+    tags=[TAG_MASTER],
+    summary="Cập nhật Metadata học liệu",
+    response_model=UpdateResourceMetadataResponse,
+)
+def update_resource_metadata(
+    id: ResourceId,
+    body: UpdateResourceMetadataRequest,
+    request: Request,
+) -> UpdateResourceMetadataResponse:
+    fields = body.model_dump(exclude_unset=True)
+    try:
+        result = request.app.state.container.update_resource_metadata.execute(
+            UpdateResourceMetadataCommand(
+                resource_id=id,
+                supplied_fields=frozenset(fields),
+                **fields,
+            )
+        )
+    except ResourceMetadataNotFound:
+        raise HTTPException(404, "Resource not found") from None
+    except InvalidResourceMetadata as exc:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "RESOURCE_METADATA_INVALID",
+                "phase": "metadata",
+                "message": str(exc),
+            },
+        ) from None
+    except ResourceMetadataPersistenceError:
+        raise HTTPException(
+            503,
+            detail={
+                "code": "PERSISTENCE_ERROR",
+                "phase": "metadata",
+                "message": "Database rejected resource metadata",
+            },
+        ) from None
+    return UpdateResourceMetadataResponse.model_validate(result)
+
+
 @router.post(
     "/api/v1/resources",
     tags=[TAG_MASTER],
-    summary="Tạo học liệu mới và phiên bản đầu tiên",
+    summary="Tiếp nhận học liệu và Metadata đã định dạng",
     status_code=201,
     response_model=CreateResourceResponse,
 )
@@ -207,20 +259,7 @@ def create_resource(
     except ResourceCreateError as exc:
         raise HTTPException(
             status_code=exc.status_code,
-            detail={
-                "code": exc.code,
-                "phase": exc.phase,
-                "message": exc.message,
-            },
-        ) from None
-    except DomainError:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "RESOURCE_CREATE_FAILED",
-                "phase": "unknown",
-                "message": "Invalid resource metadata or file format",
-            },
+            detail={"code": exc.code, "phase": exc.phase, "message": exc.message},
         ) from None
     return CreateResourceResponse.model_validate(result.__dict__)
 
@@ -302,7 +341,7 @@ def status(id: ResourceId, request: Request):
     tags=[TAG_PROCESSING],
     summary="Xem nội dung đã trích xuất và chuẩn hóa",
 )
-def content_units(
+def list_public_content_units(
     id: ResourceId,
     request: Request,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -311,10 +350,20 @@ def content_units(
 ) -> dict:
     try:
         return request.app.state.container.orchestrator.content_units(
-            id,
-            offset=offset,
-            limit=limit,
-            search=search,
+            id, offset=offset, limit=limit, search=search
         )
     except DomainError:
         raise HTTPException(status_code=404, detail="Resource version not found") from None
+
+
+@router.get("/admin/resource-versions/{id}/content-units")
+def content_units(
+    id: ResourceId,
+    request: Request,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    search: Annotated[str, Query(max_length=200)] = "",
+):
+    return services(request).orchestrator.content_units(
+        id, offset=offset, limit=limit, search=search
+    )

@@ -7,6 +7,7 @@ from sqlalchemy import delete, exists, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from data_sync_etl.adapters.persistence.resource_metadata import ResourceMetadataRepositoryMixin
 from data_sync_etl.db.models import (
     MODELS,
     ContentUnit,
@@ -38,7 +39,7 @@ def utc(value):
     return value
 
 
-class SQLAlchemyRepository:
+class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
     def __init__(self, session):
         self.session = session
 
