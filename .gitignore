@@ -8,6 +8,9 @@ __pycache__/
 !.env.example
 *.py[cod]
 storage/
+!src/data_sync_etl/adapters/storage/
+!src/data_sync_etl/adapters/storage/**
+/src/data_sync_etl/adapters/storage/__pycache__/
 *.db
 .coverage
 build/

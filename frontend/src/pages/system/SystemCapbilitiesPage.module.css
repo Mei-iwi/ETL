@@ -1,0 +1,67 @@
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit,
+            minmax(240px, 1fr));
+    gap: 20px;
+}
+
+.card {
+    padding: 20px;
+    background-color: #ffffff;
+    border: 1px solid #e5eaf1;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgb(15 23 42 / 6%);
+}
+
+.card h2 {
+    margin: 0 0 16px;
+    color: #172554;
+    font-size: 18px;
+}
+
+.card p {
+    margin: 8px 0;
+    color: #475569;
+    font-size: 14px;
+}
+
+.card ul {
+    margin: 0;
+    padding-left: 20px;
+    color: #475569;
+}
+
+.error {
+    padding: 12px 16px;
+    color: #b91c1c;
+    border-radius: 8px;
+}
+
+.reloadButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+
+    min-height: 38px;
+    padding: 8px 14px;
+
+    color: #ffffff;
+    background-color: #2563eb;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 1%;
+}
+
+.reloadButton:hover:not(:disabled) {
+    background-color: #1d4ed8;
+}
+
+.reloadButton:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+}

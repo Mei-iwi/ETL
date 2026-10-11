@@ -22,3 +22,28 @@ class ResourcePagination(BaseModel):
 class ResouceListResponse(BaseModel):
     items: list[ResourceListItem]
     pagination: ResourcePagination
+
+class SubjectBrief(BaseModel):
+    id: str
+    name: str
+    is_primary: bool
+
+class GradeLevelBrief(BaseModel):
+    id: str
+    grade_code: str
+    grade_name_vi: str
+
+class ResourceDetailResponse(BaseModel):
+    id: str
+    title: str
+    provider_id: str
+    provider_name: str
+    provider_type: str
+    resource_type_code: str
+    resource_type_name_vi: str
+    publication_status: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    subjects: list[SubjectBrief]
+    grade_levels: list[GradeLevelBrief]

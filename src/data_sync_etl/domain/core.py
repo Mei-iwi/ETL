@@ -74,3 +74,6 @@ class ProcessingJobNotFound(DomainError):
 
 class ProcessingRetryConflict(DomainError):
     pass
+
+class ResourceNotFound(DomainError): 
+    pass
