@@ -103,6 +103,7 @@ def list_resources(
         )
     )
     return ResouceListResponse.model_validate(result)
+
 @router.get(
     "/api/v1/resources/{id}",
     tags=[TAG_MASTER],
@@ -116,6 +117,17 @@ def get_resource(
     try:
         data = request.app.state.container.resource_detail.run(id)
         return ResourceDetailResponse.model_validate(data)
+    except ResourceNotFound:
+        raise HTTPException(status_code=404, detail="Resource not found") from None
+
+@router.get(
+    "/api/v1/resources/{id}/versions",
+    tags=[TAG_MASTER],
+    summary="Xem lịch sử phiên bản học liệu",
+)
+def list_resource_versions(id: ResourceId, request: Request) -> list[dict]:
+    try:
+        return request.app.state.container.resource_versions.run(id)
     except ResourceNotFound:
         raise HTTPException(status_code=404, detail="Resource not found") from None
 
