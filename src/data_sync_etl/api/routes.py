@@ -9,9 +9,11 @@ from data_sync_etl.api.resource_metadata_schemas import (
     UpdateResourceMetadataRequest,
     UpdateResourceMetadataResponse,
 )
+from data_sync_etl.api.resource_version_schemas import CreateResourceVersionResponse
 from data_sync_etl.api.resource_schemas import ResouceListResponse
 from data_sync_etl.domain.resource import CreateResourceCommand
 from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
+from data_sync_etl.domain.resource_version import CreateResourceVersionCommand
 from data_sync_etl.domain.core import (
     ProcessingJobNotFound,
     ProcessingRetryConflict,
@@ -22,6 +24,11 @@ from data_sync_etl.application.update_resource_metadata import (
     InvalidResourceMetadata,
     ResourceMetadataNotFound,
     ResourceMetadataPersistenceError,
+)
+from data_sync_etl.application.create_resource_version import (
+    InvalidResourceVersion,
+    ResourceVersionNotFound as NewResourceVersionNotFound,
+    ResourceVersionPersistenceError,
 )
 
 #Swagger Tags
@@ -210,6 +217,62 @@ def create_resource(
             detail={"code": exc.code, "phase": exc.phase, "message": exc.message},
         ) from None
     return CreateResourceResponse.model_validate(result.__dict__)
+
+
+@router.post(
+    "/api/v1/resource/{id}/versions",
+    tags=[TAG_MASTER],
+    summary="Tạo phiên bản file học liệu mới",
+    status_code=201,
+    response_model=CreateResourceVersionResponse,
+)
+def create_resource_version(
+    id: ResourceId,
+    request: Request,
+    response: Response,
+    file: UploadFile = File(...),
+    uploaded_by: str | None = Form(None, max_length=30),
+) -> CreateResourceVersionResponse:
+    if not file.filename:
+        raise HTTPException(400, "A filename is required")
+    try:
+        stream = file.file
+        stream.seek(0, 2)
+        file_size = stream.tell()
+        stream.seek(0)
+        result = request.app.state.container.resource_version_create.execute(
+            CreateResourceVersionCommand(
+                resource_id=id,
+                filename=file.filename,
+                file_stream=stream,
+                file_size=file_size,
+                declared_mime=file.content_type or "",
+                uploaded_by=uploaded_by,
+            )
+        )
+    except NewResourceVersionNotFound:
+        raise HTTPException(404, "Resource not found") from None
+    except InvalidResourceVersion as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "code": "RESOURCE_VERSION_INVALID",
+                "phase": "file_validation",
+                "message": str(exc),
+            },
+        ) from None
+    except ResourceVersionPersistenceError:
+        raise HTTPException(
+            503,
+            detail={
+                "code": "PERSISTENCE_ERROR",
+                "phase": "version_creation",
+                "message": "Database rejected the resource version",
+            },
+        ) from None
+    if result.action == "NO_CHANGE":
+        response.status_code = 200
+    return CreateResourceVersionResponse.model_validate(result.__dict__)
 
 @router.post(
         '/api/v1/resource-versions/{id}/process',

@@ -12,6 +12,7 @@ from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
+from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
 from data_sync_etl.application.ingestion import ResourceIngestion
 from data_sync_etl.application.list_resources import ListResources
 from data_sync_etl.application.mongo_projection import MongoContentProjector
@@ -60,6 +61,9 @@ class Container:
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
         self.format_registry = FormatValidatorRegistry()
         self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry)
+        self.resource_version_create = CreateResourceVersionUseCase(
+            self.uow, self.storage, self.format_registry
+        )
         self.update_resource_metadata = UpdateResourceMetadataUseCase(self.uow)
         self.capabilities = CapabilityService(
             chunk_size_words = self.settings.chunk_size_words,
