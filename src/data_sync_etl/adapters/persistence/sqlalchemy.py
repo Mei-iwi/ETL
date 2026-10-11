@@ -124,6 +124,45 @@ class SQLAlchemyRepository:
         return self.session.scalar(
             select(func.count()).select_from(MODELS[table]).filter_by(**filters)
         )
+    #ham truy van chi tiet resource
+    def get_resource_detail(self, resource_id: str) -> dict | None: 
+        resource = self.session.scalar(
+            select(MasterLearningResource).where(
+                MasterLearningResource.id == resource_id,
+                MasterLearningResource.deleted_at.is_(None),
+            )
+        )
+        if not resource:
+            return None
+
+        # Lay danh sach mon hoc lien ket
+        subject_rows = self.session.execute(
+            select(Subject.id, Subject.subject_name, ResourceSubject.is_primary)
+            .join(ResourceSubject, ResourceSubject.subject_id == Subject.id)
+            .where(
+                ResourceSubject.resource_id == resource_id,
+                Subject.deleted_at.is_(None),
+            )
+        ).all()
+        # Lay danh sach khoi lop lien ket
+        grade_rows = self.session.execute(
+            select(MasterGradeLevel.id, MasterGradeLevel.grade_code, MasterGradeLevel.grade_name_vi)
+            .join(ResourceGradeLevel, ResourceGradeLevel.grade_level_id == MasterGradeLevel.id)
+            .where(
+                ResourceGradeLevel.resource_id == resource_id,
+                MasterGradeLevel.grade_deleted_at.is_(None),
+            )
+        ).all()
+        data = self._dict(resource)
+        data["subjects"] = [
+            {"id": s.id, "name": s.subject_name, "is_primary": s.is_primary}
+            for s in subject_rows
+        ]
+        data["grade_levels"] = [
+            {"id": g.id, "grade_code": g.grade_code, "grade_name_vi": g.grade_name_vi}
+            for g in grade_rows
+        ]
+        return data
 
     def ensure_checkpoint(self, stream):
         insert = pg_insert if self.session.bind.dialect.name == "postgresql" else sqlite_insert

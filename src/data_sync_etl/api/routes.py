@@ -1,3 +1,5 @@
+from data_sync_etl.domain.core import ResourceNotFound
+from data_sync_etl.api.resource_schemas import ResourceDetailResponse
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
@@ -74,6 +76,7 @@ def system_capabilities(request: Request):
         summary= 'Lấy danh sách học liệu',
         response_model=ResouceListResponse,
 )
+
 def list_resources(
     request: Request,
     page: Annotated[int, Query(ge=1)],
@@ -100,6 +103,21 @@ def list_resources(
         )
     )
     return ResouceListResponse.model_validate(result)
+@router.get(
+    "/api/v1/resources/{id}",
+    tags=[TAG_MASTER],
+    summary="Xem chi tiết học liệu",
+    response_model=ResourceDetailResponse,
+)
+def get_resource(
+    id: ResourceId,
+    request: Request,
+) -> ResourceDetailResponse:
+    try:
+        data = request.app.state.container.resource_detail.run(id)
+        return ResourceDetailResponse.model_validate(data)
+    except ResourceNotFound:
+        raise HTTPException(status_code=404, detail="Resource not found") from None
 
 @router.post(
         '/api/v1/resource-versions/{id}/process',
