@@ -287,15 +287,24 @@ def status(id: ResourceId, request: Request):
     return services(request).orchestrator.status(id)
 
 
-@router.get("/admin/resource-versions/{id}/content-units")
+@router.get(
+    "/api/v1/resource-versions/{id}/content-units",
+    tags=[TAG_PROCESSING],
+    summary="Xem nội dung đã trích xuất và chuẩn hóa",
+)
 def content_units(
     id: ResourceId,
     request: Request,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     search: Annotated[str, Query(max_length=200)] = "",
-):
-    return services(request).orchestrator.content_units(
-        id, offset=offset, limit=limit, search=search
-    )
-
+) -> dict:
+    try:
+        return request.app.state.container.orchestrator.content_units(
+            id,
+            offset=offset,
+            limit=limit,
+            search=search,
+        )
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Resource version not found") from None
