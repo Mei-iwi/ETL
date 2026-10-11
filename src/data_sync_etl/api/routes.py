@@ -1,14 +1,27 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
+from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from data_sync_etl.api.processing_schemas import ProcessVersionResponse, RetryProcessingJobResponse
+from data_sync_etl.api.resource_create_schemas import CreateResourceResponse
+from data_sync_etl.api.resource_metadata_schemas import (
+    UpdateResourceMetadataRequest,
+    UpdateResourceMetadataResponse,
+)
 from data_sync_etl.api.resource_schemas import ResouceListResponse
+from data_sync_etl.domain.resource import CreateResourceCommand
+from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
 from data_sync_etl.domain.core import (
     ProcessingJobNotFound,
     ProcessingRetryConflict,
+    ResourceCreateError,
     ResourceVersionNotFound,
+)
+from data_sync_etl.application.update_resource_metadata import (
+    InvalidResourceMetadata,
+    ResourceMetadataNotFound,
+    ResourceMetadataPersistenceError,
 )
 
 #Swagger Tags
@@ -100,6 +113,103 @@ def list_resources(
         )
     )
     return ResouceListResponse.model_validate(result)
+
+
+@router.patch(
+    "/api/v1/resources/{id}/metadata",
+    tags=[TAG_MASTER],
+    summary="Cập nhật Metadata học liệu",
+    response_model=UpdateResourceMetadataResponse,
+)
+def update_resource_metadata(
+    id: ResourceId,
+    body: UpdateResourceMetadataRequest,
+    request: Request,
+) -> UpdateResourceMetadataResponse:
+    fields = body.model_dump(exclude_unset=True)
+    try:
+        result = request.app.state.container.update_resource_metadata.execute(
+            UpdateResourceMetadataCommand(
+                resource_id=id,
+                supplied_fields=frozenset(fields),
+                **fields,
+            )
+        )
+    except ResourceMetadataNotFound:
+        raise HTTPException(404, "Resource not found") from None
+    except InvalidResourceMetadata as exc:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "RESOURCE_METADATA_INVALID",
+                "phase": "metadata",
+                "message": str(exc),
+            },
+        ) from None
+    except ResourceMetadataPersistenceError:
+        raise HTTPException(
+            503,
+            detail={
+                "code": "PERSISTENCE_ERROR",
+                "phase": "metadata",
+                "message": "Database rejected resource metadata",
+            },
+        ) from None
+    return UpdateResourceMetadataResponse.model_validate(result)
+
+
+@router.post(
+    "/api/v1/resources",
+    tags=[TAG_MASTER],
+    summary="Tiếp nhận học liệu và Metadata đã định dạng",
+    status_code=201,
+    response_model=CreateResourceResponse,
+)
+def create_resource(
+    request: Request,
+    file: UploadFile = File(...),
+    title: str = Form(..., min_length=1, max_length=500),
+    resource_type_code: str = Form(..., min_length=1, max_length=50),
+    provider_id: str = Form(..., min_length=1, max_length=30),
+    provider_name: str = Form(..., min_length=1, max_length=255),
+    provider_type: str = Form("INTERNAL", max_length=30),
+    resource_type_name_vi: str | None = Form(None, max_length=150),
+    subject_id: str | None = Form(None, max_length=30),
+    grade_level_id: str | None = Form(None, max_length=30),
+    publication_status: str = Form("PUBLISHED", max_length=30),
+    uploaded_by: str | None = Form(None, max_length=30),
+) -> CreateResourceResponse:
+    if not file.filename:
+        raise HTTPException(400, "A filename is required")
+    try:
+        stream = file.file
+        stream.seek(0, 2)
+        file_size = stream.tell()
+        stream.seek(0)
+        result = request.app.state.container.resource_create.execute(
+            CreateResourceCommand(
+                title=title,
+                resource_type_code=resource_type_code,
+                provider_id=provider_id,
+                provider_name=provider_name,
+                filename=file.filename,
+                file_stream=stream,
+                file_size=file_size,
+                declared_mime=file.content_type or "",
+                provider_type=provider_type,
+                resource_type_name_vi=resource_type_name_vi,
+                subject_id=subject_id,
+                grade_level_id=grade_level_id,
+                publication_status=publication_status,
+                uploaded_by=uploaded_by,
+            )
+        )
+    except ResourceCreateError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "phase": exc.phase, "message": exc.message},
+        ) from None
+    return CreateResourceResponse.model_validate(result.__dict__)
 
 @router.post(
         '/api/v1/resource-versions/{id}/process',
