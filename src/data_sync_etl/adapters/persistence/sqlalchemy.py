@@ -7,6 +7,7 @@ from sqlalchemy import delete, exists, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from data_sync_etl.adapters.persistence.resource_metadata import ResourceMetadataRepositoryMixin
 from data_sync_etl.db.models import (
     MODELS,
     ContentUnit,
@@ -20,7 +21,6 @@ from data_sync_etl.db.models import (
     SyncCheckpoint,
 )
 from data_sync_etl.domain.core import now
-from data_sync_etl.adapters.persistence.resource_metadata import ResourceMetadataRepositoryMixin
 
 STREAMS = {
     "resources": "master_learning_resources",

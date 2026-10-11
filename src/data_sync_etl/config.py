@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     )
     ocr_engine: Literal["native", "fake", "tesseract"] = "native"
     admin_enabled: bool = False
+    upload_request_max_bytes: int = Field(default=501 * 1024 * 1024, ge=1024)
 
     mongo_uri: str = Field(
         default='mongodb://127.0.0.1:27017',

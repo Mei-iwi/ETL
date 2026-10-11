@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import BinaryIO, Callable, Protocol
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,14 @@ class StoragePort(Protocol):
     def exists(self, bucket: str, object_key: str) -> bool: ...
     def get_local_path(self, bucket: str, object_key: str) -> Path: ...
     def snapshot(self, bucket: str, object_key: str) -> StoredFile: ...
-    def save_stream(self, stream: BinaryIO, *, max_size_bytes: int | None = None, suffix: str = ".bin") -> StoredFile: ...
+    def save_stream(
+        self,
+        stream: BinaryIO,
+        *,
+        max_size_bytes: int | None = None,
+        suffix: str = ".bin",
+        validate_path: Callable[[Path], None] | None = None,
+    ) -> StoredFile: ...
     def delete(self, bucket: str, object_key: str) -> None: ...
     def image_path(self, task_id: str, claim_token: str) -> Path: ...
 

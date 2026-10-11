@@ -59,6 +59,25 @@ hãy đọc job/task status để phân biệt OCR thành công, retry hoặc te
 
 ### Resource Version Processing
 
+`POST /api/v1/resources` nhận `multipart/form-data` và trả 201 sau khi file được lưu và
+PostgreSQL commit Resource + Version + quan hệ Subject/Grade. Endpoint upload chỉ dùng
+cho local development: cần `ADMIN_ENABLED=true` và client phải là loopback; không có
+xác thực production. Trường `uploaded_by` vẫn xuất hiện để giữ hợp đồng nhưng giá trị
+do client gửi bị từ chối, vì hệ thống chưa có nguồn danh tính đáng tin cậy. Không đặt
+API này sau reverse proxy public rồi coi admin flag là cơ chế xác thực.
+
+Upload hỗ trợ PDF/PNG/JPEG/MP3/MP4 với giới hạn theo từng định dạng. PDF được PyMuPDF
+mở và kiểm tra từng trang; các định dạng còn lại hiện chỉ kiểm tra extension, MIME,
+signature và kích thước, chưa bảo đảm giải mã/khả năng xử lý nội dung. Giới hạn toàn
+bộ request là `UPLOAD_REQUEST_MAX_BYTES` (mặc định 501 MiB), trả 413 khi vượt; deployment
+public sau này vẫn cần giới hạn body tại reverse proxy. File lưu theo SHA-256 trong
+`storage/resources/`, publish atomically và không ghi đè file cùng key. Nếu DB rollback,
+object có thể trở thành orphan nhưng không được xóa ngay vì request khác có thể đang
+dùng chung. Chỉ dọn orphan offline sau khi dừng mọi upload, đối chiếu toàn bộ
+`resource_versions.storage_bucket/storage_object_key` và sao lưu; hiện chưa có lệnh
+GC tự động. `PUBLISHED` vẫn là mặc định theo chính sách hiện tại, dù Version mới chỉ
+ở `INGESTED`; upload không tự chạy OCR.
+
 `POST /api/v1/resource-versions/{id}/process` yêu cầu `ADMIN_ENABLED=true` trên local development.
 ID là `resource_versions.id`. Request chỉ xác minh phiên bản, kiểm tra PDF/đếm trang khi tạo
 job, và tạo/tái sử dụng OCR job; không recognize, postprocess hoặc ghi MongoDB trong HTTP.

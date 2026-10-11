@@ -33,6 +33,8 @@ class CreateResourceCommand:
                 raise DomainError(f"{field_name} is required")
             if len(value.strip()) > limit:
                 raise DomainError(f"{field_name} exceeds maximum length")
+        if self.resource_type_name_vi is not None and not self.resource_type_name_vi.strip():
+            raise DomainError("resource_type_name_vi must not be blank")
         for field_name, value, limit in (
             ("resource_type_name_vi", self.resource_type_name_vi, 150),
             ("uploaded_by", self.uploaded_by, 30),

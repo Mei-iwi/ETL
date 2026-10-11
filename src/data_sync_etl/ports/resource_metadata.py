@@ -1,4 +1,6 @@
 from typing import Any, Protocol
+
+
 class ResourceMetadataRepository(Protocol):
     def get_resource_for_update(self, resource_id: str) -> dict[str, Any] | None: ...
     def update_resource_metadata(self, resource_id: str, values: dict[str, Any]) -> dict[str, Any]: ...

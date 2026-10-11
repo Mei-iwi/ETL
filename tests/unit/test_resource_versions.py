@@ -1,6 +1,6 @@
+from conftest import ingest, make_pdf
 from fastapi.testclient import TestClient
 
-from conftest import ingest, make_pdf
 from data_sync_etl.main import create_app
 
 
