@@ -134,6 +134,20 @@ def list_resource_versions(id: ResourceId, request: Request) -> list[dict]:
     except ResourceNotFound:
         raise HTTPException(status_code=404, detail="Resource not found") from None
 
+@router.get(
+    "/api/v1/processing-jobs/{job_id}",
+    tags=[TAG_PROCESSING],
+    summary="Xem tiến trình xử lý dữ liệu",
+)
+def get_processing_job(
+    job_id: Annotated[str, Path(min_length=1, max_length=30)],
+    request: Request,
+) -> dict:
+    try:
+        return request.app.state.container.processing_job_detail.run(job_id)
+    except ProcessingJobNotFound:
+        raise HTTPException(status_code=404, detail="Processing job not found") from None
+
 @router.post(
     "/api/v1/resources",
     tags=[TAG_MASTER],
