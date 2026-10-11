@@ -14,6 +14,7 @@ import { LibraryListPage } from './pages/library/LibraryListPage'
 import { LibraryCreatePage } from './pages/library/LibraryCreatePage'
 import { LibraryProcessingPage } from './pages/library/LibraryProcessingPage'
 import { LibraryIndexingPage } from './pages/library/LibraryIndexingPage'
+import { LibraryResourceDetailPage } from './pages/library/LibraryResourceDetailPage'
 import { LibraryVersionHistoryPage } from './pages/library/LibraryVersionHistoryPage'
 
 import { MaterialSearchPage } from './pages/search/MaterialSearchPage'
@@ -48,6 +49,7 @@ export default function App() {
             <Route path='add' element={<LibraryCreatePage />} />
             <Route path='processing' element={<LibraryProcessingPage />} />
             <Route path='indexing' element={<LibraryIndexingPage />} />
+            <Route path=":resourceId" element={<LibraryResourceDetailPage />}/>
             <Route path=':resourceId/versions' element={<LibraryVersionHistoryPage />}/>
           </Route>
           <Route path='search'>

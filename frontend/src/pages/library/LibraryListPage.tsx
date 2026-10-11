@@ -131,6 +131,14 @@ export function LibraryListPage() {
                                     <td>
                                         <Link
                                             className={styles.link}
+                                            to={`/library/${encodeURIComponent(resource.id)}`}
+                                        >
+                                            Chi tiết
+                                        </Link>
+                                    </td>
+                                    <td>
+                                        <Link
+                                            className={styles.link}
                                             to={`/library/${encodeURIComponent(resource.id)}/versions`}
                                         >
                                             Lịch sử phiên bản
