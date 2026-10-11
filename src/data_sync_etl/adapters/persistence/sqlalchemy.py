@@ -20,6 +20,7 @@ from data_sync_etl.db.models import (
     SyncCheckpoint,
 )
 from data_sync_etl.domain.core import now
+from data_sync_etl.adapters.persistence.resource_metadata import ResourceMetadataRepositoryMixin
 
 STREAMS = {
     "resources": "master_learning_resources",
@@ -38,7 +39,7 @@ def utc(value):
     return value
 
 
-class SQLAlchemyRepository:
+class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
     def __init__(self, session):
         self.session = session
 

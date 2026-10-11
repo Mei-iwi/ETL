@@ -12,7 +12,6 @@ from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
-from data_sync_etl.application.get_resource_detail import GetResourceDetail
 from data_sync_etl.application.ingestion import ResourceIngestion
 from data_sync_etl.application.list_resources import ListResources
 from data_sync_etl.application.mongo_projection import MongoContentProjector
@@ -23,15 +22,12 @@ from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.sync import MasterSync
+from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
 from data_sync_etl.config import Settings
 from data_sync_etl.db.session import make_engine, sessions
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.workers.ocr import OCRWorker
-from data_sync_etl.application.get_resource_detail import GetResourceDetail
-from data_sync_etl.application.list_resource_versions import ListResourceVersions
-from data_sync_etl.application.get_processing_job import GetProcessingJob
-
 
 
 def create_source(settings):
@@ -61,12 +57,10 @@ class Container:
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
         self.resource_listing = ListResources(self.uow)
-        self.resource_detail = GetResourceDetail(self.uow)
-        self.resource_versions = ListResourceVersions(self.uow)
-        self.processing_job_detail = GetProcessingJob(self.uow)
-        self.format_registry = FormatValidatorRegistry()
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
+        self.format_registry = FormatValidatorRegistry()
         self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry)
+        self.update_resource_metadata = UpdateResourceMetadataUseCase(self.uow)
         self.capabilities = CapabilityService(
             chunk_size_words = self.settings.chunk_size_words,
             chunk_overlap_words=self.settings.chunk_overlap_words,
