@@ -12,8 +12,10 @@ from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
+from data_sync_etl.application.get_processing_job import GetProcessingJob
 from data_sync_etl.application.get_resource_detail import GetResourceDetail
 from data_sync_etl.application.ingestion import ResourceIngestion
+from data_sync_etl.application.list_resource_versions import ListResourceVersions
 from data_sync_etl.application.list_resources import ListResources
 from data_sync_etl.application.mongo_projection import MongoContentProjector
 from data_sync_etl.application.ocr import OCRPipeline
@@ -28,10 +30,6 @@ from data_sync_etl.db.session import make_engine, sessions
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.workers.ocr import OCRWorker
-from data_sync_etl.application.get_resource_detail import GetResourceDetail
-from data_sync_etl.application.list_resource_versions import ListResourceVersions
-from data_sync_etl.application.get_processing_job import GetProcessingJob
-
 
 
 def create_source(settings):

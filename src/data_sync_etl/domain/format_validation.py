@@ -1,6 +1,14 @@
+import mmap
+from pathlib import Path
 from typing import Protocol
 
-from data_sync_etl.domain.core import DomainError
+import pymupdf
+
+from data_sync_etl.domain.core import DomainError, UploadTooLargeError
+
+
+class InvalidFileContent(DomainError):
+    pass
 
 
 class FormatValidator(Protocol):
@@ -10,6 +18,7 @@ class FormatValidator(Protocol):
     media_category: str
 
     def validate(self, extension: str, mime_type: str, header: bytes, file_size: int) -> None: ...
+    def validate_path(self, path: Path) -> None: ...
 
 
 class _BaseFormatValidator:
@@ -26,12 +35,16 @@ class _BaseFormatValidator:
         if file_size < 1:
             raise DomainError("Uploaded file is empty")
         if file_size > self.max_size_bytes:
-            raise DomainError("Uploaded file exceeds the maximum allowed size")
+            raise UploadTooLargeError("Uploaded file exceeds the maximum allowed size")
         if not self._matches_signature(header):
             raise DomainError("File signature does not match the declared file type")
 
     def _matches_signature(self, header: bytes) -> bool:
         raise NotImplementedError
+
+    def validate_path(self, path: Path) -> None:
+        # Signature-only validation for formats without a configured parser.
+        return None
 
 
 class PdfFormatValidator(_BaseFormatValidator):
@@ -42,6 +55,22 @@ class PdfFormatValidator(_BaseFormatValidator):
 
     def _matches_signature(self, header: bytes) -> bool:
         return header.startswith(b"%PDF-")
+
+    def validate_path(self, path: Path) -> None:
+        try:
+            with path.open("rb") as source:
+                with mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+                    view = memoryview(mapped)
+                    try:
+                        with pymupdf.open(stream=view, filetype="pdf") as document:
+                            if document.needs_pass or document.page_count < 1:
+                                raise InvalidFileContent("PDF is encrypted or has no pages")
+                            for page_number in range(document.page_count):
+                                document.load_page(page_number)
+                    finally:
+                        view.release()
+        except (pymupdf.FileDataError, RuntimeError, ValueError, OSError):
+            raise InvalidFileContent("PDF cannot be opened") from None
 
 
 class PngFormatValidator(_BaseFormatValidator):

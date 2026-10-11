@@ -1,20 +1,21 @@
-from data_sync_etl.domain.core import ResourceNotFound
-from data_sync_etl.api.resource_schemas import ResourceDetailResponse
+from ipaddress import ip_address
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from data_sync_etl.api.processing_schemas import ProcessVersionResponse, RetryProcessingJobResponse
-from data_sync_etl.api.resource_schemas import ResouceListResponse
 from data_sync_etl.api.resource_create_schemas import CreateResourceResponse
-from data_sync_etl.domain.core import DomainError, ResourceCreateError
-from data_sync_etl.domain.resource import CreateResourceCommand
+from data_sync_etl.api.resource_schemas import ResouceListResponse, ResourceDetailResponse
 from data_sync_etl.domain.core import (
+    DomainError,
     ProcessingJobNotFound,
     ProcessingRetryConflict,
+    ResourceCreateError,
+    ResourceNotFound,
     ResourceVersionNotFound,
 )
+from data_sync_etl.domain.resource import CreateResourceCommand
 
 #Swagger Tags
 TAG_SYSTEM: str = 'System'
@@ -157,7 +158,7 @@ def get_processing_job(
 )
 def create_resource(
     request: Request,
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File()],
     title: str = Form(..., min_length=1, max_length=500),
     resource_type_code: str = Form(..., min_length=1, max_length=50),
     provider_id: str = Form(..., min_length=1, max_length=30),
@@ -169,6 +170,15 @@ def create_resource(
     publication_status: str = Form("PUBLISHED", max_length=30),
     uploaded_by: str | None = Form(None, max_length=30),
 ) -> CreateResourceResponse:
+    container = services(request)
+    try:
+        local_client = request.client is not None and ip_address(request.client.host).is_loopback
+    except ValueError:
+        local_client = False
+    if not local_client:
+        raise HTTPException(403, "Resource upload is available only on a local admin interface")
+    if uploaded_by is not None and uploaded_by.strip():
+        raise HTTPException(400, "uploaded_by requires an authenticated identity")
     if not file.filename:
         raise HTTPException(400, "A filename is required")
     try:
@@ -176,7 +186,7 @@ def create_resource(
         stream.seek(0, 2)
         file_size = stream.tell()
         stream.seek(0)
-        result = request.app.state.container.resource_create.execute(
+        result = container.resource_create.execute(
             CreateResourceCommand(
                 title=title,
                 resource_type_code=resource_type_code,

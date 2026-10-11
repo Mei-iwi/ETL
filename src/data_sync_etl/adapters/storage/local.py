@@ -3,9 +3,9 @@ import os
 import re
 import tempfile
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 
-from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.core import DomainError, UploadTooLargeError
 from data_sync_etl.ports.processing import StoredFile
 
 BLOCK_SIZE = 1024 * 1024
@@ -60,13 +60,11 @@ class LocalFilesystemStorageAdapter:
         return self._resolve(bucket, object_key).is_file()
 
     def snapshot(self, bucket: str, object_key: str) -> StoredFile:
-        with self.open_stream(bucket, object_key) as stream:
-            digest = stream_hash(stream)
-        return StoredFile(
-            bucket=bucket,
-            object_key=object_key,
-            source_hash=digest,
-        )
+        source = self._resolve(bucket, object_key)
+        if not source.is_file():
+            raise DomainError("Stored file not found")
+        with source.open("rb") as stream:
+            return self.save_stream(stream, suffix=source.suffix or ".bin", allow_empty=True)
 
     def save_stream(
         self,
@@ -74,6 +72,8 @@ class LocalFilesystemStorageAdapter:
         *,
         max_size_bytes: int | None = None,
         suffix: str = ".bin",
+        validate_path: Callable[[Path], None] | None = None,
+        allow_empty: bool = False,
     ) -> StoredFile:
         digest = hashlib.sha256()
         size = 0
@@ -89,25 +89,33 @@ class LocalFilesystemStorageAdapter:
                         break
                     size += len(block)
                     if max_size_bytes is not None and size > max_size_bytes:
-                        raise DomainError("Uploaded file exceeds the maximum allowed size")
+                        raise UploadTooLargeError("Uploaded file exceeds the maximum allowed size")
                     digest.update(block)
                     target.write(block)
                 target.flush()
                 os.fsync(target.fileno())
-            if size < 1:
+            if size < 1 and not allow_empty:
                 raise DomainError("Uploaded file is empty")
+            if validate_path is not None:
+                validate_path(temporary)
             source_hash = digest.hexdigest()
             object_key = f"{source_hash[:2]}/{source_hash}{suffix.lower()}"
+            (resource_root / source_hash[:2]).mkdir(parents=True, exist_ok=True)
             destination = self._resolve("resources", object_key)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            if destination.exists():
-                temporary.unlink(missing_ok=True)
+            try:
+                # A hard link publishes fully flushed bytes only if the hash key
+                # does not exist. Unlike os.replace, this never overwrites a peer.
+                os.link(temporary, destination)
+            except FileExistsError:
+                if not destination.is_file() or destination.is_symlink():
+                    raise DomainError("Stored object is not a regular file") from None
+                with destination.open("rb") as existing:
+                    if stream_hash(existing) != source_hash:
+                        raise DomainError("Stored object hash mismatch") from None
                 return StoredFile("resources", object_key, source_hash, created=False)
-            os.replace(temporary, destination)
             return StoredFile("resources", object_key, source_hash, created=True)
-        except Exception:
+        finally:
             temporary.unlink(missing_ok=True)
-            raise
 
     def delete(self, bucket: str, object_key: str) -> None:
         self._resolve(bucket, object_key).unlink(missing_ok=True)

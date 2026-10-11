@@ -35,8 +35,11 @@ class CreateResourceCommand:
                 raise DomainError(f"{field} is required")
             if len(value.strip()) > max_length:
                 raise DomainError(f"{field} exceeds maximum length")
-        if self.resource_type_name_vi is not None and len(self.resource_type_name_vi) > 150:
-            raise DomainError("resource_type_name_vi exceeds maximum length")
+        if self.resource_type_name_vi is not None:
+            if not self.resource_type_name_vi.strip():
+                raise DomainError("resource_type_name_vi must not be blank")
+            if len(self.resource_type_name_vi.strip()) > 150:
+                raise DomainError("resource_type_name_vi exceeds maximum length")
         if self.uploaded_by is not None and len(self.uploaded_by) > 30:
             raise DomainError("uploaded_by exceeds maximum length")
         if self.subject_id is not None and len(self.subject_id) > 30:
