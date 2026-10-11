@@ -7,7 +7,7 @@ version = "0.1.0"
 description = "Standalone master data synchronization and page-level ETL"
 requires-python = ">=3.12"
 dependencies = [
- "fastapi>=0.115,<1", "uvicorn>=0.30,<1", "SQLAlchemy>=2.0,<2.1",
+ "fastapi>=0.115,<1", "uvicorn>=0.30,<1", "python-multipart>=0.0.9,<1", "SQLAlchemy>=2.0,<2.1",
  "alembic>=1.13,<2", "psycopg[binary]>=3.2,<4", "pydantic>=2.9,<3",
  "pydantic-settings>=2.5,<3", "PyMuPDF>=1.24,<2", "ijson>=3.3,<4",
  "python-ulid>=3,<4",

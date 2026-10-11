@@ -1,0 +1,150 @@
+.page {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding-bottom: 24px;
+    color: #334155;
+}
+
+.hero {
+    padding: 22px 26px;
+}
+
+.hero h1 {
+    margin: 0 0 8px;
+    color: #172554;
+    font-size: 28px;
+}
+
+.hero p {
+    margin: 0;
+    color: #64748b;
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+.section {
+    margin-top: 28px;
+}
+
+.section h2 {
+    margin: 0 0 14px;
+    color: #172554;
+    font-size: 20px;
+}
+
+.diagramFigure {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 16px;
+    background-color: #ffffff;
+    border: 1px solid #e5eaf1;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
+}
+
+.diagram {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    max-height: 760px;
+    margin: 0 auto;
+    object-fit: contain;
+}
+
+.diagramCaption {
+    margin-top: 12px;
+    color: #64748b;
+    font-size: 13px;
+    font-style: italic;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.tableWrapper {
+    width: 100%;
+    overflow-x: auto;
+    background-color: #ffffff;
+    border: 1px solid #e5eaf1;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
+}
+
+.processTable {
+    width: 100%;
+    min-width: 860px;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.processTable th,
+.processTable td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #e5eaf1;
+    text-align: left;
+    vertical-align: top;
+}
+
+.processTable th {
+    color: white;
+    background-color: blue;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.processTable th:first-child,
+.processTable td:first-child {
+    width: 76px;
+    text-align: center;
+}
+
+.processTable th:nth-child(2) {
+    width: 190px;
+}
+
+.processTable th:last-child {
+    width: 220px;
+}
+
+.processTable tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+
+.stepNumber {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    font-weight: 700;
+}
+
+.stepName {
+    color: #1e293b;
+    font-weight: 600;
+}
+
+.output {
+    font-weight: 600;
+}
+
+@media (max-width: 700px) {
+    .hero {
+        padding: 20px;
+    }
+
+    .hero h1 {
+        font-size: 24px;
+    }
+
+    .diagramFigure {
+        padding: 12px;
+    }
+
+    .diagram {
+        width: 100%;
+        max-height: none;
+    }
+}

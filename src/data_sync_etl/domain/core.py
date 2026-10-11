@@ -33,6 +33,17 @@ class DomainError(ValueError):
     """Only static, non-sensitive error messages may cross the public boundary."""
 
 
+class ResourceCreateError(DomainError):
+    """Safe, structured error raised while creating a learning resource."""
+
+    def __init__(self, phase: str, code: str, message: str, status_code: int = 400):
+        self.phase = phase
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        super().__init__(message)
+
+
 class ResourceVersionNotFound(DomainError):
     pass
 

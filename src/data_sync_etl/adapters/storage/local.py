@@ -1,5 +1,7 @@
 import hashlib
+import os
 import re
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO
 
@@ -65,6 +67,50 @@ class LocalFilesystemStorageAdapter:
             object_key=object_key,
             source_hash=digest,
         )
+
+    def save_stream(
+        self,
+        stream: BinaryIO,
+        *,
+        max_size_bytes: int | None = None,
+        suffix: str = ".bin",
+    ) -> StoredFile:
+        digest = hashlib.sha256()
+        size = 0
+        resource_root = self.root / "resources"
+        resource_root.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(prefix=".upload-", dir=resource_root)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(fd, "wb") as target:
+                while True:
+                    block = stream.read(BLOCK_SIZE)
+                    if not block:
+                        break
+                    size += len(block)
+                    if max_size_bytes is not None and size > max_size_bytes:
+                        raise DomainError("Uploaded file exceeds the maximum allowed size")
+                    digest.update(block)
+                    target.write(block)
+                target.flush()
+                os.fsync(target.fileno())
+            if size < 1:
+                raise DomainError("Uploaded file is empty")
+            source_hash = digest.hexdigest()
+            object_key = f"{source_hash[:2]}/{source_hash}{suffix.lower()}"
+            destination = self._resolve("resources", object_key)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                temporary.unlink(missing_ok=True)
+                return StoredFile("resources", object_key, source_hash, created=False)
+            os.replace(temporary, destination)
+            return StoredFile("resources", object_key, source_hash, created=True)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+
+    def delete(self, bucket: str, object_key: str) -> None:
+        self._resolve(bucket, object_key).unlink(missing_ok=True)
 
     def image_path(self, task_id: str, claim_token: str) -> Path:
         safe_id = re.compile(r"[A-Za-z0-9_-]{1,100}")
