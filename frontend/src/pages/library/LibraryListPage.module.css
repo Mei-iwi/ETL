@@ -1,0 +1,159 @@
+.page {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding-bottom: 24px;
+    color: #334155;
+}
+
+.header {
+    margin-bottom: 20px;
+}
+
+.header h1 {
+    margin: 0 0 8px;
+    color: #172554;
+    font-size: 28px;
+}
+
+.header p {
+    margin: 0;
+    color: #64748b;
+    line-height: 1.6;
+}
+
+.searchForm {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.searchForm input {
+    width: min(100%, 440px);
+    min-height: 40px;
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font: inherit;
+}
+
+.searchForm button,
+.pagination button {
+    min-height: 38px;
+    padding: 8px 14px;
+    color: #ffffff;
+    background: #2563eb;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.searchForm button:hover,
+.pagination button:hover:not(:disabled) {
+    background: #1d4ed8;
+}
+
+.tableWrapper {
+    overflow-x: auto;
+    background: #ffffff;
+    border: 1px solid #e5eaf1;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
+}
+
+.table {
+    width: 100%;
+    min-width: 850px;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.table th,
+.table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #e5eaf1;
+    text-align: left;
+}
+
+.table th {
+    color: #172554;
+    background: #f8fafc;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.title {
+    color: #1e293b;
+    font-weight: 600;
+}
+
+.link {
+    color: #2563eb;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.link:hover {
+    text-decoration: underline;
+}
+
+.message {
+    padding: 28px 16px !important;
+    color: #64748b;
+    text-align: center !important;
+}
+
+.error {
+    padding: 12px 14px;
+    color: #b91c1c;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+}
+
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 16px;
+    color: #64748b;
+    font-size: 14px;
+}
+
+.pagination div {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pagination button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+@media (max-width: 600px) {
+    .header h1 {
+        font-size: 24px;
+    }
+
+    .searchForm {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .searchForm input {
+        width: 100%;
+    }
+
+    .pagination {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
