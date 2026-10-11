@@ -13,7 +13,10 @@ from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
+from data_sync_etl.application.get_processing_job import GetProcessingJob
+from data_sync_etl.application.get_resource_detail import GetResourceDetail
 from data_sync_etl.application.ingestion import ResourceIngestion
+from data_sync_etl.application.list_resource_versions import ListResourceVersions
 from data_sync_etl.application.list_resources import ListResources
 from data_sync_etl.application.mongo_projection import MongoContentProjector
 from data_sync_etl.application.ocr import OCRPipeline
@@ -58,6 +61,9 @@ class Container:
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
         self.resource_listing = ListResources(self.uow)
+        self.resource_detail = GetResourceDetail(self.uow)
+        self.resource_versions = ListResourceVersions(self.uow)
+        self.processing_job_detail = GetProcessingJob(self.uow)
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
         self.format_registry = FormatValidatorRegistry()
         self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry)

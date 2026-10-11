@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from ipaddress import ip_address
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -7,8 +8,85 @@ from fastapi.responses import JSONResponse
 
 from data_sync_etl.api.routes import router
 from data_sync_etl.composition import Container
+from data_sync_etl.config import Settings
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.logging import configure, event, flow
+
+
+class UploadBodyLimitMiddleware:
+    def __init__(self, app, max_bytes: int, *, local_admin_settings=None):
+        self.app = app
+        self.max_bytes = max_bytes
+        self.local_admin_settings = local_admin_settings
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope["type"] != "http"
+            or scope["method"] != "POST"
+            or scope["path"] != "/api/v1/resources"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        if self.local_admin_settings is not None:
+            host = (scope.get("client") or (None,))[0]
+            try:
+                loopback = host is not None and ip_address(host).is_loopback
+            except ValueError:
+                loopback = False
+            if not self.local_admin_settings.admin_enabled or not loopback:
+                await JSONResponse(status_code=403, content={"detail": "Local admin upload only"})(
+                    scope, receive, send
+                )
+                return
+
+        async def too_large():
+            response = JSONResponse(
+                status_code=413,
+                content={
+                    "detail": {
+                        "code": "PAYLOAD_TOO_LARGE",
+                        "phase": "file_validation",
+                        "message": "Upload request exceeds configured limit",
+                    }
+                },
+            )
+            await response(scope, receive, send)
+
+        headers = dict(scope.get("headers", []))
+        try:
+            declared = int(headers.get(b"content-length", b"0"))
+        except ValueError:
+            declared = 0
+        if declared > self.max_bytes:
+            await too_large()
+            return
+
+        consumed = 0
+        exceeded = False
+        outgoing = []
+
+        async def limited_receive():
+            nonlocal consumed, exceeded
+            if exceeded:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            message = await receive()
+            if message["type"] == "http.request":
+                consumed += len(message.get("body", b""))
+                if consumed > self.max_bytes:
+                    exceeded = True
+                    return {"type": "http.request", "body": b"", "more_body": False}
+            return message
+
+        async def capture_send(message):
+            outgoing.append(message)
+
+        await self.app(scope, limited_receive, capture_send)
+        if exceeded:
+            await too_large()
+        else:
+            for message in outgoing:
+                await send(message)
 
 
 def create_app(container=None):
@@ -27,6 +105,7 @@ def create_app(container=None):
             app.state.container.engine.dispose()
 
     app = FastAPI(title="Data Sync + ETL (local admin/dev)", lifespan=lifespan)
+    configured = container.settings if container is not None else Settings()
 
     @app.middleware("http")
     async def correlation(request: Request, call_next):
@@ -81,6 +160,11 @@ def create_app(container=None):
         )
 
     app.include_router(router)
+    app.add_middleware(
+        UploadBodyLimitMiddleware,
+        max_bytes=configured.upload_request_max_bytes,
+        local_admin_settings=configured,
+    )
     return app
 
 

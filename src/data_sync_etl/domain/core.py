@@ -33,6 +33,10 @@ class DomainError(ValueError):
     """Only static, non-sensitive error messages may cross the public boundary."""
 
 
+class UploadTooLargeError(DomainError):
+    pass
+
+
 class ResourceCreateError(DomainError):
     """Safe, structured error raised while creating a learning resource."""
 

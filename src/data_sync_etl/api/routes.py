@@ -1,3 +1,4 @@
+from ipaddress import ip_address
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
@@ -10,7 +11,7 @@ from data_sync_etl.api.resource_metadata_schemas import (
     UpdateResourceMetadataResponse,
 )
 from data_sync_etl.api.resource_version_schemas import CreateResourceVersionResponse
-from data_sync_etl.api.resource_schemas import ResouceListResponse
+from data_sync_etl.api.resource_schemas import ResouceListResponse, ResourceDetailResponse
 from data_sync_etl.domain.resource import CreateResourceCommand
 from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
 from data_sync_etl.domain.resource_version import CreateResourceVersionCommand
@@ -29,6 +30,14 @@ from data_sync_etl.application.create_resource_version import (
     InvalidResourceVersion,
     ResourceVersionNotFound as NewResourceVersionNotFound,
     ResourceVersionPersistenceError,
+)
+from data_sync_etl.domain.core import (
+    DomainError,
+    ProcessingJobNotFound,
+    ProcessingRetryConflict,
+    ResourceCreateError,
+    ResourceNotFound,
+    ResourceVersionNotFound,
 )
 
 #Swagger Tags
@@ -122,6 +131,46 @@ def list_resources(
     return ResouceListResponse.model_validate(result)
 
 
+@router.get(
+    "/api/v1/resources/{id}",
+    tags=[TAG_MASTER],
+    summary="Xem chi tiết học liệu",
+    response_model=ResourceDetailResponse,
+)
+def get_resource(id: ResourceId, request: Request) -> ResourceDetailResponse:
+    try:
+        data = request.app.state.container.resource_detail.run(id)
+        return ResourceDetailResponse.model_validate(data)
+    except ResourceNotFound:
+        raise HTTPException(status_code=404, detail="Resource not found") from None
+
+
+@router.get(
+    "/api/v1/resources/{id}/versions",
+    tags=[TAG_MASTER],
+    summary="Xem lịch sử phiên bản học liệu",
+)
+def list_resource_versions(id: ResourceId, request: Request) -> list[dict]:
+    try:
+        return request.app.state.container.resource_versions.run(id)
+    except ResourceNotFound:
+        raise HTTPException(status_code=404, detail="Resource not found") from None
+
+
+@router.get(
+    "/api/v1/processing-jobs/{job_id}",
+    tags=[TAG_PROCESSING],
+    summary="Xem tiến trình xử lý dữ liệu",
+)
+def get_processing_job(
+    job_id: Annotated[str, Path(min_length=1, max_length=30)], request: Request
+) -> dict:
+    try:
+        return request.app.state.container.processing_job_detail.run(job_id)
+    except ProcessingJobNotFound:
+        raise HTTPException(status_code=404, detail="Processing job not found") from None
+
+
 @router.patch(
     "/api/v1/resources/{id}/metadata",
     tags=[TAG_MASTER],
@@ -174,7 +223,7 @@ def update_resource_metadata(
 )
 def create_resource(
     request: Request,
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File()],
     title: str = Form(..., min_length=1, max_length=500),
     resource_type_code: str = Form(..., min_length=1, max_length=50),
     provider_id: str = Form(..., min_length=1, max_length=30),
@@ -186,6 +235,15 @@ def create_resource(
     publication_status: str = Form("PUBLISHED", max_length=30),
     uploaded_by: str | None = Form(None, max_length=30),
 ) -> CreateResourceResponse:
+    container = services(request)
+    try:
+        local_client = request.client is not None and ip_address(request.client.host).is_loopback
+    except ValueError:
+        local_client = False
+    if not local_client:
+        raise HTTPException(403, "Resource upload is available only on a local admin interface")
+    if uploaded_by is not None and uploaded_by.strip():
+        raise HTTPException(400, "uploaded_by requires an authenticated identity")
     if not file.filename:
         raise HTTPException(400, "A filename is required")
     try:
@@ -193,7 +251,7 @@ def create_resource(
         stream.seek(0, 2)
         file_size = stream.tell()
         stream.seek(0)
-        result = request.app.state.container.resource_create.execute(
+        result = container.resource_create.execute(
             CreateResourceCommand(
                 title=title,
                 resource_type_code=resource_type_code,
@@ -347,6 +405,26 @@ def status(id: ResourceId, request: Request):
     return services(request).orchestrator.status(id)
 
 
+@router.get(
+    "/api/v1/resource-versions/{id}/content-units",
+    tags=[TAG_PROCESSING],
+    summary="Xem nội dung đã trích xuất và chuẩn hóa",
+)
+def list_public_content_units(
+    id: ResourceId,
+    request: Request,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    search: Annotated[str, Query(max_length=200)] = "",
+) -> dict:
+    try:
+        return request.app.state.container.orchestrator.content_units(
+            id, offset=offset, limit=limit, search=search
+        )
+    except DomainError:
+        raise HTTPException(status_code=404, detail="Resource version not found") from None
+
+
 @router.get("/admin/resource-versions/{id}/content-units")
 def content_units(
     id: ResourceId,
@@ -358,4 +436,3 @@ def content_units(
     return services(request).orchestrator.content_units(
         id, offset=offset, limit=limit, search=search
     )
-

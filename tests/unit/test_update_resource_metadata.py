@@ -1,21 +1,29 @@
-import pytest
 from datetime import UTC, datetime
+
+import pytest
 from fastapi.testclient import TestClient
 
-from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase, InvalidMetadata, ResourceNotFound
+from data_sync_etl.application.update_resource_metadata import (
+    InvalidMetadata,
+    ResourceNotFound,
+    UpdateResourceMetadataUseCase,
+)
 from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
 from data_sync_etl.main import create_app
+
 
 class Repo:
     def __init__(self):
         self.row={"id":"r1","title":"Old","resource_type_code":"HANDOUT","resource_type_name_vi":"Tài liệu",
         "provider_id":"p1","provider_name":"Demo","provider_type":"SCHOOL","publication_status":"DRAFT",
         "created_by":None,"updated_at":None}
-        self.subject=None; self.grade=None
+        self.subject=None
+        self.grade=None
     def get_resource_for_update(self,rid): return self.row if rid=="r1" else None
     def get(self,table,key): return None
     def update_resource_metadata(self,rid,values):
-        self.row.update({k:v for k,v in values.items() if k not in {"subject_id","grade_level_id"}}); return self.row
+        self.row.update({k:v for k,v in values.items() if k not in {"subject_id","grade_level_id"}})
+        return self.row
     def replace_subject_relation(self,rid,sid): self.subject=sid
     def replace_grade_relation(self,rid,gid): self.grade=gid
     def get_resource_subject_id(self,rid): return self.subject
@@ -27,7 +35,8 @@ class Uow:
     def __exit__(self,*args): return False
 
 def test_patch_title_only():
-    repo=Repo(); use=UpdateResourceMetadataUseCase(Uow(repo))
+    repo=Repo()
+    use=UpdateResourceMetadataUseCase(Uow(repo))
     out=use.execute(UpdateResourceMetadataCommand(resource_id="r1",title=" New ",supplied_fields=frozenset({"title"})))
     assert out["title"]=="New" and repo.row["resource_type_code"]=="HANDOUT"
 
