@@ -103,21 +103,17 @@ export function SystemCapalitiesPage() {
         return () => controllerRef.current?.abort()
     }, [loadCapabilities])
 
-    if (!data) {
-        return null
-    }
-
     return (
         <section>
             <h1>Khả năng xử lý</h1>
-            <button className={styles.reloadButton} type="button" onClick={() => void loadCapabilities()} disabled={loading}>{loading ? 'Đăng tải...' : 'Tải lại'}</button>
+            <button className={styles.reloadButton} type="button" onClick={() => void loadCapabilities()} disabled={loading}>{loading ? 'Đang tải...' : 'Tải lại'}</button>
             {error && (
                 <p className={styles.error}>Lỗi tải dữ liệu: {error}</p>
             )}
             {loading && !data && (
                 <p>Đang tải dữ liệu ...</p>
             )}
-            <div className={styles.grid}>
+            {data && <div className={styles.grid}>
                 <article className={styles.card}>
                     <h2>API</h2>
                     <p>Phiên bản: {data.api_version}</p>
@@ -179,7 +175,7 @@ export function SystemCapalitiesPage() {
                         {data.storage.mongodb_enabled ? 'Đang bật' : 'Đăng tắt'}
                     </p>
                 </article>
-            </div>
+            </div>}
 
         </section>
 

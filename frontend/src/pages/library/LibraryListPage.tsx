@@ -1,5 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
+import {
+    getResourceTypes,
+    type ResourceTypeOption,
+} from '../../services/libraryLookupApi'
 import styles from './LibraryListPage.module.css'
 
 type Resource = {
@@ -25,9 +29,40 @@ export function LibraryListPage() {
     const [keyword, setKeyword] = useState('')
     const [query, setQuery] = useState('')
     const [page, setPage] = useState(1)
+    const [resourceTypeCode, setResourceTypeCode] = useState('')
+    const [resourceTypes, setResourceTypes] = useState<ResourceTypeOption[]>([])
+    const [lookupLoading, setLookupLoading] = useState(true)
+    const [lookupError, setLookupError] = useState('')
     const [data, setData] = useState<ResourceListResponse | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
+
+    useEffect(() => {
+        const controller = new AbortController()
+
+        async function loadResourceTypes() {
+            try {
+                const items = await getResourceTypes(controller.signal)
+                if (controller.signal.aborted) return
+                setResourceTypes(items)
+                if (items.length === 0) {
+                    setLookupError('Danh mục loại học liệu đang trống.')
+                }
+            } catch (err) {
+                if (controller.signal.aborted) return
+                setLookupError(
+                    err instanceof Error
+                        ? err.message
+                        : 'Không thể tải danh mục loại học liệu.',
+                )
+            } finally {
+                if (!controller.signal.aborted) setLookupLoading(false)
+            }
+        }
+
+        void loadResourceTypes()
+        return () => controller.abort()
+    }, [])
 
     useEffect(() => {
         const controller = new AbortController()
@@ -41,6 +76,9 @@ export function LibraryListPage() {
                 size: '7',
                 q: query,
             })
+            if (resourceTypeCode) {
+                params.set('resource_type_code', resourceTypeCode)
+            }
 
             try {
                 const response = await fetch(
@@ -70,7 +108,7 @@ export function LibraryListPage() {
         void loadResources()
 
         return () => controller.abort()
-    }, [page, query])
+    }, [page, query, resourceTypeCode])
 
     function handleSearch(event: FormEvent<HTMLFormElement>) {
         event.preventDefault()
@@ -94,9 +132,26 @@ export function LibraryListPage() {
                     onChange={(event) => setKeyword(event.target.value)}
                     placeholder="Nhập tên học liệu..."
                 />
+                <select
+                    aria-label="Lọc theo loại học liệu"
+                    value={resourceTypeCode}
+                    onChange={(event) => {
+                        setPage(1)
+                        setResourceTypeCode(event.target.value)
+                    }}
+                    disabled={lookupLoading || Boolean(lookupError)}
+                >
+                    <option value="">Tất cả loại học liệu</option>
+                    {resourceTypes.map((resourceType) => (
+                        <option key={resourceType.code} value={resourceType.code}>
+                            {resourceType.name}
+                        </option>
+                    ))}
+                </select>
                 <button type="submit">Tìm kiếm</button>
             </form>
 
+            {lookupError && <p className={styles.error} role="alert">{lookupError}</p>}
             {error && <p className={styles.error} role="alert">{error}</p>}
 
             <div className={styles.tableWrapper}>
@@ -135,8 +190,7 @@ export function LibraryListPage() {
                                         >
                                             Chi tiết
                                         </Link>
-                                    </td>
-                                    <td>
+                                        {' · '}
                                         <Link
                                             className={styles.link}
                                             to={`/library/${encodeURIComponent(resource.id)}/versions`}

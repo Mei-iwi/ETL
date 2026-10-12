@@ -1,40 +1,128 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router"
 import {
+    getProcessingJob,
     retryProcessing,
     startProcessing
 } from '../../services/processingApi'
-import type { ProcessResult } from "../../types/processing"
+import type { JobStatus, ProcessingStatus, ProcessResult } from "../../types/processing"
 import styles from './LibraryPages.module.css'
 
+type ProcessingView = {
+    resource_version_id: string
+    job_id: string
+    job_status: JobStatus
+    processing_status: ProcessingStatus
+    action?: string
+}
+
+const terminalStatuses: ProcessingStatus[] = [
+    'OCR_FAILED',
+    'FINALIZATION_FAILED',
+    'CONTENT_READY',
+]
+
+function isAbortError(error: unknown) {
+    return error instanceof DOMException && error.name === 'AbortError'
+}
+
 export function LibraryProcessingPage() {
-    const [searchParams] = useSearchParams()
+    const [searchParams, setSearchParams] = useSearchParams()
 
     const versionId = searchParams.get('versionId') ?? ''
+    const jobId = searchParams.get('jobId') ?? ''
 
-    const [result, setResult] = useState<ProcessResult | null>(null)
+    const [result, setResult] = useState<ProcessingView | null>(null)
 
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
+    const actionControllerRef = useRef<AbortController | null>(null)
+
+    useEffect(() => {
+        return () => actionControllerRef.current?.abort()
+    }, [])
+
+    useEffect(() => {
+        if (!jobId || loading) return
+
+        let active = true
+        let timerId: number | undefined
+        let controller: AbortController | null = null
+
+        async function loadStatus() {
+            controller = new AbortController()
+
+            try {
+                const data = await getProcessingJob(jobId, controller.signal)
+                if (!active) return
+
+                setResult((current) => ({
+                    resource_version_id: data.resource_version_id,
+                    job_id: data.id,
+                    job_status: data.status,
+                    processing_status: data.processing_status,
+                    action: current?.job_id === data.id
+                        ? current.action
+                        : undefined,
+                }))
+
+                if (!terminalStatuses.includes(data.processing_status)) {
+                    timerId = window.setTimeout(() => {
+                        void loadStatus()
+                    }, 4_000)
+                }
+            } catch (e) {
+                if (!active || isAbortError(e)) return
+                setError(
+                    e instanceof Error
+                        ? e.message
+                        : 'Không thể tải trạng thái xử lý',
+                )
+            }
+        }
+
+        void loadStatus()
+
+        return () => {
+            active = false
+            controller?.abort()
+            if (timerId !== undefined) window.clearTimeout(timerId)
+        }
+    }, [jobId, loading])
+
+    function updateJobInUrl(data: ProcessResult) {
+        const nextParams = new URLSearchParams(searchParams)
+        nextParams.set('jobId', data.job_id)
+        setSearchParams(nextParams, { replace: true })
+    }
 
     async function handleStartProcessing() {
         if (!versionId) {
             setError('Không tìm thấy mã phiên bản học liệu')
             return
         }
+        actionControllerRef.current?.abort()
+        const controller = new AbortController()
+        actionControllerRef.current = controller
         setLoading(true)
         setError('')
 
         try {
-            const data = await startProcessing(versionId)
+            const data = await startProcessing(versionId, controller.signal)
+            if (actionControllerRef.current !== controller) return
             setResult(data)
+            updateJobInUrl(data)
         } catch (e) {
+            if (isAbortError(e)) return
             setError(
                 e instanceof Error ? e.message : 'Không thể bắt đầu xử lý',
             )
         }
         finally {
-            setLoading(false)
+            if (actionControllerRef.current === controller) {
+                actionControllerRef.current = null
+                setLoading(false)
+            }
         }
     }
 
@@ -43,18 +131,27 @@ export function LibraryProcessingPage() {
             setError('Không tìm thấy mã processing job')
             return
         }
+        actionControllerRef.current?.abort()
+        const controller = new AbortController()
+        actionControllerRef.current = controller
         setLoading(true)
         setError('')
         try {
-            const data = await retryProcessing(result.job_id)
+            const data = await retryProcessing(result.job_id, controller.signal)
+            if (actionControllerRef.current !== controller) return
             setResult(data)
+            updateJobInUrl(data)
         }
         catch (e) {
+            if (isAbortError(e)) return
             setError(
                 e instanceof Error ? e.message : 'Không thể yêu cầu xử lý lại'
             )
         } finally {
-            setLoading(false)
+            if (actionControllerRef.current === controller) {
+                actionControllerRef.current = null
+                setLoading(false)
+            }
         }
     }
 
@@ -94,10 +191,12 @@ export function LibraryProcessingPage() {
                             <span className={styles.resultLabel}>Trạng thái xử lý</span>
                             <span className={styles.resultValue}>{result.processing_status}</span>
                         </p>
-                        <p className={styles.resultItem}>
-                            <span className={styles.resultLabel}>Hành động</span>
-                            <span className={styles.resultValue}>{result.action}</span>
-                        </p>
+                        {result.action && (
+                            <p className={styles.resultItem}>
+                                <span className={styles.resultLabel}>Hành động</span>
+                                <span className={styles.resultValue}>{result.action}</span>
+                            </p>
+                        )}
                     </div>
                     {canRetry && (
                         <div className={styles.actions}>

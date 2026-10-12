@@ -1,0 +1,35 @@
+from pydantic import BaseModel
+
+from data_sync_etl.api.resource_schemas import ResourcePagination
+
+
+class ResourceTypeItem(BaseModel):
+    code: str
+    name: str
+
+
+class ResourceTypeListResponse(BaseModel):
+    items: list[ResourceTypeItem]
+    pagination: ResourcePagination
+
+
+class ProviderItem(BaseModel):
+    id: str
+    name: str
+    provider_type: str
+
+
+class ProviderListResponse(BaseModel):
+    items: list[ProviderItem]
+    pagination: ResourcePagination
+
+
+class GradeLevelItem(BaseModel):
+    id: str
+    grade_code: str
+    grade_name_vi: str
+
+
+class GradeLevelListResponse(BaseModel):
+    items: list[GradeLevelItem]
+    pagination: ResourcePagination
