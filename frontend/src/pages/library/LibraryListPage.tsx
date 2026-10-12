@@ -38,7 +38,7 @@ export function LibraryListPage() {
 
             const params = new URLSearchParams({
                 page: String(page),
-                size: '10',
+                size: '7',
                 q: query,
             })
 
