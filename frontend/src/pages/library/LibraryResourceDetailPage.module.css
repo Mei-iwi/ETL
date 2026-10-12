@@ -1,0 +1,158 @@
+.page {
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding-bottom: 24px;
+    color: #334155;
+}
+
+.backLink {
+    display: inline-block;
+    margin-bottom: 18px;
+    color: #2563eb;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.backLink:hover {
+    text-decoration: underline;
+}
+
+.header {
+    margin-bottom: 20px;
+}
+
+.eyebrow {
+    margin: 0 0 6px;
+    color: #2563eb;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.header h1 {
+    margin: 0 0 8px;
+    color: #172554;
+    font-size: 28px;
+    line-height: 1.3;
+}
+
+.subtitle {
+    margin: 0;
+    color: #64748b;
+    font-size: 14px;
+}
+
+.panel {
+    margin-bottom: 16px;
+    padding: 20px;
+    background: #ffffff;
+    border: 1px solid #e5eaf1;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
+}
+
+.panel h2 {
+    margin: 0 0 16px;
+    color: #172554;
+    font-size: 18px;
+}
+
+.details {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 24px;
+    margin: 0;
+}
+
+.details dt {
+    margin-bottom: 5px;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.details dd {
+    margin: 0;
+    color: #1e293b;
+    font-size: 14px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.tagList {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    color: #334155;
+    background: #f8fafc;
+    border: 1px solid #e5eaf1;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.primaryTag {
+    padding: 3px 7px;
+    color: #1d4ed8;
+    background: #eff6ff;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.empty,
+.message {
+    color: #64748b;
+    font-size: 14px;
+}
+
+.error {
+    padding: 12px 14px;
+    color: #b91c1c;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+}
+
+.historyLink {
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 8px 14px;
+    color: #ffffff;
+    background: #2563eb;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.historyLink:hover {
+    background: #1d4ed8;
+}
+
+@media (max-width: 600px) {
+    .header h1 {
+        font-size: 24px;
+    }
+
+    .panel {
+        padding: 16px;
+    }
+
+    .details {
+        grid-template-columns: 1fr;
+    }
+}
