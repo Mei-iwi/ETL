@@ -5,6 +5,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -32,10 +33,10 @@ class MasterLearningResource(Base):
     id = Column(String(30), primary_key=True, default=new_id)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
-    provider_id = Column(String(30), nullable=False)
-    provider_name = Column(String(255), nullable=False)
-    provider_type = Column(String(30), nullable=False)
-    provider_is_active = Column(Boolean, nullable=False)
+    provider_id = Column(String(30), nullable=True)
+    provider_name = Column(String(255), nullable=True)
+    provider_type = Column(String(30), nullable=True)
+    provider_is_active = Column(Boolean, nullable=True)
     provider_deleted_at = Column(DateTime(timezone=True), nullable=True)
     provider_deleted_by = Column(String(30), nullable=True)
     provider_created_at = Column(DateTime(timezone=True), nullable=True)
@@ -49,7 +50,7 @@ class MasterLearningResource(Base):
     resource_type_created_at = Column(DateTime(timezone=True), nullable=True)
     resource_type_updated_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(String(30), nullable=True)
-    title = Column(String(500), nullable=False)
+    title = Column(String(500), nullable=True)
     publication_status = Column(String(30), nullable=False)
     is_active = Column(Boolean, nullable=False)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
@@ -63,7 +64,7 @@ class MasterUser(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
     email = Column(String(255), nullable=False)
     hashed_password = Column(String(255), nullable=False, info={"sensitive": True})
-    full_name = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
     role_id = Column(String(30), nullable=False)
     role_code = Column(String(50), nullable=False)
     role_name = Column(String(255), nullable=False)
@@ -105,6 +106,11 @@ class MasterGradeLevel(Base):
 
 class Subject(Base):
     __tablename__ = "subjects"
+    __table_args__ = (
+        Index("ix_subject_grade_active_deleted", "grade_id", "is_active", "deleted_at"),
+        Index("ix_subjects_name", "subject_name"),
+        Index("ix_subjects_slug", "subject_slug"),
+    )
     id = Column(String(30), primary_key=True, default=new_id)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
@@ -120,6 +126,7 @@ class Subject(Base):
 
 class ResourceSubject(Base):
     __tablename__ = "resource_subjects"
+    __table_args__ = (Index("ix_resource_subjects_subject", "subject_id"),)
     resource_id = Column(
         String(30),
         ForeignKey("master_learning_resources.id", ondelete="RESTRICT"),
@@ -182,6 +189,14 @@ class ContentUnit(Base):
         UniqueConstraint("resource_version_id", "sequence_no"),
         CheckConstraint("sequence_no > 0"),
         CheckConstraint("page_from > 0 AND page_to >= page_from"),
+        UniqueConstraint("resource_version_id", "id", name="uq_content_unit_version_id"),
+        ForeignKeyConstraint(
+            ["resource_version_id", "parent_unit_id"],
+            ["content_units.resource_version_id", "content_units.id"],
+            name="fk_content_parent_same_version",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("parent_unit_id <> id", name="ck_content_parent_not_self"),
     )
     id = Column(String(30), primary_key=True, default=new_id)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)

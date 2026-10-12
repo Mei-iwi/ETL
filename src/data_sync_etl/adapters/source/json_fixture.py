@@ -9,9 +9,9 @@ from pathlib import Path
 import ijson
 from pydantic import ValidationError
 
+from data_sync_etl.adapters.source.aggregate import build_aggregate
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.ports.source import (
-    Cursor,
     EducationLevel,
     GradeLevel,
     LearningResource,
@@ -20,7 +20,6 @@ from data_sync_etl.ports.source import (
     ResourceSubjectRelation,
     ResourceType,
     Role,
-    SourceAggregate,
     Subject,
     User,
 )
@@ -115,44 +114,7 @@ class JsonFixtureSourceAdapter:
         return [r for r in self.records("resource_grades") if r.resource_id == resource_id]
 
     def aggregate(self, stream, row):
-        values = row.model_dump()
-        timestamps = [row.updated_at]
-        subjects, grades = [], []
-        if stream == "resources":
-            for prefix, parent in [
-                ("provider_", self.get_provider(row.provider_id)),
-                ("resource_type_", self.get_resource_type(row.resource_type_id)),
-            ]:
-                values.update({prefix + k: v for k, v in parent.model_dump().items() if k != "id"})
-                timestamps.append(parent.updated_at)
-            subjects = self.get_resource_subjects(row.id)
-            grades = self.get_resource_grade_levels(row.id)
-            timestamps += [r.updated_at for r in subjects + grades]
-        elif stream == "users":
-            parent = self.get_role(row.role_id)
-            values.update({"role_" + k: v for k, v in parent.model_dump().items() if k != "id"})
-            values["hashed_password"] = row.hashed_password.get_secret_value()
-            timestamps.append(parent.updated_at)
-        elif stream == "grades":
-            parent = self.get_education_level(row.education_level_id)
-            values = {"id": row.id, "education_level_id": row.education_level_id}
-            values.update(
-                {
-                    "grade_" + k: v
-                    for k, v in row.model_dump().items()
-                    if k not in ("id", "education_level_id")
-                }
-            )
-            values.update(
-                {"education_" + k: v for k, v in parent.model_dump().items() if k != "id"}
-            )
-            timestamps.append(parent.updated_at)
-        return SourceAggregate(
-            cursor=Cursor(updated_at=max(timestamps), id=row.id),
-            values=values,
-            subjects=subjects,
-            grades=grades,
-        )
+        return build_aggregate(self, stream, row)
 
     def batches(self, stream, cursor=None, batch_size=100):
         if stream not in {"resources", "users", "grades", "subjects"} or batch_size < 1:

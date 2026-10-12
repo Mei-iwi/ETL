@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from pymongo import MongoClient
 
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
+from data_sync_etl.adapters.mongo.schema import initialize
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.main import create_app
 from data_sync_etl.ports.processing import OCRResult
@@ -21,20 +22,22 @@ def test_real_mongo_projection_upserts_and_reconciliation(container):
     try:
         client.admin.command("ping")
         db = client[name]
+        initialize(db, apply=True)
         container.mongo_projector.documents = MongoContentStore(db)
         version = ingest(container)
         job = container.ocr.create_job(version["id"])
         for _ in range(3):
             container.ocr.succeed(container.ocr.claim("w"), OCRResult("Tiếng Việt\nDòng 2"))
         assert container.worker.once("projection")
-        container.mongo_projector.project(version["id"], job["id"])
+        # Administrative replay still carries the established ownership generation.
+        container.mongo_projector.project(version["id"], job["id"], generation=1)
         assert db.ocr_pages.count_documents({}) == 3
         assert db.ocr_pages.find_one({})["raw_text"] == "Tiếng Việt\nDòng 2"
         assert db.mongo_content_units.count_documents({"is_current": True}) == 3
         # Reconciliation marks obsolete documents; it never deletes their content.
         store = container.mongo_projector.documents
         ids = [d["_id"] for d in db.mongo_content_units.find({})]
-        store.reconcile_content_units(version["id"], ids[:2])
+        store.reconcile_content_units(version["id"], ids[:2], generation=1)
         assert db.mongo_content_units.count_documents({}) == 3
         assert db.mongo_content_units.count_documents({"is_current": False}) == 1
     finally:
@@ -49,6 +52,7 @@ def test_process_api_worker_postgres_and_mongo(pg_container, mongo_test_database
     c = pg_container
     client = MongoClient(mongo_test_database[0], serverSelectionTimeoutMS=3000)
     database = client[mongo_test_database[1]]
+    initialize(database, apply=True)
     c.mongo_projector.documents = MongoContentStore(database)
     c.settings.admin_enabled = True
     try:
@@ -113,10 +117,13 @@ def test_mongo_rejects_stale_projection_generation(mongo_test_database):
     database = client[mongo_test_database[1]]
     store = MongoContentStore(database)
     try:
+        initialize(database, apply=True)
         document = {
             "_id": "unit-1",
             "resource_version_id": "version-1",
             "text": "new",
+            "markdown": "new",
+            "updated_at": now(),
             "is_current": True,
             "projection_generation": 2,
             "created_at": now(),

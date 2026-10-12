@@ -50,6 +50,7 @@ def test_handoff_excludes_local_artifacts(tmp_path):
     for name in [
         ".env",
         ".env.local",
+        ".env.source.local",
         "storage/demo/a.pdf",
         "src/demo.egg-info/x.py",
         "src/__pycache__/bad.py",

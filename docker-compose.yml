@@ -6,9 +6,24 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-etl}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  source-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${SOURCE_POSTGRES_USER:-etl_source_admin}
+      POSTGRES_DB: ${SOURCE_POSTGRES_DB:-etl_source}
+      POSTGRES_PASSWORD: ${SOURCE_POSTGRES_PASSWORD:?Set SOURCE_POSTGRES_PASSWORD separately}
+    ports:
+      - "127.0.0.1:${SOURCE_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - source_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -17,7 +32,7 @@ services:
   mongo:
     image: mongo:8.0
     ports:
-      - "127.0.0.1:27018:27017"
+      - "127.0.0.1:${MONGO_PORT:-27018}:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -28,3 +43,4 @@ services:
 volumes:
   postgres_data:
   mongo_data:
+  source_postgres_data:

@@ -1,6 +1,11 @@
 from pymongo import MongoClient
 
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
+from data_sync_etl.adapters.mongo.foundation_store import (
+    MongoBagStore,
+    MongoContentReader,
+    MongoMetadataStore,
+)
 from data_sync_etl.adapters.ocr.engines import (
     FakeOCREngine,
     PyMuPDFPDFProcessor,
@@ -10,6 +15,7 @@ from data_sync_etl.adapters.ocr.engines import (
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyUnitOfWork
 from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectReader
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
+from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
@@ -41,6 +47,10 @@ from data_sync_etl.workers.ocr import OCRWorker
 def create_source(settings):
     if settings.source_adapter == "json":
         return JsonFixtureSourceAdapter(settings.source_fixture_root)
+    if settings.source_adapter in {"postgresql", "production"}:
+        return PostgreSQLSourceAdapter(
+            settings.source_database_url, replay_seconds=settings.source_replay_seconds
+        )
     raise DomainError("BLOCKED_SOURCE_MAPPING: production source adapter is not configured")
 
 
@@ -59,6 +69,13 @@ def create_ocr_engine(settings):
 
 
 class Container:
+    def close(self):
+        if hasattr(self.source, "close"):
+            self.source.close()
+        if self.mongo_client is not None:
+            self.mongo_client.close()
+        self.engine.dispose()
+
     def __init__(self, settings=None, engine=None, documents=None):
         self.settings = settings or Settings()
         self.source = create_source(self.settings)
@@ -103,6 +120,9 @@ class Container:
             self.sync, self.ingestion, self.ocr, self.postprocess, self.uow
         )
         self.mongo_client = None
+        self.metadata_documents = None
+        self.content_reader = None
+        self.content_bags = None
         if documents is None:
             self.mongo_client = MongoClient(
                 self.settings.mongo_uri,
@@ -112,6 +132,9 @@ class Container:
             )
             mongo_database = self.mongo_client[self.settings.mongo_database]
             self.documents = MongoContentStore(mongo_database)
+            self.metadata_documents = MongoMetadataStore(mongo_database)
+            self.content_reader = MongoContentReader(mongo_database)
+            self.content_bags = MongoBagStore(mongo_database, self.settings.vector_dimension)
         else:
             self.documents = documents
 

@@ -74,7 +74,17 @@ def main():
     scratch.mkdir(exist_ok=True)
     temporary = tempfile.mkdtemp(prefix="qa-", dir=scratch)
     commands = [
-        [sys.executable, "-m", "ruff", "check", "src", "tests", "alembic", "scripts"],
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "src",
+            "tests",
+            "alembic",
+            "alembic_source",
+            "scripts",
+        ],
         [
             sys.executable,
             "-m",
@@ -84,6 +94,7 @@ def main():
             "src",
             "tests",
             "alembic",
+            "alembic_source",
             "scripts",
         ],
         [

@@ -109,7 +109,7 @@ def main():
         return 1
     finally:
         if container:
-            container.engine.dispose()
+            container.close()
     return 0
 
 

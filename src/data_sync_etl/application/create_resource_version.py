@@ -1,9 +1,9 @@
 from data_sync_etl.domain.core import DomainError, new_id, now
+from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.domain.resource_version import (
     CreateResourceVersionCommand,
     CreateResourceVersionResult,
 )
-from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.logging import event, flow
 from data_sync_etl.ports.processing import StoragePort
 from data_sync_etl.ports.repositories import UnitOfWork

@@ -27,9 +27,9 @@ class ResourceType(SourceRecord):
 
 
 class LearningResource(SourceRecord):
-    provider_id: Id
+    provider_id: Id | None
     resource_type_id: Id
-    title: str = Field(max_length=500)
+    title: str | None = Field(max_length=500)
     publication_status: str = Field(max_length=30)
     created_by: Id | None = None
 
@@ -43,7 +43,7 @@ class Role(SourceRecord):
 class User(SourceRecord):
     email: str = Field(max_length=255)
     hashed_password: SecretStr = Field(max_length=255)
-    full_name: str = Field(max_length=255)
+    full_name: str | None = Field(max_length=255)
     role_id: Id
     email_verified_at: AwareDatetime | None = None
 
