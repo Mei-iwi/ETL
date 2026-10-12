@@ -7,6 +7,7 @@ type ResourceDetail = {
     title: string
     provider_name: string
     resource_type_name_vi: string
+    updated_at: string
 }
 
 type ResourceVersion = {
@@ -102,6 +103,7 @@ export function LibraryVersionHistoryPage() {
                             {resource.provider_name} ·{' '}
                             {resource.resource_type_name_vi}
                         </p>
+                        
                     </div>
                 )}
             </header>
@@ -165,9 +167,7 @@ export function LibraryVersionHistoryPage() {
                                     <div>
                                         <dt>Cập nhật gần nhất</dt>
                                         <dd>
-                                            {new Date(
-                                                version.updated_at,
-                                            ).toLocaleString('vi-VN')}
+                                            {new Date(resource.updated_at).toLocaleString('vi-VN')}
                                         </dd>
                                     </div>
                                 </dl>
