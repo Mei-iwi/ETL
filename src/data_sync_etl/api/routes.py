@@ -337,7 +337,7 @@ def create_resource_version(
     id: ResourceId,
     request: Request,
     response: Response,
-    file: UploadFile = File(...),  # noqa: B008 - FastAPI uses this declaration for request injection.
+    file: Annotated[UploadFile, File()],
     uploaded_by: str | None = Form(None, max_length=30),
 ) -> CreateResourceVersionResponse:
     if not file.filename:

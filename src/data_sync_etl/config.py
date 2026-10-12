@@ -18,7 +18,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     storage_root: Path = Path("storage")
     source_fixture_root: Path = Path("fixtures/source")
-    source_adapter: Literal["json", "production"] = "json"
+    source_adapter: Literal["json", "postgresql", "production"] = "json"
+    source_database_url: str | None = Field(default=None, repr=False)
+    source_migration_database_url: str | None = Field(default=None, repr=False)
+    source_replay_seconds: int = Field(default=300, ge=0)
     ocr_max_retries: int = Field(default=3, ge=1)
     ocr_heartbeat_timeout_seconds: int = Field(default=120, ge=3)
     ocr_recovery_interval_seconds: int = Field(default=30, ge=1)

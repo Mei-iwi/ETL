@@ -28,12 +28,12 @@ class UpdateResourceMetadataRequest(BaseModel):
 
 class UpdateResourceMetadataResponse(BaseModel):
     id: str
-    title: str
+    title: str | None
     resource_type_code: str
     resource_type_name_vi: str
-    provider_id: str
-    provider_name: str
-    provider_type: str
+    provider_id: str | None
+    provider_name: str | None
+    provider_type: str | None
     subject_id: str | None
     grade_level_id: str | None
     publication_status: str

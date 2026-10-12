@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 class ResourceListItem(BaseModel):
     id: str
-    title: str
-    provider_name: str
+    title: str | None
+    provider_name: str | None
     resource_type_code: str
     resource_type_name_vi: str
     publication_status: str
@@ -35,10 +35,10 @@ class GradeLevelBrief(BaseModel):
 
 class ResourceDetailResponse(BaseModel):
     id: str
-    title: str
-    provider_id: str
-    provider_name: str
-    provider_type: str
+    title: str | None
+    provider_id: str | None
+    provider_name: str | None
+    provider_type: str | None
     resource_type_code: str
     resource_type_name_vi: str
     publication_status: str

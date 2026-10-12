@@ -14,12 +14,14 @@ ROOT_FILES = {
     "Dockerfile",
     "Dockerfile.qa",
     "alembic.ini",
+    "alembic_source.ini",
 }
 TREES = {
     "src": {".py"},
-    "tests": {".py"},
-    "scripts": {".py"},
+    "tests": {".py", ".json"},
+    "scripts": {".py", ".sql"},
     "alembic": {".py", ".mako"},
+    "alembic_source": {".py", ".sql"},
     "docs": {".md", ".json"},
     "fixtures/source": {".json"},
 }

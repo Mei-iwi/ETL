@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from data_sync_etl.cli import main as cli
+from data_sync_etl.composition import Container
 from data_sync_etl.config import Settings
 from data_sync_etl.main import create_app
 
@@ -30,6 +31,7 @@ def test_admin_rejects_unknown_body_fields_and_invalid_id(container):
 def test_cli_exit_code_and_safe_stderr(monkeypatch, capsys, failure):
     monkeypatch.setattr("sys.argv", ["etl", "sync-master", "--full"])
     container = Mock()
+    container.close.side_effect = lambda: Container.close(container)
     if failure:
         container.sync.run.side_effect = RuntimeError("private-password-document")
     else:
@@ -41,6 +43,9 @@ def test_cli_exit_code_and_safe_stderr(monkeypatch, capsys, failure):
     assert "private-password-document" not in captured.out + captured.err
     assert bool(captured.err) == failure
     container.engine.dispose.assert_called_once()
+    container.close.assert_called_once()
+    container.source.close.assert_called_once()
+    container.mongo_client.close.assert_called_once()
 
 
 def test_cli_invalid_args_do_not_echo_values(capsys):

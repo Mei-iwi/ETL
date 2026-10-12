@@ -6,6 +6,8 @@ COPY src ./src
 RUN pip install --no-cache-dir .
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY alembic_source.ini ./
+COPY alembic_source ./alembic_source
 COPY fixtures ./fixtures
 
 FROM base AS qa

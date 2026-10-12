@@ -1,0 +1,1113 @@
+{
+  "id_counters": {
+    "prefix": [
+      "VARCHAR",
+      8,
+      false,
+      null,
+      false
+    ],
+    "period": [
+      "VARCHAR",
+      4,
+      false,
+      null,
+      false
+    ],
+    "last_seq": [
+      "INTEGER",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "education_levels": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "code": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "name_vi": [
+      "VARCHAR",
+      100,
+      false,
+      null,
+      false
+    ],
+    "ordinal": [
+      "SMALLINT",
+      null,
+      false,
+      null,
+      false
+    ],
+    "is_active": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ],
+    "deleted_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "deleted_by": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "grade_levels": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "education_level_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "education_levels",
+        "id"
+      ],
+      false
+    ],
+    "code": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "name_vi": [
+      "VARCHAR",
+      100,
+      false,
+      null,
+      false
+    ],
+    "ordinal": [
+      "SMALLINT",
+      null,
+      false,
+      null,
+      false
+    ],
+    "mongo_id": [
+      "VARCHAR",
+      24,
+      true,
+      null,
+      false
+    ],
+    "created_by": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      false
+    ],
+    "updated_by": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      false
+    ],
+    "is_active": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ],
+    "deleted_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "deleted_by": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "subjects": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "grade_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "grade_levels",
+        "id"
+      ],
+      false
+    ],
+    "subject_name": [
+      "VARCHAR",
+      255,
+      false,
+      null,
+      false
+    ],
+    "subject_slug": [
+      "VARCHAR",
+      255,
+      false,
+      null,
+      false
+    ],
+    "mongo_id": [
+      "VARCHAR",
+      24,
+      true,
+      null,
+      false
+    ],
+    "is_active": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ],
+    "deleted_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "deleted_by": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "resource_grade_levels": {
+    "resource_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "learning_resources",
+        "id"
+      ],
+      false
+    ],
+    "grade_level_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "grade_levels",
+        "id"
+      ],
+      false
+    ]
+  },
+  "resource_subjects": {
+    "resource_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "learning_resources",
+        "id"
+      ],
+      false
+    ],
+    "subject_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "subjects",
+        "id"
+      ],
+      false
+    ],
+    "is_primary": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "providers": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "name": [
+      "VARCHAR",
+      255,
+      false,
+      null,
+      true
+    ],
+    "provider_type": [
+      "provider_type",
+      null,
+      false,
+      null,
+      false
+    ],
+    "is_active": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ],
+    "deleted_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "deleted_by": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "resource_types": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "code": [
+      "VARCHAR",
+      50,
+      false,
+      null,
+      true
+    ],
+    "name_vi": [
+      "VARCHAR",
+      150,
+      false,
+      null,
+      false
+    ],
+    "is_active": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ],
+    "deleted_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "deleted_by": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "roles": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "code": [
+      "VARCHAR",
+      50,
+      false,
+      null,
+      true
+    ],
+    "name": [
+      "VARCHAR",
+      255,
+      false,
+      null,
+      false
+    ],
+    "description": [
+      "VARCHAR",
+      255,
+      true,
+      null,
+      false
+    ],
+    "is_active": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ],
+    "deleted_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "deleted_by": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "users": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "email": [
+      "VARCHAR",
+      255,
+      false,
+      null,
+      true
+    ],
+    "hashed_password": [
+      "VARCHAR",
+      255,
+      false,
+      null,
+      false
+    ],
+    "full_name": [
+      "VARCHAR",
+      255,
+      true,
+      null,
+      false
+    ],
+    "role_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "roles",
+        "id"
+      ],
+      false
+    ],
+    "is_active": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ],
+    "email_verified_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "mongo_id": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      true
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "learning_resources": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "mongo_id": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      true
+    ],
+    "provider_id": [
+      "VARCHAR",
+      30,
+      true,
+      [
+        "providers",
+        "id"
+      ],
+      false
+    ],
+    "resource_type_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "resource_types",
+        "id"
+      ],
+      false
+    ],
+    "created_by": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "users",
+        "id"
+      ],
+      false
+    ],
+    "title": [
+      "VARCHAR",
+      500,
+      true,
+      null,
+      false
+    ],
+    "publication_status": [
+      "publication_status",
+      null,
+      false,
+      null,
+      false
+    ],
+    "is_active": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ],
+    "deleted_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "deleted_by": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "resource_versions": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "mongo_id": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      true
+    ],
+    "resource_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "learning_resources",
+        "id"
+      ],
+      false
+    ],
+    "parent_version_id": [
+      "VARCHAR",
+      30,
+      true,
+      [
+        "resource_versions",
+        "id"
+      ],
+      false
+    ],
+    "version_number": [
+      "INTEGER",
+      null,
+      false,
+      null,
+      false
+    ],
+    "lifecycle_status": [
+      "lifecycle_status",
+      null,
+      false,
+      null,
+      false
+    ],
+    "storage_bucket": [
+      "VARCHAR",
+      255,
+      false,
+      null,
+      false
+    ],
+    "storage_object_key": [
+      "VARCHAR",
+      500,
+      false,
+      null,
+      false
+    ],
+    "source_hash": [
+      "VARCHAR",
+      64,
+      false,
+      null,
+      false
+    ],
+    "uploaded_by": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "users",
+        "id"
+      ],
+      false
+    ],
+    "assigned_by": [
+      "VARCHAR",
+      30,
+      true,
+      [
+        "users",
+        "id"
+      ],
+      false
+    ],
+    "assigned_reviewer_id": [
+      "VARCHAR",
+      30,
+      true,
+      [
+        "users",
+        "id"
+      ],
+      false
+    ],
+    "assigned_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "pre_ocr_approved_by": [
+      "VARCHAR",
+      30,
+      true,
+      [
+        "users",
+        "id"
+      ],
+      false
+    ],
+    "pre_ocr_approved_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "final_approved_by": [
+      "VARCHAR",
+      30,
+      true,
+      [
+        "users",
+        "id"
+      ],
+      false
+    ],
+    "final_approved_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "rejection_reason": [
+      "TEXT",
+      null,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "content_units": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "mongo_id": [
+      "VARCHAR",
+      30,
+      true,
+      null,
+      true
+    ],
+    "resource_version_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "resource_versions",
+        "id"
+      ],
+      false
+    ],
+    "parent_unit_id": [
+      "VARCHAR",
+      30,
+      true,
+      [
+        "content_units",
+        "id"
+      ],
+      false
+    ],
+    "unit_type": [
+      "content_unit_type",
+      null,
+      false,
+      null,
+      false
+    ],
+    "title": [
+      "VARCHAR",
+      500,
+      true,
+      null,
+      false
+    ],
+    "sequence_no": [
+      "INTEGER",
+      null,
+      false,
+      null,
+      false
+    ],
+    "page_from": [
+      "INTEGER",
+      null,
+      true,
+      null,
+      false
+    ],
+    "page_to": [
+      "INTEGER",
+      null,
+      true,
+      null,
+      false
+    ],
+    "review_status": [
+      "content_review_status",
+      null,
+      false,
+      null,
+      false
+    ],
+    "retrieval_eligible": [
+      "BOOLEAN",
+      null,
+      false,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "ocr_jobs": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "resource_version_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "resource_versions",
+        "id"
+      ],
+      true
+    ],
+    "triggered_by": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "users",
+        "id"
+      ],
+      false
+    ],
+    "status": [
+      "ocr_job_status",
+      null,
+      false,
+      null,
+      false
+    ],
+    "total_pages": [
+      "INTEGER",
+      null,
+      false,
+      null,
+      false
+    ],
+    "completed_pages": [
+      "INTEGER",
+      null,
+      false,
+      null,
+      false
+    ],
+    "failed_pages": [
+      "INTEGER",
+      null,
+      false,
+      null,
+      false
+    ],
+    "started_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "completed_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "postprocess_enqueued_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  },
+  "ocr_page_tasks": {
+    "id": [
+      "VARCHAR",
+      30,
+      false,
+      null,
+      true
+    ],
+    "job_id": [
+      "VARCHAR",
+      30,
+      false,
+      [
+        "ocr_jobs",
+        "id"
+      ],
+      false
+    ],
+    "page_num": [
+      "INTEGER",
+      null,
+      false,
+      null,
+      false
+    ],
+    "local_image_path": [
+      "VARCHAR",
+      500,
+      false,
+      null,
+      false
+    ],
+    "status": [
+      "ocr_page_task_status",
+      null,
+      false,
+      null,
+      false
+    ],
+    "worker_id": [
+      "VARCHAR",
+      100,
+      true,
+      null,
+      false
+    ],
+    "retry_count": [
+      "INTEGER",
+      null,
+      false,
+      null,
+      false
+    ],
+    "error_message": [
+      "TEXT",
+      null,
+      true,
+      null,
+      false
+    ],
+    "heartbeat_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "started_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "completed_at": [
+      "TIMESTAMPTZ",
+      null,
+      true,
+      null,
+      false
+    ],
+    "created_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ],
+    "updated_at": [
+      "TIMESTAMPTZ",
+      null,
+      false,
+      null,
+      false
+    ]
+  }
+}

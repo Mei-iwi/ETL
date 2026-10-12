@@ -214,6 +214,12 @@ Không cài binary/model OCR vào runtime hiện tại. Với bind mount storage
 
 ## Gói bàn giao và tài liệu
 
+PostgreSQL SOURCE độc lập (15 bảng ERD / 7 enum, cổng 5433) và đồng bộ sang Master:
+[audit/mapping](docs/database_audit.md), [triggers](docs/database_triggers.md),
+[Docker, migrations và Windows Git Bash](docs/postgresql_source.md).
+Migrations SOURCE dùng `alembic_source.ini`, không dùng migration Master. JSON demo vẫn được giữ;
+MongoDB tiếp tục chỉ projection nội dung sau khi xử lý phiên bản.
+
 ```bash
 python scripts/package_source.py
 ```
@@ -222,8 +228,9 @@ Gói `artifacts/data-sync-etl-source.zip` dùng allowlist, không chứa `.env*`
 cache, `.venv`, egg-info, test DB, build/dist hay storage. Không gửi nguyên thư mục đang chạy.
 Giữ dữ liệu local để không làm mất history; trên bản nhận, tạo `.env` và chạy migrate/demo theo hướng dẫn.
 
-- [Baseline audit](docs/baseline_audit.md), [báo cáo hoàn thiện](docs/implementation_report.md).
-- [Kiến trúc](docs/architecture.md), [schema](docs/schema.md), [quyết định](docs/decisions.md).
-- [Source contract](docs/source_contract.md), [nguồn production còn thiếu](docs/production_source_adapter.md), [Master Sync](docs/master_sync.md).
-- [Versioning](docs/resource_versioning.md), [OCR](docs/ocr_pipeline.md), [Content Units](docs/content_units.md), [lifecycle](docs/status_lifecycle.md).
-- [Hai workflow](docs/end_to_end_flow.md), [đọc code](docs/technical_reading_guide.md), [debug](docs/troubleshooting.md), [bảo mật](docs/security.md).
+Các tài liệu DB hiện có được liên kết ở trên; audit ghi rõ revision runtime,
+trigger thực sự đã cài, trạng thái ID Counter và kết quả kiểm thử.
+
+MongoDB: [foundation, contracts, init/check, backup và blocker search](docs/mongodb-foundation.md).
+Không tự cài validator/index lúc API khởi động; chạy explicit
+`python -m data_sync_etl.adapters.mongo.schema --check` trước khi review/apply.
