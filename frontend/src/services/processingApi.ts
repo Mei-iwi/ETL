@@ -1,4 +1,4 @@
-import type { ProcessResult } from "../types/processing";
+import type { ProcessingJobResult, ProcessResult } from "../types/processing";
 
 async function getErrorMessage(response: Response) {
     const body: unknown = await response.json().catch(() => null)
@@ -9,6 +9,25 @@ async function getErrorMessage(response: Response) {
     ) {
         return body.detail
     }
+
+    if (
+        body && typeof body === 'object' && 'detail' in body &&
+        body.detail && typeof body.detail === 'object' &&
+        'message' in body.detail && typeof body.detail.message === 'string'
+    ) {
+        return body.detail.message
+    }
+
+    const statusMessages: Record<number, string> = {
+        403: 'Bạn không có quyền thực hiện yêu cầu này.',
+        404: 'Không tìm thấy dữ liệu xử lý.',
+        409: 'Trạng thái hiện tại không cho phép xử lý lại.',
+    }
+
+    if (statusMessages[response.status]) {
+        return statusMessages[response.status]
+    }
+
     return `Yêu cầu thất bại: ${response.status}`
 }
 
@@ -52,4 +71,25 @@ export async function retryProcessing(
         throw new Error(await getErrorMessage(response))
     }
     return response.json() as Promise<ProcessResult>
+}
+
+export async function getProcessingJob(
+    jobId: string,
+    signal?: AbortSignal,
+): Promise<ProcessingJobResult> {
+    const response = await fetch(
+        `/api/v1/processing-jobs/${encodeURIComponent(jobId)}`,
+        {
+            signal,
+            headers: {
+                Accept: 'application/json',
+            },
+        },
+    )
+
+    if (!response.ok) {
+        throw new Error(await getErrorMessage(response))
+    }
+
+    return response.json() as Promise<ProcessingJobResult>
 }

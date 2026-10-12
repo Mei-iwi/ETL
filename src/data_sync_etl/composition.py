@@ -23,6 +23,7 @@ from data_sync_etl.application.create_resource_version import CreateResourceVers
 from data_sync_etl.application.get_processing_job import GetProcessingJob
 from data_sync_etl.application.get_resource_detail import GetResourceDetail
 from data_sync_etl.application.ingestion import ResourceIngestion
+from data_sync_etl.application.list_resource_lookups import ListResourceLookups
 from data_sync_etl.application.list_resource_versions import ListResourceVersions
 from data_sync_etl.application.list_resources import ListResources
 from data_sync_etl.application.list_subjects_use_case import ListSubjectsUseCase
@@ -88,6 +89,7 @@ class Container:
             GradeBasedSubjectRecommendationPolicy(),
         )
         self.resource_listing = ListResources(self.uow)
+        self.resource_lookups = ListResourceLookups(self.uow)
         self.resource_detail = GetResourceDetail(self.uow)
         self.resource_versions = ListResourceVersions(self.uow)
         self.processing_job_detail = GetProcessingJob(self.uow)

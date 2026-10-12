@@ -21,3 +21,17 @@ export type ProcessResult = {
     processing_status: ProcessingStatus
     status_url: string
 }
+
+export type ProcessingJobResult = {
+    id: string
+    resource_version_id: string
+    status: JobStatus
+    processing_status: ProcessingStatus
+    total_pages: number
+    completed_pages: number
+    failed_pages: number
+    started_at: string | null
+    completed_at: string | null
+    updated_at: string
+    stage_runs: unknown[]
+}

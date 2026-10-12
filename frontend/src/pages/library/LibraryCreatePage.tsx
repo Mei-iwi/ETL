@@ -1,5 +1,15 @@
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 import { useNavigate } from "react-router"
+import {
+    getGradeLevels,
+    getProviders,
+    getResourceTypes,
+    getSubjects,
+    type GradeLevelOption,
+    type ProviderOption,
+    type ResourceTypeOption,
+    type SubjectOption,
+} from '../../services/libraryLookupApi'
 import styles from './LibraryPages.module.css'
 
 type CreateResourceRespones = {
@@ -22,11 +32,108 @@ export function LibraryCreatePage() {
 
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
+    const [resourceTypes, setResourceTypes] = useState<ResourceTypeOption[]>([])
+    const [providers, setProviders] = useState<ProviderOption[]>([])
+    const [resourceTypeCode, setResourceTypeCode] = useState('')
+    const [providerId, setProviderId] = useState('')
+    const [catalogLoading, setCatalogLoading] = useState(true)
+    const [catalogError, setCatalogError] = useState('')
+    const [gradeLevels, setGradeLevels] = useState<GradeLevelOption[]>([])
+    const [subjects, setSubjects] = useState<SubjectOption[]>([])
+    const [gradeLevelId, setGradeLevelId] = useState('')
+    const [subjectId, setSubjectId] = useState('')
+    const [metadataLoading, setMetadataLoading] = useState(true)
+    const [metadataError, setMetadataError] = useState('')
+    const [catalogRequest, setCatalogRequest] = useState(0)
+
+    const selectedProvider = providers.find((provider) => provider.id === providerId)
+    const availableSubjects = subjects.filter(
+        (subject) => !gradeLevelId ||
+            subject.grade_level_id === null ||
+            subject.grade_level_id === gradeLevelId,
+    )
+
+    useEffect(() => {
+        const controller = new AbortController()
+
+        async function loadCatalogs() {
+            try {
+                const [resourceTypeItems, providerItems] = await Promise.all([
+                    getResourceTypes(controller.signal),
+                    getProviders(controller.signal),
+                ])
+                if (controller.signal.aborted) return
+
+                setResourceTypes(resourceTypeItems)
+                setProviders(providerItems)
+                if (resourceTypeItems.length === 0 || providerItems.length === 0) {
+                    setCatalogError('Danh mục loại học liệu hoặc nhà cung cấp đang trống.')
+                }
+            } catch (e) {
+                if (controller.signal.aborted) return
+                setResourceTypes([])
+                setProviders([])
+                setCatalogError(
+                    e instanceof Error ? e.message : 'Không thể tải danh mục học liệu',
+                )
+            } finally {
+                if (!controller.signal.aborted) setCatalogLoading(false)
+            }
+        }
+
+        void loadCatalogs()
+        return () => controller.abort()
+    }, [catalogRequest])
+
+    useEffect(() => {
+        const controller = new AbortController()
+
+        async function loadMetadataCatalogs() {
+            try {
+                const [gradeLevelItems, subjectItems] = await Promise.all([
+                    getGradeLevels(controller.signal),
+                    getSubjects(controller.signal),
+                ])
+                if (controller.signal.aborted) return
+                setGradeLevels(gradeLevelItems)
+                setSubjects(subjectItems)
+            } catch (e) {
+                if (controller.signal.aborted) return
+                setGradeLevels([])
+                setSubjects([])
+                setMetadataError(
+                    e instanceof Error ? e.message : 'Không thể tải danh mục môn học và khối lớp',
+                )
+            } finally {
+                if (!controller.signal.aborted) setMetadataLoading(false)
+            }
+        }
+
+        void loadMetadataCatalogs()
+        return () => controller.abort()
+    }, [catalogRequest])
+
+    function handleReloadCatalogs() {
+        setResourceTypeCode('')
+        setProviderId('')
+        setGradeLevelId('')
+        setSubjectId('')
+        setCatalogError('')
+        setMetadataError('')
+        setCatalogLoading(true)
+        setMetadataLoading(true)
+        setCatalogRequest((current) => current + 1)
+    }
 
     async function handleSubmit(
         event: React.FormEvent<HTMLFormElement>,
     ) {
         event.preventDefault()
+
+        if (!resourceTypeCode || !selectedProvider || catalogLoading || catalogError) {
+            setError('Vui lòng chọn loại học liệu và nhà cung cấp hợp lệ.')
+            return
+        }
 
         setLoading(true)
         setError('')
@@ -72,28 +179,122 @@ export function LibraryCreatePage() {
                     <input type="text" id="title" name="title" required />
                 </div>
                 <div className={styles.field}>
-                    <label htmlFor="resourceType">Mã loại học liệu</label>
-                    <input type="text" name="resource_type_code" id="resourceType" required />
+                    <label htmlFor="resourceType">Loại học liệu</label>
+                    <select
+                        id="resourceType"
+                        name="resource_type_code"
+                        value={resourceTypeCode}
+                        onChange={(event) => setResourceTypeCode(event.target.value)}
+                        disabled={catalogLoading || Boolean(catalogError)}
+                        required
+                    >
+                        <option value="">Chọn loại học liệu</option>
+                        {resourceTypes.map((resourceType) => (
+                            <option key={resourceType.code} value={resourceType.code}>
+                                {resourceType.name}
+                            </option>
+                        ))}
+                    </select>
                 </div>
                 <div className={styles.field}>
-                    <label htmlFor="providerId">
-                        Mã nhà cung cấp
-                    </label>
-                    <input type="text" id="providerId" name="provider_id" required />
-                </div>
-                <div className={styles.field}>
-                    <label htmlFor="providerName">Tên nhà cung cấp</label>
-                    <input type="text" id="providerName" name="provider_name" required />
+                    <label htmlFor="providerId">Nhà cung cấp</label>
+                    <select
+                        id="providerId"
+                        name="provider_id"
+                        value={providerId}
+                        onChange={(event) => setProviderId(event.target.value)}
+                        disabled={catalogLoading || Boolean(catalogError)}
+                        required
+                    >
+                        <option value="">Chọn nhà cung cấp</option>
+                        {providers.map((provider) => (
+                            <option key={provider.id} value={provider.id}>
+                                {provider.name}
+                            </option>
+                        ))}
+                    </select>
+                    <input type="hidden" name="provider_name" value={selectedProvider?.name ?? ''} />
+                    <input type="hidden" name="provider_type" value={selectedProvider?.provider_type ?? ''} />
                 </div>
                 <div className={styles.field}>
                     <label htmlFor="file">Tải lên tệp học liệu</label>
                     <input id='file' type="file" name="file" accept="application/pdf,.pdf" required />
                 </div>
+                <div className={styles.field}>
+                    <label htmlFor="gradeLevel">Khối lớp</label>
+                    <select
+                        id="gradeLevel"
+                        name="grade_level_id"
+                        value={gradeLevelId}
+                        onChange={(event) => {
+                            const nextGradeLevelId = event.target.value
+                            setGradeLevelId(nextGradeLevelId)
+                            const selectedSubject = subjects.find((subject) => subject.id === subjectId)
+                            if (
+                                selectedSubject?.grade_level_id &&
+                                selectedSubject.grade_level_id !== nextGradeLevelId
+                            ) {
+                                setSubjectId('')
+                            }
+                        }}
+                        disabled={metadataLoading || Boolean(metadataError)}
+                    >
+                        <option value="">Không chọn khối lớp</option>
+                        {gradeLevels.map((gradeLevel) => (
+                            <option key={gradeLevel.id} value={gradeLevel.id}>
+                                {gradeLevel.grade_name_vi}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div className={styles.field}>
+                    <label htmlFor="subject">Môn học</label>
+                    <select
+                        id="subject"
+                        name="subject_id"
+                        value={subjectId}
+                        onChange={(event) => setSubjectId(event.target.value)}
+                        disabled={metadataLoading || Boolean(metadataError)}
+                    >
+                        <option value="">Không chọn môn học</option>
+                        {availableSubjects.map((subject) => (
+                            <option key={subject.id} value={subject.id}>
+                                {subject.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div className={styles.field}>
+                    <label htmlFor="publicationStatus">Trạng thái xuất bản</label>
+                    <select id="publicationStatus" name="publication_status" defaultValue="PUBLISHED">
+                        <option value="PUBLISHED">Đã xuất bản</option>
+                        <option value="DRAFT">Bản nháp</option>
+                        <option value="UNPUBLISHED">Chưa xuất bản</option>
+                    </select>
+                </div>
+                {(catalogLoading || metadataLoading) && <p role="status">Đang tải danh mục...</p>}
+                {catalogError && (
+                    <p className={styles.alert} role="alert">{catalogError}</p>
+                )}
+                {metadataError && (
+                    <p className={styles.alert} role="alert">{metadataError}</p>
+                )}
+                {(catalogError || metadataError) && (
+                    <div className={styles.actions}>
+                        <button className={styles.primaryButton} type="button" onClick={handleReloadCatalogs}>
+                            Tải lại danh mục
+                        </button>
+                    </div>
+                )}
                 {error && (
                     <p className={styles.alert} role="alert">{error}</p>
                 )}
                 <div className={styles.actions}>
-                    <button className={styles.primaryButton} type="submit" disabled={loading}>
+                    <button
+                        className={styles.primaryButton}
+                        type="submit"
+                        disabled={loading || catalogLoading || Boolean(catalogError) || !resourceTypeCode || !selectedProvider}
+                    >
                         {loading ? 'Đang tạo học liệu...' : 'Tạo học liệu'}
                     </button>
                 </div>

@@ -4,8 +4,17 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
-from data_sync_etl.api.processing_schemas import ProcessVersionResponse, RetryProcessingJobResponse
+from data_sync_etl.api.processing_schemas import (
+    ProcessingJobStatusResponse,
+    ProcessVersionResponse,
+    RetryProcessingJobResponse,
+)
 from data_sync_etl.api.resource_create_schemas import CreateResourceResponse
+from data_sync_etl.api.resource_lookup_schemas import (
+    GradeLevelListResponse,
+    ProviderListResponse,
+    ResourceTypeListResponse,
+)
 from data_sync_etl.api.resource_metadata_schemas import (
     UpdateResourceMetadataRequest,
     UpdateResourceMetadataResponse,
@@ -147,6 +156,66 @@ def recommended_subjects(
 
 
 @router.get(
+    "/api/v1/resource-types",
+    tags=[TAG_MASTER],
+    summary="Lấy danh mục loại học liệu",
+    response_model=ResourceTypeListResponse,
+)
+def list_resource_types(
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    size: Annotated[int, Query(ge=1, le=100)] = 20,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+) -> ResourceTypeListResponse:
+    result = request.app.state.container.resource_lookups.list_resource_types(
+        page=page,
+        size=size,
+        query=q,
+    )
+    return ResourceTypeListResponse.model_validate(result)
+
+
+@router.get(
+    "/api/v1/providers",
+    tags=[TAG_MASTER],
+    summary="Lấy danh mục nhà cung cấp",
+    response_model=ProviderListResponse,
+)
+def list_providers(
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    size: Annotated[int, Query(ge=1, le=100)] = 20,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+) -> ProviderListResponse:
+    result = request.app.state.container.resource_lookups.list_providers(
+        page=page,
+        size=size,
+        query=q,
+    )
+    return ProviderListResponse.model_validate(result)
+
+
+@router.get(
+    "/api/v1/grade-levels",
+    tags=[TAG_MASTER],
+    summary="Lấy danh mục khối lớp",
+    response_model=GradeLevelListResponse,
+)
+def list_grade_levels(
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    size: Annotated[int, Query(ge=1, le=100)] = 20,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+) -> GradeLevelListResponse:
+    result = request.app.state.container.resource_lookups.list_grade_levels(
+        page=page,
+        size=size,
+        query=q,
+    )
+    return GradeLevelListResponse.model_validate(result)
+
+
+@router.get(
         '/api/v1/resources',
         tags=[TAG_MASTER],
         summary= 'Lấy danh sách học liệu',
@@ -210,12 +279,14 @@ def list_resource_versions(id: ResourceId, request: Request) -> list[dict]:
     "/api/v1/processing-jobs/{job_id}",
     tags=[TAG_PROCESSING],
     summary="Xem tiến trình xử lý dữ liệu",
+    response_model=ProcessingJobStatusResponse,
 )
 def get_processing_job(
     job_id: Annotated[str, Path(min_length=1, max_length=30)], request: Request
-) -> dict:
+) -> ProcessingJobStatusResponse:
     try:
-        return request.app.state.container.processing_job_detail.run(job_id)
+        result = request.app.state.container.processing_job_detail.run(job_id)
+        return ProcessingJobStatusResponse.model_validate(result)
     except ProcessingJobNotFound:
         raise HTTPException(status_code=404, detail="Processing job not found") from None
 

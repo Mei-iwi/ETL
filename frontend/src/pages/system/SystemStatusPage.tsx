@@ -36,17 +36,20 @@ export function SystemStatusPage() {
                 cache: 'no-store',
             })
 
-            const data = await response.json()
+            const data: HealthData = await response.json()
 
             if (controller.signal.aborted) return
 
-            if (response.ok) {
-                setConnectionState('online')
-            } else {
-                setConnectionState('offline')
-            }
+            const isOnline = response.ok &&
+                data.status === 'ok' &&
+                data.database === 'ok'
 
-            setHealthData(data || `HTTP ${response.status}`)
+            setConnectionState(isOnline ? 'online' : 'offline')
+            setHealthData(data)
+
+            if (!response.ok) {
+                setHealthError(data.detail || `HTTP ${response.status}`)
+            }
 
         } catch (e) {
             if (controller.signal.aborted) return
@@ -81,7 +84,7 @@ export function SystemStatusPage() {
                             <span className={`${styles.statusValue} connection-status ${connectionState}`} role="status" aria-live="polite">
                                 {connectionState === 'checking' && 'Đang kiểm tra...'}
                                 {connectionState === 'online' && 'Đã kết nối'}
-                                {connectionState == 'offline' && 'Mất kết nối'}
+                                {connectionState === 'offline' && 'Mất kết nối'}
                             </span>
                         </span>
                     </p>
@@ -100,10 +103,12 @@ export function SystemStatusPage() {
                     {connectionState === 'checking' ? 'Đang kiểm tra kết nối ...' : 'Kiểm tra lại'}
                 </button>
 
-                {healthData && (
+                {(healthData || healthError) && (
                     <div className="health-respone">
                         <h4>Phản hồi từ hệ thống</h4>
-                        <pre>{healthData ? JSON.stringify(healthData, null, 2) : healthError}</pre>
+                        {healthData
+                            ? <pre>{JSON.stringify(healthData, null, 2)}</pre>
+                            : <p role="alert">{healthError}</p>}
                     </div>
                 )}
             </div>
