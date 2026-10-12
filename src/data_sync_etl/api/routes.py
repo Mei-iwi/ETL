@@ -10,26 +10,23 @@ from data_sync_etl.api.resource_metadata_schemas import (
     UpdateResourceMetadataRequest,
     UpdateResourceMetadataResponse,
 )
-from data_sync_etl.api.resource_version_schemas import CreateResourceVersionResponse
 from data_sync_etl.api.resource_schemas import ResouceListResponse, ResourceDetailResponse
-from data_sync_etl.domain.resource import CreateResourceCommand
-from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
-from data_sync_etl.domain.resource_version import CreateResourceVersionCommand
-from data_sync_etl.domain.core import (
-    ProcessingJobNotFound,
-    ProcessingRetryConflict,
-    ResourceCreateError,
-    ResourceVersionNotFound,
+from data_sync_etl.api.resource_version_schemas import CreateResourceVersionResponse
+from data_sync_etl.api.subject_schemas import (
+    RecommendedSubjectListResponse,
+    SubjectListResponse,
+)
+from data_sync_etl.application.create_resource_version import (
+    InvalidResourceVersion,
+    ResourceVersionPersistenceError,
+)
+from data_sync_etl.application.create_resource_version import (
+    ResourceVersionNotFound as NewResourceVersionNotFound,
 )
 from data_sync_etl.application.update_resource_metadata import (
     InvalidResourceMetadata,
     ResourceMetadataNotFound,
     ResourceMetadataPersistenceError,
-)
-from data_sync_etl.application.create_resource_version import (
-    InvalidResourceVersion,
-    ResourceVersionNotFound as NewResourceVersionNotFound,
-    ResourceVersionPersistenceError,
 )
 from data_sync_etl.domain.core import (
     DomainError,
@@ -39,6 +36,9 @@ from data_sync_etl.domain.core import (
     ResourceNotFound,
     ResourceVersionNotFound,
 )
+from data_sync_etl.domain.resource import CreateResourceCommand
+from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
+from data_sync_etl.domain.resource_version import CreateResourceVersionCommand
 
 #Swagger Tags
 TAG_SYSTEM: str = 'System'
@@ -95,6 +95,55 @@ def health(request: Request):
 )
 def system_capabilities(request: Request):
     return request.app.state.container.capabilities.describe()
+
+
+@router.get(
+    "/api/v1/subjects",
+    tags=[TAG_MASTER],
+    summary="Lấy danh sách môn học",
+    response_model=SubjectListResponse,
+    response_model_exclude_none=True,
+)
+def list_subjects(
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    size: Annotated[int, Query(ge=1, le=100)] = 20,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    grade_level_id: Annotated[str | None, Query(max_length=30)] = None,
+) -> SubjectListResponse:
+    try:
+        result = request.app.state.container.subject_listing.execute(
+            page=page,
+            size=size,
+            keyword=q,
+            grade_level_id=grade_level_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return SubjectListResponse.model_validate(result)
+
+
+@router.get(
+    "/api/v1/subjects/recommended",
+    tags=[TAG_MASTER],
+    summary="Lấy danh sách môn học đề xuất",
+    response_model=RecommendedSubjectListResponse,
+)
+def recommended_subjects(
+    request: Request,
+    grade_level_id: Annotated[str | None, Query(max_length=30)] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+    exclude_ids: Annotated[str | None, Query(max_length=1000)] = None,
+) -> RecommendedSubjectListResponse:
+    try:
+        result = request.app.state.container.subject_recommendation.execute(
+            grade_level_id=grade_level_id,
+            limit=limit,
+            exclude_ids=exclude_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return RecommendedSubjectListResponse.model_validate(result)
 
 
 @router.get(
@@ -288,7 +337,7 @@ def create_resource_version(
     id: ResourceId,
     request: Request,
     response: Response,
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008 - FastAPI uses this declaration for request injection.
     uploaded_by: str | None = Form(None, max_length=30),
 ) -> CreateResourceVersionResponse:
     if not file.filename:

@@ -8,6 +8,7 @@ from data_sync_etl.adapters.ocr.engines import (
     UnconfiguredOCREngine,
 )
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyUnitOfWork
+from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectReader
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.application.capabilities import CapabilityService
@@ -18,12 +19,14 @@ from data_sync_etl.application.get_resource_detail import GetResourceDetail
 from data_sync_etl.application.ingestion import ResourceIngestion
 from data_sync_etl.application.list_resource_versions import ListResourceVersions
 from data_sync_etl.application.list_resources import ListResources
+from data_sync_etl.application.list_subjects_use_case import ListSubjectsUseCase
 from data_sync_etl.application.mongo_projection import MongoContentProjector
 from data_sync_etl.application.ocr import OCRPipeline
 from data_sync_etl.application.orchestrator import EtlOrchestrator
 from data_sync_etl.application.postprocess import Postprocessor
 from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
+from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
@@ -31,6 +34,7 @@ from data_sync_etl.config import Settings
 from data_sync_etl.db.session import make_engine, sessions
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
+from data_sync_etl.domain.subject import GradeBasedSubjectRecommendationPolicy
 from data_sync_etl.workers.ocr import OCRWorker
 
 
@@ -60,6 +64,12 @@ class Container:
         self.source = create_source(self.settings)
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
+        self.subject_reader = SQLAlchemySubjectReader(sessions(self.engine))
+        self.subject_listing = ListSubjectsUseCase(self.subject_reader)
+        self.subject_recommendation = RecommendSubjectsUseCase(
+            self.subject_reader,
+            GradeBasedSubjectRecommendationPolicy(),
+        )
         self.resource_listing = ListResources(self.uow)
         self.resource_detail = GetResourceDetail(self.uow)
         self.resource_versions = ListResourceVersions(self.uow)
