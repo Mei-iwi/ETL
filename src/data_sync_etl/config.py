@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     tesseract_path: str = "tesseract"
     tesseract_languages: str = "vie+eng"
     sync_batch_size: int = Field(default=100, ge=1, le=10000)
+    master_sync_auto_interval_seconds: int = Field(default=300, ge=30, le=86400)
+    master_sync_auto_poll_seconds: int = Field(default=5, ge=1, le=60)
+    master_sync_auto_worker_stale_seconds: int = Field(default=30, ge=5, le=300)
+    master_sync_auto_lease_seconds: int = Field(default=120, ge=30, le=3600)
 
     chunk_size_words: int = Field(
         default=200, ge=20, le=500

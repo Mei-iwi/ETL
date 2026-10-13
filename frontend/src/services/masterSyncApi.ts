@@ -1,4 +1,8 @@
-import type { MasterSyncRequest, MasterSyncResponse } from '../types/masterSync'
+import type {
+    MasterSyncRequest,
+    MasterSyncResponse,
+    MasterSyncStatusResponse,
+} from '../types/masterSync'
 
 async function getErrorMessage(response: Response) {
     const body: unknown = await response.json().catch(() => null)
@@ -26,4 +30,37 @@ export async function syncMasterData(
         throw new Error(await getErrorMessage(response))
     }
     return response.json() as Promise<MasterSyncResponse>
+}
+
+export async function getMasterSyncStatus(
+    signal?: AbortSignal,
+): Promise<MasterSyncStatusResponse> {
+    const response = await fetch('/api/v1/master-data/sync/status', {
+        signal,
+        headers: { Accept: 'application/json' },
+    })
+
+    if (!response.ok) {
+        throw new Error(await getErrorMessage(response))
+    }
+    return response.json() as Promise<MasterSyncStatusResponse>
+}
+
+export async function configureMasterSyncAuto(
+    enabled: boolean,
+    stream: MasterSyncRequest['stream'] = 'all',
+): Promise<MasterSyncStatusResponse> {
+    const response = await fetch('/api/v1/master-data/sync/auto', {
+        method: 'PATCH',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ enabled, stream }),
+    })
+
+    if (!response.ok) {
+        throw new Error(await getErrorMessage(response))
+    }
+    return response.json() as Promise<MasterSyncStatusResponse>
 }

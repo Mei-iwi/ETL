@@ -17,6 +17,7 @@ from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectR
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
+from data_sync_etl.application.auto_sync import AutoSyncCoordinator
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
@@ -42,6 +43,7 @@ from data_sync_etl.db.session import make_engine, sessions
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.domain.subject import GradeBasedSubjectRecommendationPolicy
+from data_sync_etl.workers.master_sync import MasterSyncWorker
 from data_sync_etl.workers.ocr import OCRWorker
 
 
@@ -108,6 +110,24 @@ class Container:
 
         )
         self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size)
+        self.auto_sync = AutoSyncCoordinator(
+            self.uow,
+            environment_supported=(
+                isinstance(self.source, PostgreSQLSourceAdapter)
+                and self.engine.dialect.name == "postgresql"
+            ),
+            source_health=(
+                self.source.health if isinstance(self.source, PostgreSQLSourceAdapter) else None
+            ),
+            interval_seconds=self.settings.master_sync_auto_interval_seconds,
+            worker_stale_seconds=self.settings.master_sync_auto_worker_stale_seconds,
+            lease_seconds=self.settings.master_sync_auto_lease_seconds,
+        )
+        self.master_sync_worker = MasterSyncWorker(
+            self.sync,
+            self.auto_sync,
+            poll_seconds=self.settings.master_sync_auto_poll_seconds,
+        )
         self.ingestion = ResourceIngestion(self.uow, self.storage)
         self.ocr = OCRPipeline(
             self.uow,

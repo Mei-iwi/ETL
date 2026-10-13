@@ -33,6 +33,18 @@ class DomainError(ValueError):
     """Only static, non-sensitive error messages may cross the public boundary."""
 
 
+class SyncAlreadyRunning(DomainError):
+    pass
+
+
+class AutoSyncUnavailable(DomainError):
+    pass
+
+
+class AutoSyncBaselineRequired(DomainError):
+    pass
+
+
 class UploadTooLargeError(DomainError):
     pass
 
