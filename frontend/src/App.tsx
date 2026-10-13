@@ -28,6 +28,7 @@ import { RunExperimentPage } from './pages/experiments/RunExperimentPage'
 
 import { SystemStatusPage } from './pages/system/SystemStatusPage'
 import { SystemCapalitiesPage } from './pages/system/SystemCapalitiesPage'
+import { LibraryUpdateVersion } from './pages/library/LibraryUpdateVersion'
 
 export default function App() {
   return (
@@ -51,6 +52,7 @@ export default function App() {
             <Route path='indexing' element={<LibraryIndexingPage />} />
             <Route path=":resourceId" element={<LibraryResourceDetailPage />}/>
             <Route path=':resourceId/versions' element={<LibraryVersionHistoryPage />}/>
+            <Route path=':resourceId/update-version' element={<LibraryUpdateVersion />}/>
           </Route>
           <Route path='search'>
             <Route index element={<Navigate to='materials' />} />

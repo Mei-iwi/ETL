@@ -234,3 +234,6 @@ trigger thực sự đã cài, trạng thái ID Counter và kết quả kiểm t
 MongoDB: [foundation, contracts, init/check, backup và blocker search](docs/mongodb-foundation.md).
 Không tự cài validator/index lúc API khởi động; chạy explicit
 `python -m data_sync_etl.adapters.mongo.schema --check` trước khi review/apply.
+
+# Chạy backend
+.venv\Scripts\python.exe -m uvicorn data_sync_etl.main:app --reload --host 0.0.0.0 --port 8000

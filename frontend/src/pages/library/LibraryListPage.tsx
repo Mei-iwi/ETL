@@ -197,6 +197,13 @@ export function LibraryListPage() {
                                         >
                                             Lịch sử phiên bản
                                         </Link>
+                                        {' . '}
+                                        <Link
+                                            className={styles.link}
+                                            to={`/library/${encodeURIComponent(resource.id)}/update-version`}
+                                            >
+                                                Cập nhật
+                                            </Link>
                                     </td>
                                 </tr>
                             ))

@@ -114,11 +114,11 @@ export function LibraryResourceDetailPage() {
             </Link>
 
             <header className={styles.header}>
-                <p className={styles.eyebrow}>Chi tiết học liệu</p>
-                <h1>{resource.title}</h1>
-                <p className={styles.subtitle}>
+                <h1 className={styles.eyebrow}>Chi tiết học liệu</h1>
+                <h3>{resource.title}</h3>
+                {/* <p className={styles.subtitle}>
                     Mã học liệu: {resource.id}
-                </p>
+                </p> */}
             </header>
 
             <section className={styles.panel}>
