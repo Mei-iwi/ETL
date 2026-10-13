@@ -150,15 +150,12 @@ export function LibraryUpdateVersion() {
 
     return (
         <section className={styles.page}>
-            <Link className={styles.secondaryButton} to={detailPath}>
+            <Link className={styles.backLink} to={detailPath}>
                 ← Quay lại chi tiết
             </Link>
 
             <header className={styles.pageHeader}>
                 <h1>Cập nhật học liệu</h1>
-                <p className={styles.lead}>
-                    Cập nhật tên, loại, đơn vị cung cấp, môn học, khối lớp và trạng thái.
-                </p>
             </header>
 
             {loading ? (
@@ -264,7 +261,7 @@ export function LibraryUpdateVersion() {
                     </div>
 
                     {error && <p className={styles.alert} role="alert">{error}</p>}
-                    {data && <p role="status">Cập nhật học liệu thành công!</p>}
+                    {data && <p role="status" className={styles.success}>Cập nhật học liệu thành công!</p>}
 
                     <div className={styles.actions}>
                         <button

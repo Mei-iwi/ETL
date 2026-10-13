@@ -227,3 +227,16 @@
         width: 100%;
     }
 }
+
+.backLink {
+    display: inline-block;
+    margin-bottom: 18px;
+    color: #2563eb;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.success{
+    color: green;
+}
