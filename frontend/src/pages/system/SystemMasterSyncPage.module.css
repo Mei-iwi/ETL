@@ -252,6 +252,64 @@
     font-size: 18px;
 }
 
+.filesHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.filesHeader h2 {
+    margin: 0;
+}
+
+.importTable {
+    min-width: 760px;
+    table-layout: fixed;
+    line-height: 1.6;
+    font-size: 13px;
+}
+
+.importTable th,
+.importTable td {
+    padding: 14px 10px;
+    vertical-align: middle;
+}
+
+.importTable th {
+    color: #172554;
+    background: #f8fafc;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.importTable th:nth-child(2),
+.importTable td:nth-child(2),
+.importTable th:nth-child(3),
+.importTable td:nth-child(3),
+.importTable th:nth-child(4),
+.importTable td:nth-child(4),
+.importTable th:nth-child(5),
+.importTable td:nth-child(5),
+.importTable th:last-child,
+.importTable td:last-child {
+    text-align: center;
+}
+
+.importTable tbody tr:hover {
+    background: #f8fafc;
+}
+
+.files .fileAction {
+    width: auto;
+    min-height: 34px;
+    padding: 6px 10px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
 .tableWrap {
     overflow-x: auto;
 }
