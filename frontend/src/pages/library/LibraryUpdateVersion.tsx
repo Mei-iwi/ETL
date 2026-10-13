@@ -190,13 +190,13 @@ export function LibraryUpdateVersion() {
                 const processResult = await startProcessing(version.resource_version_id)
                 if (!processResult.job_id) throw new Error('Phản hồi xử lý thiếu mã job')
                 navigate(
-                    `/library/processing?versionId=${encodeURIComponent(version.resource_version_id)}&jobId=${encodeURIComponent(processResult.job_id)}`,
+                    `/library/processing?versionId=${encodeURIComponent(version.resource_version_id)}&jobId=${encodeURIComponent(processResult.job_id)}&resourceId=${encodeURIComponent(resourceId)}`,
                     { replace: true },
                 )
             } catch (processError) {
                 const detail = processError instanceof Error ? `: ${processError.message}` : ''
                 navigate(
-                    `/library/processing?versionId=${encodeURIComponent(version.resource_version_id)}`,
+                    `/library/processing?versionId=${encodeURIComponent(version.resource_version_id)}&resourceId=${encodeURIComponent(resourceId)}`,
                     {
                         replace: true,
                         state: {

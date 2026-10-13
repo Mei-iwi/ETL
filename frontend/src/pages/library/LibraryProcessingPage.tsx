@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation, useSearchParams } from 'react-router'
+import { Link, Navigate, useLocation, useSearchParams } from 'react-router'
 import {
     getContentUnits,
     getProcessingJob,
@@ -60,6 +60,8 @@ export function LibraryProcessingPage() {
     const location = useLocation()
     const versionId = searchParams.get('versionId') ?? ''
     const jobId = searchParams.get('jobId') ?? ''
+    const resourceId = searchParams.get('resourceId') ?? ''
+    const backPath = resourceId ? `/library/${encodeURIComponent(resourceId)}` : '/library/list'
     const processingNotice = (location.state as ProcessingLocationState | null)?.processingNotice
 
     const [result, setResult] = useState<ProcessingView | null>(null)
@@ -233,8 +235,13 @@ export function LibraryProcessingPage() {
     const canRetry = currentResult?.processing_status === 'OCR_FAILED' || currentResult?.processing_status === 'FINALIZATION_FAILED'
     const mainStatus = getMainStatus(jobId, currentResult, statusError)
 
+    if (!versionId) return <Navigate to="/library/list" replace />
+
     return (
         <section className={styles.page}>
+            <Link className={styles.backLink} to={backPath}>
+                {resourceId ? '← Quay lại chi tiết học liệu' : '← Quay lại danh sách học liệu'}
+            </Link>
             <header className={styles.pageHeader}><h1>Xử lý dữ liệu</h1></header>
 
             <div className={styles.card}>

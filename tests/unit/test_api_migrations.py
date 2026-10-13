@@ -124,19 +124,20 @@ def test_system_capabilities(container):
 
     assert data['api_version'] == 'v1'
     assert data['formats'][0]['extension'] == '.pdf'
+    assert data['formats'][0]['native_text_extraction'] is True
+    assert data['master_sync']['source'] == 'json_fixture'
+    assert data['master_sync']['auto_sync_supported'] is False
     assert data['processing']['scanned_pdf_ocr'] is False
     assert data['processing']['fake_ocr_demo'] is True
     assert(
         data['processing']['chunking']['size_words']
         == container.settings.chunk_size_words
     )
-    assert data['representations']['bag_of_words'] is True
+    assert data['processing']['chunking']['enabled'] is False
+    assert data['representations']['bag_of_words'] is False
+    assert data['representations']['vector']['enabled'] is False
     assert data['representations']['vector']['semantic'] is False
-    assert data['retrieval']['modes'] == [
-        'keyword',
-        'vector',
-        'hybrid'
-    ]
+    assert data['retrieval']['modes'] == []
     assert data['storage']['mongodb_enabled'] is False
     assert 'database_url' not in response.text
 
