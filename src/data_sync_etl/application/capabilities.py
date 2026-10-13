@@ -7,6 +7,10 @@ class CapabilityService:
     chunk_overlap_words: int
     vector_dimension: int
     ocr_engine: str
+    source_adapter: str = 'json'
+    metadata_backend: str = 'postgresql'
+    mongodb_enabled: bool = False
+    auto_sync_supported: bool = False
 
     def describe(self) -> dict[str, object]:
         return {
@@ -15,11 +19,14 @@ class CapabilityService:
                 {
                     'extension': '.pdf',
                     'mime_type': 'application/pdf',
+                    'native_text_extraction': True,
+                    # Keep the old spelling for existing API consumers.
                     'native_text_extractioin': True,
                 }
             ], 
             'master_sync': {
-                'source': 'json_fixture',
+                'source': 'json_fixture' if self.source_adapter == 'json' else 'postgresql',
+                'auto_sync_supported': self.auto_sync_supported,
                 'streams': [
                     'resources',
                     'users',
@@ -29,31 +36,33 @@ class CapabilityService:
                 'modes': ['full', 'incremental'],
             }, 
             'processing': {
-                'scanned_pdf_ocr': False,
+                'ocr_engine': self.ocr_engine,
+                'scanned_pdf_ocr': self.ocr_engine == 'tesseract',
                 'fake_ocr_demo': self.ocr_engine == 'fake',
+                'normalized_content': True,
                 'chunking': {
-                    'enabled': True,
+                    'enabled': False,
                     'size_words': self.chunk_size_words,
                     'overlap_words': self.chunk_overlap_words
                 },
             },
             'representations': {
-                'bag_of_words': True,
+                'bag_of_words': False,
                 'vector': {
-                    'enabled': True,
-                    'method': 'feature_hasing',
+                    'enabled': False,
+                    'method': None,
                     'semantic': False,
                     'dimensions': self.vector_dimension
                 },
             },
             'retrieval': {
-                'modes': ['keyword', 'vector', 'hybrid'],
-                'filters': ['resouce_id'],
+                'modes': [],
+                'filters': [],
             },
             'storage': {
-              'metadata': 'postgresql',
-            'content_and_index': 'postgresql',
-            'files': 'local_filesystem',
-            'mongodb_enabled': False,
+                'metadata': self.metadata_backend,
+                'content_and_index': 'mongodb' if self.mongodb_enabled else self.metadata_backend,
+                'files': 'local_filesystem',
+                'mongodb_enabled': self.mongodb_enabled,
             }
         }

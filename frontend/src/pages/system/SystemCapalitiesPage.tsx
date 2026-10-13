@@ -6,14 +6,17 @@ type CapabilitiesData = {
     formats: Array<{
         extension: string
         mime_type: string
-        native_text_extractioin: boolean
+        native_text_extraction: boolean
     }>
     master_sync: {
         source: string
         streams: string[]
         modes: string[]
+        auto_sync_supported: boolean
     }
     processing: {
+        ocr_engine: string
+        normalized_content: boolean
         scanned_pdf_ocr: boolean
         fake_ocr_demo: boolean
         chunking: {
@@ -26,7 +29,7 @@ type CapabilitiesData = {
         bag_of_words: boolean
         vector: {
             enabled: boolean
-            method: string
+            method: string | null
             semantic: boolean
             dimensions: number
         }
@@ -76,6 +79,7 @@ export function SystemCapalitiesPage() {
 
             const result: CapabilitiesData = await response.json()
 
+            if (controller.signal.aborted || controllerRef.current !== controller) return
             setData(result)
 
         } catch (e) {
@@ -119,25 +123,38 @@ export function SystemCapalitiesPage() {
                     <p>Phiên bản: {data.api_version}</p>
                 </article>
                 <article className={styles.card}>
+                    <h2>Đồng bộ dữ liệu nguồn</h2>
+                    <p>Nguồn: {data.master_sync.source === 'postgresql' ? 'PostgreSQL' : 'JSON thử nghiệm'}</p>
+                    <p>Chế độ: {data.master_sync.modes.join(', ')}</p>
+                    <p>Tự động đồng bộ: {data.master_sync.auto_sync_supported ? 'Có hỗ trợ' : 'Không hỗ trợ trong cấu hình hiện tại'}</p>
+                </article>
+                <article className={styles.card}>
                     <h2>Định dạng hỗ trợ</h2>
                     {data.formats.map((format) => (
                         <div key={format.extension}>
                             <strong>{format.extension}</strong>
                             <p>{format.mime_type}</p>
                             <p>
-                                Trích xuất văn bản: {' '} {format.native_text_extractioin ? 'Có' : 'Không'}
+                                Trích xuất văn bản: {' '} {format.native_text_extraction ? 'Có' : 'Không'}
                             </p>
                         </div>
                     ))}
                 </article>
                 <article className={styles.card}>
+                    <h2>Trích xuất và chuẩn hóa</h2>
+                    <p>Engine: {data.processing.ocr_engine}</p>
+                    <p>OCR PDF scan: {data.processing.scanned_pdf_ocr ? 'Có hỗ trợ, cần Tesseract và dữ liệu ngôn ngữ' : 'Chưa hỗ trợ trong cấu hình hiện tại'}</p>
+                    <p>Chuẩn hóa nội dung: {data.processing.normalized_content ? 'Đã hỗ trợ' : 'Chưa hỗ trợ'}</p>
+                    {data.processing.fake_ocr_demo && <p>OCR giả lập, chỉ dùng thử nghiệm.</p>}
+                </article>
+                <article className={styles.card}>
                     <h2>Phân đoạn văn bản</h2>
                     <p>
                         Trạng thái: {' '}
-                        {data.processing.chunking.enabled ? 'Đang bật' : 'Đang tắt'}
+                        {data.processing.chunking.enabled ? 'Đã tích hợp' : 'Chưa tích hợp vào pipeline'}
                     </p>
                     <p>
-                        Kích thước: {' '}
+                        Kích thước cấu hình: {' '}
                         {data.processing.chunking.size_words} từ
                     </p>
                     <p>
@@ -149,16 +166,21 @@ export function SystemCapalitiesPage() {
                     <h2>Biểu diễn vector</h2>
                     <p>
                         Trạng thái: {' '}
-                        {data.representations.vector.enabled ? 'Đang bật' : 'Đang tắt'}
+                        {data.representations.vector.enabled ? 'Đã tích hợp' : 'Chưa tích hợp vào pipeline'}
                     </p>
                     <p>
                         Phương pháp: {' '}
-                        {data.representations.vector.method}
+                        {data.representations.vector.method ?? 'Chưa cấu hình'}
                     </p>
                     <p>
-                        Số chiều: {' '}
+                        Số chiều cấu hình: {' '}
                         {data.representations.vector.dimensions}
                     </p>
+                    <p>Bag of Words: {data.representations.bag_of_words ? 'Đã tích hợp' : 'Chưa tích hợp vào pipeline'}</p>
+                </article>
+                <article className={styles.card}>
+                    <h2>Tra cứu nội dung</h2>
+                    <p>{data.retrieval.modes.length ? `Chế độ: ${data.retrieval.modes.join(', ')}` : 'Chưa tích hợp API tìm kiếm nội dung'}</p>
                 </article>
                 <article className={styles.card}>
                     <h2>Lưu trữ</h2>
@@ -172,7 +194,7 @@ export function SystemCapalitiesPage() {
                     </p>
                     <p>
                         MongoDB: {' '}
-                        {data.storage.mongodb_enabled ? 'Đang bật' : 'Đăng tắt'}
+                        {data.storage.mongodb_enabled ? 'Đã cấu hình' : 'Không sử dụng'}
                     </p>
                 </article>
             </div>}

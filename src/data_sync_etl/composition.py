@@ -110,7 +110,13 @@ class Container:
             chunk_overlap_words=self.settings.chunk_overlap_words,
             vector_dimension = self.settings.vector_dimension,
             ocr_engine=self.settings.ocr_engine,
-
+            source_adapter=self.settings.source_adapter,
+            metadata_backend=self.engine.dialect.name,
+            mongodb_enabled=documents is None,
+            auto_sync_supported=(
+                isinstance(self.source, PostgreSQLSourceAdapter)
+                and self.engine.dialect.name == "postgresql"
+            ),
         )
         self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size)
         self.auto_sync = AutoSyncCoordinator(
