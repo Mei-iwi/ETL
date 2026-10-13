@@ -16,6 +16,28 @@ def test_health_admin_disabled(container):
         assert response.status_code == 200 and response.json()["database"] == "ok"
         assert response.headers["X-Correlation-ID"]
         assert client.post("/admin/sync/master", json={"full": True}).status_code == 403
+        assert client.post("/api/v1/master-data/sync", json={"full": True}).status_code == 403
+
+
+def test_master_sync_v1_contract_and_tag(container):
+    container.settings.admin_enabled = True
+    app = create_app(container)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/master-data/sync",
+            json={"stream": "all", "full": True},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"grades", "subjects", "users", "resources"}
+    result = body["resources"]
+    assert set(result) == {
+        "run_id", "records_read", "inserted", "updated", "skipped", "failed"
+    }
+    operation = app.openapi()["paths"]["/api/v1/master-data/sync"]["post"]
+    assert operation["tags"] == ["Learning Resource Ingestion and Management"]
+    assert "/admin/sync/master" not in app.openapi()["paths"]
 
 
 def test_system_capabilities(container):

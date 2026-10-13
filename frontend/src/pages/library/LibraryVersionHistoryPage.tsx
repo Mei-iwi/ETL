@@ -167,7 +167,7 @@ export function LibraryVersionHistoryPage() {
                                     <div>
                                         <dt>Cập nhật gần nhất</dt>
                                         <dd>
-                                            {new Date(resource.updated_at).toLocaleString('vi-VN')}
+                                            {new Date(version.updated_at).toLocaleString('vi-VN')}
                                         </dd>
                                     </div>
                                 </dl>

@@ -1,9 +1,10 @@
 from ipaddress import ip_address
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
+from data_sync_etl.api.master_sync_schemas import MasterSyncRequest, MasterSyncRunResult
 from data_sync_etl.api.processing_schemas import (
     ProcessingJobStatusResponse,
     ProcessVersionResponse,
@@ -63,11 +64,6 @@ ResourceId = Annotated[str, Path(min_length=1, max_length=30)]
 
 class AdminInput(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-
-class SyncInput(AdminInput):
-    stream: Literal["all", "resources", "users", "grades", "subjects"] = "all"
-    full: bool = False
 
 
 class IngestInput(AdminInput):
@@ -500,8 +496,18 @@ def retry_processing_job(
         response.status_code = 200
     return RetryProcessingJobResponse.model_validate(result)
 
-@router.post("/admin/sync/master")
-def sync(body: SyncInput, request: Request):
+@router.post(
+    "/api/v1/master-data/sync",
+    tags=[TAG_MASTER],
+    summary="Đồng bộ dữ liệu nguồn vào Master Data",
+    response_model=dict[str, MasterSyncRunResult],
+)
+def sync_master_data(body: MasterSyncRequest, request: Request):
+    return services(request).sync.run(body.stream, body.full)
+
+
+@router.post("/admin/sync/master", include_in_schema=False)
+def sync(body: MasterSyncRequest, request: Request):
     return services(request).sync.run(body.stream, body.full)
 
 

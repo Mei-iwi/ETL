@@ -1,0 +1,138 @@
+.page {
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
+    padding-bottom: 24px;
+}
+
+.page h1 {
+    margin: 0 0 20px;
+    color: #172554;
+    font-size: clamp(26px, 3vw, 34px);
+}
+
+.card {
+    padding: 24px;
+    background-color: #ffffff;
+    border: 1px solid #e5eaf1;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgb(15 23 42 / 6%);
+}
+
+.form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.field {
+    display: grid;
+    gap: 7px;
+}
+
+.field label {
+    color: #334155;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.field select {
+    min-height: 42px;
+    padding: 9px 12px;
+    color: #1e293b;
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font: inherit;
+}
+
+.actions {
+    display: flex;
+    align-items: end;
+}
+
+.button {
+    min-height: 42px;
+    padding: 9px 16px;
+    color: #ffffff;
+    background-color: #2563eb;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+    background-color: #1d4ed8;
+}
+
+.button:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.error {
+    margin: 16px 0 0;
+    color: #b91c1c;
+    font-size: 14px;
+}
+
+.results {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.resultCard {
+    padding: 18px;
+    background-color: #ffffff;
+    border: 1px solid #e5eaf1;
+    border-radius: 12px;
+}
+
+.resultCard h2 {
+    margin: 0 0 14px;
+    color: #172554;
+    font-size: 18px;
+}
+
+.metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0;
+}
+
+.metrics div {
+    padding: 10px;
+    background-color: #f8fafc;
+    border-radius: 8px;
+}
+
+.metrics dt {
+    color: #64748b;
+    font-size: 12px;
+}
+
+.metrics dd {
+    margin: 4px 0 0;
+    color: #1e293b;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+@media (max-width: 640px) {
+    .card {
+        padding: 18px;
+    }
+
+    .form {
+        grid-template-columns: 1fr;
+    }
+
+    .button {
+        width: 100%;
+    }
+}

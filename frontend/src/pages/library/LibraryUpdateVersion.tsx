@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 
 import { useUpdateResourceMetadata } from '../../hooks/useUpdateResourceMetadata'
@@ -12,6 +12,8 @@ import {
     type ResourceTypeOption,
     type SubjectOption,
 } from '../../services/libraryLookupApi'
+import { startProcessing } from '../../services/processingApi'
+import { createResourceVersion } from '../../services/resourceApi'
 import type {
     PublicationStatus,
     UpdateResourceMetadataRequest,
@@ -26,6 +28,8 @@ type ResourceDetailResponse = {
     subjects: { id: string }[]
     grade_levels: { id: string }[]
 }
+
+type UpdateStage = 'idle' | 'metadata' | 'uploading' | 'processing'
 
 export function LibraryUpdateVersion() {
     const { resourceId } = useParams<{ resourceId: string }>()
@@ -42,6 +46,11 @@ export function LibraryUpdateVersion() {
     const [subjects, setSubjects] = useState<SubjectOption[]>([])
     const [loading, setLoading] = useState(true)
     const [loadError, setLoadError] = useState('')
+    const [updateStage, setUpdateStage] = useState<UpdateStage>('idle')
+    const [versionError, setVersionError] = useState('')
+    const [versionMessage, setVersionMessage] = useState('')
+    const [returnToDetail, setReturnToDetail] = useState(false)
+    const submittingRef = useRef(false)
     const { mutate, isLoading, error, data, reset } = useUpdateResourceMetadata()
 
     const selectedResourceType = resourceTypes.find((item) => item.code === resourceTypeCode)
@@ -118,18 +127,22 @@ export function LibraryUpdateVersion() {
     const detailPath = `/library/${encodeURIComponent(resourceId ?? '')}`
 
     useEffect(() => {
-        if (!data) return
+        if (!data || !returnToDetail) return
 
         const timer = window.setTimeout(() => {
             navigate(detailPath)
         }, 2500)
 
         return () => window.clearTimeout(timer)
-    }, [data, detailPath, navigate])
+    }, [data, detailPath, navigate, returnToDetail])
 
     async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault()
-        if (!resourceId || !selectedResourceType || !selectedProvider) return
+        if (submittingRef.current || !resourceId || !selectedResourceType || !selectedProvider) return
+
+        const formData = new FormData(event.currentTarget)
+        const fileValue = formData.get('file')
+        const file = fileValue instanceof File && fileValue.size > 0 ? fileValue : null
 
         const payload: UpdateResourceMetadataRequest = {
             title: title.trim(),
@@ -143,10 +156,77 @@ export function LibraryUpdateVersion() {
             publication_status: publicationStatus,
         }
 
-        await mutate(resourceId, payload)
+        submittingRef.current = true
+        setUpdateStage('metadata')
+        setVersionError('')
+        setVersionMessage('')
+        setReturnToDetail(false)
+        let metadataUpdated = false
+
+        try {
+            await mutate(resourceId, payload)
+            metadataUpdated = true
+
+            if (!file) {
+                setVersionMessage('Cập nhật thông tin học liệu thành công.')
+                setReturnToDetail(true)
+                return
+            }
+
+            setUpdateStage('uploading')
+            const version = await createResourceVersion(resourceId, file)
+            if (!version.resource_version_id) {
+                throw new Error('Phản hồi tạo phiên bản thiếu mã phiên bản')
+            }
+
+            if (version.action === 'NO_CHANGE') {
+                setVersionMessage('Tệp không thay đổi, không cần xử lý lại.')
+                setReturnToDetail(true)
+                return
+            }
+
+            setUpdateStage('processing')
+            try {
+                const processResult = await startProcessing(version.resource_version_id)
+                if (!processResult.job_id) throw new Error('Phản hồi xử lý thiếu mã job')
+                navigate(
+                    `/library/processing?versionId=${encodeURIComponent(version.resource_version_id)}&jobId=${encodeURIComponent(processResult.job_id)}`,
+                    { replace: true },
+                )
+            } catch (processError) {
+                const detail = processError instanceof Error ? `: ${processError.message}` : ''
+                navigate(
+                    `/library/processing?versionId=${encodeURIComponent(version.resource_version_id)}`,
+                    {
+                        replace: true,
+                        state: {
+                            processingNotice: `Đã tạo phiên bản mới, chưa xác nhận được yêu cầu xử lý${detail}`,
+                        },
+                    },
+                )
+            }
+        } catch (cause) {
+            if (metadataUpdated) {
+                setVersionError(
+                    cause instanceof Error
+                        ? `Đã cập nhật metadata nhưng không thể cập nhật tệp: ${cause.message}`
+                        : 'Đã cập nhật metadata nhưng không thể cập nhật tệp.',
+                )
+            }
+        } finally {
+            submittingRef.current = false
+            setUpdateStage('idle')
+        }
     }
 
-    const formDisabled = loading || isLoading || Boolean(loadError)
+    const formDisabled = loading || isLoading || updateStage !== 'idle' || Boolean(loadError)
+    const submitLabel = updateStage === 'metadata'
+        ? 'Đang lưu thông tin...'
+        : updateStage === 'uploading'
+            ? 'Đang tạo phiên bản mới...'
+            : updateStage === 'processing'
+                ? 'Đang khởi chạy xử lý...'
+                : 'Lưu và xử lý thay đổi'
 
     return (
         <section className={styles.page}>
@@ -260,8 +340,24 @@ export function LibraryUpdateVersion() {
                         </select>
                     </div>
 
+                    <div className={styles.field}>
+                        <label htmlFor="file">Thay tệp học liệu (không bắt buộc)</label>
+                        <input
+                            id="file"
+                            name="file"
+                            type="file"
+                            accept="application/pdf,.pdf"
+                            disabled={formDisabled}
+                        />
+                    </div>
+
                     {error && <p className={styles.alert} role="alert">{error}</p>}
-                    {data && <p role="status" className={styles.success}>Cập nhật học liệu thành công!</p>}
+                    {versionError && <p className={styles.alert} role="alert">{versionError}</p>}
+                    {data && updateStage === 'idle' && (
+                        <p role="status" className={styles.success}>
+                            {versionMessage || 'Cập nhật học liệu thành công!'}
+                        </p>
+                    )}
 
                     <div className={styles.actions}>
                         <button
@@ -269,9 +365,9 @@ export function LibraryUpdateVersion() {
                             type="submit"
                             disabled={formDisabled || !title.trim() || !selectedResourceType || !selectedProvider}
                         >
-                            {isLoading ? 'Đang lưu...' : 'Lưu thay đổi'}
+                            {submitLabel}
                         </button>
-                        <button className={styles.secondaryButton} type="button" onClick={() => navigate(detailPath)}>
+                        <button className={styles.secondaryButton} type="button" onClick={() => navigate(detailPath)} disabled={formDisabled}>
                             Hủy
                         </button>
                     </div>

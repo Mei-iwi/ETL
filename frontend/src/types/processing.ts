@@ -35,3 +35,25 @@ export type ProcessingJobResult = {
     updated_at: string
     stage_runs: unknown[]
 }
+
+export type ContentUnit = {
+    id: string
+    resource_version_id: string
+    parent_unit_id: string | null
+    unit_type: string
+    title: string | null
+    sequence_no: number
+    page_from: number | null
+    page_to: number | null
+    review_status: string
+    retrieval_eligible: boolean
+    text: string
+    page_result_id: string
+}
+
+export type ContentUnitsResult = {
+    items: ContentUnit[]
+    total: number
+    offset: number
+    limit: number
+}

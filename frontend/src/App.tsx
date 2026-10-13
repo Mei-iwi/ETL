@@ -28,6 +28,7 @@ import { RunExperimentPage } from './pages/experiments/RunExperimentPage'
 
 import { SystemStatusPage } from './pages/system/SystemStatusPage'
 import { SystemCapalitiesPage } from './pages/system/SystemCapalitiesPage'
+import { SystemMasterSyncPage } from './pages/system/SystemMasterSyncPage'
 import { LibraryUpdateVersion } from './pages/library/LibraryUpdateVersion'
 
 export default function App() {
@@ -71,6 +72,7 @@ export default function App() {
             <Route index element={<Navigate to='status' />} />
             <Route path='status' element={<SystemStatusPage />} />
             <Route path='capabilities' element={<SystemCapalitiesPage />} />
+            <Route path='master-sync' element={<SystemMasterSyncPage />} />
           </Route>
         </Route>
 
