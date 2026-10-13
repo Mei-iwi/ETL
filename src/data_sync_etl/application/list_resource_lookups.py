@@ -8,6 +8,49 @@ class ListResourceLookups:
         self.uow = uow
 
     @staticmethod
+    def _canonical_active_identity(
+        group: list[dict],
+        *,
+        identity_fields: tuple[str, ...],
+        active_field: str,
+        deleted_field: str,
+        freshness_field: str,
+    ) -> tuple[str, ...] | None:
+        """Return the most common valid identity in a denormalized lookup group.
+
+        Master resources carry a snapshot of provider/type metadata. A stale
+        resource row must not make the whole lookup disappear when another row
+        still contains the current active metadata.
+        """
+        candidates: dict[tuple[str, ...], tuple[int, object]] = {}
+        for row in group:
+            if not row[active_field] or row[deleted_field] is not None:
+                continue
+            identity = tuple((row[field] or '').strip() for field in identity_fields)
+            if not all(identity):
+                continue
+            count, latest = candidates.get(identity, (0, None))
+            timestamp = row.get(freshness_field) or row.get("updated_at")
+            if latest is None or (timestamp is not None and timestamp > latest):
+                latest = timestamp
+            candidates[identity] = (count + 1, latest)
+
+        if not candidates:
+            return None
+
+        # Prefer the majority snapshot, then the freshest metadata snapshot.
+        # Identity is a deterministic tie-breaker for legacy rows with equal data.
+        return max(
+            candidates,
+            key=lambda identity: (
+                candidates[identity][0],
+                candidates[identity][1] is not None,
+                candidates[identity][1],
+                identity,
+            ),
+        )
+
+    @staticmethod
     def _paginate(items: list[dict], page: int, size: int) -> dict:
         total = len(items)
         offset = (page - 1) * size
@@ -40,17 +83,16 @@ class ListResourceLookups:
 
         items = []
         for code, group in grouped.items():
-            identities = {
-                (row["resource_type_id"], row["resource_type_name_vi"].strip())
-                for row in group
-            }
-            valid = all(
-                row["resource_type_is_active"] and row["resource_type_deleted_at"] is None
-                for row in group
+            identity = self._canonical_active_identity(
+                group,
+                identity_fields=("resource_type_id", "resource_type_name_vi"),
+                active_field="resource_type_is_active",
+                deleted_field="resource_type_deleted_at",
+                freshness_field="resource_type_updated_at",
             )
-            if len(identities) != 1 or not valid:
+            if identity is None:
                 continue
-            _, name = next(iter(identities))
+            _, name = identity
             if name and self._matches(query, code, name):
                 items.append({"code": code, "name": name})
 
@@ -69,20 +111,16 @@ class ListResourceLookups:
 
         items = []
         for provider_id, group in grouped.items():
-            identities = {
-                (
-                    (row["provider_name"] or "").strip(),
-                    (row["provider_type"] or "").strip(),
-                )
-                for row in group
-            }
-            valid = all(
-                row["provider_is_active"] and row["provider_deleted_at"] is None
-                for row in group
+            identity = self._canonical_active_identity(
+                group,
+                identity_fields=("provider_name", "provider_type"),
+                active_field="provider_is_active",
+                deleted_field="provider_deleted_at",
+                freshness_field="provider_updated_at",
             )
-            if len(identities) != 1 or not valid:
+            if identity is None:
                 continue
-            name, provider_type = next(iter(identities))
+            name, provider_type = identity
             if name and provider_type and self._matches(query, provider_id, name):
                 items.append(
                     {

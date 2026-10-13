@@ -1,4 +1,5 @@
 import io
+from datetime import UTC, datetime
 
 import pymupdf
 from fastapi.testclient import TestClient
@@ -78,6 +79,26 @@ def test_resource_type_and_provider_catalogs_exclude_inactive_metadata(container
 
     assert all(item["code"] != "TEXTBOOK" for item in resource_types)
     assert all(item["id"] != "provider-1" for item in providers)
+
+
+def test_catalog_keeps_active_identity_when_one_snapshot_is_stale(container):
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        repo.update(
+            "master_learning_resources",
+            "resource-3",
+            {
+                "resource_type_id": "stale-type",
+                "resource_type_name_vi": "Legacy name",
+                "resource_type_updated_at": datetime(2025, 1, 1, tzinfo=UTC),
+            },
+        )
+
+    with TestClient(create_app(container)) as client:
+        resource_types = client.get("/api/v1/resource-types").json()["items"]
+
+    assert {item["code"] for item in resource_types} == {"HANDOUT", "TEXTBOOK"}
+    assert next(item for item in resource_types if item["code"] == "HANDOUT")["name"] == "Tai lieu"
 
 
 def test_catalog_values_are_accepted_by_create_resource(container):
