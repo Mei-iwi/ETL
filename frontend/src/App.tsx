@@ -11,6 +11,7 @@ import { OverviewSummary } from './pages/overview/OverviewSummary'
 import { OverviewProcess } from './pages/overview/OverviewProcess'
 
 import { LibraryListPage } from './pages/library/LibraryListPage'
+import { LibrarySyncErrorsPage } from './pages/library/LibrarySyncErrorsPage'
 import { LibraryCreatePage } from './pages/library/LibraryCreatePage'
 import { LibraryProcessingPage } from './pages/library/LibraryProcessingPage'
 import { LibraryIndexingPage } from './pages/library/LibraryIndexingPage'
@@ -52,6 +53,7 @@ export default function App() {
             <Route path='processing' element={<LibraryProcessingPage />} />
             <Route path='indexing' element={<LibraryIndexingPage />} />
             <Route path='source-sync' element={<SystemMasterSyncPage />} />
+            <Route path='source-sync-errors' element={<LibrarySyncErrorsPage />} />
             <Route path=":resourceId" element={<LibraryResourceDetailPage />}/>
             <Route path=':resourceId/versions' element={<LibraryVersionHistoryPage />}/>
             <Route path=':resourceId/update-version' element={<LibraryUpdateVersion />}/>

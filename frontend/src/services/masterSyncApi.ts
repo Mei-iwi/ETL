@@ -18,8 +18,10 @@ async function getErrorMessage(response: Response) {
 export async function getSourceSyncFiles(
     after: string | null,
     signal?: AbortSignal,
+    options: { size?: number; status?: 'failed' } = {},
 ): Promise<SourceSyncFilesResponse> {
-    const params = new URLSearchParams({ size: '20' })
+    const params = new URLSearchParams({ size: String(options.size ?? 20) })
+    if (options.status) params.set('status', options.status)
     if (after) params.set('after', after)
     const response = await fetch(`/api/v1/master-data/sync/files?${params}`, {
         signal,

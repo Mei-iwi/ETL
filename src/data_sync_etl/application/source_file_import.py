@@ -286,10 +286,10 @@ class SourceFileImportService:
             return row["manual_retries"] < self.settings.processing_manual_retry_limit
         return row["status"] == "PROCESSING" and self._processing(repo, row)[1]
 
-    def list_files(self, after=None, size=20):
+    def list_files(self, after=None, size=20, failed_only=False):
         availability = self.availability()
         with self.uow() as repo:
-            rows = repo.source_import_page(after, size + 1)
+            rows = repo.source_import_page(after, size + 1, failed_only=failed_only)
             undiscovered = repo.count("source_file_imports", {}) == 0
             items = []
             for row in rows[:size]:
@@ -305,7 +305,7 @@ class SourceFileImportService:
                     and self._eligible(repo, row),
                     "target_version_id": row["target_version_id"], "processing_job_id": row["processing_job_id"],
                 })
-        if undiscovered and hasattr(self.source, "list_versions"):
+        if not failed_only and undiscovered and hasattr(self.source, "list_versions"):
             # Preserve the initial metadata view before the worker has discovered any jobs.
             return {**self.source.list_versions(after=after, size=size), **availability}
         return {"items": items, "next_cursor": rows[size - 1]["source_version_id"] if len(rows) > size else None,

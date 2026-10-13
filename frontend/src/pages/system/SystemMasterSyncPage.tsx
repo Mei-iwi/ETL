@@ -41,7 +41,6 @@ export function SystemMasterSyncPage() {
     const [loading, setLoading] = useState(false)
     const [actionError, setActionError] = useState('')
     const [statusError, setStatusError] = useState('')
-    const [fileError, setFileError] = useState('')
     const [statusLoading, setStatusLoading] = useState(true)
     const [autoPending, setAutoPending] = useState(false)
     const [result, setResult] = useState<MasterSyncResponse | null>(null)
@@ -143,7 +142,7 @@ export function SystemMasterSyncPage() {
     else if (statusError) currentStatus = 'Không thể cập nhật'
     else if (syncInProgress) currentStatus = 'Đang đồng bộ'
 
-    const fileNotice = fileError || (syncStatus?.file_sync_supported === false
+    const fileNotice = (syncStatus?.file_sync_supported === false
         ? syncStatus.file_sync_error === 'BLOCKED_SOURCE_DATABASE'
             ? 'Chưa có nguồn PostgreSQL.'
             : 'Kho tệp nguồn chưa sẵn sàng.'
@@ -162,7 +161,7 @@ export function SystemMasterSyncPage() {
     return (
         <section className={styles.page}>
             <h1>Đồng bộ dữ liệu nguồn</h1>
-            {fileNotice && <p className={styles.notice} role={fileError ? 'alert' : 'status'}>{fileNotice}</p>}
+            {fileNotice && <p className={styles.notice} role="status">{fileNotice}</p>}
             {(actionError || statusError) && <p className={styles.error} role="alert">{actionError || statusError}</p>}
             <div className={`${styles.card} ${styles.statusCard}`}>
                 <div>
@@ -264,13 +263,15 @@ export function SystemMasterSyncPage() {
                     </div>
                 </div>
             )}
-            <SourceSyncFilesSection onError={setFileError} />
             {dialog}
         </section>
     )
 }
 
-function SourceSyncFilesSection({ onError }: { onError: (message: string) => void }) {
+export function SourceSyncFilesSection({ onError, failedOnly = false }: {
+    onError: (message: string) => void
+    failedOnly?: boolean
+}) {
     const { confirm, dialog } = useConfirmation()
     const [cursors, setCursors] = useState<Array<string | null>>([null])
     const [files, setFiles] = useState<SourceSyncFilesResponse | null>(null)
@@ -288,7 +289,7 @@ function SourceSyncFilesSection({ onError }: { onError: (message: string) => voi
         async function pollFiles() {
             controller = new AbortController()
             try {
-                const response = await getSourceSyncFiles(cursor, controller.signal)
+                const response = await getSourceSyncFiles(cursor, controller.signal, failedOnly ? { size: 7, status: 'failed' } : {})
                 if (active) {
                     setFiles(response)
                     onError('')
@@ -310,7 +311,7 @@ function SourceSyncFilesSection({ onError }: { onError: (message: string) => voi
             controller?.abort()
             if (timer !== undefined) window.clearTimeout(timer)
         }
-    }, [cursor, refresh, onError])
+    }, [cursor, refresh, onError, failedOnly])
 
     async function retry(fileId?: string) {
         if (retryingRef.current) return
@@ -341,6 +342,7 @@ function SourceSyncFilesSection({ onError }: { onError: (message: string) => voi
         } finally {
             retryingRef.current = false
             setRetryPending(false)
+            if (failedOnly) setCursors([null])
             setRefresh((value) => value + 1)
         }
     }
@@ -373,14 +375,16 @@ function SourceSyncFilesSection({ onError }: { onError: (message: string) => voi
     }
 
     return (
-        <section className={`${styles.card} ${styles.files}`} aria-label="Tệp học liệu từ nguồn">
+        <section className={`${styles.card} ${styles.files}`} aria-label={failedOnly ? 'Tệp đồng bộ lỗi' : 'Tệp học liệu từ nguồn'}>
             {dialog}
-            <h2>Tệp học liệu từ nguồn</h2>
+            <h2>{failedOnly ? 'Tệp đồng bộ lỗi' : 'Tệp học liệu từ nguồn'}</h2>
+            {files && !files.file_sync_supported && <p className={styles.notice}>Kho tệp nguồn chưa sẵn sàng.</p>}
+            {files?.file_sync_supported && !files.file_worker_healthy && <p className={styles.notice}>Worker nhập tệp chưa hoạt động.</p>}
             {files?.items.some((file) => file.retry_eligible) && <button className={styles.button} type="button"
                 disabled={retryPending} onClick={() => void retry()}>Thử lại tất cả file lỗi</button>}
             {retryMessage && <p className={styles.statusLabel} role="status">{retryMessage}</p>}
             {loading && <p className={styles.statusLabel}>Đang tải...</p>}
-            {files && files.items.length === 0 && <p className={styles.statusLabel}>Chưa có phiên bản nguồn.</p>}
+            {files && files.items.length === 0 && <p className={styles.statusLabel}>{failedOnly ? 'Không có tệp đồng bộ lỗi.' : 'Chưa có phiên bản nguồn.'}</p>}
             {files && files.items.length > 0 && (
                 <div className={styles.tableWrap}>
                     <table className={styles.fileTable}>

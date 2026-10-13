@@ -12,8 +12,10 @@ from data_sync_etl.db.models import (
     MODELS,
     ContentUnit,
     ContentUnitText,
+    EtlStageRun,
     MasterGradeLevel,
     MasterLearningResource,
+    OcrJob,
     OcrPageTask,
     ResourceGradeLevel,
     ResourceSubject,
@@ -177,7 +179,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             .on_conflict_do_nothing(index_elements=["stream_name"])
         )
 
-    def source_import_page(self, after=None, size=20, retry_candidates=False):
+    def source_import_page(self, after=None, size=20, retry_candidates=False, failed_only=False):
         model = SourceFileImport
         key = model.source_version_id
         if self.session.bind.dialect.name == "postgresql":
@@ -187,6 +189,33 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             stmt = stmt.where(key > after)
         if retry_candidates:
             stmt = stmt.where(model.status.in_(["FAILED", "RETRY_EXHAUSTED", "PROCESSING"]))
+        if failed_only:
+            def latest_stage(stage):
+                return select(EtlStageRun.status).where(
+                    EtlStageRun.resource_version_id == model.target_version_id,
+                    EtlStageRun.stage == stage,
+                ).order_by(EtlStageRun.created_at.desc(), EtlStageRun.id.desc()).limit(1).correlate(model).scalar_subquery()
+
+            projection = latest_stage("MONGO_PROJECTION")
+            postprocess = latest_stage("POSTPROCESS")
+            pending_retry = exists().where(
+                EtlStageRun.resource_version_id == model.target_version_id,
+                EtlStageRun.stage == "FINALIZATION_RETRY", EtlStageRun.status == "PENDING",
+            )
+            finalization_failed = and_(~pending_retry, or_(
+                projection == "FAILED",
+                and_(or_(projection.is_(None), projection != "RUNNING"), postprocess == "FAILED"),
+            ))
+            processing_failed = exists().where(
+                OcrJob.id == model.processing_job_id,
+                or_(OcrJob.status.in_(["FAILED", "COMPLETED_WITH_ERRORS"]),
+                    and_(OcrJob.status == "COMPLETED", or_(
+                        OcrJob.failed_pages > 0, OcrJob.completed_pages != OcrJob.total_pages,
+                        finalization_failed,
+                    ))),
+            )
+            stmt = stmt.where(or_(model.status.in_(["FAILED", "RETRY_EXHAUSTED"]),
+                                  and_(model.status == "PROCESSING", processing_failed)))
         return [self._dict(row) for row in self.session.scalars(stmt.order_by(key).limit(size))]
 
     def claim_source_import(self, stamp, token, expires_at):
