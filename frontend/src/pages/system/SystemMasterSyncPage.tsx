@@ -377,17 +377,28 @@ export function SourceSyncFilesSection({ onError, failedOnly = false }: {
     return (
         <section className={`${styles.card} ${styles.files}`} aria-label={failedOnly ? 'Tệp đồng bộ lỗi' : 'Tệp học liệu từ nguồn'}>
             {dialog}
-            <h2>{failedOnly ? 'Tệp đồng bộ lỗi' : 'Tệp học liệu từ nguồn'}</h2>
+            <div className={styles.filesHeader}>
+                <h2>{failedOnly ? 'Tệp đồng bộ lỗi' : 'Tệp học liệu từ nguồn'}</h2>
+                {files?.items.some((file) => file.retry_eligible) && <button className={`${styles.button} ${styles.fileAction}`} type="button"
+                    disabled={retryPending} onClick={() => void retry()}>Thử lại tất cả file lỗi</button>}
+            </div>
             {files && !files.file_sync_supported && <p className={styles.notice}>Kho tệp nguồn chưa sẵn sàng.</p>}
             {files?.file_sync_supported && !files.file_worker_healthy && <p className={styles.notice}>Worker nhập tệp chưa hoạt động.</p>}
-            {files?.items.some((file) => file.retry_eligible) && <button className={styles.button} type="button"
-                disabled={retryPending} onClick={() => void retry()}>Thử lại tất cả file lỗi</button>}
             {retryMessage && <p className={styles.statusLabel} role="status">{retryMessage}</p>}
             {loading && <p className={styles.statusLabel}>Đang tải...</p>}
             {files && files.items.length === 0 && <p className={styles.statusLabel}>{failedOnly ? 'Không có tệp đồng bộ lỗi.' : 'Chưa có phiên bản nguồn.'}</p>}
             {files && files.items.length > 0 && (
                 <div className={styles.tableWrap}>
-                    <table className={styles.fileTable}>
+                    <table className={`${styles.fileTable} ${styles.importTable}`}>
+                        <colgroup>
+                            <col style={{ width: '27%' }} />
+                            <col style={{ width: '9%' }} />
+                            <col style={{ width: '11%' }} />
+                            <col style={{ width: '12%' }} />
+                            <col style={{ width: '7%' }} />
+                            <col style={{ width: '22%' }} />
+                            <col style={{ width: '12%' }} />
+                        </colgroup>
                         <thead><tr><th>Học liệu</th><th>Phiên bản</th><th>Nhập tệp</th><th>OCR/ETL</th><th>Lần thử</th><th>Lỗi</th><th>Thao tác</th></tr></thead>
                         <tbody>
                             {files.items.map((file) => (
@@ -398,8 +409,8 @@ export function SourceSyncFilesSection({ onError, failedOnly = false }: {
                                     <td>{file.etl_status ? etlLabels[file.etl_status] ?? file.etl_status : '—'}</td>
                                     <td>{file.retry_count ?? '—'}</td>
                                     <td>{file.last_error_code ? errorLabels[file.last_error_code] ?? 'Lỗi xử lý, cần kiểm tra' : '—'}</td>
-                                    <td>{file.retry_eligible && file.import_job_id && <button className={styles.button}
-                                        type="button" disabled={retryPending} onClick={() => void retry(file.import_job_id!)}>Thử lại</button>}</td>
+                                    <td>{file.retry_eligible && file.import_job_id ? <button className={`${styles.button} ${styles.fileAction}`}
+                                        type="button" disabled={retryPending} onClick={() => void retry(file.import_job_id!)}>Thử lại</button> : '—'}</td>
                                 </tr>
                             ))}
                         </tbody>
