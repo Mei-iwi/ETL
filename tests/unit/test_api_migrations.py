@@ -1,4 +1,5 @@
 import ast
+from contextlib import contextmanager
 from pathlib import Path
 
 from conftest import migrate
@@ -17,6 +18,10 @@ def test_health_admin_disabled(container):
         assert response.headers["X-Correlation-ID"]
         assert client.post("/admin/sync/master", json={"full": True}).status_code == 403
         assert client.post("/api/v1/master-data/sync", json={"full": True}).status_code == 403
+        assert client.get("/api/v1/master-data/sync/status").status_code == 403
+        assert client.patch(
+            "/api/v1/master-data/sync/auto", json={"enabled": False}
+        ).status_code == 403
 
 
 def test_master_sync_v1_contract_and_tag(container):
@@ -37,7 +42,74 @@ def test_master_sync_v1_contract_and_tag(container):
     }
     operation = app.openapi()["paths"]["/api/v1/master-data/sync"]["post"]
     assert operation["tags"] == ["Learning Resource Ingestion and Management"]
+    status_response = client.get("/api/v1/master-data/sync/status")
+    assert status_response.status_code == 200
+    status = status_response.json()
+    assert status["auto_supported"] is False
+    assert status["auto_enabled"] is False
+    assert status["worker_healthy"] is False
+    assert status["auto_running"] is False
+    assert status["auto_all_enabled"] is False
+    assert len(status["auto_streams"]) == 4
+    assert {item["sync_mode"] for item in status["auto_streams"]} == {"INCREMENTAL"}
+    assert status["runs"][0]["sync_mode"] == "FULL"
+    assert status["runs"][0]["status"] == "COMPLETED"
+    status_operation = app.openapi()["paths"]["/api/v1/master-data/sync/status"]["get"]
+    assert status_operation["tags"] == ["Learning Resource Ingestion and Management"]
+    auto_operation = app.openapi()["paths"]["/api/v1/master-data/sync/auto"]["patch"]
+    assert auto_operation["tags"] == ["Learning Resource Ingestion and Management"]
+    assert client.patch(
+        "/api/v1/master-data/sync/auto", json={"enabled": True}
+    ).status_code == 409
+    disabled = client.patch(
+        "/api/v1/master-data/sync/auto", json={"enabled": False}
+    )
+    assert disabled.status_code == 200 and disabled.json()["auto_enabled"] is False
+    assert client.patch(
+        "/api/v1/master-data/sync/auto", json={"enabled": False, "extra": True}
+    ).status_code == 422
     assert "/admin/sync/master" not in app.openapi()["paths"]
+
+
+def test_master_sync_conflict_returns_409(container, monkeypatch):
+    container.settings.admin_enabled = True
+
+    @contextmanager
+    def busy_sync():
+        yield False
+
+    monkeypatch.setattr(container.uow, "sync_lock", busy_sync)
+    with TestClient(create_app(container)) as client:
+        response = client.post("/api/v1/master-data/sync", json={"full": False})
+    assert response.status_code == 409
+
+
+def test_auto_sync_api_configures_individual_streams_and_all(container):
+    container.settings.admin_enabled = True
+    container.auto_sync.environment_supported = True
+    container.auto_sync.source_health = lambda: None
+    container.sync.run(full=True)
+    container.auto_sync.heartbeat_and_claim("worker-1")
+
+    with TestClient(create_app(container)) as client:
+        response = client.patch(
+            "/api/v1/master-data/sync/auto",
+            json={"enabled": True, "stream": "resources"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["auto_enabled"] is True
+        assert body["auto_all_enabled"] is False
+        assert [item["stream_name"] for item in body["auto_streams"] if item["enabled"]] == [
+            "resources"
+        ]
+
+        response = client.patch(
+            "/api/v1/master-data/sync/auto",
+            json={"enabled": True, "stream": "all"},
+        )
+        assert response.status_code == 200
+        assert response.json()["auto_all_enabled"] is True
 
 
 def test_system_capabilities(container):
@@ -84,12 +156,18 @@ def test_migration_up_down_up(container):
     migrate(container.engine, "base", downgrade=True)
     assert inspect(container.engine).get_table_names() == ["alembic_version"]
     migrate(container.engine)
-    assert len(inspect(container.engine).get_table_names()) == 16
+    assert len(inspect(container.engine).get_table_names()) == 18
+    assert "sync_mode" in {
+        column["name"] for column in inspect(container.engine).get_columns("sync_runs")
+    }
     assert len(inspect(container.engine).get_foreign_keys("ocr_page_tasks")) == 1
 
 
 def test_cli_demo_and_rerun(container):
     assert parser().parse_args(["sync-master", "--full"]).full
+    assert parser().parse_args(
+        ["run-master-sync-worker", "--worker-id", "worker-1", "--once"]
+    ).once
     assert demo_run(container, "resource-1")["content_unit_count"] == 3
     assert demo_run(container, "resource-1")["action"] == "NO_CHANGE"
 

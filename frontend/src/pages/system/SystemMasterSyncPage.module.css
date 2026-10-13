@@ -19,6 +19,28 @@
     box-shadow: 0 4px 12px rgb(15 23 42 / 6%);
 }
 
+.statusCard {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.statusCard > div {
+    display: grid;
+    gap: 5px;
+}
+
+.statusLabel {
+    color: #64748b;
+    font-size: 12px;
+}
+
+.statusValue {
+    color: #1e293b;
+    font-size: 14px;
+}
+
 .form {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -49,6 +71,81 @@
 .actions {
     display: flex;
     align-items: end;
+}
+
+.autoPanel {
+    grid-column: 1 / -1;
+    display: grid;
+    border-top: 1px solid #e5eaf1;
+}
+
+.autoHeader,
+.autoRow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 120px auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 42px;
+}
+
+.autoHeader {
+    color: #334155;
+    font-size: 14px;
+}
+
+.autoHeader span {
+    grid-column: 2 / -1;
+    color: #64748b;
+    font-size: 12px;
+    text-align: right;
+}
+
+.autoRow {
+    border-top: 1px solid #f1f5f9;
+    color: #334155;
+    font-size: 14px;
+}
+
+.autoRow span:nth-child(2) {
+    color: #64748b;
+    font-size: 12px;
+}
+
+.autoRow input {
+    position: relative;
+    width: 38px;
+    height: 22px;
+    margin: 0;
+    appearance: none;
+    background-color: #cbd5e1;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.autoRow input::after {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    background-color: #ffffff;
+    border-radius: 50%;
+    content: '';
+    transition: transform 0.15s ease;
+}
+
+.autoRow input:checked {
+    background-color: #2563eb;
+}
+
+.autoRow input:checked::after {
+    transform: translateX(16px);
+}
+
+.autoRow input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
 }
 
 .button {
@@ -130,6 +227,10 @@
 
     .form {
         grid-template-columns: 1fr;
+    }
+
+    .statusCard {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .button {

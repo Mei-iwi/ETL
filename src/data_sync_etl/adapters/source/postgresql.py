@@ -204,5 +204,9 @@ class PostgreSQLSourceAdapter:
         with self.snapshot() as reader:
             return reader.get_resource_grade_levels(resource_id)
 
+    def health(self):
+        with self.snapshot() as reader:
+            reader.connection.execute(text("SELECT 1 FROM learning_resources LIMIT 1"))
+
     def close(self):
         self.engine.dispose()

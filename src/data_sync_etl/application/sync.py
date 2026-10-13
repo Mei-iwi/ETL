@@ -1,6 +1,6 @@
 from time import monotonic
 
-from data_sync_etl.domain.core import DomainError, new_id, now
+from data_sync_etl.domain.core import DomainError, SyncAlreadyRunning, new_id, now
 from data_sync_etl.logging import event, flow
 from data_sync_etl.ports.repositories import UnitOfWork
 from data_sync_etl.ports.source import Cursor, SourceDataReader
@@ -20,11 +20,24 @@ class MasterSync:
     def run(self, stream="all", full=False):
         if stream != "all" and stream not in STREAMS:
             raise DomainError("Unknown sync stream")
-        with flow():
-            return {
-                name: self._stream(name, full)
-                for name in (STREAMS if stream == "all" else [stream])
-            }
+        with self.uow.sync_lock() as acquired:
+            if not acquired:
+                raise SyncAlreadyRunning("Master data sync is already running")
+            with flow():
+                return {
+                    name: self._stream(name, full)
+                    for name in (STREAMS if stream == "all" else [stream])
+                }
+
+    def status(self, limit=20):
+        with self.uow() as repo:
+            runs = repo.find("sync_runs", order=("-started_at",), limit=limit)
+        return {
+            "runs": [
+                {"run_id": run["id"], **{key: value for key, value in run.items() if key != "id"}}
+                for run in runs
+            ],
+        }
 
     @staticmethod
     def cursor(checkpoint):
@@ -42,6 +55,7 @@ class MasterSync:
                 dict(
                     id=run_id,
                     stream_name=stream,
+                    sync_mode="FULL" if full else "INCREMENTAL",
                     started_at=now(),
                     status="RUNNING",
                     records_read=0,

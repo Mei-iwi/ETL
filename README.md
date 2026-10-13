@@ -43,6 +43,17 @@ etl create-ocr-job --resource-version-id VERSION_ID
 etl run-ocr-worker --worker-id worker-1
 ```
 
+Auto Incremental chỉ khả dụng khi cả nguồn và Master DB dùng PostgreSQL. Sau migration,
+chạy Full baseline một lần, sau đó giữ worker riêng hoạt động:
+
+```bash
+etl sync-master --stream all --full
+etl run-master-sync-worker --worker-id master-sync-1
+```
+
+Worker kiểm tra định kỳ theo `MASTER_SYNC_AUTO_INTERVAL_SECONDS` (mặc định 300 giây).
+Bật/tắt Auto qua trang đồng bộ hoặc API chỉ thay đổi cấu hình Incremental; không tự chạy Full.
+
 Trong terminal khác, theo dõi và hậu xử lý khi job terminal:
 
 ```bash
@@ -185,13 +196,21 @@ không downgrade DB dev/public. Thư mục test tạm `.test-tmp` không thuộc
 
 ## Docker runtime và QA
 
-Dockerfile có hai target; Compose dev gồm PostgreSQL và MongoDB.
+Dockerfile có hai target; Compose dev gồm Master PostgreSQL, Source PostgreSQL và MongoDB.
+Khi chạy Compose, hai service one-shot `master-migrate` và `source-migrate` tự chờ database
+healthy rồi nâng schema tương ứng đến Alembic `head`. Cơ chế này tạo đủ bảng trên volume mới
+và bổ sung các revision còn thiếu trên volume hiện có.
 
 ```bash
+docker compose up --build -d
+docker compose ps -a
 docker build --target runtime -t etl-master-data-runtime .
 docker build --target qa -t etl-master-data-qa .
 docker run --rm --network etl-master-data_default --env-file .env etl-master-data-qa python scripts/verify.py --postgres --db-host postgres
 ```
+
+`master-migrate` và `source-migrate` phải kết thúc với mã `0`. Không dùng `docker compose down -v`
+chỉ để chạy lại migration vì lệnh đó xóa dữ liệu trong các volume database.
 
 QA target có tests/dev dependencies. Runtime target chạy non-root, không cài pytest/Ruff, không copy tests.
 Trước khi chạy runtime, tạo `.env.runtime` local với DATABASE_URL dùng host `postgres` trong Docker network,
@@ -208,6 +227,7 @@ Healthcheck gọi `/health`. CLI/worker là process/container riêng và phải 
 ```bash
 docker run --rm --no-healthcheck --network etl-master-data_default --env-file .env.runtime -v etl_storage:/app/storage etl-master-data-runtime etl sync-master --stream all --full
 docker run --rm --no-healthcheck --network etl-master-data_default --env-file .env.runtime -v etl_storage:/app/storage etl-master-data-runtime etl run-ocr-worker --worker-id docker-worker
+docker run --rm --no-healthcheck --network etl-master-data_default --env-file .env.runtime etl-master-data-runtime etl run-master-sync-worker --worker-id master-sync-worker
 ```
 
 Không cài binary/model OCR vào runtime hiện tại. Với bind mount storage, cấp quyền ghi cho UID 10001.

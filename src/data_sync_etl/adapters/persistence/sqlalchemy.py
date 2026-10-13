@@ -18,6 +18,8 @@ from data_sync_etl.db.models import (
     ResourceGradeLevel,
     ResourceSubject,
     Subject,
+    SyncAutoConfig,
+    SyncAutoStream,
     SyncCheckpoint,
 )
 from data_sync_etl.domain.core import now
@@ -30,6 +32,7 @@ STREAMS = {
 }
 
 # SQLite is a single-process test/development fallback only.
+_SYNC_LOCK = Lock()
 _PROCESSING_LOCKS = [Lock() for _ in range(64)]
 
 
@@ -173,6 +176,31 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             .on_conflict_do_nothing(index_elements=["stream_name"])
         )
 
+    def ensure_auto_sync_config(self, interval_seconds):
+        insert = pg_insert if self.session.bind.dialect.name == "postgresql" else sqlite_insert
+        self.session.execute(
+            insert(SyncAutoConfig)
+            .values(
+                id="master-data",
+                enabled=False,
+                interval_seconds=interval_seconds,
+                source_ready=False,
+                updated_at=now(),
+            )
+            .on_conflict_do_nothing(index_elements=["id"])
+        )
+        for stream in STREAMS:
+            self.session.execute(
+                insert(SyncAutoStream)
+                .values(
+                    stream_name=stream,
+                    config_id="master-data",
+                    enabled=False,
+                    updated_at=now(),
+                )
+                .on_conflict_do_nothing(index_elements=["stream_name"])
+            )
+
     def sync_upsert(self, table, values):
         # Private comparison path may read the hash; public repository reads never return it.
         model = MODELS[table]
@@ -288,6 +316,27 @@ class SQLAlchemyUnitOfWork:
     def __call__(self):
         with self.sessions.begin() as session:
             yield SQLAlchemyRepository(session)
+
+    @contextmanager
+    def sync_lock(self):
+        key = int.from_bytes(sha256(b'master-data-sync').digest()[:8], 'big', signed=True)
+        with self.sessions() as session:
+            dialect = session.get_bind().dialect.name
+            if dialect == 'postgresql':
+                with session.begin():
+                    acquired = session.scalar(
+                        text('SELECT pg_try_advisory_xact_lock(:key)'), {'key': key}
+                    )
+                    yield bool(acquired)
+            elif dialect == 'sqlite':
+                acquired = _SYNC_LOCK.acquire(blocking=False)
+                try:
+                    yield acquired
+                finally:
+                    if acquired:
+                        _SYNC_LOCK.release()
+            else:
+                raise RuntimeError('Master sync locks require PostgreSQL')
 
     @contextmanager
     def processing_lock(self, version_id: str):

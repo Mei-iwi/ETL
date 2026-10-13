@@ -59,6 +59,11 @@ export const navagationItems: NavigationGroup[] = [
                 to: '/library/indexing',
                 label: 'Phân đoạn và chỉ mục',
                 end: true
+            },
+            {
+                to: '/library/source-sync',
+                label: 'Đồng bộ dữ liệu nguồn',
+                end: true
             }
 
         ]
@@ -128,11 +133,6 @@ export const navagationItems: NavigationGroup[] = [
             {
                 to: '/systems/capabilities',
                 label: 'Khả năng xử lý',
-                end: true,
-            },
-            {
-                to: '/systems/master-sync',
-                label: 'Đồng bộ dữ liệu',
                 end: true,
             }
         ]

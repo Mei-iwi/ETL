@@ -34,6 +34,9 @@ def parser():
     worker = commands.add_parser("run-ocr-worker")
     worker.add_argument("--worker-id", required=True)
     worker.add_argument("--once", action="store_true")
+    sync_worker = commands.add_parser("run-master-sync-worker")
+    sync_worker.add_argument("--worker-id", required=True)
+    sync_worker.add_argument("--once", action="store_true")
     commands.add_parser("recover-stale-ocr-tasks")
     demo = commands.add_parser("demo-run")
     demo.add_argument("--fixture-resource-id", default="resource-1")
@@ -80,6 +83,8 @@ def dispatch(container, args):
             return container.ocr.create_job(args.resource_version_id)
         case "run-ocr-worker":
             return container.worker.run(args.worker_id, args.once)
+        case "run-master-sync-worker":
+            return container.master_sync_worker.run(args.worker_id, args.once)
         case "recover-stale-ocr-tasks":
             return container.ocr.recover_stale()
         case "postprocess":

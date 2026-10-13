@@ -282,6 +282,7 @@ class SyncRun(Base):
     __tablename__ = "sync_runs"
     id = Column(String(30), primary_key=True, default=new_id)
     stream_name = Column(String(30), nullable=False)
+    sync_mode = Column(String(20), nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=False)
     finished_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String(30), nullable=False)
@@ -293,6 +294,32 @@ class SyncRun(Base):
     checkpoint_before = Column(JSON_TYPE, nullable=True)
     checkpoint_after = Column(JSON_TYPE, nullable=True)
     error_message = Column(Text, nullable=True)
+
+
+class SyncAutoConfig(Base):
+    __tablename__ = "sync_auto_config"
+    id = Column(String(30), primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    interval_seconds = Column(Integer, nullable=False)
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+    worker_id = Column(String(100), nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    source_ready = Column(Boolean, nullable=False, default=False)
+    lease_owner = Column(String(100), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_auto_run_at = Column(DateTime(timezone=True), nullable=True)
+    last_error_code = Column(String(50), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class SyncAutoStream(Base):
+    __tablename__ = "sync_auto_streams"
+    stream_name = Column(String(30), primary_key=True)
+    config_id = Column(
+        String(30), ForeignKey("sync_auto_config.id", ondelete="CASCADE"), nullable=False
+    )
+    enabled = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
 
 
 class OcrPageResult(Base):
@@ -354,6 +381,8 @@ MODELS = {
         OcrPageTask,
         SyncCheckpoint,
         SyncRun,
+        SyncAutoConfig,
+        SyncAutoStream,
         OcrPageResult,
         EtlStageRun,
         ContentUnitText,

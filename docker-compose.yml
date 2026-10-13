@@ -1,3 +1,5 @@
+name: etl-master-data
+
 services:
   postgres:
     image: postgres:16
@@ -29,6 +31,32 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  master-migrate:
+    build:
+      context: .
+      target: runtime
+    image: etl-master-data-runtime:local
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-etl}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-etl}
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+  source-migrate:
+    image: etl-master-data-runtime:local
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-etl}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-etl}
+      SOURCE_MIGRATION_DATABASE_URL: postgresql+psycopg://${SOURCE_POSTGRES_USER:-etl_source_admin}:${SOURCE_POSTGRES_PASSWORD}@source-postgres:5432/${SOURCE_POSTGRES_DB:-etl_source}
+    command: ["python", "-m", "alembic", "-c", "alembic_source.ini", "upgrade", "head"]
+    depends_on:
+      master-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      source-postgres:
+        condition: service_healthy
+    restart: "no"
   mongo:
     image: mongo:8.0
     ports:

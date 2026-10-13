@@ -51,6 +51,7 @@ export default function App() {
             <Route path='add' element={<LibraryCreatePage />} />
             <Route path='processing' element={<LibraryProcessingPage />} />
             <Route path='indexing' element={<LibraryIndexingPage />} />
+            <Route path='source-sync' element={<SystemMasterSyncPage />} />
             <Route path=":resourceId" element={<LibraryResourceDetailPage />}/>
             <Route path=':resourceId/versions' element={<LibraryVersionHistoryPage />}/>
             <Route path=':resourceId/update-version' element={<LibraryUpdateVersion />}/>
@@ -72,7 +73,7 @@ export default function App() {
             <Route index element={<Navigate to='status' />} />
             <Route path='status' element={<SystemStatusPage />} />
             <Route path='capabilities' element={<SystemCapalitiesPage />} />
-            <Route path='master-sync' element={<SystemMasterSyncPage />} />
+            <Route path='master-sync' element={<Navigate to='/library/source-sync' replace />} />
           </Route>
         </Route>
 

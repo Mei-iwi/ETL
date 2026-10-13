@@ -4,7 +4,12 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
-from data_sync_etl.api.master_sync_schemas import MasterSyncRequest, MasterSyncRunResult
+from data_sync_etl.api.master_sync_schemas import (
+    MasterSyncAutoRequest,
+    MasterSyncRequest,
+    MasterSyncRunResult,
+    MasterSyncStatusResponse,
+)
 from data_sync_etl.api.processing_schemas import (
     ProcessingJobStatusResponse,
     ProcessVersionResponse,
@@ -39,12 +44,15 @@ from data_sync_etl.application.update_resource_metadata import (
     ResourceMetadataPersistenceError,
 )
 from data_sync_etl.domain.core import (
+    AutoSyncBaselineRequired,
+    AutoSyncUnavailable,
     DomainError,
     ProcessingJobNotFound,
     ProcessingRetryConflict,
     ResourceCreateError,
     ResourceNotFound,
     ResourceVersionNotFound,
+    SyncAlreadyRunning,
 )
 from data_sync_etl.domain.resource import CreateResourceCommand
 from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
@@ -503,7 +511,36 @@ def retry_processing_job(
     response_model=dict[str, MasterSyncRunResult],
 )
 def sync_master_data(body: MasterSyncRequest, request: Request):
-    return services(request).sync.run(body.stream, body.full)
+    try:
+        return services(request).sync.run(body.stream, body.full)
+    except SyncAlreadyRunning:
+        raise HTTPException(409, "A Master Data sync is already running") from None
+
+
+@router.get(
+    "/api/v1/master-data/sync/status",
+    tags=[TAG_MASTER],
+    summary="Xem trạng thái đồng bộ Master Data",
+    response_model=MasterSyncStatusResponse,
+)
+def master_sync_status(request: Request):
+    container = services(request)
+    return {**container.sync.status(), **container.auto_sync.state()}
+
+
+@router.patch(
+    "/api/v1/master-data/sync/auto",
+    tags=[TAG_MASTER],
+    summary="Bật hoặc tắt Auto Incremental Master Data",
+    response_model=MasterSyncStatusResponse,
+)
+def configure_master_sync_auto(body: MasterSyncAutoRequest, request: Request):
+    container = services(request)
+    try:
+        container.auto_sync.configure(body.enabled, body.stream)
+    except (AutoSyncUnavailable, AutoSyncBaselineRequired) as exc:
+        raise HTTPException(409, str(exc)) from None
+    return {**container.sync.status(), **container.auto_sync.state()}
 
 
 @router.post("/admin/sync/master", include_in_schema=False)
