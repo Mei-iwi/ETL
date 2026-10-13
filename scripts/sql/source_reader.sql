@@ -12,12 +12,12 @@ END $$;
 GRANT CONNECT ON DATABASE etl_source TO etl_source_reader;
 GRANT USAGE ON SCHEMA public TO etl_source_reader;
 GRANT SELECT ON education_levels,grade_levels,subjects,providers,resource_types,roles,
-    users,learning_resources,resource_subjects,resource_grade_levels TO etl_source_reader;
+    users,learning_resources,resource_subjects,resource_grade_levels,resource_versions TO etl_source_reader;
 DO $$
 DECLARE source_table text;
 BEGIN
     FOREACH source_table IN ARRAY ARRAY['education_levels','grade_levels','subjects','providers',
-        'resource_types','roles','users','learning_resources','resource_subjects','resource_grade_levels'] LOOP
+        'resource_types','roles','users','learning_resources','resource_subjects','resource_grade_levels','resource_versions'] LOOP
         IF has_table_privilege('etl_source_reader', 'public.' || source_table, 'INSERT,UPDATE,DELETE,TRUNCATE') THEN
             RAISE EXCEPTION 'Existing source reader has write privileges; operator review required';
         END IF;

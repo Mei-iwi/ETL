@@ -218,3 +218,45 @@ def test_streams_can_be_enabled_individually_or_together(container):
     assert state["auto_enabled"] is True
     auto.configure(False, "all")
     assert auto.state()["auto_enabled"] is False
+
+
+def test_modes_persist_independently_and_worker_obeys_them(container):
+    auto = coordinator(container)
+    container.sync.run(full=True)
+    auto.heartbeat_and_claim("worker-1")
+    auto.configure(True)
+    auto.configure(None, "resources", "FULL")
+    restarted = coordinator(container)
+    state = restarted.state()
+    assert state["auto_all_enabled"]
+    assert next(row for row in state["auto_streams"] if row["stream_name"] == "resources")["sync_mode"] == "FULL"
+    make_due(container)
+    assert MasterSyncWorker(container.sync, restarted).once("worker-1") == {"action": "COMPLETED"}
+    with container.uow() as repo:
+        runs = repo.find("sync_runs", order=("-started_at",), limit=4)
+    assert {row["stream_name"]: row["sync_mode"] for row in runs} == {
+        "resources": "FULL", "users": "INCREMENTAL", "grades": "INCREMENTAL", "subjects": "INCREMENTAL",
+    }
+
+
+def test_bulk_mode_change_preserves_partial_enabled_selection(container):
+    auto = coordinator(container)
+    container.sync.run(full=True)
+    auto.heartbeat_and_claim("worker-1")
+    auto.configure(True, "resources")
+    auto.configure(None, "all", "FULL")
+    state = auto.state()
+    assert [row["stream_name"] for row in state["auto_streams"] if row["enabled"]] == ["resources"]
+    assert {row["sync_mode"] for row in state["auto_streams"]} == {"FULL"}
+
+
+def test_mode_change_rejected_while_auto_is_running(container):
+    auto = coordinator(container)
+    container.sync.run(full=True)
+    auto.heartbeat_and_claim("worker-1")
+    auto.configure(True)
+    make_due(container)
+    assert auto.heartbeat_and_claim("worker-1")
+    with pytest.raises(AutoSyncUnavailable):
+        auto.configure(None, "resources", "FULL")
+    auto.configure(False)  # Stopping future runs still works during an active run.

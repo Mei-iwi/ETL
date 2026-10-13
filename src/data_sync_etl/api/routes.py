@@ -9,6 +9,9 @@ from data_sync_etl.api.master_sync_schemas import (
     MasterSyncRequest,
     MasterSyncRunResult,
     MasterSyncStatusResponse,
+    SourceFileRetryResponse,
+    SourceFilesBatchRetryResponse,
+    SourceSyncFilesResponse,
 )
 from data_sync_etl.api.processing_schemas import (
     ProcessingJobStatusResponse,
@@ -38,6 +41,7 @@ from data_sync_etl.application.create_resource_version import (
 from data_sync_etl.application.create_resource_version import (
     ResourceVersionNotFound as NewResourceVersionNotFound,
 )
+from data_sync_etl.application.source_file_import import SourceImportConflict, SourceImportNotFound
 from data_sync_etl.application.update_resource_metadata import (
     InvalidResourceMetadata,
     ResourceMetadataNotFound,
@@ -90,6 +94,17 @@ def services(request):
             403, "Admin API disabled; enable only on a trusted local development interface"
         )
     return request.app.state.container
+
+
+def source_file_admin(request):
+    container = services(request)
+    try:
+        local = request.client is not None and ip_address(request.client.host).is_loopback
+    except ValueError:
+        local = False
+    if not local:
+        raise HTTPException(403, "Chỉ được quản trị tệp nguồn từ máy cục bộ")
+    return container
 
 
 @router.get("/health", tags=[TAG_SYSTEM])
@@ -525,7 +540,7 @@ def sync_master_data(body: MasterSyncRequest, request: Request):
 )
 def master_sync_status(request: Request):
     container = services(request)
-    return {**container.sync.status(), **container.auto_sync.state()}
+    return {**container.sync.status(), **container.auto_sync.state(), **container.source_file_import.availability()}
 
 
 @router.patch(
@@ -537,10 +552,52 @@ def master_sync_status(request: Request):
 def configure_master_sync_auto(body: MasterSyncAutoRequest, request: Request):
     container = services(request)
     try:
-        container.auto_sync.configure(body.enabled, body.stream)
+        container.auto_sync.configure(body.enabled, body.stream, body.sync_mode)
     except (AutoSyncUnavailable, AutoSyncBaselineRequired) as exc:
         raise HTTPException(409, str(exc)) from None
-    return {**container.sync.status(), **container.auto_sync.state()}
+    return {**container.sync.status(), **container.auto_sync.state(), **container.source_file_import.availability()}
+
+
+@router.get(
+    "/api/v1/master-data/sync/files",
+    tags=[TAG_MASTER],
+    summary="Xem phiên bản học liệu từ nguồn",
+    response_model=SourceSyncFilesResponse,
+)
+def source_sync_files(
+    request: Request,
+    after: Annotated[str | None, Query(min_length=1, max_length=30)] = None,
+    size: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    container = source_file_admin(request)
+    try:
+        result = container.source_file_import.list_files(after=after, size=size)
+    except DomainError:
+        raise HTTPException(503, "Không thể đọc phiên bản nguồn; kiểm tra kết nối và quyền đọc") from None
+    return SourceSyncFilesResponse.model_validate(result)
+
+
+@router.post("/api/v1/master-data/sync/files/retry-failed", tags=[TAG_MASTER], status_code=202,
+             response_model=SourceFilesBatchRetryResponse)
+def retry_failed_source_files(
+    request: Request,
+    after: Annotated[str | None, Query(min_length=1, max_length=30)] = None,
+    size: Annotated[int, Query(ge=1, le=100)] = 100,
+):
+    container = source_file_admin(request)
+    return container.source_file_import.retry_failed(after, size)
+
+
+@router.post("/api/v1/master-data/sync/files/{file_id}/retry", tags=[TAG_MASTER], status_code=202,
+             response_model=SourceFileRetryResponse)
+def retry_source_file(file_id: ResourceId, request: Request):
+    container = source_file_admin(request)
+    try:
+        return container.source_file_import.retry(file_id)
+    except SourceImportNotFound:
+        raise HTTPException(404, "Không tìm thấy tác vụ nhập tệp") from None
+    except SourceImportConflict:
+        raise HTTPException(409, "Tệp chưa đủ điều kiện thử lại") from None
 
 
 @router.post("/admin/sync/master", include_in_schema=False)

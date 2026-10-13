@@ -48,11 +48,12 @@ class AutoSyncCoordinator:
     def _stream_state(repo):
         rows = repo.find("sync_auto_streams")
         enabled = {row["stream_name"]: row["enabled"] for row in rows}
+        modes = {row["stream_name"]: row["sync_mode"] for row in rows}
         return [
             {
                 "stream_name": stream,
                 "enabled": enabled.get(stream, False),
-                "sync_mode": "INCREMENTAL",
+                "sync_mode": modes.get(stream, "INCREMENTAL"),
             }
             for stream in AUTO_STREAMS
         ]
@@ -102,13 +103,17 @@ class AutoSyncCoordinator:
             "auto_streams": streams,
         }
 
-    def configure(self, enabled: bool, stream="all"):
+    def configure(self, enabled: bool | None, stream="all", sync_mode=None):
         if stream != "all" and stream not in AUTO_STREAMS:
             raise ValueError("Unknown Auto Sync stream")
+        if sync_mode not in {None, "INCREMENTAL", "FULL"}:
+            raise ValueError("Unknown Auto Sync mode")
         current = now()
         with self.uow() as repo:
             config = self._ensure(repo)
             target_streams = list(AUTO_STREAMS) if stream == "all" else [stream]
+            if sync_mode is not None and config["lease_expires_at"] and config["lease_expires_at"] > current:
+                raise AutoSyncUnavailable("Wait for the active sync before changing mode")
             if enabled:
                 if not self.environment_supported:
                     raise AutoSyncUnavailable("Auto sync requires PostgreSQL source and Master DB")
@@ -124,11 +129,13 @@ class AutoSyncCoordinator:
             stream_rows = self._stream_state(repo)
             stream_enabled = {row["stream_name"]: row["enabled"] for row in stream_rows}
             for target in target_streams:
-                stream_enabled[target] = enabled
+                if enabled is not None:
+                    stream_enabled[target] = enabled
                 repo.update(
                     "sync_auto_streams",
                     target,
-                    {"enabled": enabled, "updated_at": current},
+                    {"enabled": stream_enabled[target], "updated_at": current,
+                     **({"sync_mode": sync_mode} if sync_mode is not None else {})},
                 )
             any_enabled = any(stream_enabled.values())
             repo.update(
@@ -189,6 +196,11 @@ class AutoSyncCoordinator:
                 )
             repo.update("sync_auto_config", CONFIG_ID, updates)
             return enabled_streams if claimed else []
+
+    def mode(self, stream):
+        with self.uow() as repo:
+            row = repo.get("sync_auto_streams", stream)
+        return row["sync_mode"] if row else "INCREMENTAL"
 
     def mark_worker_stopped(self, worker_id: str):
         with self.uow() as repo:

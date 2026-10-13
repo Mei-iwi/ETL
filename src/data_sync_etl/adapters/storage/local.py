@@ -6,16 +6,10 @@ from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Callable
 
 from data_sync_etl.domain.core import DomainError, UploadTooLargeError
+from data_sync_etl.domain.file_integrity import stream_hash
 from data_sync_etl.ports.processing import StoredFile
 
 BLOCK_SIZE = 1024 * 1024
-
-
-def stream_hash(stream: BinaryIO) -> str:
-    digest = hashlib.sha256()
-    while chunk := stream.read(BLOCK_SIZE):
-        digest.update(chunk)
-    return digest.hexdigest()
 
 
 class LocalFilesystemStorageAdapter:

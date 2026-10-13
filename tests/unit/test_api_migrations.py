@@ -156,7 +156,7 @@ def test_migration_up_down_up(container):
     migrate(container.engine, "base", downgrade=True)
     assert inspect(container.engine).get_table_names() == ["alembic_version"]
     migrate(container.engine)
-    assert len(inspect(container.engine).get_table_names()) == 18
+    assert len(inspect(container.engine).get_table_names()) == len(Base.metadata.tables) + 1
     assert "sync_mode" in {
         column["name"] for column in inspect(container.engine).get_columns("sync_runs")
     }

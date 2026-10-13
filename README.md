@@ -196,6 +196,55 @@ không downgrade DB dev/public. Thư mục test tạm `.test-tmp` không thuộc
 
 ## Docker runtime và QA
 
+### Nhập PDF từ filesystem nguồn
+
+Auto Sync mặc định Incremental. Mỗi nhóm có thể chọn Full rõ ràng trên giao diện;
+worker chạy theo lựa chọn đã lưu trong `sync_auto_streams.sync_mode` ở mỗi lượt theo lịch.
+Chọn chế độ ở dòng tất cả áp dụng cho mọi nhóm và giữ nguyên nhóm nào đang bật/tắt.
+Không đổi chế độ trong lượt Auto đang chạy. Chạy migration Master `0012` trước khi khởi động
+lại backend và Master Sync worker; baseline Full ban đầu vẫn được yêu cầu.
+
+Sau Master Sync resources thành công, worker nhập file đối soát metadata phiên bản theo
+keyset ID, ghi hàng đợi bền vững rồi mới đọc PDF. Khi Auto resources bật, đối soát lặp theo
+`SOURCE_FILE_RECONCILE_SECONDS`; tắt Auto dừng các lượt đối soát định kỳ mới, các job đã
+xếp hàng vẫn được xử lý. Full/Incremental thủ công kích hoạt một lượt đối soát. Không có CDC;
+việc xóa bản ghi nguồn không xóa lịch sử hoặc file đích.
+
+Đặt `SOURCE_FILE_STORAGE_ROOT` thành thư mục tuyệt đối có thật, đọc được, khác và không
+lồng với `STORAGE_ROOT`. Resolver chỉ chấp nhận `<root>/<storage_bucket>/<storage_object_key>`.
+Nếu kho thực tế dùng cách ánh xạ khác, cần cấu hình adapter phù hợp trước khi chạy.
+Tài khoản nguồn cần SELECT trên `resource_versions` và các bảng Master-related, không có
+quyền ghi. Chạy migration Master `0011` bằng `python -m alembic upgrade head` hoặc Compose.
+
+Mặc định chỉ nhập phiên bản nguồn `APPROVED`. `SOURCE_FILE_ALLOWED_STATUSES` là danh sách
+JSON server-side; chỉ mở rộng sau khi xác nhận chính sách nguồn. Mapping duy nhất là
+`(postgresql, source_version_id)`; số phiên bản nguồn được giữ nguyên. Trùng số với bản
+upload thủ công hoặc nhập bản cũ hơn phiên bản đích mới nhất báo `BLOCKED_SOURCE_MAPPING`.
+Cùng ID nguồn đổi hash/resource/số phiên bản báo `SOURCE_VERSION_MUTATED` và không tự ghi đè.
+
+```bash
+etl source-file-precheck
+etl run-master-sync-worker --worker-id master-sync-1
+etl run-source-file-worker --worker-id source-file-1
+etl run-ocr-worker --worker-id ocr-1
+```
+
+Chạy ba worker trong các terminal/process riêng, cùng cấu hình DB và storage.
+`run-source-file-worker --worker-id source-file-1 --once` xử lý tối đa một job để kiểm tra.
+PRECHECK chỉ kiểm tra kết nối/quyền đọc/hash; không chứng minh OCR/Mongo projection hoàn tất.
+OCR native chỉ đọc text PDF; PDF scan cần Tesseract được cài và cấu hình. File import tự
+retry lỗi tạm thời theo budget/backoff; lỗi dữ liệu/quyền/path dừng để can thiệp. Retry thủ
+công enqueue đúng stage, OCR/finalization dùng budget sẵn có. Mỗi API retry-all xét tối đa
+100 job và trả `next_cursor`; giao diện giới hạn 10 lô mỗi thao tác.
+
+Trong Docker, mount kho nguồn read-only cho file worker, ví dụ
+`--mount type=bind,src=<absolute-source-root>,dst=/mnt/source-files,readonly`, đặt
+`SOURCE_FILE_STORAGE_ROOT=/mnt/source-files` trong env container; mount storage đích
+writable riêng và chia sẻ cho worker OCR. Không dùng path host trong env của container.
+API file/list/retry yêu cầu `ADMIN_ENABLED=true` và client loopback, chỉ dùng local dev.
+Deployment public cần xác thực/ủy quyền admin ở gateway/backend; không bật public các
+endpoint này với cấu hình local dev.
+
 Dockerfile có hai target; Compose dev gồm Master PostgreSQL, Source PostgreSQL và MongoDB.
 Khi chạy Compose, hai service one-shot `master-migrate` và `source-migrate` tự chờ database
 healthy rồi nâng schema tương ứng đến Alembic `head`. Cơ chế này tạo đủ bảng trên volume mới

@@ -29,7 +29,7 @@ export const navagationItems: NavigationGroup[] = [
             },
             {
                 to: '/overview/process',
-                label: 'Quy trình hoạt đông',
+                label: 'Quy trình hoạt động',
                 end: true,
             }
         ]
@@ -46,6 +46,11 @@ export const navagationItems: NavigationGroup[] = [
                 end: true,
             },
             {
+                to: '/library/source-sync',
+                label: 'Đồng bộ dữ liệu nguồn',
+                end: true
+            },
+            {
                 to: '/library/add',
                 label: 'Thêm học liệu',
                 end: true
@@ -58,11 +63,6 @@ export const navagationItems: NavigationGroup[] = [
             {
                 to: '/library/indexing',
                 label: 'Phân đoạn và chỉ mục',
-                end: true
-            },
-            {
-                to: '/library/source-sync',
-                label: 'Đồng bộ dữ liệu nguồn',
                 end: true
             }
 
@@ -98,7 +98,7 @@ export const navagationItems: NavigationGroup[] = [
         end: false,
         children: [
             {
-                to: 'experiments/evaluation-data',
+                to: '/experiments/evaluation-data',
                 label: 'Dữ liệu đánh giá',
                 end: true,
             },
