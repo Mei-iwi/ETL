@@ -61,6 +61,11 @@ def test_postgresql_concurrent_claim_and_mapping(source, pg_container, tmp_path)
     with c.uow() as repo:
         assert repo.count("source_file_imports", {}) == repo.count("resource_versions", {}) == repo.count("ocr_jobs", {}) == 1
     assert original == path.read_bytes()
+    assert c.source_file_import.list_files(failed_only=True)["items"] == []
+    with c.uow() as repo:
+        job = repo.find("ocr_jobs", limit=1)[0]
+        repo.update("ocr_jobs", job["id"], {"status": "FAILED", "failed_pages": job["total_pages"]})
+    assert len(c.source_file_import.list_files(failed_only=True)["items"]) == 1
 
 
 def test_local_source_to_real_postgresql_and_mongo(source, pg_container, mongo_test_database, tmp_path):

@@ -309,6 +309,7 @@ def test_projection_retry_does_not_recopy_or_rerun_ocr(importing, monkeypatch):
             break
     before = c.source_file_import.list_files()["items"][0]
     assert before["etl_status"] == "FINALIZATION_FAILED" and before["retry_eligible"]
+    assert len(c.source_file_import.list_files(failed_only=True)["items"]) == 1
     c.source_file_import.retry(row["id"])
     monkeypatch.setattr(c.source_files, "open_stream", lambda *_: (_ for _ in ()).throw(AssertionError("No recopy")))
     c.source_file_import.execute(c.source_file_import.claim())
@@ -316,6 +317,30 @@ def test_projection_retry_does_not_recopy_or_rerun_ocr(importing, monkeypatch):
     c.worker.once("test-ocr")
     after = c.source_file_import.list_files()["items"][0]
     assert after["etl_status"] == "CONTENT_READY"
+    assert c.source_file_import.list_files(failed_only=True)["items"] == []
     assert after["processing_job_id"] == before["processing_job_id"]
     with c.uow() as repo:
         assert repo.count("ocr_page_tasks", {}) == 1
+
+
+def test_failed_list_seven_row_pagination_excludes_pending(importing):
+    c, rows, _ = importing
+    with c.uow() as repo:
+        for number in range(10):
+            source = {**rows[0], "source_version_id": f"failed-version-{number:02d}"}
+            c.source_file_import._discover(repo, source)
+        jobs = repo.source_import_page(size=20)
+        for row in jobs[:9]:
+            repo.update("source_file_imports", row["id"], {
+                "status": "FAILED", "last_error_code": "FILE_NOT_FOUND",
+            })
+    c.settings.admin_enabled = True
+    with TestClient(create_app(c), client=("127.0.0.1", 5555)) as client:
+        first = client.get("/api/v1/master-data/sync/files?size=7&status=failed").json()
+        assert len(first["items"]) == 7 and first["next_cursor"]
+        second = client.get("/api/v1/master-data/sync/files", params={
+            "size": 7, "status": "failed", "after": first["next_cursor"],
+        }).json()
+        assert len(second["items"]) == 2 and second["next_cursor"] is None
+        assert {row["import_status"] for row in first["items"] + second["items"]} == {"FAILED"}
+        assert client.get("/api/v1/master-data/sync/files?status=invalid").status_code == 422

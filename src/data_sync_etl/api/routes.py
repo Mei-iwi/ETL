@@ -1,5 +1,5 @@
 from ipaddress import ip_address
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -568,10 +568,11 @@ def source_sync_files(
     request: Request,
     after: Annotated[str | None, Query(min_length=1, max_length=30)] = None,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
+    status: Literal["failed"] | None = None,
 ):
     container = source_file_admin(request)
     try:
-        result = container.source_file_import.list_files(after=after, size=size)
+        result = container.source_file_import.list_files(after=after, size=size, failed_only=status == "failed")
     except DomainError:
         raise HTTPException(503, "Không thể đọc phiên bản nguồn; kiểm tra kết nối và quyền đọc") from None
     return SourceSyncFilesResponse.model_validate(result)

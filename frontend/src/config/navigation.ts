@@ -51,6 +51,11 @@ export const navagationItems: NavigationGroup[] = [
                 end: true
             },
             {
+                to: '/library/source-sync-errors',
+                label: 'Lỗi đồng bộ',
+                end: true
+            },
+            {
                 to: '/library/add',
                 label: 'Thêm học liệu',
                 end: true
