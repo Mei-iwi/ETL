@@ -93,3 +93,10 @@ class ProcessingRetryConflict(DomainError):
 
 class ResourceNotFound(DomainError): 
     pass
+
+
+class SourceFileError(DomainError):
+    def __init__(self, code, transient=False):
+        super().__init__(code)
+        self.code = code
+        self.transient = transient

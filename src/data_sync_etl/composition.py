@@ -17,6 +17,7 @@ from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectR
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
+from data_sync_etl.adapters.storage.source_local import SourceLocalFileReader
 from data_sync_etl.application.auto_sync import AutoSyncCoordinator
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
@@ -36,6 +37,7 @@ from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
+from data_sync_etl.application.source_file_import import SourceFileImportService
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
 from data_sync_etl.config import Settings
@@ -45,6 +47,7 @@ from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.domain.subject import GradeBasedSubjectRecommendationPolicy
 from data_sync_etl.workers.master_sync import MasterSyncWorker
 from data_sync_etl.workers.ocr import OCRWorker
+from data_sync_etl.workers.source_file_import import SourceFileImportWorker
 
 
 def create_source(settings):
@@ -180,6 +183,12 @@ class Container:
             self.uow,
             max_manual_retries=self.settings.processing_manual_retry_limit,
         )
+        self.source_files = SourceLocalFileReader(self.settings.source_file_storage_root, self.storage.root)
+        self.source_file_import = SourceFileImportService(
+            self.source, self.source_files, self.storage, self.uow,
+            self.process_version, self.retry_processing_job, self.settings,
+        )
+        self.source_file_worker = SourceFileImportWorker(self.source_file_import)
         self.worker = OCRWorker(
             self.ocr,
             on_job_terminal=self.processing_finalizer.finalize,

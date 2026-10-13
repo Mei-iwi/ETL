@@ -319,6 +319,7 @@ class SyncAutoStream(Base):
         String(30), ForeignKey("sync_auto_config.id", ondelete="CASCADE"), nullable=False
     )
     enabled = Column(Boolean, nullable=False, default=False)
+    sync_mode = Column(String(20), nullable=False, default="INCREMENTAL", server_default="INCREMENTAL")
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
 
 
@@ -366,6 +367,39 @@ class ContentUnitText(Base):
     text = Column(Text, nullable=False)
 
 
+class SourceFileImport(Base):
+    __tablename__ = "source_file_imports"
+    __table_args__ = (
+        UniqueConstraint("source_system", "source_version_id", name="uq_source_file_identity"),
+        UniqueConstraint("target_version_id", name="uq_source_file_target"),
+        Index("ix_source_file_queue", "status", "next_retry_at", "lease_expires_at"),
+    )
+    id = Column(String(30), primary_key=True, default=new_id)
+    source_system = Column(String(30), nullable=False, default="postgresql")
+    source_version_id = Column(String(30), nullable=False)
+    resource_id = Column(String(30), nullable=False)
+    resource_title = Column(String(500), nullable=True)
+    source_version_number = Column(Integer, nullable=False)
+    source_lifecycle_status = Column(String(30), nullable=False)
+    source_resource_active = Column(Boolean, nullable=False, default=True)
+    source_updated_at = Column(DateTime(timezone=True), nullable=False)
+    storage_bucket = Column(String(255), nullable=False)
+    storage_object_key = Column(String(500), nullable=False)
+    source_hash = Column(String(64), nullable=False)
+    status = Column(String(30), nullable=False, default="PENDING")
+    attempts = Column(Integer, nullable=False, default=0)
+    manual_retries = Column(Integer, nullable=False, default=0)
+    processing_retry_requested = Column(Boolean, nullable=False, default=False)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    last_error_code = Column(String(50), nullable=True)
+    claim_token = Column(String(30), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    target_version_id = Column(String(30), ForeignKey("resource_versions.id", ondelete="RESTRICT"), nullable=True)
+    processing_job_id = Column(String(30), ForeignKey("ocr_jobs.id", ondelete="RESTRICT"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
 MODELS = {
     m.__tablename__: m
     for m in [
@@ -386,5 +420,6 @@ MODELS = {
         OcrPageResult,
         EtlStageRun,
         ContentUnitText,
+        SourceFileImport,
     ]
 }

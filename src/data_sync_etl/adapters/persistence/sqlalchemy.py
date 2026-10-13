@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from threading import Lock
 
-from sqlalchemy import delete, exists, func, or_, select, text
+from sqlalchemy import and_, delete, exists, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -17,6 +17,7 @@ from data_sync_etl.db.models import (
     OcrPageTask,
     ResourceGradeLevel,
     ResourceSubject,
+    SourceFileImport,
     Subject,
     SyncAutoConfig,
     SyncAutoStream,
@@ -175,6 +176,37 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             .values(stream_name=stream, updated_at=now())
             .on_conflict_do_nothing(index_elements=["stream_name"])
         )
+
+    def source_import_page(self, after=None, size=20, retry_candidates=False):
+        model = SourceFileImport
+        key = model.source_version_id
+        if self.session.bind.dialect.name == "postgresql":
+            key = key.collate("C")
+        stmt = select(model)
+        if after is not None:
+            stmt = stmt.where(key > after)
+        if retry_candidates:
+            stmt = stmt.where(model.status.in_(["FAILED", "RETRY_EXHAUSTED", "PROCESSING"]))
+        return [self._dict(row) for row in self.session.scalars(stmt.order_by(key).limit(size))]
+
+    def claim_source_import(self, stamp, token, expires_at):
+        model = SourceFileImport
+        stmt = select(model).where(or_(
+            and_(model.status.in_(["PENDING", "IMPORTED", "RETRY_PROCESSING", "RETRY_WAIT"]),
+                 or_(model.next_retry_at.is_(None), model.next_retry_at <= stamp)),
+            and_(model.status == "FETCHING", model.lease_expires_at <= stamp),
+        )).order_by(model.resource_id, model.source_version_number, model.id).limit(1).with_for_update(skip_locked=True)
+        row = self.session.scalar(stmt)
+        if row is None:
+            return None
+        previous_status = row.status
+        row.status = "FETCHING"
+        row.claim_token = token
+        row.lease_expires_at = expires_at
+        row.updated_at = stamp
+        row.attempts += 1
+        self.session.flush()
+        return {**self._dict(row), "previous_status": previous_status}
 
     def ensure_auto_sync_config(self, interval_seconds):
         insert = pg_insert if self.session.bind.dialect.name == "postgresql" else sqlite_insert

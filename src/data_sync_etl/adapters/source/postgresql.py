@@ -208,5 +208,40 @@ class PostgreSQLSourceAdapter:
         with self.snapshot() as reader:
             reader.connection.execute(text("SELECT 1 FROM learning_resources LIMIT 1"))
 
+    def list_versions(self, after=None, size=20):
+        """Read a bounded metadata page; never return storage references or hashes."""
+        page = self.version_page(after, size)
+        public = {"source_version_id", "resource_id", "source_version_number",
+                  "source_lifecycle_status", "updated_at", "resource_title"}
+        return {"items": [{k: v for k, v in row.items() if k in public} for row in page["items"]],
+                "next_cursor": page["next_cursor"]}
+
+    def version_page(self, after=None, size=20):
+        """Private worker metadata. Storage references must never be serialized to HTTP."""
+        if not 1 <= size <= 100:
+            raise DomainError("Invalid source version page size")
+        with self.snapshot() as reader:
+            connection = reader.connection
+            if not connection.scalar(text(
+                "SELECT has_table_privilege(current_user, 'resource_versions', 'SELECT')"
+            )) or connection.scalar(text(
+                "SELECT has_table_privilege(current_user, 'resource_versions', "
+                "'INSERT,UPDATE,DELETE,TRUNCATE')"
+            )):
+                raise DomainError("BLOCKED_SOURCE_VERSION_ACCESS")
+            rows = connection.execute(text(
+                "SELECT v.id AS source_version_id, v.resource_id, v.version_number AS "
+                "source_version_number, v.lifecycle_status::text AS source_lifecycle_status, "
+                "v.updated_at, r.title AS resource_title, v.storage_bucket, v.storage_object_key, "
+                "v.source_hash, r.is_active AS resource_active, r.deleted_at AS resource_deleted_at "
+                "FROM resource_versions v JOIN learning_resources r ON r.id=v.resource_id "
+                "WHERE (CAST(:after AS varchar) IS NULL OR v.id COLLATE \"C\" > :after) "
+                "ORDER BY v.id COLLATE \"C\" LIMIT :limit"
+            ), {"after": after, "limit": size + 1}).mappings().all()
+            return {
+                "items": [dict(row) for row in rows[:size]],
+                "next_cursor": rows[size - 1]["source_version_id"] if len(rows) > size else None,
+            }
+
     def close(self):
         self.engine.dispose()

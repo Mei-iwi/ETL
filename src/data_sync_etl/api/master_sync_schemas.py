@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 SyncStream = Literal["all", "resources", "users", "grades", "subjects"]
 
@@ -34,10 +34,13 @@ class MasterSyncRunStatus(MasterSyncRunResult):
 class MasterSyncAutoStream(BaseModel):
     stream_name: Literal["resources", "users", "grades", "subjects"]
     enabled: bool
-    sync_mode: Literal["INCREMENTAL"]
+    sync_mode: Literal["INCREMENTAL", "FULL"]
 
 
 class MasterSyncStatusResponse(BaseModel):
+    file_sync_supported: bool = False
+    file_sync_error: str | None = "BLOCKED_SOURCE_STORAGE"
+    file_worker_healthy: bool = False
     auto_supported: bool
     auto_enabled: bool
     interval_seconds: int
@@ -54,6 +57,52 @@ class MasterSyncStatusResponse(BaseModel):
 class MasterSyncAutoRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
-    enabled: bool
+    enabled: bool | None = None
     stream: SyncStream = "all"
+    sync_mode: Literal["INCREMENTAL", "FULL"] | None = None
+
+    @model_validator(mode="after")
+    def require_update(self):
+        if self.enabled is None and self.sync_mode is None:
+            raise ValueError("Provide enabled or sync_mode")
+        return self
+
+
+class SourceSyncFile(BaseModel):
+    source_version_id: str
+    resource_id: str
+    resource_title: str | None
+    source_version_number: int
+    source_lifecycle_status: str
+    updated_at: datetime
+    # UNTRACKED is the metadata view before worker discovery; other states are durable.
+    import_status: Literal["UNTRACKED", "PENDING", "FETCHING", "IMPORTED", "PROCESSING", "RETRY_WAIT",
+                           "RETRY_PROCESSING", "FAILED", "RETRY_EXHAUSTED"] = "UNTRACKED"
+    retry_eligible: bool = False
+    import_job_id: str | None = None
+    etl_status: str | None = None
+    retry_count: int | None = None
+    last_error_code: str | None = None
+    target_version_id: str | None = None
+    processing_job_id: str | None = None
+
+
+class SourceSyncFilesResponse(BaseModel):
+    items: list[SourceSyncFile]
+    next_cursor: str | None
+    file_sync_supported: bool = False
+    file_sync_error: str | None = "BLOCKED_SOURCE_STORAGE"
+    file_worker_healthy: bool = False
+
+
+class SourceFileRetryResponse(BaseModel):
+    import_job_id: str
+    action: Literal["QUEUED"]
+
+
+class SourceFilesBatchRetryResponse(BaseModel):
+    accepted_count: int
+    skipped_count: int
+    conflict_count: int
+    next_cursor: str | None
 

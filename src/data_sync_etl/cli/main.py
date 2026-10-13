@@ -37,6 +37,10 @@ def parser():
     sync_worker = commands.add_parser("run-master-sync-worker")
     sync_worker.add_argument("--worker-id", required=True)
     sync_worker.add_argument("--once", action="store_true")
+    file_worker = commands.add_parser("run-source-file-worker")
+    file_worker.add_argument("--worker-id", required=True)
+    file_worker.add_argument("--once", action="store_true")
+    commands.add_parser("source-file-precheck")
     commands.add_parser("recover-stale-ocr-tasks")
     demo = commands.add_parser("demo-run")
     demo.add_argument("--fixture-resource-id", default="resource-1")
@@ -85,6 +89,10 @@ def dispatch(container, args):
             return container.worker.run(args.worker_id, args.once)
         case "run-master-sync-worker":
             return container.master_sync_worker.run(args.worker_id, args.once)
+        case "run-source-file-worker":
+            return container.source_file_worker.run(args.worker_id, args.once)
+        case "source-file-precheck":
+            return container.source_file_import.precheck(container.mongo_client)
         case "recover-stale-ocr-tasks":
             return container.ocr.recover_stale()
         case "postprocess":

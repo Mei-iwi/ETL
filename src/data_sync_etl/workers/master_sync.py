@@ -38,7 +38,7 @@ class MasterSyncWorker:
                 action = "COMPLETED"
                 for stream in streams:
                     try:
-                        self.sync.run(stream, full=False)
+                        self.sync.run(stream, full=self.coordinator.mode(stream) == "FULL")
                     except SyncAlreadyRunning:
                         error_code = "SYNC_BUSY"
                         action = "SKIPPED"
