@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 import {
     getGradeLevels,
@@ -10,6 +10,7 @@ import {
     type ResourceTypeOption,
     type SubjectOption,
 } from '../../services/libraryLookupApi'
+import { startProcessing } from '../../services/processingApi'
 import styles from './LibraryPages.module.css'
 
 type CreateResourceRespones = {
@@ -27,10 +28,13 @@ type CreateResourceRespones = {
     created_at: string
 }
 
+type SubmitStage = 'idle' | 'creating' | 'processing'
+
 export function LibraryCreatePage() {
     const navigate = useNavigate()
+    const submittingRef = useRef(false)
 
-    const [loading, setLoading] = useState(false)
+    const [submitStage, setSubmitStage] = useState<SubmitStage>('idle')
     const [error, setError] = useState('')
     const [resourceTypes, setResourceTypes] = useState<ResourceTypeOption[]>([])
     const [providers, setProviders] = useState<ProviderOption[]>([])
@@ -130,12 +134,15 @@ export function LibraryCreatePage() {
     ) {
         event.preventDefault()
 
+        if (submittingRef.current) return
+
         if (!resourceTypeCode || !selectedProvider || catalogLoading || catalogError) {
             setError('Vui lòng chọn loại học liệu và nhà cung cấp hợp lệ.')
             return
         }
 
-        setLoading(true)
+        submittingRef.current = true
+        setSubmitStage('creating')
         setError('')
 
         const form = event.currentTarget
@@ -155,15 +162,41 @@ export function LibraryCreatePage() {
                 )
             }
             const createdResource: CreateResourceRespones = await response.json()
+            const versionId = createdResource.initial_version_id
+            if (typeof versionId !== 'string' || !versionId.trim()) {
+                throw new Error('Phản hồi tạo học liệu thiếu mã phiên bản')
+            }
 
-            navigate(`/library/processing?versionId=${encodeURIComponent(createdResource.initial_version_id)}`)
+            try {
+                setSubmitStage('processing')
+                const processResult = await startProcessing(versionId)
+                if (typeof processResult.job_id !== 'string' || !processResult.job_id.trim()) {
+                    throw new Error('Phản hồi xử lý thiếu mã job')
+                }
+                navigate(
+                    `/library/processing?versionId=${encodeURIComponent(versionId)}&jobId=${encodeURIComponent(processResult.job_id)}`,
+                    { replace: true },
+                )
+            } catch (processError) {
+                const detail = processError instanceof Error ? `: ${processError.message}` : ''
+                navigate(
+                    `/library/processing?versionId=${encodeURIComponent(versionId)}`,
+                    {
+                        replace: true,
+                        state: {
+                            processingNotice: `Đã tạo học liệu, chưa xác nhận được yêu cầu xử lý${detail}`,
+                        },
+                    },
+                )
+            }
         }
         catch (e) {
             setError(
                 e instanceof Error ? e.message : 'Không thể tạo học liệu',
             )
         } finally {
-            setLoading(false)
+            submittingRef.current = false
+            setSubmitStage('idle')
         }
     }
 
@@ -293,9 +326,13 @@ export function LibraryCreatePage() {
                     <button
                         className={styles.primaryButton}
                         type="submit"
-                        disabled={loading || catalogLoading || Boolean(catalogError) || !resourceTypeCode || !selectedProvider}
+                        disabled={submitStage !== 'idle' || catalogLoading || Boolean(catalogError) || !resourceTypeCode || !selectedProvider}
                     >
-                        {loading ? 'Đang tạo học liệu...' : 'Tạo học liệu'}
+                        {submitStage === 'creating'
+                            ? 'Đang tạo học liệu...'
+                            : submitStage === 'processing'
+                                ? 'Đang khởi chạy xử lý...'
+                                : 'Tạo và xử lý học liệu'}
                     </button>
                 </div>
             </form>

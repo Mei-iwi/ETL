@@ -1,4 +1,22 @@
-import type { ProcessingJobResult, ProcessResult } from "../types/processing";
+import type {
+    ContentUnitsResult,
+    ProcessingJobResult,
+    ProcessResult,
+} from "../types/processing";
+
+export class ProcessingApiError extends Error {
+    status: number
+
+    constructor(message: string, status: number) {
+        super(message)
+        this.name = 'ProcessingApiError'
+        this.status = status
+    }
+}
+
+export function isRetryableProcessingError(error: unknown) {
+    return !(error instanceof ProcessingApiError) || error.status >= 500
+}
 
 async function getErrorMessage(response: Response) {
     const body: unknown = await response.json().catch(() => null)
@@ -47,7 +65,7 @@ export async function startProcessing(
         },
     )
     if (!response.ok) {
-        throw new Error(await getErrorMessage(response))
+        throw new ProcessingApiError(await getErrorMessage(response), response.status)
     }
     return response.json() as Promise<ProcessResult>
 }
@@ -68,7 +86,7 @@ export async function retryProcessing(
     )
 
     if (!response.ok) {
-        throw new Error(await getErrorMessage(response))
+        throw new ProcessingApiError(await getErrorMessage(response), response.status)
     }
     return response.json() as Promise<ProcessResult>
 }
@@ -88,8 +106,35 @@ export async function getProcessingJob(
     )
 
     if (!response.ok) {
-        throw new Error(await getErrorMessage(response))
+        throw new ProcessingApiError(await getErrorMessage(response), response.status)
     }
 
     return response.json() as Promise<ProcessingJobResult>
+}
+
+export async function getContentUnits(
+    versionId: string,
+    offset = 0,
+    limit = 10,
+    signal?: AbortSignal,
+): Promise<ContentUnitsResult> {
+    const params = new URLSearchParams({
+        offset: String(offset),
+        limit: String(limit),
+    })
+    const response = await fetch(
+        `/api/v1/resource-versions/${encodeURIComponent(versionId)}/content-units?${params}`,
+        {
+            signal,
+            headers: {
+                Accept: 'application/json',
+            },
+        },
+    )
+
+    if (!response.ok) {
+        throw new ProcessingApiError(await getErrorMessage(response), response.status)
+    }
+
+    return response.json() as Promise<ContentUnitsResult>
 }

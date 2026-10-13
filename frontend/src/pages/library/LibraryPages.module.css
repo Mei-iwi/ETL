@@ -237,6 +237,121 @@
     text-decoration: none;
 }
 
-.success{
-    color: green;
+.success {
+    margin: 0;
+    color: #15803d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.notice {
+    margin: 16px 0 0;
+    color: #a16207;
+    font-size: 14px;
+}
+
+.statusMessage {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 6px 10px;
+    margin-bottom: 18px;
+    padding: 4px 0 14px;
+    color: #475569;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 16px;
+}
+
+.statusMessage[data-tone='active'] {
+    color: #1d4ed8;
+}
+
+.statusMessage[data-tone='success'] {
+    color: #15803d;
+}
+
+.statusMessage[data-tone='warning'] {
+    color: #a16207;
+}
+
+.statusMessage[data-tone='error'] {
+    color: #b91c1c;
+}
+
+.statusMessage small {
+    grid-column: 2;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+.contentSection {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.contentSection h3 {
+    margin: 0 0 14px;
+    color: #172554;
+    font-size: 18px;
+}
+
+.contentList {
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.contentItem {
+    padding: 14px;
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+}
+
+.contentItem h4,
+.contentItem p {
+    margin: 0;
+}
+
+.contentItem h4 {
+    margin-bottom: 8px;
+    color: #1e293b;
+    font-size: 15px;
+}
+
+.contentItem p {
+    color: #334155;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.contentMeta {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.contentPagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 16px;
+    color: #475569;
+    font-size: 13px;
+}
+
+@media (max-width: 640px) {
+    .contentPagination {
+        align-items: stretch;
+        flex-direction: column;
+        text-align: center;
+    }
 }
