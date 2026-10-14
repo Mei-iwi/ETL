@@ -410,3 +410,7 @@ docker compose stop
 
 Lần sau chạy lại `docker compose up --build -d` và các lệnh start ở mục 4.
 Không dùng `docker compose down -v` để sửa lỗi migration: lệnh đó xóa volume dữ liệu.
+
+etl run-source-file-worker --worker-id files-test-1
+etl run-ocr-worker --worker-id ocr-test-1
+etl run-master-sync-worker --worker-id master-sync-1
