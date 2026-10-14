@@ -18,13 +18,14 @@ async function getErrorMessage(response: Response) {
 export async function getSourceSyncFiles(
     after: string | null,
     signal?: AbortSignal,
-    options: { size?: number; status?: 'failed' } = {},
+    options: { size?: number; status?: 'failed' | 'failed-retryable' | 'failed-blocked' } = {},
 ): Promise<SourceSyncFilesResponse> {
     const params = new URLSearchParams({ size: String(options.size ?? 20) })
     if (options.status) params.set('status', options.status)
     if (after) params.set('after', after)
     const response = await fetch(`/api/v1/master-data/sync/files?${params}`, {
         signal,
+        cache: 'no-store',
         headers: { Accept: 'application/json' },
     })
     if (!response.ok) throw new Error(await getErrorMessage(response))
@@ -73,6 +74,7 @@ export async function getMasterSyncStatus(
 ): Promise<MasterSyncStatusResponse> {
     const response = await fetch('/api/v1/master-data/sync/status', {
         signal,
+        cache: 'no-store',
         headers: { Accept: 'application/json' },
     })
 

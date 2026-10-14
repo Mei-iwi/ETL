@@ -46,6 +46,8 @@ export function SystemMasterSyncPage() {
     const [result, setResult] = useState<MasterSyncResponse | null>(null)
     const [syncStatus, setSyncStatus] = useState<MasterSyncStatusResponse | null>(null)
     const submittingRef = useRef(false)
+    const statusRevisionRef = useRef(0)
+    const [statusRefresh, setStatusRefresh] = useState(0)
 
     useEffect(() => {
         let active = true
@@ -53,15 +55,19 @@ export function SystemMasterSyncPage() {
         let timer: number | undefined
 
         async function pollStatus() {
-            controller = new AbortController()
+            if (timer !== undefined) window.clearTimeout(timer)
+            controller?.abort()
+            const requestController = new AbortController()
+            controller = requestController
+            const revision = statusRevisionRef.current
             try {
-                const response = await getMasterSyncStatus(controller.signal)
-                if (active) {
+                const response = await getMasterSyncStatus(requestController.signal)
+                if (active && !requestController.signal.aborted && revision === statusRevisionRef.current && !submittingRef.current) {
                     setSyncStatus(response)
                     setStatusError('')
                 }
             } catch (caughtError) {
-                if (active && !controller.signal.aborted) {
+                if (active && !requestController.signal.aborted && revision === statusRevisionRef.current && !submittingRef.current) {
                     setStatusError(
                         caughtError instanceof Error
                             ? caughtError.message
@@ -69,26 +75,34 @@ export function SystemMasterSyncPage() {
                     )
                 }
             } finally {
-                if (active) {
+                if (active && controller === requestController) {
                     setStatusLoading(false)
-                    timer = window.setTimeout(pollStatus, 5000)
+                    timer = window.setTimeout(pollStatus, document.hidden ? 15000 : 2000)
                 }
             }
         }
 
+        function refreshWhenVisible() {
+            if (!document.hidden) void pollStatus()
+        }
+        document.addEventListener('visibilitychange', refreshWhenVisible)
+        window.addEventListener('focus', refreshWhenVisible)
         void pollStatus()
         return () => {
             active = false
             if (timer !== undefined) window.clearTimeout(timer)
             controller?.abort()
+            document.removeEventListener('visibilitychange', refreshWhenVisible)
+            window.removeEventListener('focus', refreshWhenVisible)
         }
-    }, [])
+    }, [statusRefresh])
 
     async function handleFullSync() {
         if (submittingRef.current) return
         if (!await confirm('Chạy Full Sync cho tất cả nhóm dữ liệu?')) return
 
         submittingRef.current = true
+        statusRevisionRef.current += 1
         setLoading(true)
         setActionError('')
         try {
@@ -97,9 +111,10 @@ export function SystemMasterSyncPage() {
         } catch (caughtError) {
             setActionError(caughtError instanceof Error ? caughtError.message : 'Không thể đồng bộ dữ liệu')
         } finally {
+            statusRevisionRef.current += 1
             submittingRef.current = false
             setLoading(false)
-            getMasterSyncStatus().then(setSyncStatus).catch(() => undefined)
+            setStatusRefresh((value) => value + 1)
         }
     }
 
@@ -112,6 +127,7 @@ export function SystemMasterSyncPage() {
             if (!await confirm(message)) return
         }
         submittingRef.current = true
+        statusRevisionRef.current += 1
         setAutoPending(true)
         setActionError('')
         try {
@@ -119,8 +135,10 @@ export function SystemMasterSyncPage() {
         } catch (caughtError) {
             setActionError(caughtError instanceof Error ? caughtError.message : 'Không thể cập nhật Auto Sync')
         } finally {
+            statusRevisionRef.current += 1
             submittingRef.current = false
             setAutoPending(false)
+            setStatusRefresh((value) => value + 1)
         }
     }
 
@@ -133,9 +151,19 @@ export function SystemMasterSyncPage() {
     const displayedResults = latestResults && Object.keys(latestResults).length > 0
         ? latestResults
         : result
+    const enabledStreams = syncStatus?.auto_streams.filter((item) => item.enabled) ?? []
     const syncInProgress = loading || Boolean(currentRun) || Boolean(syncStatus?.auto_running)
     const modes = new Set(syncStatus?.auto_streams.map((item) => item.sync_mode))
     const allMode = modes.size === 1 ? syncStatus?.auto_streams[0]?.sync_mode : ''
+    const configuredModes = new Set(
+        (enabledStreams.length > 0 ? enabledStreams : syncStatus?.auto_streams ?? [])
+            .map((item) => item.sync_mode),
+    )
+    const displayedMode = loading ? 'Full'
+        : currentRun?.sync_mode ? currentRun.sync_mode === 'FULL' ? 'Full' : 'Incremental'
+            : configuredModes.size > 1 ? 'Theo từng nhóm'
+                : configuredModes.has('FULL') ? 'Full'
+                    : configuredModes.has('INCREMENTAL') ? 'Incremental' : 'Chưa xác định'
 
     let currentStatus = 'Không có job đang chạy'
     if (statusLoading && !syncStatus) currentStatus = 'Đang tải...'
@@ -181,8 +209,8 @@ export function SystemMasterSyncPage() {
                     </strong>
                 </div>
                 <div>
-                    <span className={styles.statusLabel}>Chế độ</span>
-                    <strong className={styles.statusValue}>{latestRun?.sync_mode ?? 'Chưa xác định'}</strong>
+                    <span className={styles.statusLabel}>{syncInProgress ? 'Chế độ đang chạy' : 'Chế độ cấu hình'}</span>
+                    <strong className={styles.statusValue}>{displayedMode}</strong>
                 </div>
             </div>
             <div className={styles.card}>
@@ -245,22 +273,27 @@ export function SystemMasterSyncPage() {
                 </details>
             </div>
 
-            {displayedResults && Object.keys(displayedResults).length > 0 && (
+            {syncStatus && (
                 <div className={`${styles.card} ${styles.results}`}>
+                    {enabledStreams.length === 0 ? <p className={styles.notice}>Chưa bật nhóm đồng bộ tự động.</p> : (
                     <div className={styles.tableWrap}>
                     <table className={styles.fileTable}>
                         <thead><tr><th>Nhóm dữ liệu</th><th>Đã đọc</th><th>Đã thêm</th><th>Cập nhật</th><th>Bỏ qua</th><th>Lỗi</th></tr></thead>
                         <tbody>
-                    {Object.entries(displayedResults).map(([name, data]) => (
+                    {enabledStreams.map(({ stream_name: name }) => {
+                        const data = displayedResults?.[name]
+                        return (
                         <tr key={name}>
                             <td>{streamLabels[name] ?? name}</td>
-                            <td>{data.records_read}</td><td>{data.inserted}</td><td>{data.updated}</td>
-                            <td>{data.skipped}</td><td>{data.failed}</td>
+                            <td>{data?.records_read ?? '—'}</td><td>{data?.inserted ?? '—'}</td><td>{data?.updated ?? '—'}</td>
+                            <td>{data?.skipped ?? '—'}</td><td>{data?.failed ?? '—'}</td>
                         </tr>
-                    ))}
+                        )
+                    })}
                         </tbody>
                     </table>
                     </div>
+                    )}
                 </div>
             )}
             {dialog}
@@ -268,9 +301,10 @@ export function SystemMasterSyncPage() {
     )
 }
 
-export function SourceSyncFilesSection({ onError, failedOnly = false }: {
+export function SourceSyncFilesSection({ onError, failedOnly = false, retryableOnly }: {
     onError: (message: string) => void
     failedOnly?: boolean
+    retryableOnly?: boolean
 }) {
     const { confirm, dialog } = useConfirmation()
     const [cursors, setCursors] = useState<Array<string | null>>([null])
@@ -280,6 +314,7 @@ export function SourceSyncFilesSection({ onError, failedOnly = false }: {
     const [retryMessage, setRetryMessage] = useState('')
     const [refresh, setRefresh] = useState(0)
     const retryingRef = useRef(false)
+    const filesRevisionRef = useRef(0)
     const cursor = cursors[cursors.length - 1]
 
     useEffect(() => {
@@ -287,36 +322,51 @@ export function SourceSyncFilesSection({ onError, failedOnly = false }: {
         let timer: number | undefined
         let controller: AbortController | undefined
         async function pollFiles() {
-            controller = new AbortController()
+            if (timer !== undefined) window.clearTimeout(timer)
+            controller?.abort()
+            const requestController = new AbortController()
+            controller = requestController
+            const revision = filesRevisionRef.current
             try {
-                const response = await getSourceSyncFiles(cursor, controller.signal, failedOnly ? { size: 7, status: 'failed' } : {})
-                if (active) {
+                const response = await getSourceSyncFiles(cursor, requestController.signal, failedOnly ? {
+                    size: 7,
+                    status: retryableOnly === undefined ? 'failed' : retryableOnly ? 'failed-retryable' : 'failed-blocked',
+                } : {})
+                if (active && !requestController.signal.aborted && revision === filesRevisionRef.current && !retryingRef.current) {
                     setFiles(response)
                     onError('')
                 }
             } catch (caughtError) {
-                if (active && !controller.signal.aborted) {
+                if (active && !requestController.signal.aborted && revision === filesRevisionRef.current && !retryingRef.current) {
                     onError(caughtError instanceof Error ? caughtError.message : 'Không thể tải tệp nguồn')
                 }
             } finally {
-                if (active) {
+                if (active && controller === requestController) {
                     setLoading(false)
-                    timer = window.setTimeout(pollFiles, 5000)
+                    timer = window.setTimeout(pollFiles, document.hidden ? 15000 : 2000)
                 }
             }
         }
+        function refreshWhenVisible() {
+            if (!document.hidden) void pollFiles()
+        }
+        document.addEventListener('visibilitychange', refreshWhenVisible)
+        window.addEventListener('focus', refreshWhenVisible)
         void pollFiles()
         return () => {
             active = false
             controller?.abort()
             if (timer !== undefined) window.clearTimeout(timer)
+            document.removeEventListener('visibilitychange', refreshWhenVisible)
+            window.removeEventListener('focus', refreshWhenVisible)
         }
-    }, [cursor, refresh, onError, failedOnly])
+    }, [cursor, refresh, onError, failedOnly, retryableOnly])
 
     async function retry(fileId?: string) {
         if (retryingRef.current) return
         if (!fileId && !await confirm('Thử lại các tệp lỗi đủ điều kiện?')) return
         retryingRef.current = true
+        filesRevisionRef.current += 1
         setRetryPending(true)
         setRetryMessage('')
         try {
@@ -340,6 +390,7 @@ export function SourceSyncFilesSection({ onError, failedOnly = false }: {
         } catch (caughtError) {
             setRetryMessage(caughtError instanceof Error ? caughtError.message : 'Không thể thử lại')
         } finally {
+            filesRevisionRef.current += 1
             retryingRef.current = false
             setRetryPending(false)
             if (failedOnly) setCursors([null])

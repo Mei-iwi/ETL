@@ -246,6 +246,37 @@
     margin-top: 20px;
 }
 
+.errorTabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    border-bottom: 1px solid #e5eaf1;
+}
+
+.errorTabs a {
+    padding: 10px 16px;
+    color: #64748b;
+    border-bottom: 2px solid transparent;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.errorTabs a:hover {
+    color: #1d4ed8;
+}
+
+.errorTabs a[aria-current='page'] {
+    color: #2563eb;
+    border-bottom-color: #2563eb;
+}
+
+.errorTabs a:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: -2px;
+    border-radius: 4px;
+}
+
 .files h2 {
     margin: 0 0 12px;
     color: #172554;
@@ -304,10 +335,44 @@
 
 .files .fileAction {
     width: auto;
-    min-height: 34px;
-    padding: 6px 10px;
-    font-size: 13px;
+    min-height: 31px;
+    padding: 4px 8px;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.5;
+    border-radius: 3.2px;
     white-space: nowrap;
+    color: #212529;
+    background-color: #ffc107;
+    border-color: #ffc107;
+    transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out,
+        border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.files .fileAction:hover:not(:disabled) {
+    background-color: #e0a800;
+    border-color: #d39e00;
+}
+
+.files .fileAction:focus-visible {
+    outline: 0;
+    box-shadow: 0 0 0 3.2px rgb(222 170 12 / 50%);
+}
+
+.files .fileAction:active:not(:disabled) {
+    background-color: #d39e00;
+    border-color: #c69500;
+}
+
+.files .fileAction:disabled {
+    opacity: 0.65;
+    box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .files .fileAction {
+        transition: none;
+    }
 }
 
 .tableWrap {
