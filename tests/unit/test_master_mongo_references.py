@@ -15,8 +15,8 @@ from data_sync_etl.ports.source import LearningResource, User
 
 def test_nullable_unique_references_and_other_ten_tables_unchanged(container):
     inspector = inspect(container.engine)
-    counts = {'master_learning_resources': 26, 'master_users': 20, 'master_grade_levels': 21,
-              'subjects': 9, 'resource_subjects': 3, 'resource_grade_levels': 2,
+    counts = {'master_learning_resources': 29, 'master_users': 23, 'master_grade_levels': 24,
+              'subjects': 12, 'resource_subjects': 3, 'resource_grade_levels': 2,
               'resource_versions': 20, 'content_units': 13, 'ocr_jobs': 12, 'ocr_page_tasks': 14}
     for table, count in counts.items():
         assert len(inspector.get_columns(table)) == len(MODELS[table].__table__.columns) == count

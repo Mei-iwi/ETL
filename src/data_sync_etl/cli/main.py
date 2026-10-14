@@ -24,6 +24,12 @@ def parser():
     mode = sync.add_mutually_exclusive_group(required=True)
     mode.add_argument("--full", action="store_true")
     mode.add_argument("--incremental", action="store_true")
+    reconcile = commands.add_parser('reconcile-master', help='Read-only preview by default; apply needs approved fingerprint')
+    reconcile.add_argument('--stream', choices=['all', 'grades', 'subjects', 'users', 'resources'], default='all')
+    action = reconcile.add_mutually_exclusive_group()
+    action.add_argument('--dry-run', action='store_true')
+    action.add_argument('--apply', action='store_true')
+    reconcile.add_argument('--fingerprint')
     project = commands.add_parser('project-master-mongo')
     project.add_argument('--stream', choices=['all', 'users', 'resources'], default='all')
     project.add_argument('--full', action='store_true', required=True,
@@ -87,6 +93,8 @@ def dispatch(container, args):
     match args.command:
         case "sync-master":
             return container.sync.run(args.stream, args.full)
+        case 'reconcile-master':
+            return container.reconcile_master.run(args.stream, apply=args.apply, fingerprint=args.fingerprint)
         case 'project-master-mongo':
             return container.master_metadata_projection.run(args.stream)
         case 'sync-mongo-metadata':
@@ -126,6 +134,8 @@ def main():
         with flow():
             result = dispatch(container, args)
         print(json.dumps(result, default=str, ensure_ascii=True, indent=2))
+        if args.command == 'reconcile-master' and result['status'] == 'BLOCKED':
+            return 1
         if args.command in ('project-master-mongo', 'sync-mongo-metadata') and any(
             r['status'] in {'FAILED', 'BLOCKED', 'DISABLED', 'BLOCKED_MONGO_ID_MAPPING', 'BUSY'} for r in result.values()
         ):

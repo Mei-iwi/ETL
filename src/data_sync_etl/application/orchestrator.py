@@ -69,6 +69,10 @@ class EtlOrchestrator:
 
     def content_units(self, version_id, *, offset=0, limit=50, search=""):
         with self.uow() as repo:
-            if not repo.get("resource_versions", version_id):
+            version = repo.get("resource_versions", version_id)
+            if not version:
                 raise DomainError("Resource version not found")
+            resource = repo.get('master_learning_resources', version['resource_id'])
+            if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
+                raise DomainError('Resource inactive or deleted')
             return repo.content_units(version_id, offset=offset, limit=limit, search=search)

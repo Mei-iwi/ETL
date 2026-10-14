@@ -29,6 +29,7 @@ from data_sync_etl.db.models import (
     SyncCheckpoint,
 )
 from data_sync_etl.domain.core import DomainError, now
+from data_sync_etl.domain.source_ownership import state_hash
 
 STREAMS = {
     "resources": "master_learning_resources",
@@ -222,6 +223,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             select(MasterLearningResource).where(
                 MasterLearningResource.id == resource_id,
                 MasterLearningResource.deleted_at.is_(None),
+                MasterLearningResource.is_active.is_(True),
             )
         )
         if not resource:
@@ -234,6 +236,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             .where(
                 ResourceSubject.resource_id == resource_id,
                 Subject.deleted_at.is_(None),
+                Subject.is_active.is_(True),
             )
         ).all()
         # Lay danh sach khoi lop lien ket
@@ -243,6 +246,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             .where(
                 ResourceGradeLevel.resource_id == resource_id,
                 MasterGradeLevel.grade_deleted_at.is_(None),
+                MasterGradeLevel.grade_is_active.is_(True),
             )
         ).all()
         data = self._dict(resource)
@@ -347,11 +351,23 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
                 .on_conflict_do_nothing(index_elements=["stream_name"])
             )
 
-    def sync_upsert(self, table, values):
+    def sync_upsert(self, table, values, *, source_origin=None):
         # Private comparison path may read the hash; public repository reads never return it.
         model = MODELS[table]
         referenced = table in ('master_users', 'master_learning_resources')
-        row = self.session.get(model, values['id'], with_for_update=referenced, populate_existing=True)
+        row = self.session.get(model, values['id'], with_for_update=referenced or source_origin is not None, populate_existing=True)
+        values = {k: v for k, v in values.items() if k not in {'source_origin', 'source_state_hash', 'source_missing_at'}}
+        if source_origin is not None:
+            if source_origin != 'POSTGRESQL':
+                raise DomainError('BLOCKED_SOURCE_OWNERSHIP')
+            if row is not None:
+                if row.source_origin != source_origin:
+                    raise DomainError('BLOCKED_SOURCE_OWNERSHIP')
+                if not row.source_state_hash or row.source_state_hash != state_hash(self._dict(row)):
+                    raise DomainError('BLOCKED_LOCAL_SOURCE_CHANGE')
+                created = 'grade_created_at' if table == 'master_grade_levels' else 'created_at'
+                if created in values and utc(values[created]) != utc(getattr(row, created)):
+                    raise DomainError('BLOCKED_SOURCE_IDENTITY')
         if table == 'master_grade_levels' and values.get('grade_mongo_id') is None:
             values = {k: v for k, v in values.items() if k != 'grade_mongo_id'}
         if referenced:
@@ -366,15 +382,34 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
                     raise DomainError('BLOCKED_MONGO_ID_MAPPING')
                 self._check_mongo_reference(model, values['id'], incoming)
         if row is None:
-            self.insert(table, values)
+            inserted = self.insert(table, {**values, **({'source_origin': source_origin} if source_origin else {})})
+            if source_origin:
+                self.update(table, values['id'], {'source_state_hash': state_hash(inserted)})
             return "INSERTED"
         changed = {k: v for k, v in values.items() if utc(getattr(row, k)) != utc(v)}
         if not changed:
+            if source_origin and row.source_missing_at is not None:
+                row.source_missing_at = None
+                self.session.flush()
             return "SKIPPED"
         for k, v in changed.items():
             setattr(row, k, v)
         self.session.flush()
+        if source_origin:
+            row.source_missing_at = None
+            row.source_state_hash = state_hash(self._dict(row))
+            self.session.flush()
         return "UPDATED"
+
+    def reconciliation_page(self, table, after=None, size=100):
+        if table not in STREAMS.values() or not 1 <= size <= 1000:
+            raise ValueError('Invalid reconciliation bounds')
+        model = MODELS[table]
+        column = model.id.collate('C') if self.session.bind.dialect.name == 'postgresql' else model.id
+        query = select(model).order_by(column).limit(size)
+        if after is not None:
+            query = query.where(column > after)
+        return [self._dict(row) for row in self.session.scalars(query)]
 
     def stale_tasks(self, cutoff):
         stmt = (

@@ -39,6 +39,7 @@ from data_sync_etl.application.postprocess import Postprocessor
 from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
+from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.source_file_import import SourceFileImportService
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
@@ -131,6 +132,9 @@ class Container:
         )
         self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size,
                                skip_shared_metadata_validation=self.settings.mongo_metadata_mode == 'shared')
+        self.reconcile_master = ReconcileMaster(self.source, self.uow,
+            batch_size=min(1000, self.settings.sync_batch_size),
+            max_affected=self.settings.reconcile_max_affected, max_ratio=self.settings.reconcile_max_ratio)
         self.auto_sync = AutoSyncCoordinator(
             self.uow,
             environment_supported=(

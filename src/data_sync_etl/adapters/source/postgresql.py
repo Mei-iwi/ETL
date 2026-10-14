@@ -39,6 +39,32 @@ class SnapshotReader:
     def __init__(self, connection):
         self.connection = connection
 
+    def reconciliation_summary(self, stream):
+        table = TABLES[stream]
+        relation = self.connection.execute(text('SELECT relkind, relrowsecurity FROM pg_class WHERE oid=to_regclass(:name)'), {'name': table}).one_or_none()
+        if relation is None or relation[0] not in ('r', 'p') or relation[1]:
+            raise DomainError('BLOCKED_SOURCE_COVERAGE')
+        dependencies = {
+            'resources': "SELECT 1 FROM learning_resources r LEFT JOIN resource_types t ON t.id=r.resource_type_id LEFT JOIN providers p ON p.id=r.provider_id WHERE t.id IS NULL OR (r.provider_id IS NOT NULL AND p.id IS NULL) LIMIT 1",
+            'users': 'SELECT 1 FROM users r LEFT JOIN roles d ON d.id=r.role_id WHERE d.id IS NULL LIMIT 1',
+            'grades': 'SELECT 1 FROM grade_levels r LEFT JOIN education_levels d ON d.id=r.education_level_id WHERE d.id IS NULL LIMIT 1',
+            'subjects': 'SELECT 1 FROM subjects r LEFT JOIN grade_levels d ON d.id=r.grade_id WHERE d.id IS NULL LIMIT 1',
+        }
+        if self.connection.scalar(text(dependencies[stream])):
+            raise DomainError('BLOCKED_DEPENDENCY')
+        row = self.connection.execute(text(f'SELECT count(*), min(id COLLATE "C"), max(id COLLATE "C") FROM {table}')).one()
+        return dict(count=row[0], minimum=row[1], maximum=row[2])
+
+    def reconciliation_ids(self, stream, after, size):
+        table = TABLES[stream]
+        return list(self.connection.scalars(text(f'SELECT id FROM {table} WHERE CAST(:after AS varchar) IS NULL OR id COLLATE "C" > :after ORDER BY id COLLATE "C" LIMIT :size'), {'after': after, 'size': size}))
+
+    def reconciliation_present(self, stream, ids):
+        if not ids or len(ids) > 1000:
+            return set()
+        query = text(f'SELECT id FROM {TABLES[stream]} WHERE id IN :ids').bindparams(bindparam('ids', expanding=True))
+        return set(self.connection.scalars(query, {'ids': ids}))
+
     @staticmethod
     def record(name, values):
         values = dict(values)
@@ -91,6 +117,7 @@ class SnapshotReader:
 
 
 class PostgreSQLSourceAdapter:
+    source_origin = 'POSTGRESQL'
     def __init__(self, url=None, *, engine=None, replay_seconds=300):
         if engine is None:
             if not url or make_url(url).get_backend_name() != "postgresql":

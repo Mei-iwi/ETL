@@ -29,6 +29,9 @@ JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
 
 
 class MasterLearningResource(Base):
+    source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
+    source_state_hash = Column(String(64), nullable=True)
+    source_missing_at = Column(DateTime(timezone=True), nullable=True)
     __tablename__ = "master_learning_resources"
     __table_args__ = (Index('uq_master_learning_resources_mongo_id', 'mongo_id', unique=True),)
     mongo_id = Column(String(30), nullable=True)
@@ -60,6 +63,9 @@ class MasterLearningResource(Base):
 
 
 class MasterUser(Base):
+    source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
+    source_state_hash = Column(String(64), nullable=True)
+    source_missing_at = Column(DateTime(timezone=True), nullable=True)
     __tablename__ = "master_users"
     __table_args__ = (Index('uq_master_users_mongo_id', 'mongo_id', unique=True),)
     mongo_id = Column(String(30), nullable=True)
@@ -85,6 +91,9 @@ class MasterUser(Base):
 
 
 class MasterGradeLevel(Base):
+    source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
+    source_state_hash = Column(String(64), nullable=True)
+    source_missing_at = Column(DateTime(timezone=True), nullable=True)
     __tablename__ = "master_grade_levels"
     grade_mongo_id = Column(String(24), nullable=True)
     id = Column(String(30), primary_key=True, default=new_id)
@@ -110,6 +119,9 @@ class MasterGradeLevel(Base):
 
 
 class Subject(Base):
+    source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
+    source_state_hash = Column(String(64), nullable=True)
+    source_missing_at = Column(DateTime(timezone=True), nullable=True)
     __tablename__ = "subjects"
     __table_args__ = (
         Index("ix_subject_grade_active_deleted", "grade_id", "is_active", "deleted_at"),

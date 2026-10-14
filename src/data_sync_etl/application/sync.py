@@ -91,7 +91,10 @@ class MasterSync:
                 with self.uow() as repo:
                     checkpoint = repo.get("sync_checkpoints", stream, lock=True)
                     for aggregate in batch:
-                        action = repo.sync_upsert(STREAMS[stream], aggregate.values)
+                        if getattr(self.source, 'source_origin', None) == 'POSTGRESQL':
+                            action = repo.sync_upsert(STREAMS[stream], aggregate.values, source_origin='POSTGRESQL')
+                        else:
+                            action = repo.sync_upsert(STREAMS[stream], aggregate.values)
                         if stream == "resources":
                             replaced = self._relations(repo, aggregate)
                             if replaced and action == "SKIPPED":
@@ -135,7 +138,9 @@ class MasterSync:
             with self.uow() as repo:
                 repo.update("sync_runs", run_id, dict(status="COMPLETED", finished_at=now()))
         except Exception as exc:
-            mapping_blocked = isinstance(exc, DomainError) and str(exc) == 'BLOCKED_MONGO_ID_MAPPING'
+            safe_code = str(exc) if isinstance(exc, DomainError) and str(exc) in {
+                'BLOCKED_MONGO_ID_MAPPING', 'BLOCKED_SOURCE_OWNERSHIP', 'BLOCKED_LOCAL_SOURCE_CHANGE', 'BLOCKED_SOURCE_IDENTITY',
+            } else None
             with self.uow() as repo:
                 repo.update(
                     "sync_runs",
@@ -144,10 +149,10 @@ class MasterSync:
                         status="FAILED",
                         failed=1,
                         finished_at=now(),
-                        error_message='BLOCKED_MONGO_ID_MAPPING' if mapping_blocked else "Sync batch failed; inspect source contract and references",
+                        error_message=safe_code or "Sync batch failed; inspect source contract and references",
                     ),
                 )
-            raise DomainError('BLOCKED_MONGO_ID_MAPPING' if mapping_blocked else "Sync failed; committed checkpoints are preserved") from None
+            raise DomainError(safe_code or "Sync failed; committed checkpoints are preserved") from None
         return {"run_id": run_id, **totals}
 
     @staticmethod

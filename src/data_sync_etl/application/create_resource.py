@@ -132,6 +132,7 @@ class CreateResourceUseCase:
                         "master_learning_resources",
                         {
                             "id": resource_id,
+                            "source_origin": "LOCAL",
                             "created_at": stamp,
                             "updated_at": stamp,
                             "provider_id": command.provider_id.strip(),

@@ -303,6 +303,9 @@ class SourceFileImportService:
         return state, exhausted and count < self.settings.processing_manual_retry_limit
 
     def _eligible(self, repo, row):
+        resource = repo.get('master_learning_resources', row['resource_id'])
+        if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
+            return False
         if row["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
             return False
         if row["last_error_code"] in {"SOURCE_VERSION_MUTATED", "BLOCKED_SOURCE_MAPPING", "UNSUPPORTED_SOURCE_FORMAT"}:

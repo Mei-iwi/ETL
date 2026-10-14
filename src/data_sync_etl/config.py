@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     source_database_url: str | None = Field(default=None, repr=False)
     source_migration_database_url: str | None = Field(default=None, repr=False)
     source_replay_seconds: int = Field(default=300, ge=0)
+    reconcile_max_affected: int = Field(default=100, ge=1, le=1000)
+    reconcile_max_ratio: float = Field(default=0.1, gt=0, le=1)
     source_file_storage_root: Path | None = Field(default=None, repr=False)
     source_file_allowed_statuses: tuple[str, ...] = ("APPROVED",)
     source_file_import_max_attempts: int = Field(default=3, ge=1, le=10)

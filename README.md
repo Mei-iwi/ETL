@@ -116,8 +116,9 @@ python -m alembic -c alembic_source.ini upgrade head
 python -m alembic -c alembic_source.ini current
 ```
 
-Master và Source là hai DB riêng. Head Master hiện tại `0014`: `0013` thêm reference
-users/resources; `0014` thêm `grade_mongo_id`, reference version/unit theo ảnh Master.
+Master và Source là hai DB riêng. Head Master hiện tại `0015`: `0013` thêm reference
+users/resources; `0014` thêm reference grade/version/unit; `0015` thêm provenance và
+audit mất nguồn. Dữ liệu cũ UNKNOWN, không auto-backfill ownership.
 Không backfill lịch sử; chưa migrate có thể gây API 500 do thiếu cột.
 
 ### Reader nguồn — thiết lập lần đầu
@@ -268,6 +269,61 @@ metadata và content_bags snapshot không đổi. Scan Tesseract chưa test ph�
 Không dùng compose up như read-only vì có migration side effect; không down -v.
 
 ### CLI thường dùng
+
+#### Đối soát bản ghi mất nguồn — không xóa dữ liệu
+
+Full/Incremental vẫn upsert bản ghi hiện diện, không tự phát hiện/apply hard delete.
+Soft delete đi theo trạng thái nguồn và timestamp; users nguồn chỉ có is_active,
+grades dùng grade_is_active/grade_deleted_at ở Master. Trigger liên kết nguồn hiện
+touch learning_resources.updated_at khi thêm/sửa/xóa quan hệ; giữ replay/GREATEST.
+
+Migration mới `0015` thêm source_origin/source_state_hash/source_missing_at cho
+users/resources/subjects/grades Master; không sửa 15 bảng nguồn. Bản ghi PG insert mới
+POSTGRESQL, API-created resource LOCAL, dữ liệu cũ UNKNOWN. Không auto-backfill chỉ
+vì cùng ID/mongo_id. Unknown/local trùng Source PK bị BLOCKED_SOURCE_OWNERSHIP;
+operator phải audit và duyệt ownership riêng trước khi sync, không bulk đổi marker.
+Fingerprint trạng thái bảo vệ thay đổi nội bộ; nguồn tái xuất hiện phải giữ created_at
+và mapping đã duyệt. Cùng PK nhưng thực thể mới/remap sẽ bị chặn, không tự phục hồi.
+
+Pre-flight READ-ONLY: kiểm `python -m alembic current`/`heads`, backup/restore, quyền
+reader và đúng DB. Code head 0015 cần operator duyệt migration; **không tự chạy**
+`python -m alembic upgrade head` trên DB đang dùng. Sau migration đã duyệt/restart:
+
+```bash
+etl reconcile-master --stream resources --dry-run
+etl reconcile-master --stream all --dry-run
+```
+
+Preview không ghi Master/Mongo/checkpoint. Report có source_count, pages, fingerprint,
+known-source/local/unknown exclusions, candidates/already-inactive và tối đa 20 ID mẫu.
+Quét bảng gốc trong read-only REPEATABLE READ, kiểm RLS/view/dependency/completeness;
+không suy parent bị xóa từ aggregate JOIN. Nguồn rỗng, giảm mạnh, lỗi trang/quyền/schema,
+local mutation hoặc vượt ngưỡng → BLOCKED. JSON adapter không được reconcile/apply.
+
+Chỉ sau khi operator duyệt plan fingerprint và phạm vi ảnh hưởng:
+
+```bash
+etl reconcile-master --stream resources --apply --fingerprint <APPROVED_FINGERPRINT>
+```
+
+Apply quét lại, so fingerprint, khóa Master, đọc nguồn lại, kiểm toàn write-set trước
+mọi UPDATE; commit một transaction giới hạn (mặc định tối đa 100 row, tỷ lệ 10%).
+Vượt ngưỡng không apply một phần. Không tự tăng RECONCILE_MAX_AFFECTED/MAX_RATIO để
+vượt guard. PG source/target khác DB nên không có atomic distributed snapshot: nguồn
+có thể tái xuất hiện sau lần kiểm cuối, khi đó Full/Incremental sau sẽ restore nếu
+ownership/identity/state còn hợp lệ. Không tuyên bố CDC hoặc loại bỏ hoàn toàn race.
+
+Đích chỉ inactive và deleted_at/grade_deleted_at nếu chưa có. source_missing_at là
+thời điểm **ghi nhận mất nguồn**, không phải thời điểm người dùng xóa. Giữ deleted_by,
+created_at/PK/mongo_id, quan hệ, resource_versions/jobs/tasks/content_units, toàn bộ
+Mongo users/resources/ocr_pages/units/content_bags. Row đã inactive không viết lại
+ngày xóa; chạy lại preview/apply mới idempotent. Reconcile không đổi counters/mode PG.
+
+Sau apply: SELECT trạng thái/provenance, đối chiếu count/hash lịch sử PG và BSON
+Mongo; API detail/version/content và enqueue/retry không trả/khởi tạo nội dung đã
+thu hồi. Job đang chạy/finalization được giữ theo state machine, không kill/xóa history.
+Không tự cleanup hoặc rollback downgrade (guard chặn khi có audit/mapping). Restore
+chỉ từ Source hợp lệ hoặc quy trình operator đã duyệt; không reset marker tùy tiện.
 
 Giao diện phân biệt cấu hình Auto với từng lần chạy thực tế (mode/thời điểm/run ID).
 Nút **Đồng bộ Full** gọi full=true; **Chạy Incremental** gọi full=false và có xác nhận.
