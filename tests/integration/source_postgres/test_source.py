@@ -1,6 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -259,8 +259,11 @@ def test_dependency_incremental(source, pg_container, sql, stream, table, target
     use_source(pg_container, source)
     pg_container.sync.run(full=True)
     execute(source, sql)
-    assert pg_container.sync.run(stream)[stream]["updated"] >= 1
+    result = pg_container.sync.run(stream)[stream]
+    assert result['updated'] >= 1
+    assert result['records_read'] == result['inserted'] + result['updated'] + result['skipped']
     with pg_container.uow() as repo:
+        assert repo.get('sync_runs', result['run_id'])['sync_mode'] == 'INCREMENTAL'
         assert repo.get(table, target)[column] == expected
 
 
@@ -365,6 +368,44 @@ def test_snapshot_consistency_and_late_commit_replay(source, pg_container):
     pg_container.sync.run("resources")
     with pg_container.uow() as repo:
         assert repo.get("master_learning_resources", "resource-2")["title"] == "late commit"
+
+
+def test_incremental_candidates_replay_checkpoint_not_wall_clock(source, pg_container, monkeypatch):
+    use_source(pg_container, source)
+    initial = pg_container.sync.run(full=True)['resources']
+    repeated = pg_container.sync.run('resources', full=False)['resources']
+    assert repeated['records_read'] == repeated['skipped'] == initial['records_read']
+    assert repeated['inserted'] == repeated['updated'] == 0
+    with pg_container.uow() as repo:
+        before = repo.get('sync_checkpoints', 'resources')
+        assert repo.get('sync_runs', repeated['run_id'])['sync_mode'] == 'INCREMENTAL'
+    later = datetime.now(UTC) + timedelta(days=30)
+
+    class LaterClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return later
+
+    monkeypatch.setattr('data_sync_etl.adapters.source.postgresql.datetime', LaterClock)
+    unchanged = pg_container.sync.run('resources', full=False)['resources']
+    assert unchanged['records_read'] == unchanged['skipped'] == initial['records_read']
+    # Relation inserts in the seed touch all resource timestamps. Use a known
+    # later marker in this isolated fixture, so the other candidates are >300s
+    # behind the new checkpoint without sleeping or changing runtime replay.
+    execute(source, "UPDATE learning_resources SET title='one changed candidate', updated_at=:stamp WHERE id='resource-1'",
+            stamp=before['last_updated_at'] + timedelta(seconds=600))
+    changed = pg_container.sync.run('resources', full=False)['resources']
+    assert changed['updated'] == 1 and changed['inserted'] == 0
+    # New checkpoint moves past old fixture timestamps. Only the last changed row
+    # remains in the replay window; restart must preserve that cursor and counters.
+    pg_container.sync.source = PostgreSQLSourceAdapter(engine=source.reader_engine, replay_seconds=300)
+    last = pg_container.sync.run('resources', full=False)['resources']
+    assert last['records_read'] == last['skipped'] == 1 and last['updated'] == last['inserted'] == 0
+    with pg_container.uow() as repo:
+        after = repo.get('sync_checkpoints', 'resources')
+        assert (after['last_updated_at'], after['last_id']) >= (before['last_updated_at'], before['last_id'])
+        for data in (repeated, unchanged, changed, last):
+            assert data['records_read'] == data['inserted'] + data['updated'] + data['skipped']
 
 
 def test_repeated_concurrent_updates_have_new_markers(source):

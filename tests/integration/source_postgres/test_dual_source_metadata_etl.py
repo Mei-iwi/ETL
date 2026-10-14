@@ -229,6 +229,37 @@ def test_composition_prioritizes_source_over_identity_bootstrap(source, pg_conta
         runtime.close()
 
 
+def test_missing_source_docs_never_create_identity_and_old_target_is_retained(source, pg_container, dual, mongo_test_database, monkeypatch):
+    src, dst, sync, _, _, _ = dual
+    with source.engine.begin() as connection:
+        connection.execute(text("UPDATE learning_resources SET mongo_id='MISSING-RESOURCE' WHERE id='resource-1'"))
+        connection.execute(text("UPDATE users SET mongo_id='MISSING-USER' WHERE id='user-1'"))
+    monkeypatch.setattr('data_sync_etl.composition.create_source', lambda _: source.adapter)
+    settings = Settings(_env_file=None, source_adapter='postgresql', source_mongo_enabled=True,
+        source_mongo_database=src.name, mongo_database=dst.name, mongo_uri=mongo_test_database[0],
+        master_mongo_identity_bootstrap=True, master_mongo_identity_scope='source_verified',
+        storage_root=pg_container.storage.root)
+    runtime = Container(settings, pg_container.engine)
+    try:
+        before = snapshot(src)
+        for full in (True, False):
+            runtime.sync.run(full=full)
+        for stream in ('users', 'resources'):
+            assert runtime.mongo_metadata_sync.run(stream)[stream]['missing_extension'] == 1
+        assert dst.users.count_documents({}) == dst.learning_resources.count_documents({}) == 0
+        stamp = now()
+        old = dict(_id='MISSING-RESOURCE', created_at=stamp, updated_at=stamp)
+        dst.learning_resources.insert_one(old)
+        old_bson = BSON.encode(dst.learning_resources.find_one({'_id': 'MISSING-RESOURCE'}))
+        runtime.sync.run('resources', full=False)
+        assert BSON.encode(dst.learning_resources.find_one({'_id': 'MISSING-RESOURCE'})) == old_bson
+        assert snapshot(src) == before
+        with pg_container.uow() as repo:
+            assert all(run['status'] == 'COMPLETED' for run in repo.find('sync_runs'))
+    finally:
+        runtime.close()
+
+
 def test_source_and_target_metadata_rpc_have_no_open_pg_transaction(pg_container, dual, monkeypatch):
     _, _, _, master, store, reader = dual
     calls = []

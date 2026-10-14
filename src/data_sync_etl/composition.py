@@ -214,7 +214,10 @@ class Container:
         if self.settings.source_mongo_enabled:
             # Source extensions take precedence over legacy identity-only bootstrap.
             self.master_metadata_projection = self.mongo_metadata_sync
-        self.sync.metadata_projection = self.master_metadata_projection
+        # Normal Master Sync never invokes legacy identity bootstrap, even if an
+        # old deployment still has MASTER_MONGO_IDENTITY_BOOTSTRAP=true.
+        # Legacy projection remains available only through its explicit CLI.
+        self.sync.metadata_projection = self.mongo_metadata_sync
 
         self.mongo_projector = MongoContentProjector(
             self.uow,

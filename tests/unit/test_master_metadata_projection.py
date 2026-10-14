@@ -10,6 +10,7 @@ from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyRepository
 from data_sync_etl.application.auto_sync import AutoSyncCoordinator
 from data_sync_etl.application.master_metadata_projection import MasterMetadataProjection
 from data_sync_etl.cli.main import dispatch, parser
+from data_sync_etl.composition import Container
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.mongo_documents import ResourceDescriptionDocument, UserProfileDocument
 from data_sync_etl.main import create_app
@@ -43,6 +44,59 @@ class MetadataMemory:
         created = document.id not in target
         target.setdefault(document.id, document)
         return created
+
+
+def test_normal_master_sync_never_invokes_opted_in_legacy_bootstrap(container, monkeypatch):
+    store = MetadataMemory()
+    monkeypatch.setattr('data_sync_etl.composition.MongoMetadataStore', lambda _: store)
+    monkeypatch.setattr('data_sync_etl.composition.MongoClient', MagicMock())
+    settings = container.settings.model_copy(update={
+        'source_mongo_enabled': False, 'master_mongo_identity_bootstrap': True,
+        'master_mongo_identity_ids': {'users': ['user-1'], 'resources': ['resource-1']},
+    })
+    runtime = Container(settings, container.engine)
+    try:
+        for full in (True, False):
+            runtime.sync.run(full=full)
+        runtime.settings.admin_enabled = True
+        with TestClient(create_app(runtime)) as api:
+            assert api.post('/api/v1/master-data/sync', json={'stream': 'all', 'full': False}).status_code == 200
+        auto = AutoSyncCoordinator(runtime.uow, environment_supported=True, source_health=lambda: None,
+                                   interval_seconds=30, worker_stale_seconds=15, lease_seconds=30)
+        auto.heartbeat_and_claim('no-bootstrap')
+        auto.configure(True, 'resources')
+        with runtime.uow() as repo:
+            repo.update('sync_auto_config', 'master-data', {'next_run_at': None})
+        assert MasterSyncWorker(runtime.sync, auto).once('no-bootstrap')['action'] == 'COMPLETED'
+        assert store.calls == 0 and not store.users and not store.resources
+        with runtime.uow() as repo:
+            assert all(run['status'] == 'COMPLETED' for run in repo.find('sync_runs'))
+        # Explicit legacy invocation plus existing opt-in retains compatibility.
+        dispatch(runtime, parser().parse_args(['project-master-mongo', '--full']))
+        assert store.calls == 2 and store.users and store.resources
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize('full', [True, False])
+def test_api_and_cli_preserve_requested_mode(container, monkeypatch, full):
+    original = container.sync.run
+    calls = []
+
+    def observe(stream='all', full=False):
+        calls.append(full)
+        return original(stream, full)
+
+    monkeypatch.setattr(container.sync, 'run', observe)
+    container.settings.admin_enabled = True
+    with TestClient(create_app(container)) as api:
+        response = api.post('/api/v1/master-data/sync', json={'stream': 'users', 'full': full})
+    assert response.status_code == 200
+    cli_result = dispatch(container, parser().parse_args(['sync-master', '--stream', 'users', '--full' if full else '--incremental']))
+    assert calls == [full, full]
+    with container.uow() as repo:
+        for result in (response.json(), cli_result):
+            assert repo.get('sync_runs', result['users']['run_id'])['sync_mode'] == ('FULL' if full else 'INCREMENTAL')
 
 
 def approved(container):

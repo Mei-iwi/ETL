@@ -26,7 +26,9 @@ class SourceMongoMetadataSync:
         report['conflict_reasons'] = {}
         report['master_driven_scan'] = True
         if self.source is None or self.destination is None:
-            return {**report, 'status': 'DISABLED', 'error_code': 'SOURCE_MONGO_NOT_CONFIGURED'}
+            report.update(status='DISABLED', error_code='SOURCE_MONGO_NOT_CONFIGURED')
+            event(stage='mongo_source_metadata_sync', stream=stream, action='DISABLED', coverage=report)
+            return report
         with self.uow.metadata_projection_lock(stream) as acquired:
             if not acquired:
                 return {**report, 'status': 'BUSY'}

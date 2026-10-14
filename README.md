@@ -256,14 +256,25 @@ Phạm vi mặc định `approved_ids` chỉ chọn ID PostgreSQL đã duyệt t
 etl project-master-mongo --stream all --full
 ```
 
-Sync Master cũng gọi projection; chạy lại có thể báo `unchanged`.
+Legacy bootstrap chỉ chạy khi operator chủ động gọi `project-master-mongo` và
+bật `MASTER_MONGO_IDENTITY_BOOTSTRAP=true`. Master Sync/API/Auto không gọi nhánh này,
+kể cả cấu hình cũ còn bật bootstrap; khi Mongo nguồn tắt chỉ log DISABLED, PG vẫn chạy.
 `READY_IDENTITY_ONLY` chỉ xác nhận document ID/timestamps, không phải metadata đầy đủ.
 Mongo lỗi không rollback Master; dùng lệnh trên chạy bù. Tắt bootstrap và restart để ngừng
-tạo identity. Grade chỉ giữ reference, không tạo collection mới; content unit lưu
+tạo identity từ lệnh legacy. Document identity-only cũ không bị xóa; có nguồn thật sẽ
+enrich đúng mapping theo merge/CAS. Grade chỉ giữ reference, không tạo collection mới; content unit lưu
 reference theo ID đích sau projection thành công. Version reference vẫn NULL vì chưa
 có collection đích. Chi tiết: [nguồn kép và vận hành](docs/dual_source_etl.md).
 
 ### CLI thường dùng
+
+Giao diện phân biệt cấu hình Auto với từng lần chạy thực tế (mode/thời điểm/run ID).
+Nút **Đồng bộ Full** gọi full=true; **Chạy Incremental** gọi full=false và có xác nhận.
+Đổi dropdown chỉ lưu lịch Auto, không chạy ngay. `Đã đọc (ứng viên)` gồm cả bản ghi
+replay/SKIPPED, không phải số thêm/cập nhật. Với PostgreSQL, replay mặc định 300 giây
+**tính từ checkpoint timestamp**, không phải cửa sổ 300 giây gần giờ hiện tại;
+chờ lâu không bảo đảm đọc 0. Giữ GREATEST timestamps của parent và đối soát Full định kỳ
+cho writer commit muộn quá replay. Không thay số liệu hoặc tắt replay để làm đẹp bảng.
 
 ```bash
 etl --help
@@ -325,6 +336,12 @@ Frontend:
 cd frontend
 npm.cmd run build
 npm.cmd run lint
+```
+
+Test logic chế độ/kết quả/poll không cần framework UI mới (đã chạy với Node 22.17):
+
+```bash
+node --experimental-strip-types --test tests/masterSyncResults.test.mjs
 ```
 
 Quy trình test cô lập, nghiệm thu và giới hạn: [runbook](docs/dual_source_etl.md).
