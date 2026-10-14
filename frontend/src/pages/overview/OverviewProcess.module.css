@@ -107,6 +107,10 @@
     width: 220px;
 }
 
+.processTable tbody tr:hover {
+    background-color: #dfe8f4;
+}
+
 .processTable tbody tr:last-child td {
     border-bottom: 0;
 }
