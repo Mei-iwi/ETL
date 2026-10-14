@@ -6,6 +6,8 @@ quản lý, đồng bộ và retry. Giai đoạn hiện tại dừng ở OCR/Con
 chunking mới, keywords, BoW/content_bags, embeddings, Search hoặc đánh giá.
 
 Master Sync chỉ đồng bộ metadata; nội dung hoàn tất khi đạt `CONTENT_READY`.
+`COMPLETED` trên API/giao diện đồng bộ là PostgreSQL Master, không xác nhận Mongo
+metadata thành công. `CONTENT_READY` không đồng nghĩa đã lập chỉ mục tìm kiếm.
 Hỗ trợ **PDF, DOCX, XLSX, TXT, CSV, PPTX, PNG, JPG, JPEG**; không tiếp nhận/xử lý MP3/MP4.
 
 ## 1. Cài đặt
@@ -193,11 +195,12 @@ XLSX đọc giá trị cache, không tính công thức; TXT/CSV dùng UTF-8/BOM
 PPTX chỉ trích xuất text/bảng, không OCR ảnh nhúng. Tắt Auto không dừng job đã xếp hàng.
 Precheck thành công không chứng minh ETL hoàn tất.
 
-### Metadata Master → MongoDB
+### Metadata Mongo nguồn → Mongo đích
 
 Để đồng bộ metadata mở rộng **thật**, dùng Mongo nguồn có hai collection `users`,
 `learning_resources`. Có thể dùng chung server hiện tại nhưng phải tách database;
-không seed metadata mẫu vào nguồn thật. Thêm vào .env gốc:
+không seed metadata mẫu vào nguồn thật. Chỉ sửa .env sau khi operator đã phê duyệt
+database nguồn thực, quyền read và phạm vi ghi đích; mặc định nguồn Mongo tắt:
 
 ```dotenv
 SOURCE_MONGO_ENABLED=true
@@ -324,7 +327,10 @@ npm.cmd run build
 npm.cmd run lint
 ```
 
-Kết quả kiểm thử nguồn kép và giới hạn: [báo cáo kiểm thử](docs/dual_source_etl.md).
+Quy trình test cô lập, nghiệm thu và giới hạn: [runbook](docs/dual_source_etl.md).
+QA không fallback sang database ứng dụng; tên database test phải chứa thành phần
+`test` riêng (ví dụ `etl_test`, `etl_source_test`). Không dùng `docker compose up`
+để pre-flight read-only vì service migration có thể ghi database.
 
 ## 8. Lỗi thường gặp và dừng hệ thống
 

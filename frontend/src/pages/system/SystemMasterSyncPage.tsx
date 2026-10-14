@@ -203,7 +203,7 @@ export function SystemMasterSyncPage() {
                     <strong className={styles.statusValue}>{formatTime(latestRun?.finished_at ?? latestRun?.started_at)}</strong>
                 </div>
                 <div>
-                    <span className={styles.statusLabel}>Kết quả</span>
+                    <span className={styles.statusLabel}>Kết quả PostgreSQL Master</span>
                     <strong className={styles.statusValue}>
                         {latestRun ? `Master: ${statusLabels[latestRun.status]}` : 'Chưa có dữ liệu'}
                     </strong>

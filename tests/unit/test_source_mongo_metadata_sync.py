@@ -2,7 +2,9 @@ from datetime import timedelta
 from unittest.mock import MagicMock
 
 import pytest
+from pymongo.errors import OperationFailure
 
+from data_sync_etl.adapters.mongo.foundation_store import MongoMetadataStore
 from data_sync_etl.adapters.source.mongo_metadata import MongoMetadataSourceReader
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
 from data_sync_etl.cli.main import parser
@@ -85,3 +87,26 @@ def test_missing_extensions_inactive_and_disabled_are_not_success(container):
     assert service.run('users')['users']['skipped_ineligible'] == 1
     destination.sync_source_metadata.assert_not_called()
     assert SourceMongoMetadataSync(container.uow, None, None).run('users')['users']['status'] == 'DISABLED'
+
+
+@pytest.mark.parametrize('existing', [False, True])
+@pytest.mark.parametrize('code', [121, 13])
+def test_server_validation_is_document_conflict_but_permissions_are_failure(container, monkeypatch, existing, code, caplog):
+    service, source, _ = configured(container)
+    store = MongoMetadataStore(MagicMock())
+    collection = store.database['users']
+    collection.name = 'users'
+    stamp = now() - timedelta(days=2)
+    old = UserProfileDocument(_id='MUSER', bio='old', created_at=stamp, updated_at=stamp) if existing else None
+    monkeypatch.setattr(store, '_get', lambda *args: old)
+    collection.find_one.return_value = old.bson() if old else None
+    for name in ('insert_one', 'update_one'):
+        getattr(collection, name).side_effect = OperationFailure('DO_NOT_LOG_SECRET', code=code)
+    service.destination = store
+    report = service.run('users')['users']
+    if code == 121:
+        assert report['status'] == 'PARTIAL' and report['failed'] == 0
+        assert report['conflict_reasons'] == {'MONGO_METADATA_DOCUMENT_INVALID': 1}
+    else:
+        assert report['status'] == 'FAILED' and report['error_code'] == 'TARGET_MONGO_WRITE_FAILED'
+    assert 'DO_NOT_LOG_SECRET' not in caplog.text

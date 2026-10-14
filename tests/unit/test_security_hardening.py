@@ -55,6 +55,13 @@ def test_handoff_excludes_local_artifacts(tmp_path):
         "src/demo.egg-info/x.py",
         "src/__pycache__/bad.py",
         ".test-tmp/test.db",
+        "docs/.env.local.json",
+        "docs/credentials.json",
+        "tests/test-secrets.json",
+        "fixtures/source/access_token.json",
+        "docs/keys/config.json",
+        "tests/volumes/local.json",
+        "src/node_modules/local.py",
     ]:
         target = tmp_path / name
         target.parent.mkdir(parents=True, exist_ok=True)

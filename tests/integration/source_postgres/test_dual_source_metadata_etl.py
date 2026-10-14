@@ -1,6 +1,8 @@
 from datetime import timedelta
+from hashlib import sha256
 from uuid import uuid4
 
+import pymupdf
 import pytest
 from bson import BSON
 from pymongo import MongoClient
@@ -143,6 +145,13 @@ def test_dual_source_to_native_pdf_ocr_and_matching_content_units_without_bag_wr
     src, dst, sync, _, _, _ = dual
     c = pg_container
     original_file = setup_import(source, c, tmp_path)
+    with pymupdf.open() as document:
+        for number in (1, 2):
+            document.new_page().insert_text((72, 72), f'A genuine native text page {number}.')
+        document.save(original_file)
+    with source.engine.begin() as connection:
+        connection.execute(text('UPDATE resource_versions SET source_hash=:hash, updated_at=now() WHERE id=:id'),
+                           {'hash': sha256(original_file.read_bytes()).hexdigest(), 'id': 'source-local-1'})
     c.sync.metadata_projection = sync
     c.sync.run(full=True)
     stamp = now()
@@ -161,22 +170,44 @@ def test_dual_source_to_native_pdf_ocr_and_matching_content_units_without_bag_wr
         version = repo.find('resource_versions', {})[0]
         job = repo.find('ocr_jobs', {})[0]
         units = repo.find('content_units', {'resource_version_id': version['id']})
-        assert job['status'] == 'COMPLETED' and units
+        assert job['status'] == 'COMPLETED' and len(units) == job['total_pages'] == 2
         assert all(u['mongo_id'] == u['id'] and u['unit_type'] == 'PAGE_TEXT' for u in units)
         for unit in units:
             projected = dst.mongo_content_units.find_one({'_id': unit['id']})
             assert projected['text'] == repo.get('content_unit_texts', unit['id'])['text']
             assert projected['resource_version_id'] == version['id'] and projected['is_current']
             assert projected['keywords'] == []
-    page = dst.ocr_pages.find_one({'job_id': job['id']})
-    assert 'genuine native text' in page['raw_text'] and page['char_count'] == len(page['raw_text'])
-    assert page['engine_name'] == 'native_pdf_text' and page['source_checksum'] == version['source_hash']
+    pages = list(dst.ocr_pages.find({'job_id': job['id']}).sort('page_num', 1))
+    assert len(pages) == 2
+    for number, page in enumerate(pages, 1):
+        assert page['_id'] == f"{job['id']}:{number}"
+        assert f'genuine native text page {number}' in page['raw_text'] and page['char_count'] == len(page['raw_text'])
+        assert page['engine_name'] == 'native_pdf_text' and page['source_checksum'] == version['source_hash']
+    assert c.orchestrator.status(version['id'])['processing_status'] == 'CONTENT_READY'
     assert dst.mongo_content_units.count_documents({'resource_version_id': version['id'], 'is_current': True}) == len(units)
     assert BSON.encode(dst.content_bags.find_one({'_id': 'old-bag'})) == bag_before
     assert snapshot(src) == source_before and original_file.exists()
     # A projection retry is idempotent; the prior indexing stage remains untouched.
     c.mongo_projector.project(version['id'], job['id'], generation=1)
     assert BSON.encode(dst.content_bags.find_one({'_id': 'old-bag'})) == bag_before
+    assert dst.ocr_pages.count_documents({'job_id': job['id']}) == 2
+    assert dst.mongo_content_units.count_documents({'resource_version_id': version['id']}) == 2
+
+
+def test_invalid_source_document_is_partial_and_next_batch_still_syncs(source, dual, caplog):
+    src, dst, sync, master, _, _ = dual
+    with source.engine.begin() as connection:
+        connection.execute(text("UPDATE learning_resources SET mongo_id='MRES-2' WHERE id='resource-2'"))
+    master.run(full=True)
+    src.learning_resources.update_one({'_id': 'MRES-1'}, {'$set': {'authors': 'PRIVATE_INVALID_PAYLOAD'}})
+    stamp = now()
+    src.learning_resources.insert_one(dict(_id='MRES-2', description='Valid fixture', created_at=stamp, updated_at=stamp))
+    before = snapshot(src)
+    report = sync.run('resources')['resources']
+    assert report['status'] == 'PARTIAL' and report['failed'] == 0 and report['inserted'] == 1
+    assert report['conflict_reasons'] == {'MONGO_METADATA_DOCUMENT_INVALID': 1}
+    assert dst.learning_resources.count_documents({'_id': 'MRES-2'}) == 1
+    assert snapshot(src) == before and 'PRIVATE_INVALID_PAYLOAD' not in caplog.text
 
 
 def test_composition_prioritizes_source_over_identity_bootstrap(source, pg_container, dual, mongo_test_database, monkeypatch):

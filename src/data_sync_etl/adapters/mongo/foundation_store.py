@@ -7,7 +7,7 @@ from datetime import UTC
 from bson import ObjectId
 from bson.codec_options import CodecOptions
 from pydantic import TypeAdapter, ValidationError
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from data_sync_etl.adapters.mongo.content_store import generation_filter, invalidate_bags
 from data_sync_etl.domain.core import DomainError, now
@@ -127,6 +127,10 @@ class MongoMetadataStore:
                     return 'INSERTED'
                 except DuplicateKeyError:
                     continue
+                except OperationFailure as exc:
+                    if exc.code == 121:
+                        raise DomainError('MONGO_METADATA_DOCUMENT_INVALID') from None
+                    raise
             fields = {field.alias or name: 1 for name, field in model.model_fields.items()}
             raw = collection.find_one({'_id': incoming['_id']}, fields)
             if raw is None:
@@ -146,7 +150,12 @@ class MongoMetadataStore:
             conditions = [{key: {'$exists': False}} if key not in raw else
                           {key: {'$exists': True, '$eq': raw[key]}}
                           for key in (extension | {'created_at', 'updated_at'})]
-            result = collection.update_one({'_id': incoming['_id'], '$and': conditions}, {'$set': changes})
+            try:
+                result = collection.update_one({'_id': incoming['_id'], '$and': conditions}, {'$set': changes})
+            except OperationFailure as exc:
+                if exc.code == 121:
+                    raise DomainError('MONGO_METADATA_DOCUMENT_INVALID') from None
+                raise
             if result.matched_count:
                 return 'UPDATED'
         raise DomainError('MONGO_METADATA_CONCURRENT_CHANGE')
