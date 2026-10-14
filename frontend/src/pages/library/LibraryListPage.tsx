@@ -121,7 +121,6 @@ export function LibraryListPage() {
             <header className={styles.header}>
                 <div>
                     <h1>Danh sách học liệu</h1>
-                    <p>Tra cứu học liệu và xem lịch sử các phiên bản.</p>
                 </div>
             </header>
 

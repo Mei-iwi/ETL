@@ -11,3 +11,21 @@
 body {
   margin: 0;
 }
+
+select:hover {
+  background-color: #ffffff;
+}
+
+select option {
+  background-color: #ffffff;
+  color: #334155;
+}
+
+select option:hover {
+  background-color: #dfe8f4;
+}
+
+select option:checked {
+  background-color: #dfe8f4;
+  color: #334155;
+}
