@@ -60,6 +60,11 @@ class Settings(BaseSettings):
         repr=False,
     )
     mongo_database: str = 'etl_content'
+    master_mongo_identity_bootstrap: bool = False
+    # Explicit per-stream approval of _id=Master.id. Never infer source.mongo_id.
+    master_mongo_identity_ids: dict[Literal['users', 'resources'], list[str]] = Field(
+        default_factory=dict, repr=False,
+    )
     finalization_max_attempts: int = Field(default=3, ge=1, le=20)
     finalization_retry_seconds: int = Field(default=30, ge=1, le=3600)
     processing_manual_retry_limit: int = Field(default=3, ge=1, le=20)

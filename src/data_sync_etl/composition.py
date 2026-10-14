@@ -30,6 +30,7 @@ from data_sync_etl.application.list_resource_lookups import ListResourceLookups
 from data_sync_etl.application.list_resource_versions import ListResourceVersions
 from data_sync_etl.application.list_resources import ListResources
 from data_sync_etl.application.list_subjects_use_case import ListSubjectsUseCase
+from data_sync_etl.application.master_metadata_projection import MasterMetadataProjection
 from data_sync_etl.application.mongo_projection import MongoContentProjector
 from data_sync_etl.application.ocr import OCRPipeline
 from data_sync_etl.application.orchestrator import EtlOrchestrator
@@ -171,6 +172,16 @@ class Container:
             self.content_bags = MongoBagStore(mongo_database, self.settings.vector_dimension)
         else:
             self.documents = documents
+
+        self.master_metadata_projection = MasterMetadataProjection(
+            self.uow, self.metadata_documents,
+            batch_size=min(1000, self.settings.sync_batch_size),
+            identity_bootstrap=self.settings.master_mongo_identity_bootstrap,
+            identity_ids=self.settings.master_mongo_identity_ids,
+            identity_guard=(self.source.metadata_identity_conflicts
+                            if isinstance(self.source, PostgreSQLSourceAdapter) else None),
+        )
+        self.sync.metadata_projection = self.master_metadata_projection
 
         self.mongo_projector = MongoContentProjector(
             self.uow,

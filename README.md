@@ -314,6 +314,35 @@ Xem [giới hạn định dạng và trích xuất](docs/multiformat_etl.md).
 
 ## 6. Lệnh thường dùng
 
+### Metadata Projection Master → MongoDB
+
+Sau sync thành công, hệ thống đối soát metadata `users`/`resources` từ Master.
+Tên mode `EXTENSION_SYNC` được giữ để tương thích, nhưng hiện chỉ kiểm tra thiếu
+nguồn: Master chưa có `bio`, `description`, `authors`, `tags`, chưa có writer extension.
+Hệ thống dùng COUNT, báo `PARTIAL_SOURCE_FIELDS` / `skipped_no_extension`, không ghi Mongo.
+Mongo lỗi không rollback Master; chạy lại bằng:
+
+```bash
+etl project-master-mongo --stream all --full
+```
+
+Identity-only chỉ bật bằng `MASTER_MONGO_IDENTITY_BOOTSTRAP=true` và danh sách
+`MASTER_MONGO_IDENTITY_IDS` đã xác nhận `_id=Master.id`; mặc định tắt, không tự bật.
+ID chưa duyệt được tính `skipped_unapproved`, không phải conflict. Không có ID duyệt
+phù hợp thì báo `NO_APPROVED_IDS`; `source.mongo_id` khác ID mới là mapping conflict.
+Document đã có giữ
+nguyên các field mở rộng và timestamp. Không thay UI/API, OCR hoặc lịch Auto.
+Xem [chính sách mapping, audit và vận hành](docs/master_metadata_projection.md).
+
+Trong `mongosh`, chọn database đúng theo `MONGO_DATABASE`, rồi kiểm tra:
+
+```javascript
+db.users.countDocuments({})
+db.learning_resources.countDocuments({})
+```
+
+Số document identity-only không chứng minh đã có profile/description đầy đủ.
+
 ```bash
 etl --help
 etl sync-master --stream resources --incremental

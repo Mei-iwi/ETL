@@ -111,9 +111,14 @@ export function SystemCapalitiesPage() {
     }, [loadCapabilities])
 
     return (
-        <section>
-            <h1>Khả năng xử lý</h1>
-            <button className={styles.reloadButton} type="button" onClick={() => void loadCapabilities()} disabled={loading}>{loading ? 'Đang tải...' : 'Tải lại'}</button>
+        <section className={styles.page}>
+            <header className={styles.pageHeader}>
+                <div>
+                    <h1>Khả năng xử lý</h1>
+                    {data && <p>Phiên bản API: {data.api_version}</p>}
+                </div>
+                <button className={styles.reloadButton} type="button" onClick={() => void loadCapabilities()} disabled={loading}>{loading ? 'Đang tải...' : 'Tải lại'}</button>
+            </header>
             {error && (
                 <p className={styles.error}>Lỗi tải dữ liệu: {error}</p>
             )}
@@ -122,27 +127,35 @@ export function SystemCapalitiesPage() {
             )}
             {data && <div className={styles.grid}>
                 <article className={styles.card}>
-                    <h2>API</h2>
-                    <p>Phiên bản: {data.api_version}</p>
-                </article>
-                <article className={styles.card}>
                     <h2>Đồng bộ dữ liệu nguồn</h2>
                     <p>Nguồn: {data.master_sync.source === 'postgresql' ? 'PostgreSQL' : 'JSON thử nghiệm'}</p>
                     <p>Chế độ: {data.master_sync.modes.join(', ')}</p>
                     <p>Tự động đồng bộ: {data.master_sync.auto_sync_supported ? 'Có hỗ trợ' : 'Không hỗ trợ trong cấu hình hiện tại'}</p>
                 </article>
-                <article className={styles.card}>
+                <article className={`${styles.card} ${styles.formatsCard}`}>
                     <h2>Định dạng hỗ trợ</h2>
-                    {data.formats.map((format) => (
-                        <div key={format.extension}>
-                            <strong>{format.extension}</strong>
-                            <p>{format.mime_type}</p>
-                            <p>
-                                Tiếp nhận: {format.upload_accepted ? 'Có' : 'Không'}
-                            </p>
-                            <p>Trích xuất văn bản: {format.text_extraction_supported ? format.ocr_requires_runtime ? 'OCR, cần Tesseract' : 'Có' : 'Chưa hỗ trợ trong cấu hình hiện tại'}</p>
-                        </div>
-                    ))}
+                    <div className={styles.tableWrapper} tabIndex={0} role="region" aria-label="Định dạng hỗ trợ">
+                        <table className={styles.formatsTable}>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Định dạng</th>
+                                    <th scope="col">MIME type</th>
+                                    <th scope="col">Tiếp nhận</th>
+                                    <th scope="col">Trích xuất văn bản</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {data.formats.map((format) => (
+                                    <tr key={format.extension}>
+                                        <td><strong>{format.extension}</strong></td>
+                                        <td>{format.mime_type}</td>
+                                        <td>{format.upload_accepted ? 'Có' : 'Không'}</td>
+                                        <td>{format.text_extraction_supported ? format.ocr_requires_runtime ? 'OCR, cần Tesseract' : 'Có' : 'Chưa hỗ trợ trong cấu hình hiện tại'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </article>
                 <article className={styles.card}>
                     <h2>Trích xuất và chuẩn hóa</h2>

@@ -15,6 +15,7 @@ from data_sync_etl.db.models import (
     EtlStageRun,
     MasterGradeLevel,
     MasterLearningResource,
+    MasterUser,
     OcrJob,
     OcrPageResult,
     OcrPageTask,
@@ -49,6 +50,18 @@ def utc(value):
 class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
     def __init__(self, session):
         self.session = session
+
+    def master_metadata_page(self, stream, after=None, size=100):
+        if stream not in ('users', 'resources') or type(size) is not int or not 1 <= size <= 1000:
+            raise ValueError('Invalid metadata projection page')
+        model = MasterUser if stream == 'users' else MasterLearningResource
+        key = model.id.collate('C') if self.session.bind.dialect.name == 'postgresql' else model.id
+        # Deliberately do not read passwords, emails, roles, titles or file paths.
+        stmt = select(model.id, model.created_at, model.updated_at).order_by(key).limit(size)
+        if after is not None:
+            stmt = stmt.where(key > after)
+        return [{k: utc(v) for k, v in row.items()}
+                for row in self.session.execute(stmt).mappings()]
 
     def content_units(self, version_id, *, offset=0, limit=50, search=""):
         conditions = [ContentUnit.resource_version_id == version_id]

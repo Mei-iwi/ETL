@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import UTC
 
+from bson import ObjectId
 from bson.codec_options import CodecOptions
 from pydantic import TypeAdapter, ValidationError
 from pymongo.errors import DuplicateKeyError
@@ -105,6 +106,35 @@ class MongoMetadataStore:
 
     def get_resource(self, document_id):
         return self._get("learning_resources", ResourceDescriptionDocument, document_id)
+
+    def _ensure_identity(self, collection, model, document):
+        data = checked(model, document).bson()
+        if set(data) != {"_id", "created_at", "updated_at"}:
+            raise DomainError("Identity bootstrap accepts only identity fields")
+        # A legacy ObjectId with the same textual value is NOT the same identity.
+        # Inspect only; never convert/move it or create a second logical document.
+        if ObjectId.is_valid(data['_id']) and self.database[collection].find_one(
+            {'_id': ObjectId(data['_id'])}, {'_id': 1},
+        ) is not None:
+            raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+        # Insert-only, atomic: never change an existing document, even its dates.
+        # Unlike _upsert(), this path cannot unset independently owned extensions.
+        try:
+            result = self.database[collection].update_one(
+                {"_id": data["_id"]}, {"$setOnInsert": data}, upsert=True,
+            )
+        except DuplicateKeyError:
+            # Another initializer won. Read/validate without rewriting its data.
+            if self._get(collection, model, data["_id"]) is None:
+                raise
+            return False
+        return result.upserted_id is not None
+
+    def ensure_user_identity(self, document: UserProfileDocument) -> bool:
+        return self._ensure_identity("users", UserProfileDocument, document)
+
+    def ensure_resource_identity(self, document: ResourceDescriptionDocument) -> bool:
+        return self._ensure_identity("learning_resources", ResourceDescriptionDocument, document)
 
 
 class MongoContentReader:

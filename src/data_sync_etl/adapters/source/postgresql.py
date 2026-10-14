@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import make_url
 
 from data_sync_etl.adapters.source.aggregate import build_aggregate
@@ -207,6 +207,19 @@ class PostgreSQLSourceAdapter:
     def health(self):
         with self.snapshot() as reader:
             reader.connection.execute(text("SELECT 1 FROM learning_resources LIMIT 1"))
+
+    def metadata_identity_conflicts(self, stream, ids):
+        """Read-only reference safety check, never a source of Mongo payload fields."""
+        if stream not in ('users', 'resources') or len(ids) > 1000:
+            raise DomainError('Invalid metadata identity check')
+        if not ids:
+            return set()
+        table = 'users' if stream == 'users' else 'learning_resources'
+        with self.snapshot() as reader:
+            rows = reader.connection.execute(text(
+                f'SELECT id,mongo_id FROM {table} WHERE id IN :ids'
+            ).bindparams(bindparam('ids', expanding=True)), {'ids': list(ids)})
+            return {row.id for row in rows if row.mongo_id is not None and row.mongo_id != row.id}
 
     def list_versions(self, after=None, size=20):
         """Read a bounded metadata page; never return storage references or hashes."""

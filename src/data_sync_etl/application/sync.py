@@ -14,8 +14,9 @@ STREAMS = {
 
 
 class MasterSync:
-    def __init__(self, source: SourceDataReader, uow: UnitOfWork, batch_size=100):
+    def __init__(self, source: SourceDataReader, uow: UnitOfWork, batch_size=100, metadata_projection=None):
         self.source, self.uow, self.batch_size = source, uow, batch_size
+        self.metadata_projection = metadata_projection
 
     def run(self, stream="all", full=False):
         if stream != "all" and stream not in STREAMS:
@@ -132,6 +133,14 @@ class MasterSync:
                     ),
                 )
             raise DomainError("Sync failed; committed checkpoints are preserved") from None
+        # Separate post-commit step shared by CLI, API and Auto worker.
+        # Its failures must not change Master counters/checkpoints or COMPLETED status.
+        if stream in ('users', 'resources') and self.metadata_projection is not None:
+            try:
+                self.metadata_projection.run(stream)
+            except Exception:
+                event(stage='master_metadata_projection', stream=stream,
+                      action='FAILED_RECONCILE_REQUIRED')
         return {"run_id": run_id, **totals}
 
     @staticmethod
