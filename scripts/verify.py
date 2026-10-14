@@ -30,6 +30,8 @@ def validate_test_url(value, environment):
     modes = {environment.get(k, "").lower() for k in ("APP_ENV", "ENVIRONMENT", "ENV")}
     if {"prod", "production"}.intersection(labels | modes):
         raise ValueError("Refusing tests against an explicitly production-labelled target")
+    if not re.search(r"(?:^|[_-])test(?:$|[_-])", url.database.lower()):
+        raise ValueError("Tests require an explicitly named isolated test database")
     local = {"localhost", "127.0.0.1", "::1", "postgres"}
     if url.host not in local and environment.get("ETL_TEST_DB_ALLOW_REMOTE") != "true":
         raise ValueError(
@@ -42,7 +44,7 @@ def select_test_url(environment, settings, host=None):
     if "TEST_DATABASE_URL" in environment:
         selected = environment["TEST_DATABASE_URL"]
     else:
-        selected = settings.test_database_url or settings.database_url
+        selected = settings.test_database_url
     # Validate the original selection too; a host override must not bypass production checks.
     url = validate_test_url(selected, environment)
     if host:

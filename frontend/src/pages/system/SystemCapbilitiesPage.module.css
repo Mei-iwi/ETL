@@ -1,11 +1,40 @@
+.page {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding-bottom: 24px;
+    color: #334155;
+}
+
+.pageHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.pageHeader h1 {
+    margin: 0;
+    color: #172554;
+    font-size: 28px;
+}
+
+.pageHeader p {
+    margin: 8px 0 0;
+    color: #64748b;
+    font-size: 14px;
+}
+
 .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit,
-            minmax(240px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 20px;
+    align-items: stretch;
 }
 
 .card {
+    min-width: 0;
     padding: 20px;
     background-color: #ffffff;
     border: 1px solid #e5eaf1;
@@ -23,6 +52,73 @@
     margin: 8px 0;
     color: #475569;
     font-size: 14px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.formatsCard {
+    grid-column: 1 / -1;
+    order: -1;
+}
+
+.tableWrapper {
+    overflow-x: auto;
+    border: 1px solid #e5eaf1;
+    border-radius: 8px;
+}
+
+.formatsTable {
+    width: 100%;
+    min-width: 640px;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.formatsTable th,
+.formatsTable td {
+    padding: 12px 14px;
+    text-align: left;
+    vertical-align: middle;
+    border-bottom: 1px solid #e5eaf1;
+    overflow-wrap: anywhere;
+}
+
+.formatsTable th {
+    background-color: #f8fafc;
+    color: #172554;
+    font-weight: 600;
+}
+
+.formatsTable th:first-child {
+    width: 14%;
+}
+
+.formatsTable th:nth-child(2) {
+    width: 46%;
+}
+
+.formatsTable th:nth-child(3) {
+    width: 14%;
+}
+
+.formatsTable td:first-child {
+    color: #172554;
+    white-space: nowrap;
+}
+
+.formatsTable td:nth-child(2) {
+    color: #64748b;
+    font-size: 13px;
+}
+
+.formatsTable tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.formatsTable tbody tr:hover {
+    background-color: #f8fafc;
 }
 
 .card ul {
@@ -54,7 +150,7 @@
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    margin-bottom: 1%;
+    flex: 0 0 auto;
 }
 
 .reloadButton:hover:not(:disabled) {
@@ -64,4 +160,30 @@
 .reloadButton:disabled {
     cursor: not-allowed;
     opacity: 0.65;
+}
+
+.reloadButton:focus-visible,
+.tableWrapper:focus-visible {
+    outline: 3px solid rgb(37 99 235 / 25%);
+    outline-offset: 3px;
+}
+
+@media (max-width: 760px) {
+    .grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .card {
+        padding: 16px;
+    }
+
+    .pageHeader h1 {
+        font-size: 24px;
+    }
+}
+
+@media (max-width: 400px) {
+    .pageHeader {
+        flex-wrap: wrap;
+    }
 }

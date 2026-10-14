@@ -66,6 +66,8 @@ class MongoContentProjector:
         if len(tasks) != job["total_pages"] or any(t["status"] != "SUCCEEDED" for t in tasks):
             raise DomainError("Projection requires every OCR page result")
         unit_count = 0
+        if any(unit['mongo_id'] not in (None, unit['id']) for unit in units):
+            raise DomainError('BLOCKED_MONGO_ID_MAPPING')
 
         for task in tasks:
             if task["status"] != "SUCCEEDED":
@@ -144,6 +146,17 @@ class MongoContentProjector:
             [unit["id"] for unit in units],
             generation,
         )
+
+        # Mongo documents use TARGET ContentUnit IDs, never source version/unit IDs.
+        # Persist links only after the complete projection/reconciliation succeeded.
+        with self.uow() as repo:
+            for unit in units:
+                current = repo.get('content_units', unit['id'], lock=True)
+                if (current is None or current['resource_version_id'] != version_id
+                        or current['mongo_id'] not in (None, unit['id'])):
+                    raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+                if current['mongo_id'] is None:
+                    repo.update('content_units', unit['id'], {'mongo_id': unit['id']})
 
         return {
             "ocr_pages": page_count,

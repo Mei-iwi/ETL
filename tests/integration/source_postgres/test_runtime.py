@@ -5,12 +5,12 @@ import pytest
 from conftest import make_pdf, migrate
 from fastapi.testclient import TestClient
 from pymongo import MongoClient
-from sqlalchemy import text
+from sqlalchemy import MetaData, Table, select, text
 from sqlalchemy.exc import DBAPIError
 
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyRepository
-from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.main import create_app
 
 from .test_source import execute, use_source
@@ -157,18 +157,29 @@ def test_master_content_parent_and_local_timestamp(pg_container):
 def test_master_migration_preserves_rows_and_guards_null_downgrade(pg_container):
     c = pg_container
     migrate(c.engine, "0004", downgrade=True)
-    c.sync.run(full=True)
-    with c.uow() as repo:
-        before = {
-            table: repo.find(table, {})
-            for table in ("master_learning_resources", "master_users", "sync_checkpoints")
-        }
+    # Seed through reflected HISTORICAL tables, not an ORM requiring current columns.
+    tables = {name: Table(name, MetaData(), autoload_with=c.engine) for name in
+              ('master_learning_resources', 'master_users', 'sync_checkpoints')}
+    with c.engine.begin() as connection:
+        for stream, name in [('resources', 'master_learning_resources'), ('users', 'master_users')]:
+            for batch in c.source.batches(stream, None, 2):
+                for aggregate in batch:
+                    connection.execute(tables[name].insert().values(aggregate.values))
+        connection.execute(tables['sync_checkpoints'].insert().values(
+            stream_name='resources', last_id='resource-3', last_updated_at=now(), updated_at=now()))
+        before = {name: list(connection.execute(select(table).order_by(*table.primary_key.columns)).mappings())
+                  for name, table in tables.items()}
     migrate(c.engine)
     migrate(c.engine)
+    with c.engine.connect() as connection:
+        assert all(list(connection.execute(select(tables[name]).order_by(*tables[name].primary_key.columns)).mappings()) == rows
+                   for name, rows in before.items())
     with c.uow() as repo:
-        assert all(repo.find(table, {}) == rows for table, rows in before.items())
         repo.update("master_learning_resources", "resource-1", {"title": None})
     with pytest.raises(RuntimeError, match="NULL rows"):
         migrate(c.engine, "0004", downgrade=True)
     with c.engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0007"
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        from conftest import ROOT
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == ScriptDirectory.from_config(Config(str(ROOT / 'alembic.ini'))).get_current_head()

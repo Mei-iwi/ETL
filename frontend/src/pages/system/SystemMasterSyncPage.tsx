@@ -8,13 +8,14 @@ import {
     syncMasterData,
 } from '../../services/masterSyncApi'
 import type {
-    MasterSyncResponse,
     MasterSyncStatusResponse,
     MasterSyncStream,
     MasterSyncMode,
     SourceSyncFilesResponse,
 } from '../../types/masterSync'
 import styles from './SystemMasterSyncPage.module.css'
+import { acceptStatusPoll, configuredModeLabel, selectSyncResults } from './masterSyncResults'
+import type { ManualSyncResult } from './masterSyncResults'
 
 const streamLabels: Record<string, string> = {
     resources: 'Học liệu',
@@ -43,7 +44,8 @@ export function SystemMasterSyncPage() {
     const [statusError, setStatusError] = useState('')
     const [statusLoading, setStatusLoading] = useState(true)
     const [autoPending, setAutoPending] = useState(false)
-    const [result, setResult] = useState<MasterSyncResponse | null>(null)
+    const [result, setResult] = useState<ManualSyncResult | null>(null)
+    const [runningMode, setRunningMode] = useState<MasterSyncMode | null>(null)
     const [syncStatus, setSyncStatus] = useState<MasterSyncStatusResponse | null>(null)
     const submittingRef = useRef(false)
     const statusRevisionRef = useRef(0)
@@ -62,12 +64,14 @@ export function SystemMasterSyncPage() {
             const revision = statusRevisionRef.current
             try {
                 const response = await getMasterSyncStatus(requestController.signal)
-                if (active && !requestController.signal.aborted && revision === statusRevisionRef.current && !submittingRef.current) {
+                if (acceptStatusPoll(active, requestController.signal.aborted, revision, statusRevisionRef.current, submittingRef.current)) {
                     setSyncStatus(response)
+                    setResult((manual) => manual && Object.entries(manual.response).every(([stream, data]) =>
+                        response.runs.some((run) => run.stream_name === stream && run.run_id === data.run_id)) ? null : manual)
                     setStatusError('')
                 }
             } catch (caughtError) {
-                if (active && !requestController.signal.aborted && revision === statusRevisionRef.current && !submittingRef.current) {
+                if (acceptStatusPoll(active, requestController.signal.aborted, revision, statusRevisionRef.current, submittingRef.current)) {
                     setStatusError(
                         caughtError instanceof Error
                             ? caughtError.message
@@ -97,23 +101,28 @@ export function SystemMasterSyncPage() {
         }
     }, [statusRefresh])
 
-    async function handleFullSync() {
+    async function handleManualSync(mode: MasterSyncMode) {
         if (submittingRef.current) return
-        if (!await confirm('Chạy Full Sync cho tất cả nhóm dữ liệu?')) return
+        const message = mode === 'FULL' ? 'Chạy Full Sync cho tất cả nhóm dữ liệu?'
+            : 'Chạy Incremental cho tất cả nhóm? Nếu chưa có checkpoint, lần này có thể đọc toàn bộ dữ liệu.'
+        if (!await confirm(message) || submittingRef.current) return
 
         submittingRef.current = true
         statusRevisionRef.current += 1
         setLoading(true)
+        setRunningMode(mode)
         setActionError('')
+        setResult(null)
         try {
-            const response = await syncMasterData({ stream: 'all', full: true })
-            setResult(response)
+            const response = await syncMasterData({ stream: 'all', full: mode === 'FULL' })
+            setResult({ response, mode })
         } catch (caughtError) {
             setActionError(caughtError instanceof Error ? caughtError.message : 'Không thể đồng bộ dữ liệu')
         } finally {
             statusRevisionRef.current += 1
             submittingRef.current = false
             setLoading(false)
+            setRunningMode(null)
             setStatusRefresh((value) => value + 1)
         }
     }
@@ -144,13 +153,8 @@ export function SystemMasterSyncPage() {
 
     const currentRun = syncStatus?.runs.find((run) => run.status === 'RUNNING')
     const latestRun = syncStatus?.runs.find((run) => run.status !== 'RUNNING')
-    const latestResults = syncStatus?.runs.reduce<MasterSyncResponse>((runs, run) => {
-        if (!(run.stream_name in runs)) runs[run.stream_name] = run
-        return runs
-    }, {})
-    const displayedResults = latestResults && Object.keys(latestResults).length > 0
-        ? latestResults
-        : result
+    const displayedResults = selectSyncResults(syncStatus?.runs ?? [], result)
+    const pendingStatus = Object.values(displayedResults).some((run) => run.status === 'PENDING_STATUS')
     const enabledStreams = syncStatus?.auto_streams.filter((item) => item.enabled) ?? []
     const syncInProgress = loading || Boolean(currentRun) || Boolean(syncStatus?.auto_running)
     const modes = new Set(syncStatus?.auto_streams.map((item) => item.sync_mode))
@@ -159,16 +163,14 @@ export function SystemMasterSyncPage() {
         (enabledStreams.length > 0 ? enabledStreams : syncStatus?.auto_streams ?? [])
             .map((item) => item.sync_mode),
     )
-    const displayedMode = loading ? 'Full'
-        : currentRun?.sync_mode ? currentRun.sync_mode === 'FULL' ? 'Full' : 'Incremental'
-            : configuredModes.size > 1 ? 'Theo từng nhóm'
-                : configuredModes.has('FULL') ? 'Full'
-                    : configuredModes.has('INCREMENTAL') ? 'Incremental' : 'Chưa xác định'
+    const displayedMode = configuredModeLabel([...configuredModes])
+    const visibleStreams = [...new Set([...enabledStreams.map((item) => item.stream_name), ...Object.keys(result?.response ?? {})])]
+    if (visibleStreams.length === 0) visibleStreams.push(...Object.keys(displayedResults))
 
     let currentStatus = 'Không có job đang chạy'
     if (statusLoading && !syncStatus) currentStatus = 'Đang tải...'
     else if (statusError) currentStatus = 'Không thể cập nhật'
-    else if (syncInProgress) currentStatus = 'Đang đồng bộ'
+    else if (syncInProgress) currentStatus = `Đang đồng bộ (${runningMode ?? currentRun?.sync_mode ?? 'Auto'})`
 
     const fileNotice = (syncStatus?.file_sync_supported === false
         ? syncStatus.file_sync_error === 'BLOCKED_SOURCE_DATABASE'
@@ -200,16 +202,16 @@ export function SystemMasterSyncPage() {
                 </div>
                 <div>
                     <span className={styles.statusLabel}>Lần đồng bộ gần nhất</span>
-                    <strong className={styles.statusValue}>{formatTime(latestRun?.finished_at ?? latestRun?.started_at)}</strong>
+                    <strong className={styles.statusValue}>{pendingStatus ? 'Đang tải lần vừa chạy' : formatTime(latestRun?.finished_at ?? latestRun?.started_at)}</strong>
                 </div>
                 <div>
-                    <span className={styles.statusLabel}>Kết quả</span>
+                    <span className={styles.statusLabel}>Kết quả PostgreSQL Master</span>
                     <strong className={styles.statusValue}>
-                        {latestRun ? `Master: ${statusLabels[latestRun.status]}` : 'Chưa có dữ liệu'}
+                        {pendingStatus ? 'Đang cập nhật trạng thái' : latestRun ? `${latestRun.sync_mode ?? 'Chưa rõ chế độ'}: ${statusLabels[latestRun.status]}` : 'Chưa có dữ liệu'}
                     </strong>
                 </div>
                 <div>
-                    <span className={styles.statusLabel}>{syncInProgress ? 'Chế độ đang chạy' : 'Chế độ cấu hình'}</span>
+                    <span className={styles.statusLabel}>Chế độ tự động đã cấu hình</span>
                     <strong className={styles.statusValue}>{displayedMode}</strong>
                 </div>
             </div>
@@ -225,74 +227,79 @@ export function SystemMasterSyncPage() {
                             </span>
                         </div>
                         <div className={styles.autoControls}>
-                        <div className={styles.autoRow}>
-                            <label htmlFor="sync-all-enabled">Bật/tắt tất cả</label>
-                            <select className={styles.modeSelect} aria-label="Chế độ đồng bộ tất cả"
-                                value={allMode ?? ''} disabled={autoPending || syncInProgress}
-                                onChange={(event) => void handleAutoChange(undefined, 'all', event.target.value as MasterSyncMode)}>
-                                <option value="" disabled>Theo từng nhóm</option>
-                                <option value="INCREMENTAL">Incremental</option>
-                                <option value="FULL">Full</option>
-                            </select>
-                            <input
-                                id="sync-all-enabled"
-                                type="checkbox"
-                                checked={syncStatus.auto_all_enabled}
-                                disabled={(!syncStatus.auto_supported && !syncStatus.auto_all_enabled) || autoPending || loading}
-                                onChange={(event) => void handleAutoChange(event.target.checked)}
-                            />
-                        </div>
-                        {syncStatus.auto_streams.map((autoStream) => (
-                            <div className={styles.autoRow} key={autoStream.stream_name}>
-                                <label htmlFor={`sync-${autoStream.stream_name}-enabled`}>{streamLabels[autoStream.stream_name]}</label>
-                                <select className={styles.modeSelect} aria-label={`Chế độ đồng bộ ${streamLabels[autoStream.stream_name]}`}
-                                    value={autoStream.sync_mode} disabled={autoPending || syncInProgress}
-                                    onChange={(event) => void handleAutoChange(undefined, autoStream.stream_name, event.target.value as MasterSyncMode)}>
+                            <div className={styles.autoRow}>
+                                <label htmlFor="sync-all-enabled">Bật/tắt tất cả</label>
+                                <select className={styles.modeSelect} aria-label="Chế độ đồng bộ tất cả"
+                                    value={allMode ?? ''} disabled={autoPending || syncInProgress}
+                                    onChange={(event) => void handleAutoChange(undefined, 'all', event.target.value as MasterSyncMode)}>
+                                    <option value="" disabled>Theo từng nhóm</option>
                                     <option value="INCREMENTAL">Incremental</option>
                                     <option value="FULL">Full</option>
                                 </select>
                                 <input
-                                    id={`sync-${autoStream.stream_name}-enabled`}
+                                    id="sync-all-enabled"
                                     type="checkbox"
-                                    checked={autoStream.enabled}
-                                    disabled={(!syncStatus.auto_supported && !autoStream.enabled) || autoPending || loading}
-                                    onChange={(event) => void handleAutoChange(
-                                        event.target.checked,
-                                        autoStream.stream_name,
-                                    )}
+                                    checked={syncStatus.auto_all_enabled}
+                                    disabled={(!syncStatus.auto_supported && !syncStatus.auto_all_enabled) || autoPending || loading}
+                                    onChange={(event) => void handleAutoChange(event.target.checked)}
                                 />
                             </div>
-                        ))}
+                            {syncStatus.auto_streams.map((autoStream) => (
+                                <div className={styles.autoRow} key={autoStream.stream_name}>
+                                    <label htmlFor={`sync-${autoStream.stream_name}-enabled`}>{streamLabels[autoStream.stream_name]}</label>
+                                    <select className={styles.modeSelect} aria-label={`Chế độ đồng bộ ${streamLabels[autoStream.stream_name]}`}
+                                        value={autoStream.sync_mode} disabled={autoPending || syncInProgress}
+                                        onChange={(event) => void handleAutoChange(undefined, autoStream.stream_name, event.target.value as MasterSyncMode)}>
+                                        <option value="INCREMENTAL">Incremental</option>
+                                        <option value="FULL">Full</option>
+                                    </select>
+                                    <input
+                                        id={`sync-${autoStream.stream_name}-enabled`}
+                                        type="checkbox"
+                                        checked={autoStream.enabled}
+                                        disabled={(!syncStatus.auto_supported && !autoStream.enabled) || autoPending || loading}
+                                        onChange={(event) => void handleAutoChange(
+                                            event.target.checked,
+                                            autoStream.stream_name,
+                                        )}
+                                    />
+                                </div>
+                            ))}
                         </div>
                     </div>
                 )}
                 <details className={styles.manualSync}>
                     <summary>Khởi tạo / đối soát</summary>
                     <button className={styles.button} type="button" disabled={syncInProgress || autoPending || !syncStatus}
-                        onClick={() => void handleFullSync()}>{loading ? 'Đang đồng bộ...' : 'Đồng bộ Full'}</button>
+                        onClick={() => void handleManualSync('FULL')}>{loading && runningMode === 'FULL' ? 'Đang chạy Full...' : 'Đồng bộ Full'}</button>
+                    <button className={styles.button} type="button" disabled={syncInProgress || autoPending || !syncStatus}
+                        onClick={() => void handleManualSync('INCREMENTAL')}>{loading && runningMode === 'INCREMENTAL' ? 'Đang chạy Incremental...' : 'Chạy Incremental'}</button>
                 </details>
             </div>
 
             {syncStatus && (
                 <div className={`${styles.card} ${styles.results}`}>
-                    {enabledStreams.length === 0 ? <p className={styles.notice}>Chưa bật nhóm đồng bộ tự động.</p> : (
-                    <div className={styles.tableWrap}>
-                    <table className={styles.fileTable}>
-                        <thead><tr><th>Nhóm dữ liệu</th><th>Đã đọc</th><th>Đã thêm</th><th>Cập nhật</th><th>Bỏ qua</th><th>Lỗi</th></tr></thead>
-                        <tbody>
-                    {enabledStreams.map(({ stream_name: name }) => {
-                        const data = displayedResults?.[name]
-                        return (
-                        <tr key={name}>
-                            <td>{streamLabels[name] ?? name}</td>
-                            <td>{data?.records_read ?? '—'}</td><td>{data?.inserted ?? '—'}</td><td>{data?.updated ?? '—'}</td>
-                            <td>{data?.skipped ?? '—'}</td><td>{data?.failed ?? '—'}</td>
-                        </tr>
-                        )
-                    })}
-                        </tbody>
-                    </table>
-                    </div>
+                    {enabledStreams.length === 0 && <p className={styles.notice}>Tự động đang tắt; bảng dưới là lịch sử hoặc lần chạy thủ công.</p>}
+                    {visibleStreams.length === 0 ? <p className={styles.notice}>Chưa có lần đồng bộ.</p> : (
+                        <div className={styles.tableWrap}>
+                            <table className={styles.fileTable}>
+                                <thead><tr><th>Nhóm dữ liệu</th><th>Lần chạy</th><th>Thời điểm</th><th title="Số ứng viên đã kiểm tra, gồm replay; không phải số bản ghi đã thay đổi">Đã đọc</th><th>Đã thêm</th><th>Cập nhật</th><th>Bỏ qua</th><th>Lỗi</th></tr></thead>
+                                <tbody>
+                                    {visibleStreams.map((name) => {
+                                        const data = displayedResults?.[name]
+                                        return (
+                                            <tr key={name} title={data ? `Run ID: ${data.run_id}` : 'Chưa chạy'}>
+                                                <td>{streamLabels[name] ?? name}</td>
+                                                <td>{data ? `${data.sync_mode === 'FULL' ? 'Full' : data.sync_mode === 'INCREMENTAL' ? 'Incremental' : 'Chưa rõ chế độ'} · ${data.status === 'PENDING_STATUS' ? 'Đang tải trạng thái' : statusLabels[data.status]}` : 'Chưa chạy'}</td>
+                                                <td>{data?.status === 'PENDING_STATUS' ? 'Đang tải...' : formatTime(data?.finished_at ?? data?.started_at)}</td>
+                                                <td>{data?.records_read ?? '—'}</td><td>{data?.inserted ?? '—'}</td><td>{data?.updated ?? '—'}</td>
+                                                <td>{data?.skipped ?? '—'}</td><td>{data?.failed ?? '—'}</td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
                 </div>
             )}

@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     source_database_url: str | None = Field(default=None, repr=False)
     source_migration_database_url: str | None = Field(default=None, repr=False)
     source_replay_seconds: int = Field(default=300, ge=0)
+    reconcile_max_affected: int = Field(default=100, ge=1, le=1000)
+    reconcile_max_ratio: float = Field(default=0.1, gt=0, le=1)
     source_file_storage_root: Path | None = Field(default=None, repr=False)
     source_file_allowed_statuses: tuple[str, ...] = ("APPROVED",)
     source_file_import_max_attempts: int = Field(default=3, ge=1, le=10)
@@ -60,6 +62,16 @@ class Settings(BaseSettings):
         repr=False,
     )
     mongo_database: str = 'etl_content'
+    mongo_metadata_mode: Literal['shared', 'separate'] = 'shared'
+    source_mongo_enabled: bool = False
+    source_mongo_uri: str | None = Field(default=None, repr=False)
+    source_mongo_database: str = Field(default='source_metadata', pattern=r'^[A-Za-z0-9_-]{1,63}$')
+    master_mongo_identity_bootstrap: bool = False
+    master_mongo_identity_scope: Literal['approved_ids', 'source_verified'] = 'approved_ids'
+    # Approve Master IDs, not Mongo IDs. Existing mongo_id is always authoritative.
+    master_mongo_identity_ids: dict[Literal['users', 'resources'], list[str]] = Field(
+        default_factory=dict, repr=False,
+    )
     finalization_max_attempts: int = Field(default=3, ge=1, le=20)
     finalization_retry_seconds: int = Field(default=30, ge=1, le=3600)
     processing_manual_retry_limit: int = Field(default=3, ge=1, le=20)

@@ -35,6 +35,9 @@ class OCRPipeline:
             version = repo.get("resource_versions", version_id, lock=True)
             if version is None:
                 raise DomainError("Resource version not found")
+            resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
+            if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
+                raise DomainError('Resource inactive or deleted')
             if version["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
                 raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
             # Reuse any existing run, including terminal jobs: repeated commands are idempotent.

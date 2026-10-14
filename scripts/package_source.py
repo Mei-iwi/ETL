@@ -1,6 +1,7 @@
 """Create a handoff archive from an explicit source allowlist, never local data."""
 
 import argparse
+import re
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
@@ -25,6 +26,17 @@ TREES = {
     "docs": {".md", ".json"},
     "fixtures/source": {".json"},
 }
+LOCAL_DIRECTORIES = {"venv", "node_modules", "build", "dist", "volumes", "local_data", "secrets", "credentials", "keys"}
+
+
+def private_file(relative):
+    # The root placeholder is the only env file admitted by the allowlist.
+    if relative.as_posix() == ".env.example":
+        return False
+    name = relative.name.casefold()
+    return name.startswith(".env") or bool(re.search(
+        r"(?:^|[_.-])(secrets?|credentials?|tokens?|private[_-]?keys?)(?:$|[_.-])", name
+    ))
 
 
 def source_files(root):
@@ -36,8 +48,11 @@ def source_files(root):
         )
     for path in sorted(candidates):
         relative = path.relative_to(root)
+        if private_file(relative):
+            continue
         if any(
             part.startswith(".") or part == "__pycache__" or part.endswith(".egg-info")
+            or part.casefold() in LOCAL_DIRECTORIES
             for part in relative.parts[:-1]
         ):
             continue

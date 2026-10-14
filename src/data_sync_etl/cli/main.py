@@ -5,6 +5,7 @@ import sys
 import pymupdf
 
 from data_sync_etl.composition import Container
+from data_sync_etl.domain.core import DomainError
 from data_sync_etl.logging import configure, flow
 
 
@@ -23,6 +24,19 @@ def parser():
     mode = sync.add_mutually_exclusive_group(required=True)
     mode.add_argument("--full", action="store_true")
     mode.add_argument("--incremental", action="store_true")
+    reconcile = commands.add_parser('reconcile-master', help='Read-only preview by default; apply needs approved fingerprint')
+    reconcile.add_argument('--stream', choices=['all', 'grades', 'subjects', 'users', 'resources'], default='all')
+    action = reconcile.add_mutually_exclusive_group()
+    action.add_argument('--dry-run', action='store_true')
+    action.add_argument('--apply', action='store_true')
+    reconcile.add_argument('--fingerprint')
+    project = commands.add_parser('project-master-mongo')
+    project.add_argument('--stream', choices=['all', 'users', 'resources'], default='all')
+    project.add_argument('--full', action='store_true', required=True,
+                         help='Shared mode validates read-only; separate legacy mode requires explicit opt-in')
+    metadata = commands.add_parser('sync-mongo-metadata', help='Shared metadata read-only check; separate source copy only when explicitly configured')
+    metadata.add_argument('--stream', choices=['all', 'users', 'resources'], default='all')
+    metadata.add_argument('--full', action='store_true', required=True)
     ingest = commands.add_parser("ingest-resource")
     ingest.add_argument("--resource-id", required=True)
     ingest.add_argument("--bucket", required=True)
@@ -79,6 +93,12 @@ def dispatch(container, args):
     match args.command:
         case "sync-master":
             return container.sync.run(args.stream, args.full)
+        case 'reconcile-master':
+            return container.reconcile_master.run(args.stream, apply=args.apply, fingerprint=args.fingerprint)
+        case 'project-master-mongo':
+            return container.master_metadata_projection.run(args.stream)
+        case 'sync-mongo-metadata':
+            return container.mongo_metadata_sync.run(args.stream)
         case "ingest-resource":
             return container.ingestion.run(
                 args.resource_id, args.bucket, args.object_key, args.uploaded_by
@@ -114,11 +134,21 @@ def main():
         with flow():
             result = dispatch(container, args)
         print(json.dumps(result, default=str, ensure_ascii=True, indent=2))
-    except Exception:
-        print(
-            "ETL operation failed. Check configuration and stage status; sensitive details omitted.",
-            file=sys.stderr,
-        )
+        if args.command == 'reconcile-master' and result['status'] == 'BLOCKED':
+            return 1
+        if args.command in ('project-master-mongo', 'sync-mongo-metadata') and any(
+            r['status'] in {'FAILED', 'BLOCKED', 'DISABLED', 'BLOCKED_MONGO_ID_MAPPING', 'BUSY'} for r in result.values()
+        ):
+            return 1
+    except Exception as exc:
+        code = str(exc).split(':', 1)[0] if isinstance(exc, DomainError) else None
+        if code in {'SHARED_MONGO_CONFLICT_SOURCE_ENABLED', 'SHARED_MONGO_CONFLICT_IDENTITY_BOOTSTRAP'}:
+            print(f'{code}: shared mode requires SOURCE_MONGO_ENABLED=false and MASTER_MONGO_IDENTITY_BOOTSTRAP=false.', file=sys.stderr)
+        else:
+            print(
+                "ETL operation failed. Check configuration and stage status; sensitive details omitted.",
+                file=sys.stderr,
+            )
         return 1
     finally:
         if container:

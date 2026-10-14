@@ -29,7 +29,12 @@ JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
 
 
 class MasterLearningResource(Base):
+    source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
+    source_state_hash = Column(String(64), nullable=True)
+    source_missing_at = Column(DateTime(timezone=True), nullable=True)
     __tablename__ = "master_learning_resources"
+    __table_args__ = (Index('uq_master_learning_resources_mongo_id', 'mongo_id', unique=True),)
+    mongo_id = Column(String(30), nullable=True)
     id = Column(String(30), primary_key=True, default=new_id)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
@@ -58,7 +63,12 @@ class MasterLearningResource(Base):
 
 
 class MasterUser(Base):
+    source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
+    source_state_hash = Column(String(64), nullable=True)
+    source_missing_at = Column(DateTime(timezone=True), nullable=True)
     __tablename__ = "master_users"
+    __table_args__ = (Index('uq_master_users_mongo_id', 'mongo_id', unique=True),)
+    mongo_id = Column(String(30), nullable=True)
     id = Column(String(30), primary_key=True, default=new_id)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
@@ -81,7 +91,11 @@ class MasterUser(Base):
 
 
 class MasterGradeLevel(Base):
+    source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
+    source_state_hash = Column(String(64), nullable=True)
+    source_missing_at = Column(DateTime(timezone=True), nullable=True)
     __tablename__ = "master_grade_levels"
+    grade_mongo_id = Column(String(24), nullable=True)
     id = Column(String(30), primary_key=True, default=new_id)
     education_level_id = Column(String(30), nullable=False)
     grade_code = Column(String(50), nullable=False)
@@ -105,6 +119,9 @@ class MasterGradeLevel(Base):
 
 
 class Subject(Base):
+    source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
+    source_state_hash = Column(String(64), nullable=True)
+    source_missing_at = Column(DateTime(timezone=True), nullable=True)
     __tablename__ = "subjects"
     __table_args__ = (
         Index("ix_subject_grade_active_deleted", "grade_id", "is_active", "deleted_at"),
@@ -153,12 +170,14 @@ class ResourceGradeLevel(Base):
 class ResourceVersion(Base):
     __tablename__ = "resource_versions"
     __table_args__ = (
+        Index('uq_resource_versions_mongo_id', 'mongo_id', unique=True),
         UniqueConstraint("resource_id", "version_number"),
         CheckConstraint("version_number > 0"),
         Index("ix_versions_resource_created", "resource_id", "created_at"),
         Index("ix_versions_hash", "source_hash"),
     )
     id = Column(String(30), primary_key=True, default=new_id)
+    mongo_id = Column(String(30), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
     resource_id = Column(
@@ -186,6 +205,7 @@ class ResourceVersion(Base):
 class ContentUnit(Base):
     __tablename__ = "content_units"
     __table_args__ = (
+        Index('uq_content_units_mongo_id', 'mongo_id', unique=True),
         UniqueConstraint("resource_version_id", "sequence_no"),
         CheckConstraint("sequence_no > 0"),
         CheckConstraint("page_from > 0 AND page_to >= page_from"),
@@ -199,6 +219,7 @@ class ContentUnit(Base):
         CheckConstraint("parent_unit_id <> id", name="ck_content_parent_not_self"),
     )
     id = Column(String(30), primary_key=True, default=new_id)
+    mongo_id = Column(String(30), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
     resource_version_id = Column(

@@ -16,6 +16,7 @@ from data_sync_etl.adapters.ocr.engines import (
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyUnitOfWork
 from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectReader
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
+from data_sync_etl.adapters.source.mongo_metadata import MongoMetadataSourceReader
 from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.adapters.storage.source_local import SourceLocalFileReader
@@ -30,6 +31,7 @@ from data_sync_etl.application.list_resource_lookups import ListResourceLookups
 from data_sync_etl.application.list_resource_versions import ListResourceVersions
 from data_sync_etl.application.list_resources import ListResources
 from data_sync_etl.application.list_subjects_use_case import ListSubjectsUseCase
+from data_sync_etl.application.master_metadata_projection import MasterMetadataProjection
 from data_sync_etl.application.mongo_projection import MongoContentProjector
 from data_sync_etl.application.ocr import OCRPipeline
 from data_sync_etl.application.orchestrator import EtlOrchestrator
@@ -37,8 +39,10 @@ from data_sync_etl.application.postprocess import Postprocessor
 from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
+from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.source_file_import import SourceFileImportService
+from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
 from data_sync_etl.config import Settings
@@ -81,10 +85,17 @@ class Container:
             self.source.close()
         if self.mongo_client is not None:
             self.mongo_client.close()
+        if self.source_mongo_client is not None and self.source_mongo_client is not self.mongo_client:
+            self.source_mongo_client.close()
         self.engine.dispose()
 
     def __init__(self, settings=None, engine=None, documents=None):
         self.settings = settings or Settings()
+        if self.settings.mongo_metadata_mode == 'shared':
+            if self.settings.source_mongo_enabled:
+                raise DomainError('SHARED_MONGO_CONFLICT_SOURCE_ENABLED: set SOURCE_MONGO_ENABLED=false')
+            if self.settings.master_mongo_identity_bootstrap:
+                raise DomainError('SHARED_MONGO_CONFLICT_IDENTITY_BOOTSTRAP: set MASTER_MONGO_IDENTITY_BOOTSTRAP=false')
         self.source = create_source(self.settings)
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
@@ -119,7 +130,11 @@ class Container:
                 and self.engine.dialect.name == "postgresql"
             ),
         )
-        self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size)
+        self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size,
+                               skip_shared_metadata_validation=self.settings.mongo_metadata_mode == 'shared')
+        self.reconcile_master = ReconcileMaster(self.source, self.uow,
+            batch_size=min(1000, self.settings.sync_batch_size),
+            max_affected=self.settings.reconcile_max_affected, max_ratio=self.settings.reconcile_max_ratio)
         self.auto_sync = AutoSyncCoordinator(
             self.uow,
             environment_supported=(
@@ -154,6 +169,7 @@ class Container:
             self.sync, self.ingestion, self.ocr, self.postprocess, self.uow
         )
         self.mongo_client = None
+        self.source_mongo_client = None
         self.metadata_documents = None
         self.content_reader = None
         self.content_bags = None
@@ -165,12 +181,56 @@ class Container:
                 connect=False,
             )
             mongo_database = self.mongo_client[self.settings.mongo_database]
-            self.documents = MongoContentStore(mongo_database)
+            # This stage stops at OCR/ContentUnits; do not write Bag/indexing state.
+            self.documents = MongoContentStore(mongo_database, invalidate_content_bags=False)
             self.metadata_documents = MongoMetadataStore(mongo_database)
             self.content_reader = MongoContentReader(mongo_database)
             self.content_bags = MongoBagStore(mongo_database, self.settings.vector_dimension)
         else:
             self.documents = documents
+
+        self.master_metadata_projection = MasterMetadataProjection(
+            self.uow, self.metadata_documents,
+            batch_size=min(1000, self.settings.sync_batch_size),
+            identity_bootstrap=self.settings.master_mongo_identity_bootstrap,
+            identity_ids=self.settings.master_mongo_identity_ids,
+            identity_scope=self.settings.master_mongo_identity_scope,
+            identity_guard=(self.source.metadata_identity_references
+                            if isinstance(self.source, PostgreSQLSourceAdapter) else None),
+        )
+        source_metadata = None
+        if self.settings.source_mongo_enabled:
+            if self.mongo_client is None or not isinstance(self.source, PostgreSQLSourceAdapter):
+                self.close()
+                raise DomainError('SOURCE_MONGO_REQUIRES_POSTGRES_AND_MONGO_DESTINATION')
+            try:
+                uri = self.settings.source_mongo_uri or self.settings.mongo_uri
+                self.source_mongo_client = self.mongo_client if uri == self.settings.mongo_uri else MongoClient(
+                    uri, serverSelectionTimeoutMS=3000, timeoutMS=10000, connect=False)
+                source_metadata = MongoMetadataSourceReader(
+                    self.source_mongo_client[self.settings.source_mongo_database], mongo_database)
+                # Fail configuration before any PG sync or Mongo writes.
+                source_metadata.assert_distinct_destination()
+            except Exception as exc:
+                self.close()
+                code = 'SOURCE_MONGO_SAME_DESTINATION' if isinstance(exc, DomainError) else 'SOURCE_MONGO_CONFIGURATION_UNAVAILABLE'
+                raise DomainError(code) from None
+        self.mongo_metadata_sync = SourceMongoMetadataSync(
+            self.uow, (self.metadata_documents if self.settings.mongo_metadata_mode == 'shared' else source_metadata),
+            None if self.settings.mongo_metadata_mode == 'shared' else self.metadata_documents,
+            reference_guard=self.source.metadata_identity_references if isinstance(self.source, PostgreSQLSourceAdapter) else None,
+            subject_guard=self.source.metadata_subject_exists if isinstance(self.source, PostgreSQLSourceAdapter) else None,
+            batch_size=min(1000, self.settings.sync_batch_size),
+            shared=self.settings.mongo_metadata_mode == 'shared',
+        )
+        if self.settings.source_mongo_enabled or self.settings.mongo_metadata_mode == 'shared':
+            # Both shared CLIs use read-only validation; explicit separate-source
+            # mode keeps its prior copy contract, never identity fallback.
+            self.master_metadata_projection = self.mongo_metadata_sync
+        # Normal Master Sync never invokes legacy identity bootstrap, even if an
+        # old deployment still has MASTER_MONGO_IDENTITY_BOOTSTRAP=true.
+        # Legacy projection remains available only through its explicit CLI.
+        self.sync.metadata_projection = None if self.settings.mongo_metadata_mode == 'shared' else self.mongo_metadata_sync
 
         self.mongo_projector = MongoContentProjector(
             self.uow,

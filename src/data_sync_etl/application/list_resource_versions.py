@@ -8,7 +8,8 @@ class ListResourceVersions:
 
     def run(self, resource_id: str) -> list[dict]:
         with self.uow() as repo:
-            if repo.get("master_learning_resources", resource_id) is None:
+            resource = repo.get("master_learning_resources", resource_id)
+            if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
                 raise ResourceNotFound("Resource not found")
 
             versions = repo.find(

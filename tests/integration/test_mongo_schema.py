@@ -34,6 +34,18 @@ def mongo_db(mongo_test_database):
         client.close()
 
 
+def test_excel_content_limits_are_enforced_by_real_mongo(mongo_db):
+    initialize(mongo_db, apply=True, dimension=2)
+    docs = samples()
+    for name, change in [('mongo_content_units', {'title': 'a' * 501}),
+                         ('mongo_content_units', {'keywords': [str(i) for i in range(6)]}),
+                         ('content_bags', {'title': 'a' * 501}),
+                         ('content_bags', {'embedding_model': 'a' * 256})]:
+        with pytest.raises(WriteError):
+            mongo_db[name].insert_one({**docs[name], **change})
+        assert mongo_db[name].count_documents({}) == 0
+
+
 def samples():
     stamp = now()
     common = {"_id": "id-1", "created_at": stamp, "updated_at": stamp}

@@ -3,9 +3,10 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from threading import Lock
 
-from sqlalchemy import and_, delete, exists, func, or_, select, text
+from sqlalchemy import and_, delete, exists, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 
 from data_sync_etl.adapters.persistence.resource_metadata import ResourceMetadataRepositoryMixin
 from data_sync_etl.db.models import (
@@ -15,6 +16,7 @@ from data_sync_etl.db.models import (
     EtlStageRun,
     MasterGradeLevel,
     MasterLearningResource,
+    MasterUser,
     OcrJob,
     OcrPageResult,
     OcrPageTask,
@@ -26,7 +28,8 @@ from data_sync_etl.db.models import (
     SyncAutoStream,
     SyncCheckpoint,
 )
-from data_sync_etl.domain.core import now
+from data_sync_etl.domain.core import DomainError, now
+from data_sync_etl.domain.source_ownership import state_hash
 
 STREAMS = {
     "resources": "master_learning_resources",
@@ -49,6 +52,76 @@ def utc(value):
 class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
     def __init__(self, session):
         self.session = session
+
+    def source_metadata_page(self, stream, after=None, size=100):
+        if stream not in ('users', 'resources') or type(size) is not int or not 1 <= size <= 1000:
+            raise ValueError('Invalid source metadata page')
+        model = MasterUser if stream == 'users' else MasterLearningResource
+        key = model.id.collate('C') if self.session.bind.dialect.name == 'postgresql' else model.id
+        fields = [model.id, model.mongo_id, model.is_active, model.deleted_at]
+        if stream == 'resources':
+            fields.append(model.publication_status)
+        stmt = select(*fields).order_by(key).limit(size)
+        if after is not None:
+            stmt = stmt.where(key > after)
+        return [dict(row) for row in self.session.execute(stmt).mappings()]
+
+    def metadata_subject_exists(self, subject_id):
+        return self.session.scalar(select(MODELS['subjects'].id).where(
+            MODELS['subjects'].id == subject_id, MODELS['subjects'].is_active.is_(True),
+            MODELS['subjects'].deleted_at.is_(None),
+        )) is not None
+
+    def metadata_sync_state(self, stream, record_id):
+        if stream not in ('users', 'resources'):
+            raise ValueError('Invalid metadata stream')
+        model = MasterUser if stream == 'users' else MasterLearningResource
+        fields = [model.id, model.mongo_id, model.is_active, model.deleted_at]
+        if stream == 'resources':
+            fields.append(model.publication_status)
+        row = self.session.execute(select(*fields).where(model.id == record_id)).mappings().one_or_none()
+        return dict(row) if row else None
+
+    def master_metadata_page(self, stream, after=None, size=100):
+        if stream not in ('users', 'resources') or type(size) is not int or not 1 <= size <= 1000:
+            raise ValueError('Invalid metadata projection page')
+        model = MasterUser if stream == 'users' else MasterLearningResource
+        key = model.id.collate('C') if self.session.bind.dialect.name == 'postgresql' else model.id
+        # Deliberately do not read passwords, emails, roles, titles or file paths.
+        stmt = select(model.id, model.mongo_id, model.created_at, model.updated_at).order_by(key).limit(size)
+        if after is not None:
+            stmt = stmt.where(key > after)
+        return [{k: utc(v) for k, v in row.items()}
+                for row in self.session.execute(stmt).mappings()]
+
+    def reserve_master_mongo_identity(self, stream, record_id, expected, target):
+        if stream not in ('users', 'resources') or not isinstance(target, str) or not 1 <= len(target) <= 30 or target != target.strip():
+            raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+        table = STREAMS[stream]
+        model = MODELS[table]
+        row = self.session.execute(select(model.id, model.mongo_id).where(
+            model.id == record_id,
+        ).with_for_update()).first()
+        if row is None or row.mongo_id not in (expected, target):
+            raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+        self._check_mongo_reference(model, record_id, target)
+        if row.mongo_id is None:
+            try:
+                changed = self.session.execute(update(model).where(
+                    model.id == record_id, model.mongo_id.is_(None),
+                ).values(mongo_id=target).execution_options(synchronize_session=False))
+                if changed.rowcount != 1:
+                    raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+            except IntegrityError:
+                raise DomainError('BLOCKED_MONGO_ID_MAPPING') from None
+        elif row.mongo_id != target:
+            raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+
+    def _check_mongo_reference(self, model, record_id, target):
+        if target is not None and self.session.scalar(select(model.id).where(
+            model.mongo_id == target, model.id != record_id,
+        ).limit(1)) is not None:
+            raise DomainError('BLOCKED_MONGO_ID_MAPPING')
 
     def content_units(self, version_id, *, offset=0, limit=50, search=""):
         conditions = [ContentUnit.resource_version_id == version_id]
@@ -150,6 +223,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             select(MasterLearningResource).where(
                 MasterLearningResource.id == resource_id,
                 MasterLearningResource.deleted_at.is_(None),
+                MasterLearningResource.is_active.is_(True),
             )
         )
         if not resource:
@@ -162,6 +236,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             .where(
                 ResourceSubject.resource_id == resource_id,
                 Subject.deleted_at.is_(None),
+                Subject.is_active.is_(True),
             )
         ).all()
         # Lay danh sach khoi lop lien ket
@@ -171,6 +246,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
             .where(
                 ResourceGradeLevel.resource_id == resource_id,
                 MasterGradeLevel.grade_deleted_at.is_(None),
+                MasterGradeLevel.grade_is_active.is_(True),
             )
         ).all()
         data = self._dict(resource)
@@ -275,20 +351,65 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
                 .on_conflict_do_nothing(index_elements=["stream_name"])
             )
 
-    def sync_upsert(self, table, values):
+    def sync_upsert(self, table, values, *, source_origin=None):
         # Private comparison path may read the hash; public repository reads never return it.
         model = MODELS[table]
-        row = self.session.get(model, values["id"])
+        referenced = table in ('master_users', 'master_learning_resources')
+        row = self.session.get(model, values['id'], with_for_update=referenced or source_origin is not None, populate_existing=True)
+        values = {k: v for k, v in values.items() if k not in {'source_origin', 'source_state_hash', 'source_missing_at'}}
+        if source_origin is not None:
+            if source_origin != 'POSTGRESQL':
+                raise DomainError('BLOCKED_SOURCE_OWNERSHIP')
+            if row is not None:
+                if row.source_origin != source_origin:
+                    raise DomainError('BLOCKED_SOURCE_OWNERSHIP')
+                if not row.source_state_hash or row.source_state_hash != state_hash(self._dict(row)):
+                    raise DomainError('BLOCKED_LOCAL_SOURCE_CHANGE')
+                created = 'grade_created_at' if table == 'master_grade_levels' else 'created_at'
+                if created in values and utc(values[created]) != utc(getattr(row, created)):
+                    raise DomainError('BLOCKED_SOURCE_IDENTITY')
+        if table == 'master_grade_levels' and values.get('grade_mongo_id') is None:
+            values = {k: v for k, v in values.items() if k != 'grade_mongo_id'}
+        if referenced:
+            values = dict(values)
+            incoming = values.get('mongo_id')
+            if incoming is None:
+                values.pop('mongo_id', None)  # NULL/absence never silently erase a sticky reference.
+            else:
+                if not isinstance(incoming, str) or not 1 <= len(incoming) <= 30 or incoming != incoming.strip():
+                    raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+                if row is not None and row.mongo_id not in (None, incoming):
+                    raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+                self._check_mongo_reference(model, values['id'], incoming)
         if row is None:
-            self.insert(table, values)
+            inserted = self.insert(table, {**values, **({'source_origin': source_origin} if source_origin else {})})
+            if source_origin:
+                self.update(table, values['id'], {'source_state_hash': state_hash(inserted)})
             return "INSERTED"
         changed = {k: v for k, v in values.items() if utc(getattr(row, k)) != utc(v)}
         if not changed:
+            if source_origin and row.source_missing_at is not None:
+                row.source_missing_at = None
+                self.session.flush()
             return "SKIPPED"
         for k, v in changed.items():
             setattr(row, k, v)
         self.session.flush()
+        if source_origin:
+            row.source_missing_at = None
+            row.source_state_hash = state_hash(self._dict(row))
+            self.session.flush()
         return "UPDATED"
+
+    def reconciliation_page(self, table, after=None, size=100):
+        if table not in STREAMS.values() or not 1 <= size <= 1000:
+            raise ValueError('Invalid reconciliation bounds')
+        model = MODELS[table]
+        column = model.id.collate('C') if self.session.bind.dialect.name == 'postgresql' else model.id
+        query = select(model).order_by(column).limit(size)
+        if after is not None:
+            query = query.where(column > after)
+        return [self._dict(row) for row in self.session.scalars(query)]
 
     def stale_tasks(self, cutoff):
         stmt = (
@@ -390,6 +511,27 @@ class SQLAlchemyUnitOfWork:
     def __call__(self):
         with self.sessions.begin() as session:
             yield SQLAlchemyRepository(session)
+
+    @contextmanager
+    def metadata_projection_lock(self, stream):
+        # Session-scoped lock on an autocommit connection: no PG transaction
+        # remains open while the metadata projector performs Mongo RPCs.
+        name = 'master-mongo:' + stream
+        with self.sessions() as session:
+            engine = session.get_bind()
+            if engine.dialect.name != 'postgresql':
+                with self.processing_lock(name) as acquired:
+                    yield acquired
+                return
+            key = int.from_bytes(sha256(('etl-finalize:' + name).encode()).digest()[:8],
+                                 'big', signed=True)
+            with engine.connect().execution_options(isolation_level='AUTOCOMMIT') as connection:
+                acquired = bool(connection.scalar(text('SELECT pg_try_advisory_lock(:key)'), {'key': key}))
+                try:
+                    yield acquired
+                finally:
+                    if acquired:
+                        connection.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': key})
 
     @contextmanager
     def sync_lock(self):

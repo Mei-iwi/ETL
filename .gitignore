@@ -22,3 +22,15 @@ frontend/dist/
 artifacts/
 src/package-lock.json
 package-lock.json
+*.pem
+*.key
+*.p12
+*.pfx
+**/secrets/
+**/credentials/
+**/keys/
+credentials*.json
+secrets*.json
+tokens*.json
+volumes/
+local_data/

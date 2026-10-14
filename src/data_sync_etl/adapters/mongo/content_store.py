@@ -26,8 +26,9 @@ def invalidate_bags(database, version_id: str, generation: int | None) -> None:
 
 
 class MongoContentStore:
-    def __init__(self, database) -> None:
+    def __init__(self, database, *, invalidate_content_bags=True) -> None:
         self.database = database
+        self.invalidate_content_bags = invalidate_content_bags
 
     def _upsert(self, collection_name: str, document: dict[str, Any]) -> None:
         document_id = document["_id"]
@@ -51,7 +52,8 @@ class MongoContentStore:
             }
             # Conservative rebuild: this may defer indexing after unchanged retries,
             # but can never advertise bags derived from partially replaced content.
-            invalidate_bags(self.database, document["resource_version_id"], generation)
+            if self.invalidate_content_bags:
+                invalidate_bags(self.database, document["resource_version_id"], generation)
         try:
             self.database[collection_name].update_one(
                 selector,
@@ -88,7 +90,8 @@ class MongoContentStore:
             "_id": {"$nin": unit_ids},
         }
         selector.update(generation_filter(generation))
-        invalidate_bags(self.database, version_id, generation)
+        if self.invalidate_content_bags:
+            invalidate_bags(self.database, version_id, generation)
         self.database["mongo_content_units"].update_many(
             selector,
             {"$set": {"is_current": False, "updated_at": now()}},

@@ -14,20 +14,35 @@ STREAMS = {
 
 
 class MasterSync:
-    def __init__(self, source: SourceDataReader, uow: UnitOfWork, batch_size=100):
+    def __init__(self, source: SourceDataReader, uow: UnitOfWork, batch_size=100, metadata_projection=None,
+                 skip_shared_metadata_validation=False):
         self.source, self.uow, self.batch_size = source, uow, batch_size
+        self.metadata_projection = metadata_projection
+        self.skip_shared_metadata_validation = skip_shared_metadata_validation
 
     def run(self, stream="all", full=False):
         if stream != "all" and stream not in STREAMS:
             raise DomainError("Unknown sync stream")
-        with self.uow.sync_lock() as acquired:
-            if not acquired:
-                raise SyncAlreadyRunning("Master data sync is already running")
-            with flow():
-                return {
+        with flow():
+            with self.uow.sync_lock() as acquired:
+                if not acquired:
+                    raise SyncAlreadyRunning("Master data sync is already running")
+                result = {
                     name: self._stream(name, full)
                     for name in (STREAMS if stream == "all" else [stream])
                 }
+            # PG sync lock/transaction is released before any Mongo RPC.
+            if self.skip_shared_metadata_validation:
+                event(stage='mongo_metadata_validation', action='SKIP_PG_SHARED_METADATA_VALIDATION')
+                return result
+            for name in result:
+                if name in ('users', 'resources') and self.metadata_projection is not None:
+                    try:
+                        self.metadata_projection.run(name)
+                    except Exception:
+                        event(stage='master_metadata_projection', stream=name,
+                              action='FAILED_RECONCILE_REQUIRED')
+            return result
 
     def status(self, limit=20):
         with self.uow() as repo:
@@ -76,7 +91,10 @@ class MasterSync:
                 with self.uow() as repo:
                     checkpoint = repo.get("sync_checkpoints", stream, lock=True)
                     for aggregate in batch:
-                        action = repo.sync_upsert(STREAMS[stream], aggregate.values)
+                        if getattr(self.source, 'source_origin', None) == 'POSTGRESQL':
+                            action = repo.sync_upsert(STREAMS[stream], aggregate.values, source_origin='POSTGRESQL')
+                        else:
+                            action = repo.sync_upsert(STREAMS[stream], aggregate.values)
                         if stream == "resources":
                             replaced = self._relations(repo, aggregate)
                             if replaced and action == "SKIPPED":
@@ -119,7 +137,10 @@ class MasterSync:
                     )
             with self.uow() as repo:
                 repo.update("sync_runs", run_id, dict(status="COMPLETED", finished_at=now()))
-        except Exception:
+        except Exception as exc:
+            safe_code = str(exc) if isinstance(exc, DomainError) and str(exc) in {
+                'BLOCKED_MONGO_ID_MAPPING', 'BLOCKED_SOURCE_OWNERSHIP', 'BLOCKED_LOCAL_SOURCE_CHANGE', 'BLOCKED_SOURCE_IDENTITY',
+            } else None
             with self.uow() as repo:
                 repo.update(
                     "sync_runs",
@@ -128,10 +149,10 @@ class MasterSync:
                         status="FAILED",
                         failed=1,
                         finished_at=now(),
-                        error_message="Sync batch failed; inspect source contract and references",
+                        error_message=safe_code or "Sync batch failed; inspect source contract and references",
                     ),
                 )
-            raise DomainError("Sync failed; committed checkpoints are preserved") from None
+            raise DomainError(safe_code or "Sync failed; committed checkpoints are preserved") from None
         return {"run_id": run_id, **totals}
 
     @staticmethod

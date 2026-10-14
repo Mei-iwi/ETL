@@ -26,8 +26,9 @@ def test_explicit_test_url_wins_and_host_only_override():
     assert selected.host == "postgres" and selected.query["sslmode"] == "require"
 
 
-def test_dotenv_test_then_dev_fallback():
-    assert make_url(select_test_url({}, settings())).database == "etl"
+def test_dotenv_test_without_live_fallback():
+    with pytest.raises(ValueError):
+        select_test_url({}, settings())
     assert (
         make_url(select_test_url({}, settings("postgresql://localhost/etl_test"))).database
         == "etl_test"
@@ -40,6 +41,9 @@ def test_dotenv_test_then_dev_fallback():
         "",
         "secret-invalid-url",
         "sqlite:///test.db",
+        "postgresql://localhost/etl",
+        "postgresql://localhost/etl_source",
+        "postgresql://localhost/latest",
         "postgresql://localhost/production",
         "postgresql://prod-db/etl_test",
         "postgresql://localhost/etl?host=prod-db",
