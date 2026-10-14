@@ -60,6 +60,7 @@ class Settings(BaseSettings):
         repr=False,
     )
     mongo_database: str = 'etl_content'
+    mongo_metadata_mode: Literal['shared', 'separate'] = 'shared'
     source_mongo_enabled: bool = False
     source_mongo_uri: str | None = Field(default=None, repr=False)
     source_mongo_database: str = Field(default='source_metadata', pattern=r'^[A-Za-z0-9_-]{1,63}$')

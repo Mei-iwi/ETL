@@ -5,6 +5,7 @@ import sys
 import pymupdf
 
 from data_sync_etl.composition import Container
+from data_sync_etl.domain.core import DomainError
 from data_sync_etl.logging import configure, flow
 
 
@@ -26,8 +27,8 @@ def parser():
     project = commands.add_parser('project-master-mongo')
     project.add_argument('--stream', choices=['all', 'users', 'resources'], default='all')
     project.add_argument('--full', action='store_true', required=True,
-                         help='Reconcile committed Master by ID; does not enable identity bootstrap')
-    metadata = commands.add_parser('sync-mongo-metadata', help='Source-owned metadata FULL_RECONCILE; no incremental/CDC')
+                         help='Shared mode validates read-only; separate legacy mode requires explicit opt-in')
+    metadata = commands.add_parser('sync-mongo-metadata', help='Shared metadata read-only check; separate source copy only when explicitly configured')
     metadata.add_argument('--stream', choices=['all', 'users', 'resources'], default='all')
     metadata.add_argument('--full', action='store_true', required=True)
     ingest = commands.add_parser("ingest-resource")
@@ -129,11 +130,15 @@ def main():
             r['status'] in {'FAILED', 'BLOCKED', 'DISABLED', 'BLOCKED_MONGO_ID_MAPPING', 'BUSY'} for r in result.values()
         ):
             return 1
-    except Exception:
-        print(
-            "ETL operation failed. Check configuration and stage status; sensitive details omitted.",
-            file=sys.stderr,
-        )
+    except Exception as exc:
+        code = str(exc).split(':', 1)[0] if isinstance(exc, DomainError) else None
+        if code in {'SHARED_MONGO_CONFLICT_SOURCE_ENABLED', 'SHARED_MONGO_CONFLICT_IDENTITY_BOOTSTRAP'}:
+            print(f'{code}: shared mode requires SOURCE_MONGO_ENABLED=false and MASTER_MONGO_IDENTITY_BOOTSTRAP=false.', file=sys.stderr)
+        else:
+            print(
+                "ETL operation failed. Check configuration and stage status; sensitive details omitted.",
+                file=sys.stderr,
+            )
         return 1
     finally:
         if container:

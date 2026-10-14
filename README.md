@@ -1,6 +1,7 @@
 # ETL — Đồng bộ và xử lý học liệu
 
-Đồng bộ PostgreSQL nguồn → Master Data và Mongo metadata nguồn → Mongo đích;
+Đồng bộ PostgreSQL nguồn → Master Data; đối soát metadata tại chỗ trong **một MongoDB
+database `etl_content`**, không copy Mongo nguồn → đích;
 nhập file local, trích xuất/OCR, chuẩn hóa và lưu Content Units. Frontend React hỗ trợ
 quản lý, đồng bộ và retry. Giai đoạn hiện tại dừng ở OCR/Content Units, chưa chạy
 chunking mới, keywords, BoW/content_bags, embeddings, Search hoặc đánh giá.
@@ -195,76 +196,76 @@ XLSX đọc giá trị cache, không tính công thức; TXT/CSV dùng UTF-8/BOM
 PPTX chỉ trích xuất text/bảng, không OCR ảnh nhúng. Tắt Auto không dừng job đã xếp hàng.
 Precheck thành công không chứng minh ETL hoàn tất.
 
-### Metadata Mongo nguồn → Mongo đích
+### Một MongoDB database — metadata tại chỗ và ETL
 
-Để đồng bộ metadata mở rộng **thật**, dùng Mongo nguồn có hai collection `users`,
-`learning_resources`. Có thể dùng chung server hiện tại nhưng phải tách database;
-không seed metadata mẫu vào nguồn thật. Chỉ sửa .env sau khi operator đã phê duyệt
-database nguồn thực, quyền read và phạm vi ghi đích; mặc định nguồn Mongo tắt:
+Cấu hình mục tiêu (operator đối chiếu `.env` hiện tại, backup và phê duyệt trước khi đổi):
 
 ```dotenv
-SOURCE_MONGO_ENABLED=true
-SOURCE_MONGO_DATABASE=source_metadata
-# SOURCE_MONGO_URI=mongodb://127.0.0.1:27018
+SOURCE_ADAPTER=postgresql
+MONGO_URI=mongodb://127.0.0.1:27018
+MONGO_DATABASE=etl_content
+MONGO_METADATA_MODE=shared
+SOURCE_MONGO_ENABLED=false
+MASTER_MONGO_IDENTITY_BOOTSTRAP=false
 ```
 
-URI không khai báo sẽ dùng `MONGO_URI`. Tài khoản Mongo nguồn chỉ cần quyền read.
-Nguồn/đích cùng database và server bị chặn, kể cả alias hoặc node cùng replica set.
-`source_metadata` là ví dụ; thay bằng database nguồn thực có sẵn. PostgreSQL nguồn
-phải khai báo `mongo_id` đúng String _id của document nguồn, có thể khác PostgreSQL id.
+`shared` là mặc định. Hai cờ true gây config conflict trước khi tạo client/storage;
+không tự sửa `.env`. SOURCE_MONGO_URI/SOURCE_MONGO_DATABASE cũ được bỏ qua ở mode
+shared, không kết nối `source_metadata`. Restart backend/workers sau cấu hình đã duyệt.
+Mode `separate` chỉ giữ cho tương thích/test cũ, không phải kiến trúc mục tiêu.
+
+Trong etl_content, `users`/`learning_resources` là **dữ liệu mở rộng gốc** do đầu vào
+được quản lý nhập trực tiếp, không phải clone Master. `_id` String bằng PG nguồn.mongo_id
+và Master.mongo_id, có thể khác PG PK. Metadata có thể nhập trước/sau PG sync.
+Thêm document Mongo không chạy PG sync ngầm hoặc kích hoạt Incremental/CDC.
+`ocr_pages`/`mongo_content_units` là đầu ra ETL; `content_bags` giữ nguyên, runtime không ghi.
+
+Master Full/Incremental/Auto chỉ sync PG, log SKIP_PG_SHARED_METADATA_VALIDATION để
+tránh quét metadata ở mỗi tick. Hai CLI sau **chỉ đọc**, không bootstrap hoặc copy-self:
 
 ```bash
-etl sync-master --stream all --full
 etl sync-mongo-metadata --stream all --full
-```
-
-Hook metadata chạy sau PG commit; lệnh thứ hai chạy bù hoặc nhận thay đổi chỉ có ở
-Mongo, không cần sync PG lại. Hiện dùng **FULL_RECONCILE theo batch**, không có
-incremental Mongo/CDC hoặc checkpoint timestamp bền vững. Checkpoint trả về chỉ là
-tiến độ lượt quét; retry quét lại idempotent.
-
-Source NULL/absent mapping được `skipped_unmapped`, **không fallback ID**. Field
-metadata vắng không xóa field đích; explicit NULL cập nhật NULL. Created_at đích giữ
-nguyên, payload lặp không đổi timestamp; doc metadata đích mới hơn không bị ghi đè.
-Inactive/deleted/ARCHIVED bị bỏ qua, DRAFT vẫn mirror metadata và không được xem là
-public. Không đồng bộ ngược hoặc tạo Master cho document Mongo orphan.
-
-Mongo lỗi không rollback Master; xem log `mongo_source_metadata_sync` và chạy bù.
-SOURCE_MONGO_ENABLED bật sẽ ưu tiên nguồn thật, không chạy identity bootstrap song song.
-Chi tiết: [nguồn kép và ETL](docs/dual_source_etl.md).
-
-#### Chế độ legacy khi chưa bật Mongo nguồn
-
-Mặc định bootstrap tắt: `PARTIAL_SOURCE_FIELDS` / `SKIPPED_NO_EXTENSION` là có chủ đích
-vì chưa có nguồn bio/description/authors/tags; `--full` không tự bật bootstrap.
-
-Nếu đã xác nhận DEV/TEST hoặc chính sách triển khai cho phép tạo identity,
-sửa .env gốc sau khi migrate:
-
-```dotenv
-MASTER_MONGO_IDENTITY_BOOTSTRAP=true
-MASTER_MONGO_IDENTITY_SCOPE=source_verified
-MASTER_MONGO_IDENTITY_IDS={}
-```
-
-Chỉ chọn bản ghi tồn tại trong PostgreSQL nguồn. Dùng `Master.mongo_id` làm Mongo `_id`;
-mapping NULL được fallback `Master.id` và lưu tại Master. Không ghi vào nguồn,
-không tự đổi mapping A→B hoặc ghi đè document Mongo đã có.
-Phạm vi mặc định `approved_ids` chỉ chọn ID PostgreSQL đã duyệt trong allowlist.
-
-```bash
 etl project-master-mongo --stream all --full
 ```
 
-Legacy bootstrap chỉ chạy khi operator chủ động gọi `project-master-mongo` và
-bật `MASTER_MONGO_IDENTITY_BOOTSTRAP=true`. Master Sync/API/Auto không gọi nhánh này,
-kể cả cấu hình cũ còn bật bootstrap; khi Mongo nguồn tắt chỉ log DISABLED, PG vẫn chạy.
-`READY_IDENTITY_ONLY` chỉ xác nhận document ID/timestamps, không phải metadata đầy đủ.
-Mongo lỗi không rollback Master; dùng lệnh trên chạy bù. Tắt bootstrap và restart để ngừng
-tạo identity từ lệnh legacy. Document identity-only cũ không bị xóa; có nguồn thật sẽ
-enrich đúng mapping theo merge/CAS. Grade chỉ giữ reference, không tạo collection mới; content unit lưu
-reference theo ID đích sau projection thành công. Version reference vẫn NULL vì chưa
-có collection đích. Chi tiết: [nguồn kép và vận hành](docs/dual_source_etl.md).
+Report `mode=VALIDATE_SHARED`, SHARED_MONGO_VALIDATED/PARTIAL/FAILED và counters
+matched/missing_mapping/missing_document/missing_extension/invalid_document/conflicts.
+Inserted/updated luôn 0. Quét Master theo keyset (100–1000 mỗi batch), verifier PG
+nguồn xác nhận mapping, subject active/nondeleted ở Source + Master. Bỏ qua
+inactive/deleted/ARCHIVED; DRAFT chỉ được kiểm tra, không tự public. Không full-scan
+Mongo để báo orphan count; không giữ PG transaction trong RPC Mongo.
+
+Một extension hữu ích là string không trắng hoặc mảng không rỗng sau validate/
+normalization. Chỉ ID/ngày, explicit NULL, chuỗi trắng, authors/tags rỗng không đủ.
+Không tự thêm bio/description/tags, không remap ID/ObjectId hoặc tạo doc khi thiếu
+mapping. Timestamps và BSON metadata giữ nguyên, kể cả field ngoài ownership.
+Metadata thiếu/outage không rollback PG. Retry CLI kiểm tra Full lại, không có CDC.
+Document identity-only/DB source_metadata cũ không bị xóa/di chuyển/enrich tự động.
+
+#### Precheck read-only và vận hành có phê duyệt
+
+Read-only: `git status --short`, `docker compose ps -a`, `python -m alembic current`,
+`python -m alembic heads`, `python -m alembic -c alembic_source.ini current`.
+Kiểm backup/restore, file roots, quyền và 1–3 mẫu PG id→Master.mongo_id→Mongo String _id
+(không dump PII); PG Source/Master query `count(*)`, `count(mongo_id)` theo bảng tương ứng.
+
+```bash
+docker compose exec -T mongo mongosh --quiet etl_content --eval "printjson({users:db.users.countDocuments({}),resources:db.learning_resources.countDocuments({}),ocr_pages:db.ocr_pages.countDocuments({}),units:db.mongo_content_units.countDocuments({}),bags:db.content_bags.countDocuments({})})"
+```
+
+Không có `02_import_mongo_source.js` trong repo. Nếu operator có file ngoài repo,
+phải sửa **nội dung** script về duy nhất `db.getSiblingDB('etl_content')`, bỏ SOURCE_DB/
+TARGET_DB và guard cũ. Chỉ insert document vắng; cùng ID nhưng payload khác phải báo
+conflict, không overwrite. Đổi DB trên lệnh mongosh không sửa getSiblingDB trong JS.
+Không viết lại ZIP/seed không được cung cấp, không tự chạy import/live sync.
+
+Sau phê duyệt backup/config/queue: PG seed và metadata import trực tiếp vào etl_content
+(nếu cần, do operator quản lý) → `etl sync-master --stream all --full` hoặc
+`--incremental` → shared verify → file worker/OCR worker `--once` → `etl etl-status`.
+`--once` không lọc version, phải duyệt phạm vi queue trước. Đối soát cùng target
+version/job/page/generation/current; checksum/char_count/IDs đúng, replay không trùng,
+metadata và content_bags snapshot không đổi. Scan Tesseract chưa test phải NOT_RUN.
+Không dùng compose up như read-only vì có migration side effect; không down -v.
 
 ### CLI thường dùng
 
@@ -344,7 +345,7 @@ Test logic chế độ/kết quả/poll không cần framework UI mới (đã ch
 node --experimental-strip-types --test tests/masterSyncResults.test.mjs
 ```
 
-Quy trình test cô lập, nghiệm thu và giới hạn: [runbook](docs/dual_source_etl.md).
+Quy trình nghiệm thu một MongoDB database nằm ở mục 5 phía trên.
 QA không fallback sang database ứng dụng; tên database test phải chứa thành phần
 `test` riêng (ví dụ `etl_test`, `etl_source_test`). Không dùng `docker compose up`
 để pre-flight read-only vì service migration có thể ghi database.
@@ -356,7 +357,8 @@ QA không fallback sang database ứng dụng; tên database test phải chứa 
 | API 500 sau pull, báo thiếu bảng/cột | Kiểm tra traceback, đúng URL Master và migration head; không phải mọi lỗi 500 đều do schema |
 | 503 khi đọc nguồn | Kiểm tra DB/reader, SELECT trên resource_versions, kho file và thông báo lỗi cụ thể |
 | Auto không chạy | Kiểm tra baseline, công tắc, Master worker và chu kỳ; restart sau đổi config |
-| PARTIAL_SOURCE_FIELDS, Mongo metadata rỗng | Kiểm tra bootstrap/scope ở .env gốc; xem mục 5 |
+| PARTIAL, metadata thiếu | Kiểm tra mapping và đầu vào metadata thật trong etl_content; không bật bootstrap để lấp thiếu |
+| SHARED_MONGO_CONFLICT_* | shared yêu cầu SOURCE_MONGO_ENABLED=false và MASTER_MONGO_IDENTITY_BOOTSTRAP=false; operator phê duyệt cấu hình rồi restart |
 | BLOCKED_MONGO_ID_MAPPING | Đối soát mapping/duplicate/ObjectId; không tự đổi ID hay xóa document |
 | OCR_PENDING kéo dài | Kiểm tra OCR worker; chỉ chạy API chưa đủ |
 | BLOCKED_OCR_RUNTIME / OCR_FAILED | Kiểm tra Tesseract path, vie+eng, worker log; restart rồi retry |

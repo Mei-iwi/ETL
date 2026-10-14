@@ -90,6 +90,11 @@ class Container:
 
     def __init__(self, settings=None, engine=None, documents=None):
         self.settings = settings or Settings()
+        if self.settings.mongo_metadata_mode == 'shared':
+            if self.settings.source_mongo_enabled:
+                raise DomainError('SHARED_MONGO_CONFLICT_SOURCE_ENABLED: set SOURCE_MONGO_ENABLED=false')
+            if self.settings.master_mongo_identity_bootstrap:
+                raise DomainError('SHARED_MONGO_CONFLICT_IDENTITY_BOOTSTRAP: set MASTER_MONGO_IDENTITY_BOOTSTRAP=false')
         self.source = create_source(self.settings)
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
@@ -124,7 +129,8 @@ class Container:
                 and self.engine.dialect.name == "postgresql"
             ),
         )
-        self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size)
+        self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size,
+                               skip_shared_metadata_validation=self.settings.mongo_metadata_mode == 'shared')
         self.auto_sync = AutoSyncCoordinator(
             self.uow,
             environment_supported=(
@@ -206,18 +212,21 @@ class Container:
                 code = 'SOURCE_MONGO_SAME_DESTINATION' if isinstance(exc, DomainError) else 'SOURCE_MONGO_CONFIGURATION_UNAVAILABLE'
                 raise DomainError(code) from None
         self.mongo_metadata_sync = SourceMongoMetadataSync(
-            self.uow, source_metadata, self.metadata_documents,
+            self.uow, (self.metadata_documents if self.settings.mongo_metadata_mode == 'shared' else source_metadata),
+            None if self.settings.mongo_metadata_mode == 'shared' else self.metadata_documents,
             reference_guard=self.source.metadata_identity_references if isinstance(self.source, PostgreSQLSourceAdapter) else None,
             subject_guard=self.source.metadata_subject_exists if isinstance(self.source, PostgreSQLSourceAdapter) else None,
             batch_size=min(1000, self.settings.sync_batch_size),
+            shared=self.settings.mongo_metadata_mode == 'shared',
         )
-        if self.settings.source_mongo_enabled:
-            # Source extensions take precedence over legacy identity-only bootstrap.
+        if self.settings.source_mongo_enabled or self.settings.mongo_metadata_mode == 'shared':
+            # Both shared CLIs use read-only validation; explicit separate-source
+            # mode keeps its prior copy contract, never identity fallback.
             self.master_metadata_projection = self.mongo_metadata_sync
         # Normal Master Sync never invokes legacy identity bootstrap, even if an
         # old deployment still has MASTER_MONGO_IDENTITY_BOOTSTRAP=true.
         # Legacy projection remains available only through its explicit CLI.
-        self.sync.metadata_projection = self.mongo_metadata_sync
+        self.sync.metadata_projection = None if self.settings.mongo_metadata_mode == 'shared' else self.mongo_metadata_sync
 
         self.mongo_projector = MongoContentProjector(
             self.uow,

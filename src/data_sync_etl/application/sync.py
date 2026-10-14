@@ -14,9 +14,11 @@ STREAMS = {
 
 
 class MasterSync:
-    def __init__(self, source: SourceDataReader, uow: UnitOfWork, batch_size=100, metadata_projection=None):
+    def __init__(self, source: SourceDataReader, uow: UnitOfWork, batch_size=100, metadata_projection=None,
+                 skip_shared_metadata_validation=False):
         self.source, self.uow, self.batch_size = source, uow, batch_size
         self.metadata_projection = metadata_projection
+        self.skip_shared_metadata_validation = skip_shared_metadata_validation
 
     def run(self, stream="all", full=False):
         if stream != "all" and stream not in STREAMS:
@@ -30,6 +32,9 @@ class MasterSync:
                     for name in (STREAMS if stream == "all" else [stream])
                 }
             # PG sync lock/transaction is released before any Mongo RPC.
+            if self.skip_shared_metadata_validation:
+                event(stage='mongo_metadata_validation', action='SKIP_PG_SHARED_METADATA_VALIDATION')
+                return result
             for name in result:
                 if name in ('users', 'resources') and self.metadata_projection is not None:
                     try:

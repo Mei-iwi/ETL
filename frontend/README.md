@@ -19,7 +19,8 @@ Windows Git Bash có thể dùng `npm.cmd`. Vite chạy cổng 3000, proxy `/api
 
 `/library/source-sync` hiển thị trạng thái đồng bộ **PostgreSQL Master**;
 thành công ở đây không xác nhận Mongo metadata hay OCR đã hoàn tất.
-Mongo nguồn → đích được đối soát bằng CLI/report riêng, không phải realtime.
+Metadata được kiểm tra read-only tại chỗ trong cùng `etl_content` bằng CLI/report riêng,
+không copy Mongo nguồn → đích hoặc chạy realtime.
 `/library/source-sync-errors` chia hai tab retry được/không retry được.
 Trang xử lý mở từ thêm/cập nhật/chi tiết; `CONTENT_READY` chỉ xác nhận OCR/Content Units,
-không xác nhận indexing/Search. Hướng dẫn nghiệm thu: [runbook](../docs/dual_source_etl.md).
+không xác nhận indexing/Search. Hướng dẫn nghiệm thu: [README gốc, mục 5](../README.md).

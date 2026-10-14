@@ -14,6 +14,7 @@ from data_sync_etl.adapters.mongo.schema import initialize
 from data_sync_etl.adapters.source.mongo_metadata import MongoMetadataSourceReader
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
 from data_sync_etl.application.sync import MasterSync
+from data_sync_etl.cli.main import dispatch, parser
 from data_sync_etl.composition import Container
 from data_sync_etl.config import Settings
 from data_sync_etl.domain.core import DomainError, now
@@ -213,7 +214,7 @@ def test_invalid_source_document_is_partial_and_next_batch_still_syncs(source, d
 def test_composition_prioritizes_source_over_identity_bootstrap(source, pg_container, dual, mongo_test_database, monkeypatch):
     src, dst, _, _, _, _ = dual
     monkeypatch.setattr('data_sync_etl.composition.create_source', lambda _: source.adapter)
-    settings = Settings(_env_file=None, source_adapter='postgresql', source_mongo_enabled=True,
+    settings = Settings(_env_file=None, mongo_metadata_mode='separate', source_adapter='postgresql', source_mongo_enabled=True,
         source_mongo_database=src.name, mongo_database=dst.name, mongo_uri=mongo_test_database[0],
         master_mongo_identity_bootstrap=True, master_mongo_identity_scope='source_verified',
         storage_root=pg_container.storage.root)
@@ -235,7 +236,7 @@ def test_missing_source_docs_never_create_identity_and_old_target_is_retained(so
         connection.execute(text("UPDATE learning_resources SET mongo_id='MISSING-RESOURCE' WHERE id='resource-1'"))
         connection.execute(text("UPDATE users SET mongo_id='MISSING-USER' WHERE id='user-1'"))
     monkeypatch.setattr('data_sync_etl.composition.create_source', lambda _: source.adapter)
-    settings = Settings(_env_file=None, source_adapter='postgresql', source_mongo_enabled=True,
+    settings = Settings(_env_file=None, mongo_metadata_mode='separate', source_adapter='postgresql', source_mongo_enabled=True,
         source_mongo_database=src.name, mongo_database=dst.name, mongo_uri=mongo_test_database[0],
         master_mongo_identity_bootstrap=True, master_mongo_identity_scope='source_verified',
         storage_root=pg_container.storage.root)
@@ -278,3 +279,131 @@ def test_source_and_target_metadata_rpc_have_no_open_pg_transaction(pg_container
         monkeypatch.setattr(obj, name, checked(getattr(obj, name)))
     master.run(full=True)
     assert {'get_user', 'get_resource', 'sync_source_metadata'} <= set(calls)
+
+
+def test_shared_single_database_readonly_cli_pg_hooks_and_late_metadata(source, pg_container, mongo_test_database, monkeypatch):
+    uri, name = mongo_test_database
+    client = MongoClient(uri, serverSelectionTimeoutMS=3000, timeoutMS=10000, tz_aware=True)
+    db = client[name]
+    stamp = now()
+    with source.engine.begin() as connection:
+        connection.execute(text("UPDATE users SET mongo_id='MUSER-1' WHERE id='user-1'"))
+        connection.execute(text("UPDATE learning_resources SET mongo_id='MRES-1' WHERE id='resource-1'"))
+    monkeypatch.setattr('data_sync_etl.composition.create_source', lambda _: source.adapter)
+    runtime = Container(Settings(_env_file=None, source_adapter='postgresql', mongo_metadata_mode='shared',
+        mongo_uri=uri, mongo_database=name, source_mongo_database='DO_NOT_ACCESS',
+        storage_root=pg_container.storage.root), pg_container.engine)
+    try:
+        # A PG run must never open/scan Mongo metadata, even on FULL or Auto ticks.
+        original_user = runtime.metadata_documents.get_user
+        reads = []
+
+        def read_user(key):
+            with runtime.engine.connect().execution_options(isolation_level='AUTOCOMMIT') as connection:
+                assert connection.scalar(text('SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() '
+                    'AND pid<>pg_backend_pid() AND xact_start IS NOT NULL')) == 0
+            reads.append(key)
+            return original_user(key)
+
+        monkeypatch.setattr(runtime.metadata_documents, 'get_user', read_user)
+        runtime.sync.run(full=True)
+        runtime.sync.run(full=False)
+        assert not reads and runtime.source_mongo_client is None
+        assert not db.list_collection_names()
+        first = dispatch(runtime, parser().parse_args(['sync-mongo-metadata', '--full']))
+        assert first['users']['missing_document'] == first['resources']['missing_document'] == 1
+        assert first['users']['inserted'] == first['users']['updated'] == 0
+        assert not db.list_collection_names()  # Reads do not create collections.
+        # Managed input is outside Sync; fixture import is confined to this UUID DB.
+        db.users.insert_one(dict(_id='MUSER-1', subject_id='subject-1', bio='Fixture extension', created_at=stamp, updated_at=stamp))
+        db.learning_resources.insert_one(dict(_id='MRES-1', authors=[{'name': 'Một'}, {'name': 'Hai'}],
+            tags=['Tiếng Việt', 'học liệu'], description=None, created_at=stamp, updated_at=stamp))
+        before = snapshot(db)
+        with monkeypatch.context() as guard:
+            def forbidden_write(*args, **kwargs):
+                raise AssertionError('Shared PG/CLI metadata path attempted a Mongo write')
+
+            for method in ('insert_one', 'update_one', 'update_many', 'replace_one', 'delete_one', 'delete_many', 'create_index', 'drop', 'rename'):
+                guard.setattr(type(db.users), method, forbidden_write)
+            for full in (True, False):
+                runtime.sync.run(full=full)
+            for command in ('sync-mongo-metadata', 'project-master-mongo'):
+                report = dispatch(runtime, parser().parse_args([command, '--full']))
+                assert report['users']['mode'] == report['resources']['mode'] == 'VALIDATE_SHARED'
+                assert report['users']['matched'] == report['resources']['matched'] == 1
+                assert all(r['inserted'] == r['updated'] == 0 for r in report.values())
+        assert snapshot(db) == before
+        # An outage is validation failure, not a failed PG sync; retry is read-only.
+        monkeypatch.setattr(runtime.metadata_documents, 'get_user', lambda _: (_ for _ in ()).throw(ConnectionError('PRIVATE')))
+        runtime.sync.run(full=False)
+        assert runtime.mongo_metadata_sync.run('users')['users']['error_code'] == 'SHARED_MONGO_READ_FAILED'
+        monkeypatch.setattr(runtime.metadata_documents, 'get_user', read_user)
+        assert runtime.mongo_metadata_sync.run('users')['users']['matched'] == 1
+        with runtime.uow() as repo:
+            assert all(r['status'] == 'COMPLETED' for r in repo.find('sync_runs'))
+        assert snapshot(db) == before
+        # Identity-only/null/empty, invalid, and subject conflicts stay distinct.
+        db.users.replace_one({'_id': 'MUSER-1'}, dict(_id='MUSER-1', created_at=stamp, updated_at=stamp))
+        before = snapshot(db)
+        assert runtime.mongo_metadata_sync.run('users')['users']['missing_extension'] == 1
+        assert snapshot(db) == before
+        db.users.update_one({'_id': 'MUSER-1'}, {'$set': {'bio': 42}})
+        assert runtime.mongo_metadata_sync.run('users')['users']['invalid_document'] == 1
+        db.users.update_one({'_id': 'MUSER-1'}, {'$set': {'bio': 'value', 'subject_id': 'missing-subject'}})
+        assert runtime.mongo_metadata_sync.run('users')['users']['conflicts'] == 1
+        db.learning_resources.update_one({'_id': 'MRES-1'}, {'$set': {'authors': [], 'tags': [], 'description': None}})
+        assert runtime.mongo_metadata_sync.run('resources')['resources']['missing_extension'] == 1
+        assert set(db.list_collection_names()) == {'users', 'learning_resources'}
+    finally:
+        runtime.close()
+        client.close()
+
+
+def test_shared_metadata_and_bags_unchanged_through_native_pdf_etl(source, pg_container, mongo_test_database, tmp_path, monkeypatch):
+    uri, name = mongo_test_database
+    client = MongoClient(uri, serverSelectionTimeoutMS=3000, timeoutMS=10000, tz_aware=True)
+    db = client[name]
+    path = setup_import(source, pg_container, tmp_path)
+    with pymupdf.open() as document:
+        for number in (1, 2):
+            document.new_page().insert_text((72, 72), f'Shared metadata ETL native page {number}')
+        document.save(path)
+    with source.engine.begin() as connection:
+        connection.execute(text("UPDATE resource_versions SET source_hash=:hash WHERE id='source-local-1'"),
+                           {'hash': sha256(path.read_bytes()).hexdigest()})
+        connection.execute(text("UPDATE users SET mongo_id='MUSER-1' WHERE id='user-1'"))
+        connection.execute(text("UPDATE learning_resources SET mongo_id='MRES-1' WHERE id='resource-1'"))
+    monkeypatch.setattr('data_sync_etl.composition.create_source', lambda _: source.adapter)
+    runtime = Container(Settings(_env_file=None, source_adapter='postgresql', mongo_metadata_mode='shared',
+        mongo_uri=uri, mongo_database=name, source_file_storage_root=pg_container.source_files.root,
+        storage_root=pg_container.storage.root, ocr_engine='native'), pg_container.engine)
+    try:
+        stamp = now()
+        db.users.insert_one(dict(_id='MUSER-1', bio='Fixture metadata', created_at=stamp, updated_at=stamp))
+        db.learning_resources.insert_one(dict(_id='MRES-1', description='Fixture description', created_at=stamp, updated_at=stamp))
+        db.content_bags.insert_one({'_id': 'sentinel', 'existing': True})
+        before, bag = snapshot(db), BSON.encode(db.content_bags.find_one({'_id': 'sentinel'}))
+        runtime.sync.run(full=True)
+        assert runtime.mongo_metadata_sync.run('resources')['resources']['matched'] == 1
+        assert runtime.source_file_worker.once('shared-import')
+        for _ in range(4):
+            if not runtime.worker.once('shared-ocr'):
+                break
+        with runtime.uow() as repo:
+            version = repo.find('resource_versions', {})[0]
+            job = repo.find('ocr_jobs', {})[0]
+            units = repo.find('content_units', {'resource_version_id': version['id']})
+        assert runtime.orchestrator.status(version['id'])['processing_status'] == 'CONTENT_READY'
+        assert len(units) == job['total_pages'] == 2
+        assert db.ocr_pages.count_documents({'job_id': job['id']}) == 2
+        for unit in units:
+            projected = db.mongo_content_units.find_one({'_id': unit['id']})
+            assert unit['mongo_id'] == unit['id'] and projected['resource_version_id'] == version['id']
+            assert projected['is_current'] and projected['keywords'] == []
+        runtime.mongo_projector.project(version['id'], job['id'], generation=1)
+        assert db.mongo_content_units.count_documents({'resource_version_id': version['id']}) == 2
+        assert snapshot(db) == before and BSON.encode(db.content_bags.find_one({'_id': 'sentinel'})) == bag
+        assert set(db.list_collection_names()) == {'users', 'learning_resources', 'ocr_pages', 'mongo_content_units', 'content_bags'}
+    finally:
+        runtime.close()
+        client.close()

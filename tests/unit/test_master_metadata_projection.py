@@ -51,6 +51,7 @@ def test_normal_master_sync_never_invokes_opted_in_legacy_bootstrap(container, m
     monkeypatch.setattr('data_sync_etl.composition.MongoMetadataStore', lambda _: store)
     monkeypatch.setattr('data_sync_etl.composition.MongoClient', MagicMock())
     settings = container.settings.model_copy(update={
+        'mongo_metadata_mode': 'separate',
         'source_mongo_enabled': False, 'master_mongo_identity_bootstrap': True,
         'master_mongo_identity_ids': {'users': ['user-1'], 'resources': ['resource-1']},
     })
@@ -287,6 +288,7 @@ def test_post_commit_failure_keeps_master_counters_checkpoints_and_retry_recover
     store.fail_on = 2
     projection = MasterMetadataProjection(container.uow, store, batch_size=1, identity_bootstrap=True,
                                           identity_ids={'resources': ['resource-1', 'resource-2', 'resource-3']})
+    container.sync.skip_shared_metadata_validation = False
     container.sync.metadata_projection = projection
     with caplog.at_level('INFO'):
         result = container.sync.run(full=True)
@@ -314,6 +316,7 @@ def test_projection_hook_after_commit_for_manual_auto_and_no_change(container):
                 assert repo.master_metadata_page(stream, None, 1)
             calls.append(stream)
 
+    container.sync.skip_shared_metadata_validation = False
     container.sync.metadata_projection = Observer()
     result = dispatch(container, parser().parse_args(['sync-master', '--full']))
     assert calls == ['users', 'resources']
@@ -339,6 +342,7 @@ def test_metadata_outage_does_not_make_sync_http_fail(container):
         def run(self, stream):
             raise RuntimeError('Mongo unavailable')
 
+    container.sync.skip_shared_metadata_validation = False
     container.sync.metadata_projection = OfflineProjection()
     container.settings.admin_enabled = True
     with TestClient(create_app(container), client=('127.0.0.1', 50000)) as api:
