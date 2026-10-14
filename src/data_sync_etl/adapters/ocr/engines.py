@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pymupdf
@@ -38,6 +39,12 @@ class PyMuPDFPDFProcessor:
 
 
 class TesseractOCREngine:
+    supports_images = True
+
+    def check_runtime(self):
+        if self._version is None:
+            self._runtime()
+
     def __init__(self, executable="tesseract", languages="vie+eng", timeout=60):
         self.executable = executable
         self.languages = languages
@@ -74,15 +81,22 @@ class TesseractOCREngine:
         if self._version is None:
             self._runtime()
         try:
-            result = subprocess.run(
-                [self.executable, str(image_path), "stdout", "-l", self.languages],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.timeout,
-                check=True,
-            )
+            executable = str(Path(shutil.which(self.executable) or self.executable).resolve())
+            with tempfile.TemporaryDirectory(prefix="etl-ocr-") as temp_dir:
+                temp_image = Path(temp_dir) / "input.png"
+                shutil.copyfile(image_path, temp_image)
+                # A relative ASCII filename avoids Windows native-library failures
+                # on Vietnamese paths, even if the TEMP parent itself has Unicode.
+                result = subprocess.run(
+                    [executable, "input.png", "stdout", "-l", self.languages],
+                    cwd=temp_dir,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=self.timeout,
+                    check=True,
+                )
         except subprocess.TimeoutExpired:
             raise DomainError("Tesseract OCR timed out") from None
         except (OSError, subprocess.CalledProcessError):

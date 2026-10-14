@@ -16,7 +16,11 @@ from data_sync_etl.domain.core import (
     now,
 )
 from data_sync_etl.domain.file_integrity import stream_hash
-from data_sync_etl.domain.format_validation import PdfFormatValidator
+from data_sync_etl.domain.format_validation import (
+    LEGACY_MEDIA_ERROR_CODES,
+    FormatValidatorRegistry,
+    ProcessingFormatError,
+)
 from data_sync_etl.ports.repositories import UnitOfWork
 from data_sync_etl.ports.source_files import ReadOnlySourceFilePort, ReadOnlySourceVersionPort
 
@@ -31,10 +35,11 @@ class SourceImportNotFound(DomainError):
 
 class SourceFileImportService:
     def __init__(self, source: ReadOnlySourceVersionPort, files: ReadOnlySourceFilePort,
-                 storage, uow: UnitOfWork, process, retry_processing, settings):
+                 storage, uow: UnitOfWork, process, retry_processing, settings, formats=None):
         self.source, self.files, self.storage, self.uow = source, files, storage, uow
         self.process, self.retry_processing, self.settings = process, retry_processing, settings
-        self.validator = PdfFormatValidator()
+        self.formats = formats or FormatValidatorRegistry()
+        self.validator = self.formats.find_validator('source.pdf')
 
     def availability(self):
         error = None
@@ -86,6 +91,7 @@ class SourceFileImportService:
             return len(page["items"])
 
     def _discover(self, repo, source):
+        unsupported_media = source["storage_object_key"].lower().endswith(('.mp3', '.mp4'))
         existing = repo.find("source_file_imports", {
             "source_system": "postgresql", "source_version_id": source["source_version_id"]}, limit=1)
         if existing:
@@ -107,6 +113,8 @@ class SourceFileImportService:
                 })
             return
         repo.insert("source_file_imports", {
+            "status": "FAILED" if unsupported_media else "PENDING",
+            "last_error_code": "UNSUPPORTED_SOURCE_FORMAT" if unsupported_media else None,
             "source_system": "postgresql", "source_version_id": source["source_version_id"],
             "resource_id": source["resource_id"], "resource_title": source["resource_title"],
             "source_version_number": source["source_version_number"],
@@ -154,6 +162,8 @@ class SourceFileImportService:
 
     def execute(self, claimed):
         try:
+            if claimed["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
+                raise SourceFileError("UNSUPPORTED_SOURCE_FORMAT")
             if claimed["attempts"] > self.settings.source_file_import_max_attempts:
                 raise SourceFileError("WORKER_RECOVERY_EXHAUSTED", transient=True)
             if not claimed["target_version_id"]:
@@ -181,6 +191,8 @@ class SourceFileImportService:
             self._fail(claimed, "FILE_TOO_LARGE", False)
         except ProcessingRetryConflict:
             self._fail(claimed, "PROCESSING_RETRY_BLOCKED", False)
+        except ProcessingFormatError as exc:
+            self._fail(claimed, exc.code, False)
         except OSError:
             self._fail(claimed, "SOURCE_STORAGE_UNAVAILABLE", True)
         except Exception:
@@ -196,6 +208,12 @@ class SourceFileImportService:
             raise SourceFileError("INVALID_SOURCE_HASH")
         if row["source_version_number"] < 1:
             raise SourceFileError("BLOCKED_SOURCE_MAPPING")
+        try:
+            validator = self.formats.find_validator(row['storage_object_key'])
+        except DomainError:
+            raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT') from None
+        if not validator.text_extraction_supported:
+            raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT')
 
         def verify(path):
             with path.open("rb") as stream:
@@ -204,19 +222,24 @@ class SourceFileImportService:
                 stream.seek(0)
                 header = stream.read(16)
             try:
-                self.validator.validate(".pdf", "application/pdf", header, path.stat().st_size)
-                self.validator.validate_path(path)
-            except DomainError:
-                raise SourceFileError("INVALID_PDF") from None
+                validator.validate(validator.extension, sorted(validator.mime_types)[0], header, path.stat().st_size)
+                validator.validate_path(path)
+            except DomainError as exc:
+                code = str(exc).split(':', 1)[0]
+                safe_codes = {'UNSUPPORTED_TEXT_ENCODING', 'INVALID_IMAGE', 'OPENXML_LIMIT_EXCEEDED',
+                              'INVALID_OPENXML_CONTAINER', 'INVALID_OPENXML_XML', 'OPENXML_TYPE_MISMATCH',
+                              'UNSUPPORTED_OPENXML_MACROS'}
+                raise SourceFileError(code if code in safe_codes else
+                                      'INVALID_PDF' if validator.extension == '.pdf' else 'INVALID_SOURCE_FILE') from None
 
         with self.files.open_stream(row["storage_bucket"], row["storage_object_key"]) as stream:
             try:
-                stored = self.storage.save_stream(stream, max_size_bytes=self.validator.max_size_bytes,
-                                                  suffix=".pdf", validate_path=verify)
+                stored = self.storage.save_stream(stream, max_size_bytes=validator.max_size_bytes,
+                                                  suffix=validator.extension, validate_path=verify)
             except (SourceFileError, UploadTooLargeError):
                 raise
             except DomainError:
-                raise SourceFileError("INVALID_PDF") from None
+                raise SourceFileError("INVALID_PDF" if validator.extension == '.pdf' else "INVALID_SOURCE_FILE") from None
         # File publication is idempotent by content hash. A crash here leaves reusable bytes,
         # never a half-published object; shared bytes are not deleted on DB rollback.
         with self.uow() as repo:
@@ -280,7 +303,9 @@ class SourceFileImportService:
         return state, exhausted and count < self.settings.processing_manual_retry_limit
 
     def _eligible(self, repo, row):
-        if row["last_error_code"] in {"SOURCE_VERSION_MUTATED", "BLOCKED_SOURCE_MAPPING"}:
+        if row["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
+            return False
+        if row["last_error_code"] in {"SOURCE_VERSION_MUTATED", "BLOCKED_SOURCE_MAPPING", "UNSUPPORTED_SOURCE_FORMAT"}:
             return False
         if row["status"] in {"FAILED", "RETRY_EXHAUSTED"}:
             return row["manual_retries"] < self.settings.processing_manual_retry_limit
@@ -312,13 +337,15 @@ class SourceFileImportService:
             items = []
             for row in rows[:size]:
                 state, _ = self._processing(repo, row)
+                failed = repo.find('ocr_page_tasks', {'job_id': row['processing_job_id'], 'status': 'FAILED'}, limit=1) if row['processing_job_id'] else []
+                processing_code = failed[0]['error_message'] if failed and failed[0]['error_message'] in LEGACY_MEDIA_ERROR_CODES else None
                 items.append({
                     "import_job_id": row["id"], "source_version_id": row["source_version_id"],
                     "resource_id": row["resource_id"], "resource_title": row["resource_title"],
                     "source_version_number": row["source_version_number"],
                     "source_lifecycle_status": row["source_lifecycle_status"], "updated_at": row["updated_at"],
                     "import_status": row["status"], "etl_status": state,
-                    "retry_count": row["attempts"], "last_error_code": row["last_error_code"],
+                    "retry_count": row["attempts"], "last_error_code": row["last_error_code"] or processing_code,
                     "retry_eligible": (availability["file_sync_supported"] or row["target_version_id"] is not None)
                     and self._eligible(repo, row),
                     "target_version_id": row["target_version_id"], "processing_job_id": row["processing_job_id"],

@@ -66,8 +66,8 @@ class OCRWorker:
                     image_path,
                 )
 
-            except Exception:
-                self.pipeline.fail(task)
+            except Exception as exc:
+                self.pipeline.fail(task, error=exc)
 
             finally:
                 stop.set()

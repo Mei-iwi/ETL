@@ -6,11 +6,13 @@ import type {
 
 export class ProcessingApiError extends Error {
     status: number
+    code?: string
 
-    constructor(message: string, status: number) {
+    constructor(message: string, status: number, code?: string) {
         super(message)
         this.name = 'ProcessingApiError'
         this.status = status
+        this.code = code
     }
 }
 
@@ -65,7 +67,11 @@ export async function startProcessing(
         },
     )
     if (!response.ok) {
-        throw new ProcessingApiError(await getErrorMessage(response), response.status)
+        const body: unknown = await response.clone().json().catch(() => null)
+        const code = body && typeof body === 'object' && 'detail' in body &&
+            body.detail && typeof body.detail === 'object' && 'code' in body.detail &&
+            typeof body.detail.code === 'string' ? body.detail.code : undefined
+        throw new ProcessingApiError(await getErrorMessage(response), response.status, code)
     }
     return response.json() as Promise<ProcessResult>
 }

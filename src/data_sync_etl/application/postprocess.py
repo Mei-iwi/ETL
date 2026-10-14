@@ -9,6 +9,34 @@ class Postprocessor:
     def __init__(self, uow: UnitOfWork, normalizer=normalize_text):
         self.uow, self.normalizer = uow, normalizer
 
+    @staticmethod
+    def _text_units(result, page):
+        metadata = result['result_metadata'] or {}
+        if 'logical_units' not in metadata:
+            yield result['raw_text'], page, None, 'PAGE_TEXT'
+        else:
+            for unit in metadata['logical_units']:
+                yield (result['raw_text'][unit['start']:unit['end']], None,
+                       unit['title'], metadata['source_type'].upper() + '_TEXT')
+
+    @staticmethod
+    def _save_unit(repo, version_id, sequence, page, title, unit_type, result, text):
+        values = dict(page_from=page, page_to=page, title=title, unit_type=unit_type,
+                      review_status='UNREVIEWED', retrieval_eligible=False)
+        units = repo.find('content_units', {'resource_version_id': version_id, 'sequence_no': sequence}, limit=1)
+        if units:
+            unit = units[0]
+            body = repo.get('content_unit_texts', unit['id'])
+            if (any(unit[key] != values[key] for key in ('page_from', 'page_to', 'title', 'unit_type'))
+                    or body['text'] != text or body['page_result_id'] != result['id']):
+                repo.update('content_units', unit['id'], {**values, 'updated_at': now()})
+                repo.update('content_unit_texts', unit['id'], dict(text=text, page_result_id=result['id']))
+        else:
+            unit = repo.insert('content_units', {
+                **values, 'resource_version_id': version_id, 'sequence_no': sequence,
+            })
+            repo.insert('content_unit_texts', dict(content_unit_id=unit['id'], page_result_id=result['id'], text=text))
+
     def run(self, version_id, *, allow_partial=False):
         with self.uow.processing_lock(version_id) as acquired:
             if not acquired:
@@ -79,59 +107,14 @@ class Postprocessor:
                                 result["id"],
                                 {"normalized_text": normalized, "updated_at": now()},
                             )
-                        if not normalized:
-                            continue
-                        count += 1
-                        units = repo.find(
-                            "content_units",
-                            {"resource_version_id": version_id, "sequence_no": count},
-                            limit=1,
-                        )
-                        if units:
-                            unit = units[0]
-                            body = repo.get("content_unit_texts", unit["id"])
-                            if (
-                                unit["page_from"] != page
-                                or body["text"] != normalized
-                                or body["page_result_id"] != result["id"]
-                            ):
-                                repo.update(
-                                    "content_units",
-                                    unit["id"],
-                                    dict(
-                                        page_from=page,
-                                        page_to=page,
-                                        review_status="UNREVIEWED",
-                                        retrieval_eligible=False,
-                                        updated_at=now(),
-                                    ),
-                                )
-                                repo.update(
-                                    "content_unit_texts",
-                                    unit["id"],
-                                    dict(text=normalized, page_result_id=result["id"]),
-                                )
-                        else:
-                            unit = repo.insert(
-                                "content_units",
-                                dict(
-                                    resource_version_id=version_id,
-                                    unit_type="PAGE_TEXT",
-                                    sequence_no=count,
-                                    page_from=page,
-                                    page_to=page,
-                                    review_status="UNREVIEWED",
-                                    retrieval_eligible=False,
-                                ),
-                            )
-                            repo.insert(
-                                "content_unit_texts",
-                                dict(
-                                    content_unit_id=unit["id"],
-                                    page_result_id=result["id"],
-                                    text=normalized,
-                                ),
-                            )
+                        for text, source_page, title, unit_type in self._text_units(result, page):
+                            text = self.normalizer(text)
+                            if not text:
+                                continue
+                            count += 1
+                            self._save_unit(repo, version_id, count, source_page, title, unit_type, result, text)
+                    if count == 0:
+                        raise DomainError('EMPTY_EXTRACTED_CONTENT')
                     # Remove obsolete trailing baseline units without materializing document text.
                     sequence = count + 1
                     while units := repo.find(

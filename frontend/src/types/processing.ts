@@ -23,6 +23,7 @@ export type ProcessResult = {
 }
 
 export type ProcessingJobResult = {
+    error_code?: string | null
     id: string
     resource_version_id: string
     status: JobStatus
@@ -37,6 +38,9 @@ export type ProcessingJobResult = {
 }
 
 export type ContentUnit = {
+    start_seconds?: number | null
+    end_seconds?: number | null
+    source_format?: string | null
     id: string
     resource_version_id: string
     parent_unit_id: string | null

@@ -416,6 +416,14 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
         BLOCKED_SOURCE_POLICY: 'Trạng thái nguồn chưa được phép nhập',
         BLOCKED_SOURCE_MAPPING: 'Xung đột phiên bản', SOURCE_VERSION_MUTATED: 'Phiên bản nguồn bị thay đổi',
         WAITING_FOR_MASTER: 'Học liệu Master chưa sẵn sàng', SOURCE_STORAGE_UNAVAILABLE: 'Kho nguồn gián đoạn',
+        UNSUPPORTED_SOURCE_FORMAT: 'Định dạng nguồn chưa hỗ trợ xử lý',
+        INVALID_SOURCE_FILE: 'Tệp nguồn không hợp lệ', UNSUPPORTED_TEXT_ENCODING: 'Tệp cần dùng UTF-8',
+        INVALID_IMAGE: 'Ảnh không hợp lệ hoặc vượt giới hạn pixel', BLOCKED_OCR_RUNTIME: 'Cần cấu hình Tesseract',
+        OPENXML_TYPE_MISMATCH: 'Định dạng OpenXML không khớp',
+        INVALID_OPENXML_CONTAINER: 'Tệp OpenXML không hợp lệ', INVALID_OPENXML_XML: 'XML không hợp lệ',
+        OPENXML_LIMIT_EXCEEDED: 'OpenXML vượt giới hạn an toàn', UNSUPPORTED_OPENXML_MACROS: 'Không hỗ trợ macro',
+        STT_RUNTIME_UNAVAILABLE: 'Chưa có runtime/model STT', MEDIA_NO_AUDIO: 'Tệp không có luồng âm thanh',
+        MEDIA_DURATION_EXCEEDED: 'Thời lượng vượt giới hạn', INVALID_MEDIA: 'Audio/video không hợp lệ',
     }
 
     function changePage(next: Array<string | null>) {

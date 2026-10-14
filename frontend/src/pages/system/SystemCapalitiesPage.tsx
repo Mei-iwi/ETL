@@ -7,6 +7,9 @@ type CapabilitiesData = {
         extension: string
         mime_type: string
         native_text_extraction: boolean
+        upload_accepted: boolean
+        text_extraction_supported: boolean
+        ocr_requires_runtime: boolean
     }>
     master_sync: {
         source: string
@@ -135,8 +138,9 @@ export function SystemCapalitiesPage() {
                             <strong>{format.extension}</strong>
                             <p>{format.mime_type}</p>
                             <p>
-                                Trích xuất văn bản: {' '} {format.native_text_extraction ? 'Có' : 'Không'}
+                                Tiếp nhận: {format.upload_accepted ? 'Có' : 'Không'}
                             </p>
+                            <p>Trích xuất văn bản: {format.text_extraction_supported ? format.ocr_requires_runtime ? 'OCR, cần Tesseract' : 'Có' : 'Chưa hỗ trợ trong cấu hình hiện tại'}</p>
                         </div>
                     ))}
                 </article>

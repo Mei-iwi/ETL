@@ -1,8 +1,15 @@
 from datetime import timedelta
 
 from data_sync_etl.domain.core import DomainError, job_terminal, new_id, now
+from data_sync_etl.domain.format_validation import FormatValidatorRegistry, ProcessingFormatError
 from data_sync_etl.logging import event
-from data_sync_etl.ports.processing import OCREnginePort, OCRResult, PDFProcessorPort, StoragePort
+from data_sync_etl.ports.processing import (
+    DocumentExtractorPort,
+    OCREnginePort,
+    OCRResult,
+    PDFProcessorPort,
+    StoragePort,
+)
 from data_sync_etl.ports.repositories import UnitOfWork
 
 
@@ -15,15 +22,21 @@ class OCRPipeline:
         engine: OCREnginePort,
         max_retries=3,
         heartbeat_timeout=120,
+        documents: DocumentExtractorPort | None = None,
+        formats=None,
     ):
         self.uow, self.storage, self.pdf, self.engine = uow, storage, pdf, engine
         self.max_retries, self.heartbeat_timeout = max_retries, heartbeat_timeout
+        self.formats = formats or FormatValidatorRegistry()
+        self.native_documents = documents
 
     def create_job(self, version_id, triggered_by=None):
         with self.uow() as repo:
             version = repo.get("resource_versions", version_id, lock=True)
             if version is None:
                 raise DomainError("Resource version not found")
+            if version["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
+                raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
             # Reuse any existing run, including terminal jobs: repeated commands are idempotent.
             existing = repo.find(
                 "ocr_jobs",
@@ -36,10 +49,27 @@ class OCRPipeline:
             path = self.storage.get_local_path(
                 version["storage_bucket"], version["storage_object_key"]
             )
-            try:
-                total = self.pdf.page_count(path)
-            except Exception:
-                raise DomainError("Cannot open resource as a readable PDF") from None
+            validator = self.formats.find_validator(path.name)
+            if not validator.text_extraction_supported:
+                raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
+            if validator.ocr_requires_runtime:
+                if not getattr(self.engine, 'supports_images', False):
+                    raise ProcessingFormatError('BLOCKED_OCR_RUNTIME')
+                try:
+                    self.engine.check_runtime()
+                except DomainError:
+                    raise ProcessingFormatError('BLOCKED_OCR_RUNTIME') from None
+            if path.suffix.lower() == '.pdf':
+                try:
+                    total = self.pdf.page_count(path)
+                except Exception:
+                    raise DomainError("Cannot open resource as a readable PDF") from None
+            else:
+                if self.native_documents is None:
+                    raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
+                # One bounded document task; provenance is carried by logical units,
+                # never by fabricated PDF page numbers.
+                total = 1
             if total < 1:
                 raise DomainError("Empty PDF has no processable pages")
             job = repo.insert(
@@ -115,6 +145,14 @@ class OCRPipeline:
             job = repo.get("ocr_jobs", task["job_id"])
             version = repo.get("resource_versions", job["resource_version_id"])
         path = self.storage.get_local_path(version["storage_bucket"], version["storage_object_key"])
+        if path.suffix.lower() in ('.mp3', '.mp4'):
+            raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
+        if path.suffix.lower() != '.pdf':
+            validator = self.formats.find_validator(path.name)
+            validator.validate_path(path)
+            if validator.ocr_requires_runtime:
+                return self.native_documents.recognize_image(path, self.storage.image_path(task['id'], task['claim_token']), self.engine)
+            return self.native_documents.extract(path), None
         native = self.pdf.extract_native_text(path, task["page_num"])
         # Conservative native-text gate; empty/image-only pages need an OCR adapter.
         printable = sum(c.isprintable() or c.isspace() for c in native)
@@ -181,9 +219,9 @@ class OCRPipeline:
         event(task_id=task["id"], job_id=task["job_id"], stage="ocr", action="SUCCEEDED")
         return True
 
-    def _fail(self, repo, task, message):
+    def _fail(self, repo, task, message, permanent=False):
         attempts = task["retry_count"] + 1
-        terminal = attempts >= self.max_retries
+        terminal = permanent or attempts >= self.max_retries
         repo.update(
             "ocr_page_tasks",
             task["id"],
@@ -201,12 +239,20 @@ class OCRPipeline:
         if terminal:
             self._counter(repo, task["job_id"], failed=1)
 
-    def fail(self, claimed):
+    def fail(self, claimed, error=None):
         with self.uow() as repo:
             task = repo.get("ocr_page_tasks", claimed["id"], lock=True)
             if not self.owns(task, claimed):
                 return False
-            self._fail(repo, task, "OCR attempt failed; verify PDF and OCR engine configuration")
+            code = str(error).split(':', 1)[0] if isinstance(error, DomainError) else ''
+            permanent_codes = {'INVALID_DOCUMENT_CONTENT', 'EMPTY_EXTRACTED_CONTENT',
+                               'EXTRACTION_LIMIT_EXCEEDED', 'INVALID_CSV', 'UNSUPPORTED_TEXT_ENCODING',
+                               'INVALID_IMAGE', 'INVALID_OPENXML_CONTAINER', 'OPENXML_LIMIT_EXCEEDED'}
+            permanent_codes.add('UNSUPPORTED_PROCESSING_FORMAT')
+            if code in permanent_codes or code == 'BLOCKED_OCR_RUNTIME':
+                self._fail(repo, task, code, permanent=code in permanent_codes)
+            else:
+                self._fail(repo, task, "OCR attempt failed; verify document and OCR engine configuration")
         event(task_id=task["id"], stage="ocr", action="ATTEMPT_FAILED")
         return True
 
