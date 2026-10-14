@@ -58,6 +58,7 @@ from data_sync_etl.domain.core import (
     ResourceVersionNotFound,
     SyncAlreadyRunning,
 )
+from data_sync_etl.domain.format_validation import ProcessingFormatError
 from data_sync_etl.domain.resource import CreateResourceCommand
 from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
 from data_sync_etl.domain.resource_version import CreateResourceVersionCommand
@@ -487,6 +488,13 @@ def process_resource_version(
     container = services(request)
     try:
         result = container.process_version.run(id)
+    except ProcessingFormatError as exc:
+        message = (
+            'OCR ảnh cần Tesseract và dữ liệu ngôn ngữ được cấu hình hợp lệ.'
+            if exc.code == 'BLOCKED_OCR_RUNTIME' else
+            'Định dạng này chưa hỗ trợ trích xuất nội dung.'
+        )
+        raise HTTPException(400, detail={"code": exc.code, "phase": "processing", "message": message}) from None
     except ResourceVersionNotFound:
         raise HTTPException(404, 'Resource version not found') from None
 

@@ -13,6 +13,24 @@ from data_sync_etl.application.sync import MasterSync
 pytestmark = pytest.mark.postgres
 
 
+@pytest.mark.parametrize('extension', ['.mp3', '.mp4'])
+def test_source_media_excluded_from_import_queue(source, pg_container, tmp_path, extension):
+    c = pg_container
+    original = setup_import(source, c, tmp_path)
+    with source.engine.begin() as connection:
+        connection.execute(text('UPDATE resource_versions SET storage_object_key=:key, updated_at=now()'),
+                           {'key': 'excluded' + extension})
+    assert not c.source_file_worker.once('excluded-source')
+    item = c.source_file_import.list_files()['items'][0]
+    assert item['import_status'] == 'FAILED'
+    assert item['last_error_code'] == 'UNSUPPORTED_SOURCE_FORMAT'
+    assert item['retry_count'] == 0 and not item['retry_eligible']
+    assert not c.source_file_worker.once('excluded-source')
+    with c.uow() as repo:
+        assert repo.count('resource_versions', {}) == repo.count('ocr_jobs', {}) == 0
+    assert original.exists()
+
+
 def test_import_queue_migration_up_down_up(pg_container):
     engine = pg_container.engine
     assert "source_file_imports" in inspect(engine).get_table_names()
@@ -101,3 +119,55 @@ def test_local_source_to_real_postgresql_and_mongo(source, pg_container, mongo_t
         assert counts == (database.ocr_pages.count_documents({}), database.mongo_content_units.count_documents({}))
     finally:
         client.close()
+
+
+@pytest.mark.parametrize('extension', ['.docx', '.xlsx', '.txt', '.csv', '.pptx'])
+def test_native_format_source_to_real_postgresql_mongo(source, pg_container, mongo_test_database, tmp_path, extension):
+    c = pg_container
+    original = setup_import(source, c, tmp_path)
+    path = original.with_suffix(extension)
+    if extension == '.docx':
+        from docx import Document
+        document = Document()
+        document.add_heading('Bài học phân số', 1)
+        document.add_paragraph('Phép cộng và phép trừ')
+        document.save(path)
+    elif extension == '.xlsx':
+        from openpyxl import Workbook
+        document = Workbook()
+        document.active.title = 'Toán'
+        document.active.append(['Phân số', 2])
+        document.create_sheet('Văn').append(['Tiếng Việt'])
+        document.save(path)
+    elif extension == '.pptx':
+        from pptx import Presentation
+        document = Presentation()
+        document.slides.add_slide(document.slide_layouts[1]).shapes.title.text = 'Bài học phân số'
+        document.save(path)
+    else:
+        path.write_text('Bài học phân số\nPhép cộng và phép trừ' if extension == '.txt'
+                        else 'Tên,Nội dung\nPhân số,"Phép cộng, phép trừ"', encoding='utf-8')
+    with source.engine.begin() as connection:
+        connection.execute(text("UPDATE resource_versions SET storage_object_key=:key, source_hash=:hash, updated_at=now()"),
+                           {'key': path.name, 'hash': sha256(path.read_bytes()).hexdigest()})
+    uri, name = mongo_test_database
+    with MongoClient(uri, serverSelectionTimeoutMS=3000) as client:
+        database = client[name]
+        c.mongo_projector.documents = MongoContentStore(database)
+        assert c.source_file_worker.once('source-native')
+        for _ in range(10):
+            if not c.worker.once('native-test'):
+                break
+        file = c.source_file_import.list_files()['items'][0]
+        assert file['etl_status'] == 'CONTENT_READY'
+        with c.uow() as repo:
+            units = repo.find('content_units', {'resource_version_id': file['target_version_id']})
+            assert units and all(unit['page_from'] is None and unit['title'] for unit in units)
+            assert repo.count('resource_versions', {}) == repo.count('ocr_jobs', {}) == 1
+        projected = list(database.mongo_content_units.find({'resource_version_id': file['target_version_id']}))
+        assert len(projected) == len(units) and any('phân số' in unit['text'].lower() for unit in projected)
+        assert all(unit['page_from'] is None and unit['title'] for unit in projected)
+        before = {unit['_id'] for unit in projected}
+        c.sync.run(full=True)
+        assert not c.source_file_worker.once('source-native')
+        assert before == {unit['_id'] for unit in database.mongo_content_units.find({})}

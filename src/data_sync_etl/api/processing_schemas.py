@@ -33,6 +33,7 @@ class RetryProcessingJobResponse(ProcessVersionResponse):
 
 
 class ProcessingJobStatusResponse(BaseModel):
+    error_code: str | None = None
     id: str
     resource_version_id: str
     status: Literal[

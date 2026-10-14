@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from data_sync_etl.domain.format_validation import FormatValidatorRegistry
+
 
 @dataclass(frozen=True)
 class CapabilityService:
@@ -15,15 +17,7 @@ class CapabilityService:
     def describe(self) -> dict[str, object]:
         return {
             'api_version': 'v1',
-            'formats': [
-                {
-                    'extension': '.pdf',
-                    'mime_type': 'application/pdf',
-                    'native_text_extraction': True,
-                    # Keep the old spelling for existing API consumers.
-                    'native_text_extractioin': True,
-                }
-            ], 
+            'formats': FormatValidatorRegistry().describe(),
             'master_sync': {
                 'source': 'json_fixture' if self.source_adapter == 'json' else 'postgresql',
                 'auto_sync_supported': self.auto_sync_supported,

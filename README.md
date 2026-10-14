@@ -1,15 +1,16 @@
 # Công cụ đồng bộ và xử lý học liệu — ETL
 
-Ứng dụng đồng bộ metadata từ PostgreSQL nguồn sang Master Data, nhập PDF từ kho file local,
+Ứng dụng đồng bộ metadata từ PostgreSQL nguồn sang Master Data, nhập học liệu từ kho file local,
 trích xuất nội dung/OCR, chuẩn hóa và lưu kết quả vào PostgreSQL, MongoDB.
 Giao diện React hỗ trợ quản lý học liệu, bật/tắt đồng bộ và thử lại các tệp lỗi.
 
-Luồng chính: **Nguồn ERD → Master Data → nhập PDF → OCR/chuẩn hóa → PostgreSQL + MongoDB**.
+Luồng chính: **Nguồn ERD → Master Data → nhập file → trích xuất/chuẩn hóa → PostgreSQL + MongoDB**.
 Master Sync thành công chỉ xác nhận metadata; nội dung hoàn tất khi đạt `CONTENT_READY`.
 
 ## 1. Chuẩn bị và cài đặt
 
 Cần Python 3.12 trở lên, Node.js 20.19.x hoặc từ 22.12 trở lên, Docker Desktop và Docker Compose.
+Tesseract OCR cần cài riêng nếu muốn xử lý ảnh hoặc PDF scan; `pip install` không cài phần mềm này.
 Các lệnh dưới đây dành cho **Git Bash trên Windows**, bắt đầu tại thư mục gốc dự án.
 
 Cài backend và tạo cấu hình nếu chưa có:
@@ -47,7 +48,7 @@ Sửa `.env` theo môi trường của bạn; giữ file này local, không comm
 | Kho file đích | `STORAGE_ROOT`: có quyền ghi, không trùng hoặc lồng với kho nguồn |
 | API quản trị local | `ADMIN_ENABLED=true` để dùng các thao tác quản trị trên giao diện |
 | MongoDB trên host | Mặc định `MONGO_URI=mongodb://127.0.0.1:27018` |
-| OCR | `native` cho PDF có text; `tesseract` cho PDF scan |
+| OCR | `native` cho PDF có text; `tesseract` cho ảnh và PDF scan |
 
 File nguồn được đọc theo cấu trúc `<SOURCE_FILE_STORAGE_ROOT>/<storage_bucket>/<storage_object_key>`.
 Bucket/key lấy từ PostgreSQL, không nhập đường dẫn nguồn từ trình duyệt.
@@ -60,13 +61,96 @@ SOURCE_FILE_STORAGE_ROOT=D:/SourceLearningFiles
 STORAGE_ROOT=./storage
 ```
 
-PDF scan cần cài Tesseract và dữ liệu ngôn ngữ riêng, đặt `OCR_ENGINE=tesseract`,
-`TESSERACT_PATH` và `TESSERACT_LANGUAGES=vie+eng`. Kiểm tra:
+### Cài Tesseract OCR trên Windows — làm một lần trên mỗi máy
+
+DOCX/XLSX/TXT/CSV/PPTX và PDF có text không cần Tesseract. PNG/JPG/JPEG và các trang
+PDF scan cần Tesseract thật cùng dữ liệu ngôn ngữ. Docker Compose hiện chỉ chạy CSDL,
+không tự cài Tesseract vào Windows hoặc chạy OCR worker.
+
+**Bước 1 — Cài phần mềm**
+
+Tải bộ cài Windows 64-bit từ [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki),
+nguồn được [tài liệu Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html#windows)
+giới thiệu. Chạy bộ cài, chọn thư mục riêng và ghi lại đường dẫn cài đặt.
+Không cài vào thư mục gốc dự án hoặc thư mục đang chứa dữ liệu khác.
+
+Đường dẫn thường gặp:
+
+- Cài cho máy: `C:\Program Files\Tesseract-OCR`.
+- Cài riêng tài khoản: `C:\Users\<ten-user>\AppData\Local\Programs\Tesseract-OCR`.
+
+Chọn ngôn ngữ **English (`eng`)** và **Vietnamese (`vie`)** nếu bộ cài có tùy chọn đó.
+Không bắt buộc thêm PATH hệ thống vì ứng dụng dùng `TESSERACT_PATH` trong `.env`.
+
+**Bước 2 — Kiểm tra và bổ sung dữ liệu ngôn ngữ**
+
+Mở **PowerShell**. Đổi `$ocrInstallDir` thành thư mục bạn vừa cài:
+
+```powershell
+$ocrInstallDir = 'C:\Program Files\Tesseract-OCR'
+$ocrExecutable = Join-Path $ocrInstallDir 'tesseract.exe'
+if (-not (Test-Path -LiteralPath $ocrExecutable)) {
+    throw 'Chưa tìm thấy Tesseract. Kiểm tra lại thư mục cài đặt.'
+}
+& $ocrExecutable --version
+& $ocrExecutable --list-langs
+```
+
+Danh sách phải có cả `eng` và `vie`. Nếu thiếu, chạy tiếp đoạn dưới trong cùng PowerShell
+để tải đúng file từ [kho tessdata_fast chính thức](https://github.com/tesseract-ocr/tessdata_fast).
+Nếu báo thiếu quyền ghi trong Program Files, mở PowerShell bằng **Run as administrator**
+và khai báo lại `$ocrInstallDir`, `$ocrExecutable` như trên.
+
+```powershell
+foreach ($ocrLanguage in @('eng', 'vie')) {
+    $ocrModel = Join-Path $ocrInstallDir "tessdata\$ocrLanguage.traineddata"
+    if (-not (Test-Path -LiteralPath $ocrModel)) {
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$ocrLanguage.traineddata" -OutFile $ocrModel
+    }
+}
+& $ocrExecutable --list-langs
+```
+
+Các file phải nằm trực tiếp trong `Tesseract-OCR\tessdata`, không phải file HTML,
+không đổi thành đuôi `.txt` và không tải lồng thêm một thư mục `tessdata` khác.
+
+**Bước 3 — Cấu hình `.env` tại thư mục gốc dự án**
+
+```dotenv
+OCR_ENGINE=tesseract
+TESSERACT_PATH="C:/Program Files/Tesseract-OCR/tesseract.exe"
+TESSERACT_LANGUAGES=vie+eng
+```
+
+Thay `TESSERACT_PATH` bằng đường dẫn thực trên máy của bạn; dùng dấu `/` và đặt trong
+ngoặc kép nếu có khoảng trắng. Nếu cài riêng tài khoản, đường dẫn có dạng
+`C:/Users/<ten-user>/AppData/Local/Programs/Tesseract-OCR/tesseract.exe`.
+Mỗi biến chỉ khai báo một lần; thay dòng `OCR_ENGINE=native` cũ, không thêm bản trùng.
+Không chép `.env` của người khác vì tài khoản Windows, đường dẫn và mật khẩu có thể khác.
+
+**Bước 4 — Nạp lại cấu hình và thử ảnh**
+
+Dừng backend và các worker đang chạy bằng `Ctrl + C`, rồi chạy lại các lệnh ở mục 4.
+Backend kiểm tra runtime khi tạo job ảnh; OCR worker mới là nơi thực sự chạy Tesseract.
+Worker không tự nạp `.env` sau khi bạn sửa file.
+
+Trên giao diện: **Kho học liệu → Thêm học liệu** → chọn ảnh có chữ rõ → tạo học liệu
+→ chờ xử lý → mở **Xem nội dung trích xuất**. Nếu học liệu đã được tạo:
+
+- Chưa có job: bấm **Bắt đầu xử lý** sau khi cấu hình runtime xong.
+- Job đã lỗi: bấm **Xử lý lại** sau khi khởi động lại OCR worker, không upload ảnh lần nữa.
+
+Adapter dùng ảnh tạm tên ASCII để tránh lỗi đường dẫn tiếng Việt; thư mục tạm tự được
+dọn sau xử lý. Không cần đổi tên thư mục dự án hoặc đổi `STORAGE_ROOT`.
+
+Linux/Ubuntu có thể cài engine và hai ngôn ngữ bằng:
 
 ```bash
-tesseract --version
+sudo apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-vie
 tesseract --list-langs
 ```
+
+Sau đó dùng `TESSERACT_PATH=tesseract`, `OCR_ENGINE=tesseract` và `TESSERACT_LANGUAGES=vie+eng`.
 
 `OCR_ENGINE=fake` chỉ dùng demo/test. API quản trị hiện dành cho local development;
 `ADMIN_ENABLED` không thay thế xác thực admin khi triển khai public.
@@ -82,7 +166,7 @@ docker compose ps -a
 
 Compose khởi động Master PostgreSQL, Source PostgreSQL và MongoDB.
 Hai service `master-migrate`, `source-migrate` tự tạo/cập nhật schema, cần kết thúc với `Exited (0)`.
-Compose không tự thêm học liệu hoặc tạo PDF nguồn.
+Compose không tự thêm học liệu hoặc tạo file nguồn.
 
 Xem log nếu migration thất bại:
 
@@ -175,8 +259,8 @@ Auto cần PostgreSQL nguồn/Master, reader hợp lệ, worker hoạt động v
 etl run-source-file-worker --worker-id source-file-1
 ```
 
-Sau Master resources sync thành công, worker khám phá phiên bản, kiểm tra PDF/hash,
-nhập file và xếp hàng OCR. Khi Auto resources bật, metadata phiên bản được đối soát định kỳ.
+Sau Master resources sync thành công, worker khám phá phiên bản, kiểm tra định dạng/hash,
+nhập file và xếp hàng xử lý. Khi Auto resources bật, metadata phiên bản được đối soát định kỳ.
 Khi tắt Auto, các job đã xếp hàng vẫn được xử lý.
 
 ### Terminal 5 — OCR/ETL worker
@@ -185,7 +269,7 @@ Khi tắt Auto, các job đã xếp hàng vẫn được xử lý.
 etl run-ocr-worker --worker-id ocr-1
 ```
 
-Xử lý các trang PDF, chuẩn hóa nội dung và hoàn tất projection MongoDB.
+Xử lý PDF, tài liệu native và ảnh OCR, chuẩn hóa nội dung và hoàn tất projection MongoDB.
 Chỉ chạy backend HTTP hoặc mở trình duyệt không thay thế các worker.
 
 ## 5. Bắt đầu sử dụng
@@ -206,12 +290,27 @@ Chỉ chạy backend HTTP hoặc mở trình duyệt không thay thế các work
    ```
 
 3. Mở **Kho học liệu → Đồng bộ dữ liệu nguồn**, chọn chế độ và bật từng nhóm/tất cả.
-4. Mở **Kho học liệu → Lỗi đồng bộ** để retry từng tệp hoặc theo lô. Bảng phân trang 7 tệp/trang.
+4. Mở **Kho học liệu → Lỗi đồng bộ → Đồng bộ lại** để retry từng tệp hoặc theo lô.
+   Tab **Lỗi đồng bộ** chứa các tệp không thể retry. Mỗi trang phân trang 7 tệp.
    Retry chỉ xếp hàng, worker thực hiện sau đó.
 
-Đồng bộ nguồn không yêu cầu upload lại PDF. Upload thủ công vẫn dùng
-**Thêm học liệu → Xử lý học liệu**. Một số định dạng có thể upload, nhưng OCR/import nguồn
-hiện tập trung vào PDF. Xung đột phiên bản và nguồn đổi hash không được tự ghi đè.
+Đồng bộ nguồn không yêu cầu upload lại file. Upload thủ công dùng **Thêm học liệu** hoặc
+cập nhật file trong chi tiết học liệu, rồi chuyển sang trang xử lý; trang này không nằm riêng
+trong submenu. Xung đột phiên bản và nguồn đổi hash không được tự ghi đè.
+
+| Định dạng | Nội dung được xử lý |
+| --- | --- |
+| PDF | Text trực tiếp; trang scan cần Tesseract |
+| DOCX | Đoạn, tiêu đề và bảng văn bản |
+| XLSX | Sheet/hàng/ô, đọc giá trị cache; không tính công thức |
+| TXT/CSV | UTF-8 hoặc UTF-8 BOM, giữ vị trí dòng/hàng |
+| PPTX | Văn bản slide và bảng, không OCR ảnh nhúng |
+| PNG/JPG/JPEG | OCR chữ bằng Tesseract, không phân tích cảnh/biểu đồ |
+
+MP3/MP4 không được tiếp nhận hoặc xử lý; học liệu đã lưu trước đó vẫn được giữ nguyên.
+
+Luồng nguồn hỗ trợ các định dạng có xử lý nội dung ở bảng trên.
+Xem [giới hạn định dạng và trích xuất](docs/multiformat_etl.md).
 
 ## 6. Lệnh thường dùng
 
@@ -240,6 +339,19 @@ etl demo-run --fixture-resource-id resource-1
 JSON không hỗ trợ Auto Sync hoặc nhập file từ PostgreSQL nguồn.
 
 ## 7. Kiểm thử và build
+
+### Sau khi pull code mới
+
+Tại thư mục gốc, activate `.venv` và cài lại dependency:
+
+```bash
+python -m pip install -e '.[dev]'
+```
+
+Không chép đè `.env` đang dùng. Đối chiếu `.env.example`, bổ sung các biến còn thiếu;
+nếu dùng ảnh/PDF scan, làm đủ các bước cài Tesseract ở mục 2. Chạy database/migration
+ở mục 3, `npm.cmd install` trong frontend khi dependency thay đổi, rồi restart backend
+và các worker. Pull code hoặc backend `--reload` không tự restart các worker.
 
 Backend, tại thư mục gốc:
 
@@ -271,6 +383,9 @@ npm.cmd run lint
 | Thiếu baseline | Chạy Full Sync thành công lần đầu |
 | Kho nguồn chưa sẵn sàng | Kiểm tra root tuyệt đối, quyền đọc và kho nguồn/đích tách biệt |
 | PDF scan lỗi OCR | Kiểm tra Tesseract, ngôn ngữ và `OCR_ENGINE` |
+| `BLOCKED_OCR_RUNTIME` hoặc OCR ảnh cần Tesseract | Kiểm tra `TESSERACT_PATH`, `--list-langs` có `vie`/`eng`, `OCR_ENGINE=tesseract`; restart backend/worker |
+| `tesseract` không được nhận diện trong terminal | Chạy bằng đường dẫn đầy đủ như mục 2; không bắt buộc sửa PATH |
+| OCR lỗi với đường dẫn tiếng Việt | Pull bản adapter ảnh tạm mới, restart OCR worker rồi Xử lý lại; không đổi kho file |
 | File đã nhập, chưa hoàn tất | Kiểm tra OCR worker, MongoDB và finalization |
 | Cổng Docker đã được dùng | Kiểm tra `docker compose ps -a`, tránh chạy stack trùng cổng |
 

@@ -16,6 +16,7 @@ from data_sync_etl.db.models import (
     MasterGradeLevel,
     MasterLearningResource,
     OcrJob,
+    OcrPageResult,
     OcrPageTask,
     ResourceGradeLevel,
     ResourceSubject,
@@ -67,11 +68,23 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
         rows = self.session.execute(
             joined.order_by(ContentUnit.sequence_no, ContentUnit.id).offset(offset).limit(limit)
         )
+        items = []
+        results = {}
+        for unit, body in rows:
+            item = {**self._dict(unit), 'text': body.text, 'page_result_id': body.page_result_id}
+            if unit.unit_type in ('MP3_TEXT', 'MP4_TEXT'):
+                if body.page_result_id not in results:
+                    result = self.session.get(OcrPageResult, body.page_result_id)
+                    results[body.page_result_id] = (result.result_metadata or {}) if result else {}
+                metadata = results[body.page_result_id]
+                for logical in metadata.get('logical_units', []):
+                    if logical.get('title') == unit.title:
+                        locator = logical.get('locator', {})
+                        item.update({key: locator.get(key) for key in ('start_seconds', 'end_seconds', 'source_format')})
+                        break
+            items.append(item)
         return {
-            "items": [
-                {**self._dict(unit), "text": body.text, "page_result_id": body.page_result_id}
-                for unit, body in rows
-            ],
+            "items": items,
             "total": total,
             "offset": offset,
             "limit": limit,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router'
 import {
+    ProcessingApiError,
     getContentUnits,
     getProcessingJob,
     isRetryableProcessingError,
@@ -16,6 +17,7 @@ import type {
 import styles from './LibraryPages.module.css'
 
 type ProcessingView = {
+    error_code?: string | null
     resource_version_id: string
     job_id: string
     job_status: JobStatus
@@ -40,6 +42,8 @@ function getMainStatus(
     statusError: string,
 ) {
     if (statusError) return { label: 'Không thể cập nhật trạng thái', tone: 'error' }
+    if (result?.error_code === 'NO_SPEECH_CONTENT') return { label: 'Không có nội dung lời nói', tone: 'idle' }
+    if (result?.error_code === 'MEDIA_NO_AUDIO') return { label: 'Tệp không có âm thanh', tone: 'idle' }
     if (!jobId) return { label: 'Chưa bắt đầu xử lý', tone: 'idle' }
     if (!result) return { label: 'Đang cập nhật trạng thái', tone: 'active' }
 
@@ -67,6 +71,7 @@ export function LibraryProcessingPage() {
     const [result, setResult] = useState<ProcessingView | null>(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
+    const [blockedVersionId, setBlockedVersionId] = useState('')
     const [statusError, setStatusError] = useState('')
     const [stoppedJobId, setStoppedJobId] = useState('')
     const [statusRefreshKey, setStatusRefreshKey] = useState(0)
@@ -107,6 +112,7 @@ export function LibraryProcessingPage() {
                     job_id: data.id,
                     job_status: data.status,
                     processing_status: data.processing_status,
+                    error_code: data.error_code,
                 })
 
                 if (!terminalJobStatuses.includes(data.status)) {
@@ -191,6 +197,9 @@ export function LibraryProcessingPage() {
             updateJobInUrl(data)
         } catch (caughtError) {
             if (isAbortError(caughtError)) return
+            if (caughtError instanceof ProcessingApiError && caughtError.code === 'UNSUPPORTED_PROCESSING_FORMAT') {
+                setBlockedVersionId(versionId)
+            }
             setError(caughtError instanceof Error ? caughtError.message : 'Không thể bắt đầu xử lý')
         } finally {
             if (actionControllerRef.current === controller) {
@@ -233,6 +242,16 @@ export function LibraryProcessingPage() {
     }
 
     const canRetry = currentResult?.processing_status === 'OCR_FAILED' || currentResult?.processing_status === 'FINALIZATION_FAILED'
+    const unsupportedFormat = blockedVersionId === versionId || currentResult?.error_code === 'UNSUPPORTED_PROCESSING_FORMAT'
+    const mediaErrors: Record<string, string> = {
+        UNSUPPORTED_PROCESSING_FORMAT: 'Định dạng này không được hỗ trợ xử lý.',
+        MEDIA_NO_AUDIO: 'Tệp không có luồng âm thanh.', NO_SPEECH_CONTENT: 'Không có nội dung lời nói.',
+        MEDIA_DURATION_EXCEEDED: 'Thời lượng vượt giới hạn.', INVALID_MEDIA: 'Audio/video không hợp lệ.',
+        STT_RUNTIME_UNAVAILABLE: 'STT chưa có runtime/model hợp lệ.', STT_TIMEOUT: 'Nhận dạng lời nói quá thời gian.',
+        STT_OUTPUT_LIMIT_EXCEEDED: 'Transcript vượt giới hạn.', STT_RESULT_INVALID: 'Transcript không hợp lệ.',
+        STT_BUSY: 'Worker STT đang bận.', STT_OPERATION_FAILED: 'Nhận dạng lời nói thất bại.',
+    }
+    const mediaRetryBlocked = ['MEDIA_NO_AUDIO', 'NO_SPEECH_CONTENT', 'MEDIA_DURATION_EXCEEDED', 'INVALID_MEDIA', 'STT_OUTPUT_LIMIT_EXCEEDED', 'STT_RESULT_INVALID'].includes(currentResult?.error_code ?? '') || unsupportedFormat
     const mainStatus = getMainStatus(jobId, currentResult, statusError)
 
     if (!versionId) return <Navigate to="/library/list" replace />
@@ -263,6 +282,7 @@ export function LibraryProcessingPage() {
 
                 {processingNotice && <p className={styles.notice}>{processingNotice}</p>}
                 {error && <p className={styles.alert} role="alert">{error}</p>}
+                {currentResult?.error_code && <p className={styles.notice}>{mediaErrors[currentResult.error_code] ?? 'Lỗi xử lý nội dung.'}</p>}
                 {statusError && <p className={styles.alert} role="alert">{statusError}</p>}
 
                 {contentReady && (
@@ -288,6 +308,9 @@ export function LibraryProcessingPage() {
                                     <article className={styles.contentItem} key={unit.id}>
                                         <div className={styles.contentMeta}>
                                             <span>Đoạn {unit.sequence_no}</span>
+                                            {unit.start_seconds != null && unit.end_seconds != null && (
+                                                <span>{unit.start_seconds.toFixed(2)}–{unit.end_seconds.toFixed(2)} giây</span>
+                                            )}
                                             {unit.page_from !== null && (
                                                 <span>Trang {unit.page_from}{unit.page_to !== null && unit.page_to !== unit.page_from ? `–${unit.page_to}` : ''}</span>
                                             )}
@@ -325,19 +348,19 @@ export function LibraryProcessingPage() {
                     </div>
                 )}
 
-                {(!jobId || canRetry || stoppedJobId === jobId) && (
+                {((!jobId && !unsupportedFormat) || (canRetry && !mediaRetryBlocked) || (jobId && stoppedJobId === jobId)) && (
                     <div className={styles.actions}>
-                        {!jobId && (
+                        {!jobId && !unsupportedFormat && (
                             <button className={styles.primaryButton} type="button" onClick={() => void handleStartProcessing()} disabled={loading || !versionId}>
                                 {loading ? 'Đang gửi yêu cầu...' : 'Bắt đầu xử lý'}
                             </button>
                         )}
-                        {canRetry && (
+                        {canRetry && !mediaRetryBlocked && (
                             <button className={styles.secondaryButton} type="button" onClick={() => void handleRetry()} disabled={loading}>
                                 {loading ? 'Đang gửi yêu cầu...' : 'Xử lý lại'}
                             </button>
                         )}
-                        {stoppedJobId === jobId && (
+                        {jobId && stoppedJobId === jobId && (
                             <button className={styles.primaryButton} type="button" onClick={handleCheckStatusAgain}>Kiểm tra lại trạng thái</button>
                         )}
                     </div>

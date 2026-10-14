@@ -251,7 +251,7 @@ export function LibraryCreatePage() {
                 </div>
                 <div className={styles.field}>
                     <label htmlFor="file">Tải lên tệp học liệu</label>
-                    <input id='file' type="file" name="file" accept="application/pdf,.pdf" required />
+                    <input id='file' type="file" name="file" accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx" required />
                 </div>
                 <div className={styles.field}>
                     <label htmlFor="gradeLevel">Khối lớp</label>

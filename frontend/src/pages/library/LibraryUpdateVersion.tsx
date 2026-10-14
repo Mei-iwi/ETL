@@ -346,7 +346,7 @@ export function LibraryUpdateVersion() {
                             id="file"
                             name="file"
                             type="file"
-                            accept="application/pdf,.pdf"
+                            accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx"
                             disabled={formDisabled}
                         />
                     </div>

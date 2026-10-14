@@ -1,5 +1,6 @@
 from pymongo import MongoClient
 
+from data_sync_etl.adapters.extraction import NativeDocumentExtractor
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
 from data_sync_etl.adapters.mongo.foundation_store import (
     MongoBagStore,
@@ -145,6 +146,8 @@ class Container:
             create_ocr_engine(self.settings),
             self.settings.ocr_max_retries,
             self.settings.ocr_heartbeat_timeout_seconds,
+            documents=NativeDocumentExtractor(),
+            formats=self.format_registry,
         )
         self.postprocess = Postprocessor(self.uow)
         self.orchestrator = EtlOrchestrator(
@@ -193,6 +196,7 @@ class Container:
         self.source_file_import = SourceFileImportService(
             self.source, self.source_files, self.storage, self.uow,
             self.process_version, self.retry_processing_job, self.settings,
+            formats=self.format_registry,
         )
         self.source_file_worker = SourceFileImportWorker(self.source_file_import)
         self.worker = OCRWorker(

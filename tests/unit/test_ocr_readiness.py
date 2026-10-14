@@ -82,11 +82,47 @@ def test_tesseract_runtime_and_unicode_result(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(args, 0, "Tiếng Việt\nEnglish\n", "")
 
     monkeypatch.setattr(engines.subprocess, "run", execute)
+    (tmp_path / "page.png").write_bytes(b"test image bytes")
     result = TesseractOCREngine(timeout=5).recognize(tmp_path / "page.png")
     assert result.text == "Tiếng Việt\nEnglish\n"
     assert result.engine_name == "tesseract"
     assert result.engine_version == "tesseract 5.5.0"
     assert calls[-1][-2:] == ["-l", "vie+eng"]
+
+
+@pytest.mark.parametrize("failure", [None, "timeout", "process"])
+def test_tesseract_ascii_temp_image_cleanup(monkeypatch, tmp_path, failure):
+    from pathlib import Path
+
+    from data_sync_etl.adapters.ocr import engines
+
+    original = tmp_path / "Ảnh học liệu tiếng Việt.png"
+    original.write_bytes(b"original image bytes")
+    engine = TesseractOCREngine(timeout=5)
+    engine._version = "test"
+    monkeypatch.setattr(engines.shutil, "which", lambda _: "tesseract")
+    working_dirs = []
+
+    def execute(args, **kwargs):
+        directory = Path(kwargs["cwd"])
+        working_dirs.append(directory)
+        assert args[1] == "input.png" and args[1].isascii()
+        assert (directory / args[1]).read_bytes() == original.read_bytes()
+        assert kwargs["timeout"] == 5
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(args, 5)
+        if failure == "process":
+            raise subprocess.CalledProcessError(1, args)
+        return subprocess.CompletedProcess(args, 0, "Tiếng Việt", "")
+
+    monkeypatch.setattr(engines.subprocess, "run", execute)
+    if failure:
+        with pytest.raises(DomainError):
+            engine.recognize(original)
+    else:
+        assert engine.recognize(original).text == "Tiếng Việt"
+    assert working_dirs and all(not directory.exists() for directory in working_dirs)
+    assert original.read_bytes() == b"original image bytes"
 
 
 def test_tesseract_missing_runtime_or_language(monkeypatch, tmp_path):
