@@ -6,7 +6,8 @@ import pytest
 from conftest import ingest, migrate
 from sqlalchemy import inspect, text
 
-from data_sync_etl.domain.core import now
+from data_sync_etl.db.models import Base
+from data_sync_etl.domain.core import SyncAlreadyRunning, now
 from data_sync_etl.ports.processing import OCRResult
 
 pytestmark = pytest.mark.postgres
@@ -117,7 +118,7 @@ def test_postgres_migrations(pg_container):
 
     migrate(pg_container.engine, "base", downgrade=True)
     migrate(pg_container.engine)
-    assert len(inspect(pg_container.engine).get_table_names()) == 16
+    assert set(inspect(pg_container.engine).get_table_names()) == set(Base.metadata.tables) | {'alembic_version'}
     with pg_container.engine.connect() as connection:
         assert connection.scalar(text("select current_setting('server_version_num')"))
         assert len(inspect(connection).get_foreign_keys("content_unit_texts")) == 2
@@ -282,8 +283,15 @@ def test_concurrent_stale_recovery_counter(pg_container):
 
 def test_concurrent_master_sync(pg_container):
     c = pg_container
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda _: c.sync.run(full=True), range(2)))
+    # Nonblocking lock rejects a concurrent caller; it must not start a duplicate run.
+    with c.uow.sync_lock() as acquired, ThreadPoolExecutor(max_workers=1) as pool:
+        assert acquired
+        future = pool.submit(c.sync.run, full=True)
+        with pytest.raises(SyncAlreadyRunning):
+            future.result(timeout=10)
+        with c.uow() as repo:
+            assert repo.count('sync_runs', {}) == 0
+    results = [c.sync.run(full=True), c.sync.run(full=True)]
     assert sum(r["resources"]["inserted"] for r in results) == 3
     with c.uow() as repo:
         assert repo.count("master_learning_resources", {}) == 3

@@ -105,7 +105,7 @@ def test_bootstrap_unapproved_ids_are_skipped_not_conflicts(container):
 
 def assert_accounted(report):
     assert report['scanned'] == sum(report[key] for key in (
-        'projected', 'unchanged', 'skipped_no_extension', 'skipped_unapproved', 'conflicts', 'failed',
+        'projected', 'unchanged', 'skipped_no_extension', 'skipped_unapproved', 'skipped_not_source_backed', 'conflicts', 'failed',
     ))
 
 
@@ -177,7 +177,9 @@ def test_default_counts_without_fetching_master_records(container, monkeypatch):
 def test_conflicting_reference_skips_only_unsafe_record(container):
     container.sync.run(full=True)
     store = MetadataMemory()
-    projection = projector(container, store, identity_guard=lambda stream, ids: set(ids) & {'resource-1'})
+    projection = projector(container, store, identity_guard=lambda stream, ids: {
+        key: 'different-from-committed-master' if key == 'resource-1' else None for key in ids
+    })
     result = projection.run('resources')['resources']
     assert result['conflicts'] == 1 and result['projected'] == result['scanned'] - 1
     assert 'resource-1' not in store.resources
@@ -217,7 +219,7 @@ def test_keyset_multiple_pages_without_auth_or_source_reader(container):
         for key in ['A', 'Z', 'a', 'z', *[f'extra-{n:03d}' for n in range(17)]]:
             repo.insert('master_users', {**template, 'id': key, 'hashed_password': 'private-test-only'})
         expected = repo.count('master_users', {})
-        assert set(repo.master_metadata_page('users', None, 1)[0]) == {'id', 'created_at', 'updated_at'}
+        assert set(repo.master_metadata_page('users', None, 1)[0]) == {'id', 'mongo_id', 'created_at', 'updated_at'}
     store = MetadataMemory()
     projection = projector(container, store)
     # Projection must still work if the source reader is entirely unavailable.

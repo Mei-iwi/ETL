@@ -13,13 +13,17 @@ MODELS = {'users': UserProfileDocument, 'resources': ResourceDescriptionDocument
 
 class MasterMetadataProjection:
     def __init__(self, uow: UnitOfWork, documents: MetadataDocumentPort | None,
-                 *, batch_size=100, identity_bootstrap=False, identity_ids=None, identity_guard=None):
+                 *, batch_size=100, identity_bootstrap=False, identity_ids=None, identity_guard=None,
+                 identity_scope='approved_ids'):
         if type(batch_size) is not int or not 1 <= batch_size <= 1000:
             raise ValueError('Invalid metadata projection batch size')
         self.uow, self.documents, self.batch_size = uow, documents, batch_size
         self.identity_bootstrap = identity_bootstrap
         self.identity_ids = {stream: frozenset(ids) for stream, ids in (identity_ids or {}).items()}
         self.identity_guard = identity_guard
+        if identity_scope not in ('approved_ids', 'source_verified'):
+            raise ValueError('Invalid metadata identity scope')
+        self.identity_scope = identity_scope
 
     def run(self, stream='all'):
         if stream != 'all' and stream not in MODELS:
@@ -28,14 +32,15 @@ class MasterMetadataProjection:
 
     def _stream(self, stream):
         report = dict(scanned=0, projected=0, unchanged=0, skipped_no_extension=0,
-                      skipped_unapproved=0, conflicts=0, failed=0, mode='OPTIONAL_IDENTITY_BOOTSTRAP'
+                      skipped_unapproved=0, skipped_not_source_backed=0, conflicts=0, failed=0,
+                      scope=self.identity_scope, mode='OPTIONAL_IDENTITY_BOOTSTRAP'
                       if self.identity_bootstrap else 'EXTENSION_SYNC',
                       reason='IDENTITY_ONLY' if self.identity_bootstrap else 'SKIPPED_NO_EXTENSION')
-        with self.uow.processing_lock('master-mongo:' + stream) as acquired:
+        with self.uow.metadata_projection_lock(stream) as acquired:
             if not acquired:
                 return {**report, 'status': 'BUSY'}
             approved = self.identity_ids.get(stream, ())
-            if not self.identity_bootstrap or not approved:
+            if not self.identity_bootstrap or (not approved and self.identity_scope == 'approved_ids'):
                 # No extension source/writer exists. COUNT assesses eligibility without
                 # fetching Master identities/timestamps on every Auto run or making RPCs.
                 with self.uow() as repo:
@@ -56,10 +61,14 @@ class MasterMetadataProjection:
                     rows = repo.master_metadata_page(stream, after, self.batch_size)
                 if not rows:
                     break
-                requested_ids = [r['id'] for r in rows if r['id'] in approved]
+                requested_ids = [r['id'] for r in rows if self.identity_scope == 'source_verified' or r['id'] in approved]
                 try:
-                    conflicts = (self.identity_guard(stream, requested_ids)
-                                 if requested_ids and self.identity_guard else set())
+                    if requested_ids and self.identity_scope == 'source_verified' and self.identity_guard is None:
+                        raise RuntimeError('Source verifier unavailable')
+                    references = (self.identity_guard(stream, requested_ids)
+                                  if requested_ids and self.identity_guard else {})
+                    if not isinstance(references, dict):
+                        raise RuntimeError('Source verifier contract invalid')
                 except Exception:
                     # Failed reference verification cannot grant permission to create IDs.
                     report['status'] = 'BLOCKED_MONGO_ID_MAPPING'
@@ -72,21 +81,38 @@ class MasterMetadataProjection:
                     return report
                 for row in rows:
                     report['scanned'] += 1
-                    if row['id'] not in approved:
+                    if self.identity_scope == 'approved_ids' and row['id'] not in approved:
                         report['skipped_unapproved'] += 1
                         continue
                     try:
-                        document = MODELS[stream](
-                            _id=row['id'], created_at=row['created_at'], updated_at=row['updated_at'],
-                        )
-                        # A future repository exposing a reference must not silently remap it.
-                        if row.get('mongo_id') not in (None, row['id']) or row['id'] in conflicts:
+                        source_backed = row['id'] in references
+                        if self.identity_scope == 'source_verified' and not source_backed:
+                            report['skipped_not_source_backed'] += 1
+                            continue
+                        current = row['mongo_id']
+                        source_ref = references.get(row['id'])
+                        # Declared non-PK references are valid. A mismatch with committed
+                        # Master, or an ambiguous source-NULL/non-PK Master link, is not.
+                        if source_backed and (
+                            (source_ref is not None and source_ref != current)
+                            or (source_ref is None and current not in (None, row['id']))
+                        ):
                             report['conflicts'] += 1
                             continue
+                        target = current or row['id']  # Fallback ONLY in explicitly enabled scopes.
+                        document = MODELS[stream](
+                            _id=target, created_at=row['created_at'], updated_at=row['updated_at'],
+                        )
                         if self.documents is None:
                             raise RuntimeError('Metadata store unavailable')
                         existing = (self.documents.get_user(document.id) if stream == 'users'
                                     else self.documents.get_resource(document.id))
+                        # Reserve the reference in a short row-locked transaction BEFORE
+                        # insertion. Validate the existing target before reserving it.
+                        # Downtime may leave a pending reference, never a second ID.
+                        # Source is read-only; NULL sync never clears this local fallback.
+                        with self.uow() as repo:
+                            repo.reserve_master_mongo_identity(stream, row['id'], current, target)
                         if existing is not None:
                             # Mongo owns extensions and all timestamps of an existing document.
                             report['unchanged'] += 1
@@ -112,9 +138,10 @@ class MasterMetadataProjection:
                     break
         report['status'] = ('FAILED' if report['failed'] else 'BLOCKED_MONGO_ID_MAPPING'
                             if report['conflicts'] else 'READY_IDENTITY_ONLY'
-                            if report['projected'] or report['unchanged'] else 'NO_APPROVED_IDS')
-        if report['status'] == 'NO_APPROVED_IDS':
-            report['reason'] = 'NO_APPROVED_IDS'
+                            if report['projected'] or report['unchanged'] else
+                            'NO_SOURCE_BACKED_IDS' if self.identity_scope == 'source_verified' else 'NO_APPROVED_IDS')
+        if report['status'] in ('NO_APPROVED_IDS', 'NO_SOURCE_BACKED_IDS'):
+            report['reason'] = report['status']
         event(stage='master_metadata_projection', stream=stream,
               action=report['status'], coverage=report)
         return report

@@ -27,6 +27,9 @@ def parser():
     project.add_argument('--stream', choices=['all', 'users', 'resources'], default='all')
     project.add_argument('--full', action='store_true', required=True,
                          help='Reconcile committed Master by ID; does not enable identity bootstrap')
+    metadata = commands.add_parser('sync-mongo-metadata', help='Source-owned metadata FULL_RECONCILE; no incremental/CDC')
+    metadata.add_argument('--stream', choices=['all', 'users', 'resources'], default='all')
+    metadata.add_argument('--full', action='store_true', required=True)
     ingest = commands.add_parser("ingest-resource")
     ingest.add_argument("--resource-id", required=True)
     ingest.add_argument("--bucket", required=True)
@@ -85,6 +88,8 @@ def dispatch(container, args):
             return container.sync.run(args.stream, args.full)
         case 'project-master-mongo':
             return container.master_metadata_projection.run(args.stream)
+        case 'sync-mongo-metadata':
+            return container.mongo_metadata_sync.run(args.stream)
         case "ingest-resource":
             return container.ingestion.run(
                 args.resource_id, args.bucket, args.object_key, args.uploaded_by
@@ -120,8 +125,8 @@ def main():
         with flow():
             result = dispatch(container, args)
         print(json.dumps(result, default=str, ensure_ascii=True, indent=2))
-        if args.command == 'project-master-mongo' and any(
-            r['status'] in {'FAILED', 'BLOCKED_MONGO_ID_MAPPING', 'BUSY'} for r in result.values()
+        if args.command in ('project-master-mongo', 'sync-mongo-metadata') and any(
+            r['status'] in {'FAILED', 'BLOCKED', 'DISABLED', 'BLOCKED_MONGO_ID_MAPPING', 'BUSY'} for r in result.values()
         ):
             return 1
     except Exception:

@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from typing import Annotated, Protocol
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 Id = Annotated[str, Field(min_length=1, max_length=30)]
 
@@ -26,7 +26,18 @@ class ResourceType(SourceRecord):
     name_vi: str = Field(max_length=150)
 
 
-class LearningResource(SourceRecord):
+class MongoReferencedRecord(SourceRecord):
+    mongo_id: Annotated[str, Field(strict=True, min_length=1, max_length=30)] | None = None
+
+    @field_validator('mongo_id')
+    @classmethod
+    def valid_reference(cls, value):
+        if value is not None and (not value.strip() or value != value.strip()):
+            raise ValueError('Invalid Mongo reference')
+        return value
+
+
+class LearningResource(MongoReferencedRecord):
     provider_id: Id | None
     resource_type_id: Id
     title: str | None = Field(max_length=500)
@@ -40,7 +51,7 @@ class Role(SourceRecord):
     description: str | None = Field(default=None, max_length=255)
 
 
-class User(SourceRecord):
+class User(MongoReferencedRecord):
     email: str = Field(max_length=255)
     hashed_password: SecretStr = Field(max_length=255)
     full_name: str | None = Field(max_length=255)
@@ -55,6 +66,15 @@ class EducationLevel(SourceRecord):
 
 
 class GradeLevel(SourceRecord):
+    mongo_id: Annotated[str, Field(strict=True, min_length=1, max_length=24)] | None = None
+
+    @field_validator('mongo_id')
+    @classmethod
+    def valid_reference(cls, value):
+        if value is not None and (not value.strip() or value != value.strip()):
+            raise ValueError('Invalid grade Mongo reference')
+        return value
+
     education_level_id: Id
     code: str = Field(max_length=50)
     name_vi: str = Field(max_length=100)

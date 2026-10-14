@@ -21,14 +21,23 @@ class MasterSync:
     def run(self, stream="all", full=False):
         if stream != "all" and stream not in STREAMS:
             raise DomainError("Unknown sync stream")
-        with self.uow.sync_lock() as acquired:
-            if not acquired:
-                raise SyncAlreadyRunning("Master data sync is already running")
-            with flow():
-                return {
+        with flow():
+            with self.uow.sync_lock() as acquired:
+                if not acquired:
+                    raise SyncAlreadyRunning("Master data sync is already running")
+                result = {
                     name: self._stream(name, full)
                     for name in (STREAMS if stream == "all" else [stream])
                 }
+            # PG sync lock/transaction is released before any Mongo RPC.
+            for name in result:
+                if name in ('users', 'resources') and self.metadata_projection is not None:
+                    try:
+                        self.metadata_projection.run(name)
+                    except Exception:
+                        event(stage='master_metadata_projection', stream=name,
+                              action='FAILED_RECONCILE_REQUIRED')
+            return result
 
     def status(self, limit=20):
         with self.uow() as repo:
@@ -120,7 +129,8 @@ class MasterSync:
                     )
             with self.uow() as repo:
                 repo.update("sync_runs", run_id, dict(status="COMPLETED", finished_at=now()))
-        except Exception:
+        except Exception as exc:
+            mapping_blocked = isinstance(exc, DomainError) and str(exc) == 'BLOCKED_MONGO_ID_MAPPING'
             with self.uow() as repo:
                 repo.update(
                     "sync_runs",
@@ -129,18 +139,10 @@ class MasterSync:
                         status="FAILED",
                         failed=1,
                         finished_at=now(),
-                        error_message="Sync batch failed; inspect source contract and references",
+                        error_message='BLOCKED_MONGO_ID_MAPPING' if mapping_blocked else "Sync batch failed; inspect source contract and references",
                     ),
                 )
-            raise DomainError("Sync failed; committed checkpoints are preserved") from None
-        # Separate post-commit step shared by CLI, API and Auto worker.
-        # Its failures must not change Master counters/checkpoints or COMPLETED status.
-        if stream in ('users', 'resources') and self.metadata_projection is not None:
-            try:
-                self.metadata_projection.run(stream)
-            except Exception:
-                event(stage='master_metadata_projection', stream=stream,
-                      action='FAILED_RECONCILE_REQUIRED')
+            raise DomainError('BLOCKED_MONGO_ID_MAPPING' if mapping_blocked else "Sync failed; committed checkpoints are preserved") from None
         return {"run_id": run_id, **totals}
 
     @staticmethod

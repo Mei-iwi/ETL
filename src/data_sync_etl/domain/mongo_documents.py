@@ -113,12 +113,12 @@ class OCRPageDocument(ProjectedDocument):
 
 
 class ContentUnitDocument(ProjectedDocument):
-    title: str | None = None
+    title: Annotated[str, Field(max_length=500)] | None = None
     page_from: Int32 | None = None
     page_to: Int32 | None = None
     text: str
     markdown: str
-    keywords: list[str] | None = None
+    keywords: Annotated[list[str], Field(max_length=5)] | None = None
     content_unit_id: DocumentId | None = None
     page_result_id: DocumentId | None = None
     is_current: bool = True
@@ -143,11 +143,11 @@ class ContentUnitDocument(ProjectedDocument):
 
 class ContentBagDocument(ProjectedDocument):
     unit_type: Literal["CHAPTER", "LESSON", "SECTION"]
-    title: str | None = None
+    title: Annotated[str, Field(max_length=500)] | None = None
     keywords: list[str]
     embedding_text: str
     embedding: list[float]
-    embedding_model: Annotated[str, Field(min_length=1)]
+    embedding_model: Annotated[str, Field(min_length=1, max_length=255)]
     is_current: bool = True
     # Snapshot of current leaf texts/keywords/generations, not a search-ready flag.
     content_fingerprint: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None

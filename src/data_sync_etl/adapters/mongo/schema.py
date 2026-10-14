@@ -82,12 +82,12 @@ def contracts(dimension: int) -> dict[str, dict]:
         },
         "mongo_content_units": {
             **projected,
-            "title": string(True),
+            "title": string(True, 500),
             "page_from": integer(True),
             "page_to": integer(True),
             "text": string(),
             "markdown": string(),
-            "keywords": strings(True),
+            "keywords": {**strings(True), "maxItems": 5},
             "content_unit_id": string(True, 30, 1),
             "page_result_id": string(True, 30, 1),
             "is_current": {"bsonType": "bool"},
@@ -95,10 +95,10 @@ def contracts(dimension: int) -> dict[str, dict]:
         "content_bags": {
             **projected,
             "unit_type": {"enum": ["CHAPTER", "LESSON", "SECTION"]},
-            "title": string(True),
+            "title": string(True, 500),
             "keywords": {**strings(), "minItems": 1},
             "embedding_text": string(minimum=1),
-            "embedding_model": {**string(minimum=1), "pattern": r"\S"},
+            "embedding_model": {**string(maximum=255, minimum=1), "pattern": r"\S"},
             "embedding": {
                 "bsonType": "array",
                 "minItems": dimension,

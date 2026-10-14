@@ -172,6 +172,11 @@ def test_json_postgresql_equivalence_and_idempotency(source, pg_container):
         actual = [
             a.model_dump() for batch in source.adapter.batches(stream, None, 1) for a in batch
         ]
+        # PostgreSQL explicitly supplies NULL; old JSON fixtures omit mongo_id.
+        # Compare business values while testing presence-awareness separately.
+        if stream in ('users', 'resources', 'grades'):
+            for record in actual + expected:
+                record['values'].setdefault('grade_mongo_id' if stream == 'grades' else 'mongo_id', None)
         assert actual == expected
     use_source(pg_container, source)
     first = pg_container.sync.run(full=True)

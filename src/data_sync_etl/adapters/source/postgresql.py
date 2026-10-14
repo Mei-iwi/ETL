@@ -42,7 +42,8 @@ class SnapshotReader:
     @staticmethod
     def record(name, values):
         values = dict(values)
-        values.pop("mongo_id", None)  # Logical source references, not Master columns/documents.
+        if name not in ('users', 'resources', 'grades'):
+            values.pop('mongo_id', None)
         values.pop("effective_updated_at", None)
         if name == "providers":
             values["type"] = values.pop("provider_type")
@@ -208,18 +209,24 @@ class PostgreSQLSourceAdapter:
         with self.snapshot() as reader:
             reader.connection.execute(text("SELECT 1 FROM learning_resources LIMIT 1"))
 
-    def metadata_identity_conflicts(self, stream, ids):
+    def metadata_identity_references(self, stream, ids):
         """Read-only reference safety check, never a source of Mongo payload fields."""
         if stream not in ('users', 'resources') or len(ids) > 1000:
             raise DomainError('Invalid metadata identity check')
         if not ids:
-            return set()
+            return {}
         table = 'users' if stream == 'users' else 'learning_resources'
         with self.snapshot() as reader:
             rows = reader.connection.execute(text(
                 f'SELECT id,mongo_id FROM {table} WHERE id IN :ids'
             ).bindparams(bindparam('ids', expanding=True)), {'ids': list(ids)})
-            return {row.id for row in rows if row.mongo_id is not None and row.mongo_id != row.id}
+            return {row.id: row.mongo_id for row in rows}
+
+    def metadata_subject_exists(self, subject_id):
+        with self.snapshot() as reader:
+            return reader.connection.scalar(text(
+                'SELECT id FROM subjects WHERE id=:id AND is_active=true AND deleted_at IS NULL'
+            ), {'id': subject_id}) is not None
 
     def list_versions(self, after=None, size=20):
         """Read a bounded metadata page; never return storage references or hashes."""

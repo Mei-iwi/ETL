@@ -261,6 +261,7 @@ def test_normal_migration_environment_commits_and_master_orm_matches(
 ):
     from alembic.autogenerate import compare_metadata
     from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
 
     from data_sync_etl.db.models import Base
 
@@ -280,7 +281,7 @@ def test_normal_migration_environment_commits_and_master_orm_matches(
         command.downgrade(config, "0006")
         command.upgrade(config, "head")
     with pg_container.engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0007"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == ScriptDirectory.from_config(config).get_current_head()
         assert (
             compare_metadata(
                 MigrationContext.configure(connection, opts={"compare_type": True}), Base.metadata

@@ -14,7 +14,7 @@ class SaveLeafKeywords:
             unit = repo.get("content_units", unit_id)
             if unit is None or repo.find("content_units", {"parent_unit_id": unit_id}, limit=1):
                 raise DomainError("Keywords require a PostgreSQL leaf ContentUnit")
-            observed = self.documents.get_unit(unit_id)
-            if observed is None or observed.resource_version_id != unit["resource_version_id"]:
-                raise DomainError("Leaf projection unavailable or version mismatch")
-            self.documents.update_leaf_keywords(observed, keywords)
+        observed = self.documents.get_unit(unit_id)
+        if observed is None or observed.resource_version_id != unit["resource_version_id"]:
+            raise DomainError("Leaf projection unavailable or version mismatch")
+        self.documents.update_leaf_keywords(observed, keywords)

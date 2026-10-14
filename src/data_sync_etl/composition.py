@@ -16,6 +16,7 @@ from data_sync_etl.adapters.ocr.engines import (
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyUnitOfWork
 from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectReader
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
+from data_sync_etl.adapters.source.mongo_metadata import MongoMetadataSourceReader
 from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.adapters.storage.source_local import SourceLocalFileReader
@@ -40,6 +41,7 @@ from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.source_file_import import SourceFileImportService
+from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
 from data_sync_etl.config import Settings
@@ -82,6 +84,8 @@ class Container:
             self.source.close()
         if self.mongo_client is not None:
             self.mongo_client.close()
+        if self.source_mongo_client is not None and self.source_mongo_client is not self.mongo_client:
+            self.source_mongo_client.close()
         self.engine.dispose()
 
     def __init__(self, settings=None, engine=None, documents=None):
@@ -155,6 +159,7 @@ class Container:
             self.sync, self.ingestion, self.ocr, self.postprocess, self.uow
         )
         self.mongo_client = None
+        self.source_mongo_client = None
         self.metadata_documents = None
         self.content_reader = None
         self.content_bags = None
@@ -166,7 +171,8 @@ class Container:
                 connect=False,
             )
             mongo_database = self.mongo_client[self.settings.mongo_database]
-            self.documents = MongoContentStore(mongo_database)
+            # This stage stops at OCR/ContentUnits; do not write Bag/indexing state.
+            self.documents = MongoContentStore(mongo_database, invalidate_content_bags=False)
             self.metadata_documents = MongoMetadataStore(mongo_database)
             self.content_reader = MongoContentReader(mongo_database)
             self.content_bags = MongoBagStore(mongo_database, self.settings.vector_dimension)
@@ -178,9 +184,36 @@ class Container:
             batch_size=min(1000, self.settings.sync_batch_size),
             identity_bootstrap=self.settings.master_mongo_identity_bootstrap,
             identity_ids=self.settings.master_mongo_identity_ids,
-            identity_guard=(self.source.metadata_identity_conflicts
+            identity_scope=self.settings.master_mongo_identity_scope,
+            identity_guard=(self.source.metadata_identity_references
                             if isinstance(self.source, PostgreSQLSourceAdapter) else None),
         )
+        source_metadata = None
+        if self.settings.source_mongo_enabled:
+            if self.mongo_client is None or not isinstance(self.source, PostgreSQLSourceAdapter):
+                self.close()
+                raise DomainError('SOURCE_MONGO_REQUIRES_POSTGRES_AND_MONGO_DESTINATION')
+            try:
+                uri = self.settings.source_mongo_uri or self.settings.mongo_uri
+                self.source_mongo_client = self.mongo_client if uri == self.settings.mongo_uri else MongoClient(
+                    uri, serverSelectionTimeoutMS=3000, timeoutMS=10000, connect=False)
+                source_metadata = MongoMetadataSourceReader(
+                    self.source_mongo_client[self.settings.source_mongo_database], mongo_database)
+                # Fail configuration before any PG sync or Mongo writes.
+                source_metadata.assert_distinct_destination()
+            except Exception as exc:
+                self.close()
+                code = 'SOURCE_MONGO_SAME_DESTINATION' if isinstance(exc, DomainError) else 'SOURCE_MONGO_CONFIGURATION_UNAVAILABLE'
+                raise DomainError(code) from None
+        self.mongo_metadata_sync = SourceMongoMetadataSync(
+            self.uow, source_metadata, self.metadata_documents,
+            reference_guard=self.source.metadata_identity_references if isinstance(self.source, PostgreSQLSourceAdapter) else None,
+            subject_guard=self.source.metadata_subject_exists if isinstance(self.source, PostgreSQLSourceAdapter) else None,
+            batch_size=min(1000, self.settings.sync_batch_size),
+        )
+        if self.settings.source_mongo_enabled:
+            # Source extensions take precedence over legacy identity-only bootstrap.
+            self.master_metadata_projection = self.mongo_metadata_sync
         self.sync.metadata_projection = self.master_metadata_projection
 
         self.mongo_projector = MongoContentProjector(

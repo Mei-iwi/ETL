@@ -5,6 +5,9 @@ from data_sync_etl.ports.source import Cursor, Provider, SourceAggregate
 
 def build_aggregate(reader, stream, row):
     values = row.model_dump()
+    # Missing fixture information is not an instruction to clear a real mapping.
+    if stream in ('users', 'resources', 'grades') and 'mongo_id' not in row.model_fields_set:
+        values.pop('mongo_id', None)
     timestamps = [row.updated_at]
     subjects, grades = [], []
     if stream == "resources":
@@ -30,11 +33,12 @@ def build_aggregate(reader, stream, row):
         timestamps.append(role.updated_at)
     elif stream == "grades":
         education = reader.get_education_level(row.education_level_id)
+        grade_values = values
         values = {"id": row.id, "education_level_id": row.education_level_id}
         values.update(
             {
                 "grade_" + k: v
-                for k, v in row.model_dump().items()
+                for k, v in grade_values.items()
                 if k not in ("id", "education_level_id")
             }
         )

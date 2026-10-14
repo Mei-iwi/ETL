@@ -90,9 +90,14 @@ class MongoMetadataStore:
         self.database[collection].update_one({"_id": data["_id"]}, update, upsert=True)
 
     def _get(self, collection, model, document_id):
+        document_id = identifier(document_id)
+        if ObjectId.is_valid(document_id) and self.database[collection].find_one(
+            {'_id': ObjectId(document_id)}, {'_id': 1},
+        ) is not None:
+            raise DomainError('BLOCKED_MONGO_ID_MAPPING')
         # Whitelist avoids returning any legacy authentication fields.
         fields = {f.alias or name: 1 for name, f in model.model_fields.items()}
-        result = self.database[collection].find_one({"_id": identifier(document_id)}, fields)
+        result = self.database[collection].find_one({"_id": document_id}, fields)
         return checked(model, result) if result is not None else None
 
     def upsert_user(self, document: UserProfileDocument):
@@ -106,6 +111,45 @@ class MongoMetadataStore:
 
     def get_resource(self, document_id):
         return self._get("learning_resources", ResourceDescriptionDocument, document_id)
+
+    def sync_source_metadata(self, stream, document):
+        if stream not in ('users', 'resources'):
+            raise DomainError('Invalid metadata stream')
+        model = UserProfileDocument if stream == 'users' else ResourceDescriptionDocument
+        collection = self.database['users' if stream == 'users' else 'learning_resources']
+        incoming = checked(model, document).bson()
+        # Validate ObjectId collisions and the target contract without copying unknown fields.
+        for _ in range(3):
+            current = self._get(collection.name, model, incoming['_id'])
+            if current is None:
+                try:
+                    collection.insert_one(incoming)
+                    return 'INSERTED'
+                except DuplicateKeyError:
+                    continue
+            fields = {field.alias or name: 1 for name, field in model.model_fields.items()}
+            raw = collection.find_one({'_id': incoming['_id']}, fields)
+            if raw is None:
+                continue
+            old = checked(model, raw).bson()
+            extension = set(model.model_fields) - {'id', 'created_at', 'updated_at'}
+            # An identity-only legacy doc has no source-owned metadata yet.
+            if any(key in old for key in extension) and old['updated_at'] > incoming['updated_at']:
+                return 'STALE'
+            changes = {key: value for key, value in incoming.items()
+                       if key in extension and (key not in old or old[key] != value)}
+            if not changes:
+                return 'UNCHANGED'
+            changes['updated_at'] = incoming['updated_at']
+            # Compare all known fields, including ABSENT vs NULL, to avoid racing another writer.
+            # CAS uses BSON as stored, not normalized DTO arrays (e.g. legacy mixed-case tags).
+            conditions = [{key: {'$exists': False}} if key not in raw else
+                          {key: {'$exists': True, '$eq': raw[key]}}
+                          for key in (extension | {'created_at', 'updated_at'})]
+            result = collection.update_one({'_id': incoming['_id'], '$and': conditions}, {'$set': changes})
+            if result.matched_count:
+                return 'UPDATED'
+        raise DomainError('MONGO_METADATA_CONCURRENT_CHANGE')
 
     def _ensure_identity(self, collection, model, document):
         data = checked(model, document).bson()
@@ -199,6 +243,8 @@ class MongoContentReader:
         """Caller must check leaf membership against PG, then supply the observed text/generation."""
         observed = checked(ContentUnitDocument, document)
         normalized = normalize_keywords(keywords)
+        # Validate the leaf limit before invalidating bags or making any writes.
+        checked(ContentUnitDocument, {**observed.bson(), 'keywords': normalized})
         invalidate_bags(self.database, observed.resource_version_id, observed.projection_generation)
         selector = {
             "_id": observed.id,
