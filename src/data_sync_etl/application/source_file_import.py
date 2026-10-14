@@ -286,10 +286,28 @@ class SourceFileImportService:
             return row["manual_retries"] < self.settings.processing_manual_retry_limit
         return row["status"] == "PROCESSING" and self._processing(repo, row)[1]
 
-    def list_files(self, after=None, size=20, failed_only=False):
+    def list_files(self, after=None, size=20, failed_only=False, retry_eligible=None):
         availability = self.availability()
         with self.uow() as repo:
-            rows = repo.source_import_page(after, size + 1, failed_only=failed_only)
+            if retry_eligible is None:
+                rows = repo.source_import_page(after, size + 1, failed_only=failed_only)
+            else:
+                # Filter before pagination using the same eligibility rules as the Retry action.
+                # Scan by source ID, so skipped groups never produce empty intermediate pages.
+                rows = []
+                scan_after = after
+                while len(rows) <= size:
+                    batch = repo.source_import_page(scan_after, 100, failed_only=True)
+                    for row in batch:
+                        eligible = (availability["file_sync_supported"] or row["target_version_id"] is not None) \
+                            and self._eligible(repo, row)
+                        if eligible == retry_eligible:
+                            rows.append(row)
+                            if len(rows) > size:
+                                break
+                    if len(rows) > size or len(batch) < 100:
+                        break
+                    scan_after = batch[-1]["source_version_id"]
             undiscovered = repo.count("source_file_imports", {}) == 0
             items = []
             for row in rows[:size]:

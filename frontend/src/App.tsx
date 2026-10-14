@@ -53,7 +53,12 @@ export default function App() {
             <Route path='processing' element={<LibraryProcessingPage />} />
             <Route path='indexing' element={<LibraryIndexingPage />} />
             <Route path='source-sync' element={<SystemMasterSyncPage />} />
-            <Route path='source-sync-errors' element={<LibrarySyncErrorsPage />} />
+            <Route path='source-sync-errors'>
+              <Route index element={<Navigate to='retry' replace />} />
+              <Route path='retry' element={<LibrarySyncErrorsPage key='retry' />} />
+              <Route path='blocked' element={<LibrarySyncErrorsPage key='blocked' retryable={false} />} />
+            </Route>
+            <Route path='source-sync-blocked' element={<Navigate to='/library/source-sync-errors/blocked' replace />} />
             <Route path=":resourceId" element={<LibraryResourceDetailPage />}/>
             <Route path=':resourceId/versions' element={<LibraryVersionHistoryPage />}/>
             <Route path=':resourceId/update-version' element={<LibraryUpdateVersion />}/>

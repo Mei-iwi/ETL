@@ -244,6 +244,38 @@ def test_retry_api_queues_only_failed_and_hides_storage(importing):
         assert client.get("/api/v1/master-data/sync/files").status_code == 403
 
 
+def test_error_groups_filter_before_cursor_pagination(importing):
+    c, rows, _ = importing
+    rows[0]["storage_object_key"] = "missing.pdf"
+    initial = discover_and_import(c)
+    with c.uow() as repo:
+        repo.update("source_file_imports", initial["id"], {
+            "last_error_code": "SOURCE_VERSION_MUTATED",
+        })
+        template = {key: value for key, value in initial.items() if key != "id"}
+        for index in range(110):
+            repo.insert("source_file_imports", {
+                **template, "source_version_id": f"filter-{index:03d}",
+                "last_error_code": "SOURCE_VERSION_MUTATED" if index < 102 else "FILE_NOT_FOUND",
+            })
+    c.settings.admin_enabled = True
+    with TestClient(create_app(c), client=("127.0.0.1", 5555)) as client:
+        first = client.get("/api/v1/master-data/sync/files?size=7&status=failed-retryable")
+        assert first.status_code == 200
+        page = first.json()
+        assert len(page["items"]) == 7
+        assert all(item["retry_eligible"] for item in page["items"])
+        second = client.get("/api/v1/master-data/sync/files", params={
+            "size": 7, "status": "failed-retryable", "after": page["next_cursor"],
+        }).json()
+        assert len(second["items"]) == 1 and second["next_cursor"] is None
+        assert not ({item["source_version_id"] for item in page["items"]}
+                    & {item["source_version_id"] for item in second["items"]})
+        blocked = client.get("/api/v1/master-data/sync/files?size=7&status=failed-blocked").json()
+        assert len(blocked["items"]) == 7
+        assert all(not item["retry_eligible"] for item in blocked["items"])
+
+
 def test_crash_after_publication_reuses_bytes(importing, monkeypatch):
     c, _, _ = importing
     service = c.source_file_import
