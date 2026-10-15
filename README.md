@@ -3,13 +3,42 @@
 Đồng bộ PostgreSQL nguồn → Master Data; đối soát metadata tại chỗ trong **một MongoDB
 database `etl_content`**, không copy Mongo nguồn → đích;
 nhập file local, trích xuất/OCR, chuẩn hóa và lưu Content Units. Frontend React hỗ trợ
-quản lý, đồng bộ và retry. Giai đoạn hiện tại dừng ở OCR/Content Units, chưa chạy
-chunking mới, keywords, BoW/content_bags, embeddings, Search hoặc đánh giá.
+quản lý, đồng bộ và retry. Nhóm lập chỉ mục bổ sung Chunk theo cửa sổ từ, BoW/TF và
+embedding ngữ nghĩa bằng model local tùy chọn. Chưa triển khai Search hoặc đánh giá;
+không sử dụng `content_bags` để lưu Chunk.
 
 Master Sync chỉ đồng bộ metadata; nội dung hoàn tất khi đạt `CONTENT_READY`.
 `COMPLETED` trên API/giao diện đồng bộ là PostgreSQL Master, không xác nhận Mongo
 metadata thành công. `CONTENT_READY` không đồng nghĩa đã lập chỉ mục tìm kiếm.
 Hỗ trợ **PDF, DOCX, XLSX, TXT, CSV, PPTX, PNG, JPG, JPEG**; không tiếp nhận/xử lý MP3/MP4.
+
+### Lập chỉ mục học liệu
+
+Trang `/library/indexing` chọn học liệu và phiên bản. `POST
+/api/v1/resource-versions/{id}/index` chỉ xếp hàng `INDEX_BUILD` vào `etl_stage_runs`
+sau `CONTENT_READY`; worker OCR hiện có xử lý lúc nhàn rỗi. Không có daemon mới,
+không đồng bộ nguồn hay chạy OCR ngầm khi bấm lập chỉ mục.
+
+Model là tùy chọn: `python -m pip install -e '.[embeddings]'` khi người vận hành
+đồng ý cài runtime. Provision model sentence-transformers đa ngôn ngữ vào thư mục
+local trước; tạo `etl-model-revision.txt` bên trong, chứa revision đã provision.
+Cấu hình `INDEX_EMBEDDING_MODEL_PATH`, `INDEX_EMBEDDING_MODEL_ID`,
+`INDEX_EMBEDDING_MODEL_VERSION` (khớp file revision), `INDEX_EMBEDDING_DIMENSION`
+(đúng model). Không dùng `VECTOR_DIMENSION=256` của content_bags để ép chiều model.
+Runtime chỉ đọc model local, không tự download lúc startup/worker. Model thiếu,
+không đọc được hoặc sai chiều sẽ bị chặn; không có vector giả thay thế.
+
+Mongo installer bổ sung duy nhất collection `indexed_chunks`, hai index theo
+version/run/sequence và version/run/unit; giữ nguyên 5 collection cũ.
+Chạy kiểm tra trước: `python -m data_sync_etl.adapters.mongo.schema --check`.
+Chỉ chạy cùng lệnh với `--apply` thay `--check` trên DB test/demo cô lập, hoặc sau
+khi operator duyệt backup/schema của DB thật. App không tự cài schema lúc startup.
+Không cần PostgreSQL migration cho nhóm lập chỉ mục.
+
+`CONTENT_READY` chỉ xác nhận nội dung ETL; chỉ mục chỉ READY sau khi worker ghi và
+verify đủ Chunk/BoW/vector cùng fingerprint, rồi đánh dấu stage COMPLETED.
+Review/eligibility không được nâng quyền: có thể xem Chunk chưa duyệt trong workspace
+quản lý, không có nghĩa được công bố trong Search. Lỗi index không đổi kết quả OCR.
 
 ## 1. Cài đặt
 

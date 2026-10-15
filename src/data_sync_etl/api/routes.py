@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
+from data_sync_etl.api.indexing_schemas import ERROR_RESPONSES, IndexRequestResponse, index_error
 from data_sync_etl.api.master_sync_schemas import (
     MasterSyncAutoRequest,
     MasterSyncRequest,
@@ -615,6 +616,20 @@ def retry_source_file(file_id: ResourceId, request: Request):
 @router.post("/admin/sync/master", include_in_schema=False)
 def sync(body: MasterSyncRequest, request: Request):
     return services(request).sync.run(body.stream, body.full)
+
+
+@router.post("/api/v1/resource-versions/{id}/index", tags=[TAG_INDEXING],
+             status_code=202, response_model=IndexRequestResponse, responses=ERROR_RESPONSES,
+             summary="Xếp hàng phân đoạn và lập chỉ mục học liệu")
+def index_version(id: ResourceId, request: Request, response: Response):
+    container = services(request)
+    try:
+        result = container.indexing.enqueue(id)
+        if result["action"] == "ALREADY_INDEXED":
+            response.status_code = 200
+        return result
+    except Exception as exc:
+        raise index_error(exc) from None
 
 
 @router.post("/admin/resources/{id}/versions/ingest")

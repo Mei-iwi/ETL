@@ -116,6 +116,23 @@ def contracts(dimension: int) -> dict[str, dict]:
         "bsonType": "string",
         "pattern": "^[0-9a-f]{64}$",
     }
+    properties["indexed_chunks"] = {
+        **{key: string(maximum=30, minimum=1) for key in
+           ("resource_id", "resource_version_id", "content_unit_id", "index_run_id")},
+        **{key: integer() for key in ("source_projection_generation", "chunk_sequence", "unit_chunk_sequence")},
+        "page_from": integer(True), "page_to": integer(True),
+        "review_status": string(maximum=30, minimum=1), "retrieval_eligible": {"bsonType": "bool"},
+        "char_start": integer(minimum=0), "char_end": integer(), "text": string(minimum=1),
+        "bow_tf": {"bsonType": "object", "additionalProperties": integer()},
+        "bow_length": integer(minimum=0),
+        "embedding_model": string(maximum=255, minimum=1),
+        "embedding_version": string(maximum=128, minimum=1),
+        "embedding_dimension": {**integer(), "maximum": 4096},
+        "embedding": {"bsonType": "array", "minItems": 1, "maxItems": 4096,
+                      "items": {"bsonType": "double", "minimum": -1.7976931348623157e308,
+                                "maximum": 1.7976931348623157e308}},
+        "content_fingerprint": {"bsonType": "string", "pattern": "^[0-9a-f]{64}$"},
+    }
     required = {
         "users": [],
         "learning_resources": [],
@@ -136,6 +153,7 @@ def contracts(dimension: int) -> dict[str, dict]:
             "embedding",
             "embedding_model",
         ],
+        "indexed_chunks": list(properties["indexed_chunks"]),
     }
     validators = {}
     for name, fields in properties.items():
@@ -246,6 +264,16 @@ def contracts(dimension: int) -> dict[str, dict]:
             False,
         ]
     }
+    validators["indexed_chunks"]["$expr"] = {"$cond": [
+        {"$isArray": "$embedding"},
+        {"$and": [
+            {"$eq": [{"$size": "$embedding"}, "$embedding_dimension"]},
+            {"$gt": ["$char_end", "$char_start"]},
+            {"$eq": [{"$strLenCP": "$text"}, {"$subtract": ["$char_end", "$char_start"]}]},
+            {"$or": [{"$eq": ["$page_from", None]}, {"$eq": ["$page_to", None]},
+                     {"$gte": ["$page_to", "$page_from"]}]},
+            {"$anyElementTrue": [{"$map": {"input": "$embedding", "as": "v", "in": {"$ne": ["$$v", 0]}}}]},
+        ]}, False]}
     return validators
 
 
@@ -273,6 +301,10 @@ INDEXES = {
     "content_bags": [
         Index("bags_version_type", (("resource_version_id", 1), ("unit_type", 1))),
         Index("bags_keywords", (("keywords", 1),)),
+    ],
+    "indexed_chunks": [
+        Index("chunks_version_run_sequence", (("resource_version_id", 1), ("index_run_id", 1), ("chunk_sequence", 1)), True),
+        Index("chunks_version_run_unit", (("resource_version_id", 1), ("index_run_id", 1), ("content_unit_id", 1))),
     ],
 }
 
@@ -384,7 +416,7 @@ def initialize(database, *, dimension=256, apply=False, validation_level="strict
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Check/apply five Mongo schemas without deleting data"
+        description="Check/apply Mongo schemas additively without deleting data"
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="Read-only catalog and legacy audit")

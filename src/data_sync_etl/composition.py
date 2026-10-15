@@ -1,5 +1,6 @@
 from pymongo import MongoClient
 
+from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
 from data_sync_etl.adapters.extraction import NativeDocumentExtractor
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
 from data_sync_etl.adapters.mongo.foundation_store import (
@@ -7,6 +8,7 @@ from data_sync_etl.adapters.mongo.foundation_store import (
     MongoContentReader,
     MongoMetadataStore,
 )
+from data_sync_etl.adapters.mongo.index_store import MongoIndexStore
 from data_sync_etl.adapters.ocr.engines import (
     FakeOCREngine,
     PyMuPDFPDFProcessor,
@@ -26,6 +28,7 @@ from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
 from data_sync_etl.application.get_processing_job import GetProcessingJob
 from data_sync_etl.application.get_resource_detail import GetResourceDetail
+from data_sync_etl.application.indexing import IndexingService
 from data_sync_etl.application.ingestion import ResourceIngestion
 from data_sync_etl.application.list_resource_lookups import ListResourceLookups
 from data_sync_etl.application.list_resource_versions import ListResourceVersions
@@ -237,6 +240,14 @@ class Container:
             self.documents,
         )
 
+        self.indexing = IndexingService(
+            self.uow, MongoIndexStore(mongo_database) if documents is None else None,
+            LocalSentenceEmbedding(self.settings.index_embedding_model_path,
+                                   self.settings.index_embedding_model_id,
+                                   self.settings.index_embedding_model_version,
+                                   self.settings.index_embedding_dimension), self.settings,
+        )
+
         self.processing_finalizer = ProcessingFinalizer(
             self.uow,
             self.postprocess,
@@ -262,7 +273,10 @@ class Container:
         self.worker = OCRWorker(
             self.ocr,
             on_job_terminal=self.processing_finalizer.finalize,
-            reconcile=self.processing_finalizer.reconcile_once,
+            reconcile=self.reconcile_processing,
             recovery_interval_seconds=self.settings.ocr_recovery_interval_seconds,
         )
+
+    def reconcile_processing(self):
+        return self.processing_finalizer.reconcile_once() or self.indexing.once()
 

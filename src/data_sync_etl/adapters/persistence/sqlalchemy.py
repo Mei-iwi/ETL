@@ -421,6 +421,13 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
         )
         return [self._dict(row) for row in self.session.scalars(stmt)]
 
+    def index_candidates(self):
+        model = MODELS["etl_stage_runs"]
+        rows = self.session.scalars(select(model).where(
+            model.stage == "INDEX_BUILD", model.status.in_(("PENDING", "RUNNING"))
+        ).order_by(model.created_at, model.id).limit(100)).all()
+        return [self._dict(row) for row in rows]
+
     def health(self):
         self.session.execute(text("SELECT 1"))
 

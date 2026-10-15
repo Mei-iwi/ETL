@@ -257,8 +257,8 @@ def test_reject_invalid_tree(change):
 
 
 def test_contract_indexes_and_fencing_filter():
-    assert len(contracts(2)) == 5
-    assert sum(len(indexes) for indexes in INDEXES.values()) == 6
+    assert len(contracts(2)) == 6
+    assert sum(len(indexes) for indexes in INDEXES.values()) == 8
     expected = Index("test", (("job_id", 1), ("page_num", 1)), True)
     assert compatible_index({"key": dict(expected.keys), "unique": True}, expected)
     for options in (
