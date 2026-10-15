@@ -34,7 +34,9 @@ type CapabilitiesData = {
             enabled: boolean
             method: string | null
             semantic: boolean
-            dimensions: number
+            dimensions: number | null
+            implemented?: boolean
+            runtime_status?: string
         }
     }
     retrieval: {
@@ -183,7 +185,7 @@ export function SystemCapalitiesPage() {
                     <h2>Biểu diễn vector</h2>
                     <p>
                         Trạng thái: {' '}
-                        {data.representations.vector.enabled ? 'Đã tích hợp' : 'Chưa tích hợp vào pipeline'}
+                        {data.representations.vector.enabled ? 'Runtime đã kiểm tra và sẵn sàng' : data.representations.vector.implemented ? 'Đã tích hợp, runtime model chưa được xác nhận sẵn sàng' : 'Chưa tích hợp vào pipeline'}
                     </p>
                     <p>
                         Phương pháp: {' '}
@@ -191,7 +193,7 @@ export function SystemCapalitiesPage() {
                     </p>
                     <p>
                         Số chiều cấu hình: {' '}
-                        {data.representations.vector.dimensions}
+                        {data.representations.vector.dimensions ?? 'Chưa xác nhận'}
                     </p>
                     <p>Bag of Words: {data.representations.bag_of_words ? 'Đã tích hợp' : 'Chưa tích hợp vào pipeline'}</p>
                 </article>

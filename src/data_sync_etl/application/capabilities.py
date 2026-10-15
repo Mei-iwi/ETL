@@ -13,8 +13,12 @@ class CapabilityService:
     metadata_backend: str = 'postgresql'
     mongodb_enabled: bool = False
     auto_sync_supported: bool = False
+    embedding_runtime: object | None = None
 
     def describe(self) -> dict[str, object]:
+        runtime = self.embedding_runtime
+        vector_ready = bool(runtime and runtime.ready())
+        available = bool(runtime and runtime.available())
         return {
             'api_version': 'v1',
             'formats': FormatValidatorRegistry().describe(),
@@ -35,18 +39,22 @@ class CapabilityService:
                 'fake_ocr_demo': self.ocr_engine == 'fake',
                 'normalized_content': True,
                 'chunking': {
-                    'enabled': False,
+                    'enabled': True,
+                    'storage': 'transient',
                     'size_words': self.chunk_size_words,
                     'overlap_words': self.chunk_overlap_words
                 },
             },
             'representations': {
-                'bag_of_words': False,
+                'representation_unit': 'content_bag',
+                'bag_of_words': True,
                 'vector': {
-                    'enabled': False,
-                    'method': None,
-                    'semantic': False,
-                    'dimensions': self.vector_dimension
+                    'enabled': vector_ready,
+                    'method': runtime.model_id if available else None,
+                    'semantic': vector_ready,
+                    'dimensions': runtime.dimension if available else None,
+                    'implemented': True,
+                    'runtime_status': 'READY' if vector_ready else 'NOT_VERIFIED' if available else 'BLOCKED_EMBEDDING_RUNTIME',
                 },
             },
             'retrieval': {

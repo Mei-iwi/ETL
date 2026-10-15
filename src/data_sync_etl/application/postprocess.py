@@ -13,29 +13,43 @@ class Postprocessor:
     def _text_units(result, page):
         metadata = result['result_metadata'] or {}
         if 'logical_units' not in metadata:
-            yield result['raw_text'], page, None, 'PAGE_TEXT'
+            yield result['raw_text'], page, None, 'PAGE_TEXT', None
         else:
-            for unit in metadata['logical_units']:
+            logical = metadata['logical_units']
+            # Reject uncertain/malformed outlines as flat content; never invent hierarchy.
+            levels = [u.get('locator', {}).get('heading_level') for u in logical]
+            structured = (metadata.get('source_type') == 'docx'
+                          and metadata.get('structure_version') == 'docx-outline-v1'
+                          and all(level is None or type(level) is int and 1 <= level <= 3 for level in levels)
+                          and all(u.get('locator', {}).get('char_offset', 0) == 0
+                                  for u, level in zip(logical, levels, strict=True) if level is not None))
+            for unit, level in zip(logical, levels, strict=True):
+                heading = level if structured else None
                 yield (result['raw_text'][unit['start']:unit['end']], None,
-                       unit['title'], metadata['source_type'].upper() + '_TEXT')
+                       result['raw_text'][unit['start']:unit['end']][:500] if heading else unit['title'],
+                       {1: 'CHAPTER', 2: 'LESSON', 3: 'SECTION'}[heading] if heading else metadata['source_type'].upper() + '_TEXT',
+                       heading)
 
     @staticmethod
-    def _save_unit(repo, version_id, sequence, page, title, unit_type, result, text):
+    def _save_unit(repo, version_id, sequence, page, title, unit_type, result, text, parent_id=None):
         values = dict(page_from=page, page_to=page, title=title, unit_type=unit_type,
-                      review_status='UNREVIEWED', retrieval_eligible=False)
+                      parent_unit_id=parent_id)
         units = repo.find('content_units', {'resource_version_id': version_id, 'sequence_no': sequence}, limit=1)
         if units:
             unit = units[0]
             body = repo.get('content_unit_texts', unit['id'])
-            if (any(unit[key] != values[key] for key in ('page_from', 'page_to', 'title', 'unit_type'))
+            if (any(unit[key] != values[key] for key in values)
                     or body['text'] != text or body['page_result_id'] != result['id']):
-                repo.update('content_units', unit['id'], {**values, 'updated_at': now()})
+                repo.update('content_units', unit['id'], {**values, 'review_status': 'UNREVIEWED',
+                                                        'retrieval_eligible': False, 'updated_at': now()})
                 repo.update('content_unit_texts', unit['id'], dict(text=text, page_result_id=result['id']))
         else:
             unit = repo.insert('content_units', {
                 **values, 'resource_version_id': version_id, 'sequence_no': sequence,
+                'review_status': 'UNREVIEWED', 'retrieval_eligible': False,
             })
             repo.insert('content_unit_texts', dict(content_unit_id=unit['id'], page_result_id=result['id'], text=text))
+        return unit['id']
 
     def run(self, version_id, *, allow_partial=False):
         with self.uow.processing_lock(version_id) as acquired:
@@ -79,6 +93,7 @@ class Postprocessor:
                         raise DomainError("Postprocess requires all OCR pages to succeed")
                     digest = hashlib.sha256(b"page-text-nfc-v1")
                     count, successful = 0, 0
+                    outline_parents = {}
                     # One page/result at a time, keeping large document text out of a whole-file buffer.
                     for page in range(1, job["total_pages"] + 1):
                         tasks = repo.find(
@@ -107,15 +122,25 @@ class Postprocessor:
                                 result["id"],
                                 {"normalized_text": normalized, "updated_at": now()},
                             )
-                        for text, source_page, title, unit_type in self._text_units(result, page):
+                        for text, source_page, title, unit_type, heading in self._text_units(result, page):
                             text = self.normalizer(text)
                             if not text:
                                 continue
                             count += 1
-                            self._save_unit(repo, version_id, count, source_page, title, unit_type, result, text)
+                            if heading is not None:
+                                outline_parents = {level: key for level, key in outline_parents.items() if level < heading}
+                            parent = outline_parents[max(outline_parents)] if outline_parents else None
+                            unit_id = self._save_unit(repo, version_id, count, source_page, title, unit_type, result, text, parent)
+                            if heading is not None:
+                                outline_parents[heading] = unit_id
                     if count == 0:
                         raise DomainError('EMPTY_EXTRACTED_CONTENT')
                     # Remove obsolete trailing baseline units without materializing document text.
+                    # Detach obsolete edges before deleting trailing units (FK RESTRICT).
+                    obsolete = repo.find('content_units', {'resource_version_id': version_id})
+                    for unit in obsolete:
+                        if unit['sequence_no'] > count and unit['parent_unit_id'] is not None:
+                            repo.update('content_units', unit['id'], {'parent_unit_id': None})
                     sequence = count + 1
                     while units := repo.find(
                         "content_units",

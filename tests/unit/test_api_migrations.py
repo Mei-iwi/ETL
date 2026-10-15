@@ -133,8 +133,8 @@ def test_system_capabilities(container):
         data['processing']['chunking']['size_words']
         == container.settings.chunk_size_words
     )
-    assert data['processing']['chunking']['enabled'] is False
-    assert data['representations']['bag_of_words'] is False
+    assert data['processing']['chunking']['enabled'] is True
+    assert data['representations']['bag_of_words'] is True
     assert data['representations']['vector']['enabled'] is False
     assert data['representations']['vector']['semantic'] is False
     assert data['retrieval']['modes'] == []

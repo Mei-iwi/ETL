@@ -298,6 +298,20 @@ class MongoBagStore:
         self.dimension = dimension
         self.reader = MongoContentReader(database)
 
+    def invalidate_other_roots(self, version_id, root_ids, generation):
+        self.database.content_bags.update_many(
+            {'resource_version_id': identifier(version_id), '_id': {'$nin': list(root_ids)},
+             **generation_filter(generation)},
+            {'$set': {'is_current': False, 'updated_at': now()}},
+        )
+
+    def ensure_ready(self):
+        from data_sync_etl.adapters.mongo.schema import check_schema
+        from data_sync_etl.domain.indexing import IndexingError
+
+        if not check_schema(self.database, dimension=self.dimension)['schema_ready']:
+            raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+
     def _current(self, document):
         if (
             not document.is_current

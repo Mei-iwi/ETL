@@ -1,7 +1,7 @@
 from typing import Any
 
 from pydantic import ValidationError
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.mongo_documents import ContentUnitDocument, Document, OCRPageDocument
@@ -30,6 +30,14 @@ class MongoContentStore:
         self.database = database
         self.invalidate_content_bags = invalidate_content_bags
 
+    def _invalidate(self, version_id, generation):
+        try:
+            invalidate_bags(self.database, version_id, generation)
+        except PyMongoError:
+            # Index readers independently verify text/generation/fingerprint. A Bag outage
+            # must not turn successful OCR projection into a failed processing job.
+            pass
+
     def _upsert(self, collection_name: str, document: dict[str, Any]) -> None:
         document_id = document["_id"]
 
@@ -53,7 +61,7 @@ class MongoContentStore:
             # Conservative rebuild: this may defer indexing after unchanged retries,
             # but can never advertise bags derived from partially replaced content.
             if self.invalidate_content_bags:
-                invalidate_bags(self.database, document["resource_version_id"], generation)
+                self._invalidate(document["resource_version_id"], generation)
         try:
             self.database[collection_name].update_one(
                 selector,
@@ -91,7 +99,7 @@ class MongoContentStore:
         }
         selector.update(generation_filter(generation))
         if self.invalidate_content_bags:
-            invalidate_bags(self.database, version_id, generation)
+            self._invalidate(version_id, generation)
         self.database["mongo_content_units"].update_many(
             selector,
             {"$set": {"is_current": False, "updated_at": now()}},

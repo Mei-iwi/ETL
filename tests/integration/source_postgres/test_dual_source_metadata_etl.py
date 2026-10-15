@@ -221,7 +221,7 @@ def test_composition_prioritizes_source_over_identity_bootstrap(source, pg_conta
     runtime = Container(settings, pg_container.engine)
     try:
         assert runtime.master_metadata_projection is runtime.mongo_metadata_sync
-        assert not runtime.documents.invalidate_content_bags
+        assert runtime.documents.invalidate_content_bags
         runtime.sync.run(full=True)
         assert dst.learning_resources.find_one({'_id': 'MRES-1'})['description'] == 'Source description'
         assert dst.learning_resources.find_one({'_id': 'resource-2'}) is None

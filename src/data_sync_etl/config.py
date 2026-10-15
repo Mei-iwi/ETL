@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -53,6 +53,21 @@ class Settings(BaseSettings):
     vector_dimension: int = Field(
         default=256, ge=16, le = 4096
     )
+    index_auto_enabled: bool = False
+    index_embedding_model_path: Path | None = Field(default=None, repr=False)
+    index_embedding_model_id: str = Field(default="", max_length=255)
+    index_embedding_model_version: str = Field(default="", max_length=128)
+    index_embedding_dimension: int = Field(default=384, ge=1, le=4096)
+    index_max_chunks: int = Field(default=10000, ge=1, le=50000)
+    index_max_units: int = Field(default=10000, ge=1, le=50000)
+    index_max_source_chars: int = Field(default=10000000, ge=1, le=50000000)
+    index_timeout_seconds: int = Field(default=300, ge=1, le=3600)
+
+    @model_validator(mode="after")
+    def validate_chunk_overlap(self):
+        if self.chunk_overlap_words >= self.chunk_size_words:
+            raise ValueError("CHUNK_OVERLAP_WORDS must be smaller than CHUNK_SIZE_WORDS")
+        return self
     ocr_engine: Literal["native", "fake", "tesseract"] = "native"
     admin_enabled: bool = False
     upload_request_max_bytes: int = Field(default=501 * 1024 * 1024, ge=1024)

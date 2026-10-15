@@ -340,6 +340,37 @@
     font-size: 14px;
     line-height: 1.6;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.contentItem details {
+    margin: 10px 0;
+}
+
+.contentItem summary {
+    color: #2563eb;
+    cursor: pointer;
+}
+
+.indexDialog {
+    width: min(420px, calc(100% - 32px));
+    box-sizing: border-box;
+    margin: auto;
+    padding: 24px;
+    border: 1px solid #e5eaf1;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #334155;
+    box-shadow: 0 16px 48px rgb(15 23 42 / 20%);
+}
+
+.indexDialog::backdrop {
+    background: rgb(15 23 42 / 35%);
+}
+
+.indexDialog h2 {
+    margin-top: 0;
+    color: #172554;
 }
 
 .contentMeta {
@@ -360,6 +391,159 @@
     margin-top: 16px;
     color: #475569;
     font-size: 13px;
+}
+
+/* Indexing-only layout: keep other library pages unchanged. */
+.indexTabs {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 20px;
+    border-bottom: 1px solid #e2e8f0;
+    overflow-x: auto;
+}
+
+.indexTabs a {
+    padding: 12px 16px;
+    color: #64748b;
+    border-bottom: 2px solid transparent;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.indexTabs a[aria-current='page'] {
+    color: #2563eb;
+    border-bottom-color: #2563eb;
+}
+
+.indexTabs a:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: -3px;
+}
+
+.indexPanel[hidden] {
+    display: none;
+}
+
+.indexFilters {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(140px, 0.6fr);
+    align-items: end;
+}
+
+.indexFilters .field {
+    min-width: 0;
+}
+
+.indexFilterActions {
+    align-items: center;
+    margin-top: 16px;
+}
+
+.indexFilterActions .backLink {
+    margin: 0 0 0 auto;
+}
+
+.indexMessage {
+    margin: 12px 0;
+    color: #475569;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.indexMessage[data-tone='success'] {
+    color: #15803d;
+}
+
+.indexMessage[data-tone='warning'] {
+    color: #a16207;
+}
+
+.indexMessage[data-tone='error'] {
+    color: #b91c1c;
+}
+
+.indexOverview .resultGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 18px;
+}
+
+.indexOverview .resultItem:first-child {
+    grid-column: auto;
+}
+
+.indexOverview .resultItem .indexMessage {
+    margin: 0;
+}
+
+.indexDetails {
+    margin: 18px 0;
+    color: #475569;
+    font-size: 14px;
+}
+
+.indexDetails summary {
+    color: #2563eb;
+    cursor: pointer;
+}
+
+.indexDetails dl {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px 16px;
+}
+
+.indexDetails dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.indexContentGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 14px;
+    margin-top: 18px;
+}
+
+.indexDialogActions {
+    flex-wrap: nowrap;
+}
+
+.indexDialogActions button {
+    flex: 1;
+}
+
+@media (max-width: 900px) {
+    .indexFilters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .indexOverview .resultGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .indexFilters,
+    .indexContentGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .indexFilterActions .backLink {
+        margin-left: 0;
+    }
+
+    .indexDetails dl {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+
+    .indexDetails dd {
+        margin-bottom: 8px;
+    }
 }
 
 @media (max-width: 640px) {

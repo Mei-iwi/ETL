@@ -14,7 +14,7 @@ from data_sync_etl.adapters.mongo.foundation_store import (
     MongoContentReader,
     MongoMetadataStore,
 )
-from data_sync_etl.adapters.mongo.schema import INDEXES, contracts, initialize
+from data_sync_etl.adapters.mongo.schema import INDEXES, contracts, initialize, inventory
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.mongo_documents import (
     ContentBagDocument,
@@ -92,6 +92,7 @@ def samples():
             "is_current": True,
             "projection_generation": 1,
         },
+
     }
 
 
@@ -114,6 +115,22 @@ def test_installer_catalog_idempotent_read_only_check_and_preserve(mongo_db):
         assert mongo_db[name].count_documents({}) == 1
 
 
+def test_inventory_five_collections_and_dimension_mismatch(mongo_db):
+    initialize(mongo_db, dimension=384, apply=True)
+    report = inventory(mongo_db)
+    assert report['warnings'] == [] and report['extra_collections'] == []
+    assert len(report['actual']) == 5
+    assert initialize(mongo_db, dimension=384)['ready']
+    mismatch = initialize(mongo_db, dimension=256)
+    assert not mismatch['schema_ready']
+    assert {item['path'] for item in mismatch['validator_mismatches']} == {
+        'content_bags.embedding.minItems', 'content_bags.embedding.maxItems'}
+    assert initialize(mongo_db, dimension=384, apply=True)['extra_collections'] == []
+    with pytest.raises(DomainError, match='Incompatible Mongo validator'):
+        initialize(mongo_db, dimension=256, apply=True)
+    assert initialize(mongo_db, dimension=384)['ready']
+
+
 @pytest.mark.parametrize(
     "collection,changes",
     [
@@ -133,13 +150,14 @@ def test_installer_catalog_idempotent_read_only_check_and_preserve(mongo_db):
         ("ocr_pages", {"source_checksum": ""}),
         ("mongo_content_units", {"page_from": 2, "page_to": 1}),
         ("mongo_content_units", {"content_unit_id": "wrong"}),
+        ("mongo_content_units", {"markdown": None}),
         ("mongo_content_units", {"keywords": [{"word": "x"}]}),
         ("content_bags", {"embedding": [0.0, 0.0]}),
         ("content_bags", {"embedding": [float("nan"), 1.0]}),
         ("content_bags", {"embedding": [float("inf"), 1.0]}),
         ("content_bags", {"embedding": [1.0]}),
         ("content_bags", {"embedding_text": "wrong"}),
-        ("content_bags", {"unit_type": "PAGE_TEXT"}),
+        ("content_bags", {"unit_type": "MP3_TEXT"}),
     ],
 )
 def test_real_negative_validators(mongo_db, collection, changes):

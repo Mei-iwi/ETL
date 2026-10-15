@@ -1,431 +1,328 @@
 # ETL — Đồng bộ và xử lý học liệu
 
-Đồng bộ PostgreSQL nguồn → Master Data; đối soát metadata tại chỗ trong **một MongoDB
-database `etl_content`**, không copy Mongo nguồn → đích;
-nhập file local, trích xuất/OCR, chuẩn hóa và lưu Content Units. Frontend React hỗ trợ
-quản lý, đồng bộ và retry. Giai đoạn hiện tại dừng ở OCR/Content Units, chưa chạy
-chunking mới, keywords, BoW/content_bags, embeddings, Search hoặc đánh giá.
+Đồng bộ PostgreSQL nguồn → PostgreSQL Master → nhập file → trích xuất/OCR → chuẩn hóa Content Units → ContentBag và vector embedding.
 
-Master Sync chỉ đồng bộ metadata; nội dung hoàn tất khi đạt `CONTENT_READY`.
-`COMPLETED` trên API/giao diện đồng bộ là PostgreSQL Master, không xác nhận Mongo
-metadata thành công. `CONTENT_READY` không đồng nghĩa đã lập chỉ mục tìm kiếm.
-Hỗ trợ **PDF, DOCX, XLSX, TXT, CSV, PPTX, PNG, JPG, JPEG**; không tiếp nhận/xử lý MP3/MP4.
+Hỗ trợ **PDF, DOCX, XLSX, TXT, CSV, PPTX, PNG, JPG, JPEG**. Không hỗ trợ MP3/MP4; chưa triển khai tìm kiếm hoặc đánh giá.
 
-## 1. Cài đặt
+Hướng dẫn dưới đây dành cho **Development trên Windows, dùng Git Bash**: database chạy Docker; Backend, Frontend và worker chạy trên máy. Thực hiện lần lượt mục 1–6 khi cài mới; những lần sau dùng mục 7.
 
-Cần Python ≥ 3.12, Node.js 20.x (≥ 20.19) hoặc ≥ 22.12, Docker Desktop/Compose.
-Các lệnh dùng **Git Bash trên Windows**, bắt đầu tại thư mục gốc dự án.
+## 1. Chuẩn bị và cài dependencies
+
+Cần Git, Python 3.12 trở lên, Node.js 22.12 trở lên và Docker Desktop có Docker Compose. Mở Docker Desktop trước khi chạy database.
+
+Mở Git Bash tại thư mục gốc repository, nơi có `pyproject.toml` và `docker-compose.yml`:
 
 ```bash
+python --version
+node --version
+docker compose version
+
 python -m venv .venv
 source .venv/Scripts/activate
-python -m pip install -e '.[dev]'
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev,embeddings]"
+npm.cmd --prefix frontend ci
+
 test -f .env || cp .env.example .env
-cd frontend
-npm.cmd install
-cd ..
 ```
 
-Linux/macOS dùng `source .venv/bin/activate` và `npm`. PowerShell dùng
-`./.venv/Scripts/Activate.ps1`, hoặc gọi trực tiếp `./.venv/Scripts/python.exe`
-và `./.venv/Scripts/etl.exe` nếu không activate được.
+Nếu đã có `.venv`, chỉ kích hoạt và cập nhật dependencies; không cần tạo lại.
+Extra `embeddings` cài runtime Sentence Transformers/PyTorch, **không tự tải model**.
+Không ghi đè `.env` cũ hoặc commit mật khẩu/model vào Git.
 
-## 2. Cấu hình .env
+Nếu dùng PowerShell, kích hoạt bằng `.\.venv\Scripts\Activate.ps1`. Các lệnh nhiều dòng `python - <<'PY'` bên dưới phải chạy trong **Git Bash**, không phải PowerShell.
 
-Dùng [.env.example](.env.example) làm mẫu; **không chép đè .env đang dùng hoặc commit mật khẩu**.
+## 2. Cấu hình `.env`
 
-| Cấu hình | Vai trò |
-| --- | --- |
-| `POSTGRES_PASSWORD`, `DATABASE_URL` | Mật khẩu Docker Master và URL backend phải khớp |
-| `SOURCE_POSTGRES_PASSWORD`, `SOURCE_MIGRATION_DATABASE_URL` | Owner database nguồn, dùng migration |
-| `SOURCE_DATABASE_URL` | Reader nguồn chỉ có SELECT, mật khẩu riêng |
-| `SOURCE_ADAPTER=postgresql` | Dùng PostgreSQL nguồn thật; mẫu mặc định là `json` |
-| `SOURCE_FILE_STORAGE_ROOT` | Kho nguồn tuyệt đối, có thật và đọc được |
-| `STORAGE_ROOT` | Kho đích có quyền ghi, không trùng/lồng với kho nguồn |
-| `ADMIN_ENABLED=true` | Bật quản trị giao diện local, không thay thế xác thực |
-| `MONGO_URI`, `MONGO_DATABASE` | Host mặc định `mongodb://127.0.0.1:27018`, DB `etl_content` |
-
-Ví dụ cho local dùng PostgreSQL nguồn:
+Mở `.env`, giữ các nhóm có sẵn và cập nhật những giá trị dưới đây. Thay toàn bộ `your-…-password` bằng mật khẩu riêng; đây không phải mật khẩu có sẵn trong hệ thống.
 
 ```dotenv
+# API local; không thay thế cơ chế xác thực
+ADMIN_ENABLED=true
+
+# PostgreSQL Master
+POSTGRES_USER=etl
+POSTGRES_DB=etl
+POSTGRES_PASSWORD=your-master-password
+DATABASE_URL=postgresql+psycopg://etl:your-master-password@127.0.0.1:5432/etl
+
+# PostgreSQL nguồn: owner chạy migration, reader chỉ đọc
 SOURCE_ADAPTER=postgresql
+SOURCE_POSTGRES_USER=etl_source_admin
+SOURCE_POSTGRES_DB=etl_source
+SOURCE_POSTGRES_PASSWORD=your-source-owner-password
+SOURCE_MIGRATION_DATABASE_URL=postgresql+psycopg://etl_source_admin:your-source-owner-password@127.0.0.1:5433/etl_source
+SOURCE_DATABASE_URL=postgresql+psycopg://etl_source_reader:your-source-reader-password@127.0.0.1:5433/etl_source
+
+# Kho file nguồn và kho ETL phải tách biệt
 SOURCE_FILE_STORAGE_ROOT=D:/SourceLearningFiles
 STORAGE_ROOT=D:/ETLStorage
-ADMIN_ENABLED=true
+SOURCE_FILE_ALLOWED_STATUSES=["APPROVED"]
+
+# Một database MongoDB dùng chung
+MONGO_URI=mongodb://127.0.0.1:27018
+MONGO_DATABASE=etl_content
+MONGO_METADATA_MODE=shared
+SOURCE_MONGO_ENABLED=false
+MASTER_MONGO_IDENTITY_BOOTSTRAP=false
+
+# Chỉ bật auto sau khi kiểm tra schema và model thành công
+INDEX_AUTO_ENABLED=false
+INDEX_EMBEDDING_DIMENSION=384
 ```
 
-Đổi đường dẫn theo máy. File nguồn nằm tại `<root>/<storage_bucket>/<storage_object_key>`;
-bucket/key lấy từ PostgreSQL. Mặc định chỉ nhập phiên bản nguồn `APPROVED`.
-Đổi mật khẩu trong .env **không tự đổi** mật khẩu PostgreSQL trong volume đã tồn tại.
+Tạo hai thư mục file nếu chưa có:
 
-### Tesseract OCR — cần cho ảnh và PDF scan
+```bash
+mkdir -p /d/SourceLearningFiles /d/ETLStorage
+```
 
-PDF có text và DOCX/XLSX/TXT/CSV/PPTX không cần Tesseract.
-Pip và Compose không cài Tesseract trên Windows.
+File nguồn được đọc tại `<SOURCE_FILE_STORAGE_ROOT>/<storage_bucket>/<storage_object_key>`.
+Hai kho không được trùng hoặc nằm bên trong nhau. Đổi đường dẫn mẫu nếu máy dùng ổ đĩa khác.
 
-1. Cài Tesseract từ [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki),
-   được [tài liệu Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html#windows)
-   giới thiệu; chọn English (`eng`) và Vietnamese (`vie`).
-2. Kiểm tra trong **PowerShell**, sửa đường dẫn nếu cài ở vị trí khác:
+Lưu ý mật khẩu:
 
-   ```powershell
-   & 'C:\Program Files\Tesseract-OCR\tesseract.exe' --version
-   & 'C:\Program Files\Tesseract-OCR\tesseract.exe' --list-langs
-   ```
+- `POSTGRES_PASSWORD` phải khớp mật khẩu trong `DATABASE_URL`; tương tự với tài khoản owner nguồn.
+- Với cài mới theo Compose, nên dùng mật khẩu dài gồm chữ, số và dấu gạch ngang để tránh ký tự cần mã hóa trong URL. Mật khẩu có ký tự đặc biệt cần xử lý URL phù hợp cả ở cấu hình Compose.
+- Database đã tồn tại: sửa `.env` **không đổi mật khẩu role PostgreSQL**. Dùng tài khoản/mật khẩu thực tế; không xóa volume để đặt lại.
 
-   Nếu thiếu ngôn ngữ, tải `eng.traineddata` / `vie.traineddata` từ
-   [tessdata_fast chính thức](https://github.com/tesseract-ocr/tessdata_fast)
-   và đặt vào thư mục `Tesseract-OCR\tessdata` (có thể cần quyền admin).
-3. Sửa các dòng tương ứng trong .env, không khai báo trùng:
+## 3. Cài Tesseract OCR
 
-   ```dotenv
-   OCR_ENGINE=tesseract
-   TESSERACT_PATH="C:/Program Files/Tesseract-OCR/tesseract.exe"
-   TESSERACT_LANGUAGES=vie+eng
-   ```
+Tesseract dùng cho ảnh và PDF scan. Đây là phần mềm cài riêng, không được cài bằng `pip`.
 
-4. Restart backend và OCR worker, thử ảnh có chữ rõ. Job đã lỗi dùng **Xử lý lại**;
-   chưa có job dùng **Bắt đầu xử lý**. Adapter tự dùng/dọn ảnh tạm tên ASCII,
-   không cần đổi tên thư mục tiếng Việt.
+1. Mở [hướng dẫn Tesseract chính thức](https://tesseract-ocr.github.io/tessdoc/Installation.html), chọn bản Windows từ liên kết UB Mannheim.
+2. Cài vào `C:\Program Files\Tesseract-OCR` hoặc ghi lại đường dẫn đã chọn.
+3. Cài dữ liệu ngôn ngữ **English** và **Vietnamese**. Nếu thiếu, tải `eng.traineddata`, `vie.traineddata` từ [tessdata_fast chính thức](https://github.com/tesseract-ocr/tessdata_fast), chép vào thư mục `tessdata` của bản cài. Ghi vào Program Files có thể cần quyền quản trị.
+4. Kiểm tra trong Git Bash:
 
-Ubuntu: `sudo apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-vie`,
-kiểm tra `tesseract --list-langs`, đặt `TESSERACT_PATH=tesseract`.
-`OCR_ENGINE=native` chỉ đọc text PDF; `fake` dành cho demo/test.
+```bash
+"/c/Program Files/Tesseract-OCR/tesseract.exe" --version
+"/c/Program Files/Tesseract-OCR/tesseract.exe" --list-langs
+```
 
-## 3. Database và migration
+Danh sách phải có cả `eng` và `vie`. Thêm/cập nhật trong `.env`:
 
-Bật Docker Desktop, kiểm tra mật khẩu/URL trước khi chạy; sao lưu DB đang có dữ liệu:
+```dotenv
+OCR_ENGINE=tesseract
+TESSERACT_PATH="C:/Program Files/Tesseract-OCR/tesseract.exe"
+TESSERACT_LANGUAGES=vie+eng
+OCR_TIMEOUT_SECONDS=60
+```
+
+Kiểm tra đúng cấu hình mà Backend/worker sẽ dùng:
+
+```bash
+python - <<'PY'
+from data_sync_etl.config import Settings
+from data_sync_etl.adapters.ocr.engines import TesseractOCREngine
+
+s = Settings()
+TesseractOCREngine(
+    s.tesseract_path, s.tesseract_languages, s.ocr_timeout_seconds
+).check_runtime()
+print("PASS: Tesseract và dữ liệu ngôn ngữ đã sẵn sàng")
+PY
+```
+
+Nếu chỉ dùng `OCR_ENGINE=native`, hệ thống đọc text có sẵn nhưng không đáp ứng OCR ảnh/PDF scan. Không dùng `fake` cho dữ liệu thật.
+
+## 4. Tải model embedding local
+
+Model dùng: [sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2), vector **384 chiều**, chạy CPU trong adapter hiện tại. Model embedding phục vụ chỉ mục, không thay thế Tesseract OCR.
+
+### 4.1. Tải model một lần
+
+Cần Internet ở bước tải. Chọn thư mục ngoài repository, không dùng chung với một model khác. Nếu đã có đầy đủ đúng model/revision, bỏ qua bước tải.
+
+Chạy trong Git Bash đã kích hoạt `.venv`:
+
+```bash
+unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE
+python - <<'PY'
+from pathlib import Path
+from huggingface_hub import snapshot_download
+
+model_id = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+revision = "e8f8c211226b894fcb81acc59f3b34ba3efd5f42"
+target = Path("D:/Models/paraphrase-multilingual-MiniLM-L12-v2")
+
+snapshot_download(
+    repo_id=model_id,
+    revision=revision,
+    local_dir=str(target),
+    allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model"],
+    ignore_patterns=["onnx/*", "openvino/*"],
+)
+(target / "etl-model-revision.txt").write_text(revision + "\n", encoding="utf-8")
+print("Đã tải model:", target)
+PY
+```
+
+Giữ nguyên các file cấu hình/tokenizer, trọng số `.safetensors` và thư mục module như `1_Pooling`. Không chỉ tải riêng file trọng số.
+Nếu tải gián đoạn, chạy lại cùng lệnh để tiếp tục. Cách tải tham khảo: [Hugging Face Hub](https://huggingface.co/docs/huggingface_hub/guides/download).
+
+### 4.2. Khai báo model trong `.env`
+
+```dotenv
+INDEX_EMBEDDING_MODEL_PATH=D:/Models/paraphrase-multilingual-MiniLM-L12-v2
+INDEX_EMBEDDING_MODEL_ID=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+INDEX_EMBEDDING_MODEL_VERSION=e8f8c211226b894fcb81acc59f3b34ba3efd5f42
+INDEX_EMBEDDING_DIMENSION=384
+```
+
+`INDEX_EMBEDDING_MODEL_PATH` phải trỏ đến thư mục chứa `modules.json`.
+`INDEX_EMBEDDING_MODEL_VERSION` phải khớp nội dung `etl-model-revision.txt` do bước tải tạo ra.
+Không sửa số chiều hoặc chỉ ghi một revision tùy ý để bỏ qua kiểm tra.
+Biến legacy `VECTOR_DIMENSION` không quyết định số chiều ContentBag.
+
+### 4.3. Kiểm tra embedding tiếng Việt, không dùng mạng
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python - <<'PY'
+import math
+from data_sync_etl.config import Settings
+from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
+
+s = Settings()
+model = LocalSentenceEmbedding(
+    s.index_embedding_model_path,
+    s.index_embedding_model_id,
+    s.index_embedding_model_version,
+    s.index_embedding_dimension,
+)
+vector = model.embed("Học liệu tiếng Việt về phân số và phép tính.")
+assert len(vector) == s.index_embedding_dimension == 384
+assert all(math.isfinite(value) for value in vector)
+assert any(value != 0 for value in vector)
+print("PASS: embedding tiếng Việt có 384 chiều")
+PY
+```
+
+Lần nạp đầu có thể lâu hơn. Backend không tự tải model; worker sử dụng model local. Không cần GPU theo cấu hình này.
+
+## 5. Khởi tạo database
+
+Các lệnh mục này dành cho database **Dev đã xác nhận đúng đích**; Compose có chạy migration PostgreSQL. Với database đang có dữ liệu, sao lưu và duyệt thay đổi trước.
 
 ```bash
 docker compose up --build -d
 docker compose ps -a
-docker compose logs master-migrate source-migrate
+docker compose logs master-migrate source-migrate mongo-init
+python -m data_sync_etl.adapters.mongo.schema --check
 ```
 
-Compose chạy PostgreSQL Master (5432), PostgreSQL nguồn (5433), MongoDB (27018).
-Hai service migration phải kết thúc `Exited (0)`; không tự seed dữ liệu nguồn
-hoặc chạy backend/worker. Nếu đổi cổng trong .env, cập nhật URL tương ứng.
+Kết quả cần có:
 
-Migration trên host (khi cập nhật code hoặc kiểm tra thủ công):
+- PostgreSQL Master `127.0.0.1:5432/etl`, PostgreSQL nguồn `127.0.0.1:5433/etl_source`, MongoDB `127.0.0.1:27018/etl_content`.
+- `master-migrate`, `source-migrate`, `mongo-init` kết thúc với mã **0**.
+- Schema MongoDB `schema_ready=true`, đủ 5 collection và 6 index nghiệp vụ; ContentBag 384 chiều.
 
-```bash
-python -m alembic current
-python -m alembic heads
-python -m alembic upgrade head
-python -m alembic -c alembic_source.ini upgrade head
-python -m alembic -c alembic_source.ini current
-```
+Năm collection: `users`, `learning_resources`, `ocr_pages`, `mongo_content_units`, `content_bags`. Chunk preview không lưu thành collection riêng. Metadata `users`/`learning_resources` được đối chiếu tại chỗ, không tự sao chép toàn bộ bản ghi Master sang MongoDB.
 
-Master và Source là hai DB riêng. Head Master hiện tại `0015`: `0013` thêm reference
-users/resources; `0014` thêm reference grade/version/unit; `0015` thêm provenance và
-audit mất nguồn. Dữ liệu cũ UNKNOWN, không auto-backfill ownership.
-Không backfill lịch sử; chưa migrate có thể gây API 500 do thiếu cột.
+**Database MongoDB mới trống:** `mongo-init` tự tạo collection, validator và index.
+**Database cũ thiếu/sai schema:** initializer dừng, không tự sửa dữ liệu. Dùng `--inventory` và `--check` để chẩn đoán; cần backup, kiểm chứng restore và phê duyệt riêng trước khi dùng `--apply` hoặc migration tương ứng. Không dùng `docker compose down -v` để chữa lỗi schema.
 
-### Reader nguồn — thiết lập lần đầu
+### Tạo tài khoản chỉ đọc nguồn — cài mới một lần
 
-Lệnh dùng DB/owner mặc định trong .env.example; sửa nếu bạn dùng tên khác:
+Sau khi `source-migrate` thành công, với tên database/user mặc định ở mục 2:
 
 ```bash
 docker compose exec -T source-postgres psql -v ON_ERROR_STOP=1 -U etl_source_admin -d etl_source < scripts/sql/source_reader.sql
 docker compose exec source-postgres psql -U etl_source_admin -d etl_source
 ```
 
-Trong psql, đặt mật khẩu rồi thoát:
+Trong màn hình `psql`, đặt mật khẩu reader rồi thoát:
 
 ```text
 \password etl_source_reader
 \q
 ```
 
-Cập nhật mật khẩu vào `SOURCE_DATABASE_URL`; không dùng owner làm reader.
-Script cấp SELECT cả `resource_versions` và kiểm tra reader không có quyền ghi.
+Nhập mật khẩu hai lần theo yêu cầu, dùng đúng giá trị đã khai báo trong `SOURCE_DATABASE_URL`.
+Nếu thay tên database, phải đối chiếu cả câu `GRANT CONNECT` trong script trước khi chạy.
+Database mới chưa có dữ liệu nghiệp vụ; bước khởi tạo không tự nạp học liệu mẫu.
 
-### MongoDB
+## 6. Chạy Backend, Frontend và worker
+
+Mở **5 terminal riêng** tại thư mục gốc repository. Trong mỗi terminal Python, chạy `source .venv/Scripts/activate` trước. Giữ các terminal hoạt động trong lúc sử dụng.
+
+| Terminal | Lệnh | Vai trò |
+| --- | --- | --- |
+| Backend | `python -m uvicorn data_sync_etl.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers` | API |
+| Frontend | `npm.cmd --prefix frontend run dev -- --host 127.0.0.1 --strictPort` | Giao diện cổng 3000 |
+| Master Sync | `etl run-master-sync-worker --worker-id master-sync-1` | Đồng bộ metadata theo lịch/cấu hình bật tắt |
+| Nhập file | `etl run-source-file-worker --worker-id source-file-1` | Nhập file nguồn, đối soát và retry |
+| OCR/Index | `etl run-ocr-worker --worker-id ocr-1` | Trích xuất, chuẩn hóa và xử lý hàng đợi Index/Reindex |
+
+Docker Compose hiện **không chạy thay** 5 tiến trình trên và không cài Tesseract/model cho máy host.
+
+Mở [giao diện](http://127.0.0.1:3000), [Swagger API](http://127.0.0.1:8000/docs), [Health](http://127.0.0.1:8000/health).
+Frontend đang proxy về cổng **8000**; không đổi riêng cổng Backend rồi tiếp tục dùng giao diện như cũ.
+
+### Kiểm tra luồng sử dụng
+
+1. Nếu dùng nguồn PostgreSQL, kiểm tra kho file và chạy Full lần đầu trong giao diện Đồng bộ dữ liệu nguồn hoặc terminal riêng:
+   ```bash
+   etl source-file-precheck
+   etl sync-master --stream all --full
+   ```
+2. Bật tự đồng bộ từng nhóm theo nhu cầu. Mặc định lịch đồng bộ là 300 giây, không phải realtime. File nguồn cần trạng thái được phép, mặc định `APPROVED`, cùng đường dẫn/hash hợp lệ.
+3. Thêm học liệu trên giao diện hoặc chờ worker nhập file nguồn. Đợi xử lý đạt `CONTENT_READY`.
+4. Trong **Phân đoạn và chỉ mục**, chọn phiên bản, xem phân đoạn và nhấn **Xây dựng chỉ mục**. Khi cần tính lại dùng **Tái lập chỉ mục**; không phải chạy lại OCR.
+5. Đợi `PENDING → RUNNING → READY`; kiểm tra ContentBag và vector sẵn sàng. Đồng bộ metadata thành công không đồng nghĩa OCR hay Index đã hoàn tất.
+6. Sau khi schema/model và luồng thủ công đã PASS, đổi `INDEX_AUTO_ENABLED=true`, khởi động lại Backend và OCR worker. Thử bằng học liệu mới; không tự backfill hàng loạt phiên bản cũ.
+
+## 7. Các lần chạy sau và kiểm thử
+
+Bật Docker Desktop, mở terminal tại repository rồi chạy:
 
 ```bash
+source .venv/Scripts/activate
+docker compose up --build -d
 python -m data_sync_etl.adapters.mongo.schema --check
 ```
 
-Với DB mới, tạo collections/validators/indexes:
+Sau khi kiểm tra PASS, mở lại 5 terminal theo mục 6. Khi cập nhật dependencies, chạy lại `pip install -e ".[dev,embeddings]"` và `npm.cmd --prefix frontend ci`. Không cần tải lại model nếu revision không đổi.
 
-```bash
-python -m data_sync_etl.adapters.mongo.schema --apply
-```
-
-DB đã có dữ liệu: đọc kết quả check, xử lý sai khác trước khi apply.
-
-## 4. Chạy ứng dụng
-
-Mỗi thành phần chạy trong **một terminal riêng**, bắt đầu tại thư mục gốc.
-Terminal Python cần `source .venv/Scripts/activate` trước khi chạy.
-
-| Thành phần | Lệnh |
-| --- | --- |
-| Backend | `python -m uvicorn data_sync_etl.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers` |
-| Frontend | `cd frontend` rồi `npm.cmd run dev -- --host 127.0.0.1 --strictPort` |
-| Master Sync worker | `etl run-master-sync-worker --worker-id master-sync-1` |
-| File import worker | `etl run-source-file-worker --worker-id source-file-1` |
-| OCR/ETL worker | `etl run-ocr-worker --worker-id ocr-1` |
-
-Frontend: http://127.0.0.1:3000 · Swagger: http://127.0.0.1:8000/docs ·
-Health: http://127.0.0.1:8000/health. Vite proxy `/api`, `/admin`, `/health` đến backend 8000.
-
-Master worker đồng bộ metadata theo lịch; file worker nhập phiên bản; OCR worker xử lý
-nội dung và hoàn tất projection Mongo. Backend HTTP không thay thế worker.
-Thêm `--once` vào lệnh worker để chạy một lượt; im lặng khi chưa có việc là bình thường.
-
-## 5. Đồng bộ và sử dụng
-
-Kiểm tra cấu hình và chạy Full baseline lần đầu:
-
-```bash
-etl source-file-precheck
-etl sync-master --stream all --full
-```
-
-Trên giao diện **Kho học liệu**:
-
-- **Đồng bộ dữ liệu nguồn**: chọn Full/Incremental, bật từng nhóm/tất cả.
-  Auto cần reader hợp lệ, PostgreSQL nguồn/Master, Master worker và Full baseline thành công.
-  Chu kỳ mặc định 300 giây (`MASTER_SYNC_AUTO_INTERVAL_SECONDS`), không phải realtime tức thì.
-- **Lỗi đồng bộ**: tab **Đồng bộ lại** chứa tệp retry được; tab **Lỗi đồng bộ** chứa tệp
-  không thể retry. Phân trang 7 tệp; retry chỉ xếp hàng, worker thực hiện sau đó.
-- **Thêm học liệu** hoặc cập nhật file trong chi tiết: chuyển đến trang xử lý,
-  chờ `CONTENT_READY`, mở nội dung trích xuất khi cần. Không phải upload lại file đồng bộ nguồn.
-
-XLSX đọc giá trị cache, không tính công thức; TXT/CSV dùng UTF-8/BOM;
-PPTX chỉ trích xuất text/bảng, không OCR ảnh nhúng. Tắt Auto không dừng job đã xếp hàng.
-Precheck thành công không chứng minh ETL hoàn tất.
-
-### Một MongoDB database — metadata tại chỗ và ETL
-
-Cấu hình mục tiêu (operator đối chiếu `.env` hiện tại, backup và phê duyệt trước khi đổi):
-
-```dotenv
-SOURCE_ADAPTER=postgresql
-MONGO_URI=mongodb://127.0.0.1:27018
-MONGO_DATABASE=etl_content
-MONGO_METADATA_MODE=shared
-SOURCE_MONGO_ENABLED=false
-MASTER_MONGO_IDENTITY_BOOTSTRAP=false
-```
-
-`shared` là mặc định. Hai cờ true gây config conflict trước khi tạo client/storage;
-không tự sửa `.env`. SOURCE_MONGO_URI/SOURCE_MONGO_DATABASE cũ được bỏ qua ở mode
-shared, không kết nối `source_metadata`. Restart backend/workers sau cấu hình đã duyệt.
-Mode `separate` chỉ giữ cho tương thích/test cũ, không phải kiến trúc mục tiêu.
-
-Trong etl_content, `users`/`learning_resources` là **dữ liệu mở rộng gốc** do đầu vào
-được quản lý nhập trực tiếp, không phải clone Master. `_id` String bằng PG nguồn.mongo_id
-và Master.mongo_id, có thể khác PG PK. Metadata có thể nhập trước/sau PG sync.
-Thêm document Mongo không chạy PG sync ngầm hoặc kích hoạt Incremental/CDC.
-`ocr_pages`/`mongo_content_units` là đầu ra ETL; `content_bags` giữ nguyên, runtime không ghi.
-
-Master Full/Incremental/Auto chỉ sync PG, log SKIP_PG_SHARED_METADATA_VALIDATION để
-tránh quét metadata ở mỗi tick. Hai CLI sau **chỉ đọc**, không bootstrap hoặc copy-self:
-
-```bash
-etl sync-mongo-metadata --stream all --full
-etl project-master-mongo --stream all --full
-```
-
-Report `mode=VALIDATE_SHARED`, SHARED_MONGO_VALIDATED/PARTIAL/FAILED và counters
-matched/missing_mapping/missing_document/missing_extension/invalid_document/conflicts.
-Inserted/updated luôn 0. Quét Master theo keyset (100–1000 mỗi batch), verifier PG
-nguồn xác nhận mapping, subject active/nondeleted ở Source + Master. Bỏ qua
-inactive/deleted/ARCHIVED; DRAFT chỉ được kiểm tra, không tự public. Không full-scan
-Mongo để báo orphan count; không giữ PG transaction trong RPC Mongo.
-
-Một extension hữu ích là string không trắng hoặc mảng không rỗng sau validate/
-normalization. Chỉ ID/ngày, explicit NULL, chuỗi trắng, authors/tags rỗng không đủ.
-Không tự thêm bio/description/tags, không remap ID/ObjectId hoặc tạo doc khi thiếu
-mapping. Timestamps và BSON metadata giữ nguyên, kể cả field ngoài ownership.
-Metadata thiếu/outage không rollback PG. Retry CLI kiểm tra Full lại, không có CDC.
-Document identity-only/DB source_metadata cũ không bị xóa/di chuyển/enrich tự động.
-
-#### Precheck read-only và vận hành có phê duyệt
-
-Read-only: `git status --short`, `docker compose ps -a`, `python -m alembic current`,
-`python -m alembic heads`, `python -m alembic -c alembic_source.ini current`.
-Kiểm backup/restore, file roots, quyền và 1–3 mẫu PG id→Master.mongo_id→Mongo String _id
-(không dump PII); PG Source/Master query `count(*)`, `count(mongo_id)` theo bảng tương ứng.
-
-```bash
-docker compose exec -T mongo mongosh --quiet etl_content --eval "printjson({users:db.users.countDocuments({}),resources:db.learning_resources.countDocuments({}),ocr_pages:db.ocr_pages.countDocuments({}),units:db.mongo_content_units.countDocuments({}),bags:db.content_bags.countDocuments({})})"
-```
-
-Không có `02_import_mongo_source.js` trong repo. Nếu operator có file ngoài repo,
-phải sửa **nội dung** script về duy nhất `db.getSiblingDB('etl_content')`, bỏ SOURCE_DB/
-TARGET_DB và guard cũ. Chỉ insert document vắng; cùng ID nhưng payload khác phải báo
-conflict, không overwrite. Đổi DB trên lệnh mongosh không sửa getSiblingDB trong JS.
-Không viết lại ZIP/seed không được cung cấp, không tự chạy import/live sync.
-
-Sau phê duyệt backup/config/queue: PG seed và metadata import trực tiếp vào etl_content
-(nếu cần, do operator quản lý) → `etl sync-master --stream all --full` hoặc
-`--incremental` → shared verify → file worker/OCR worker `--once` → `etl etl-status`.
-`--once` không lọc version, phải duyệt phạm vi queue trước. Đối soát cùng target
-version/job/page/generation/current; checksum/char_count/IDs đúng, replay không trùng,
-metadata và content_bags snapshot không đổi. Scan Tesseract chưa test phải NOT_RUN.
-Không dùng compose up như read-only vì có migration side effect; không down -v.
-
-### CLI thường dùng
-
-#### Đối soát bản ghi mất nguồn — không xóa dữ liệu
-
-Full/Incremental vẫn upsert bản ghi hiện diện, không tự phát hiện/apply hard delete.
-Soft delete đi theo trạng thái nguồn và timestamp; users nguồn chỉ có is_active,
-grades dùng grade_is_active/grade_deleted_at ở Master. Trigger liên kết nguồn hiện
-touch learning_resources.updated_at khi thêm/sửa/xóa quan hệ; giữ replay/GREATEST.
-
-Migration mới `0015` thêm source_origin/source_state_hash/source_missing_at cho
-users/resources/subjects/grades Master; không sửa 15 bảng nguồn. Bản ghi PG insert mới
-POSTGRESQL, API-created resource LOCAL, dữ liệu cũ UNKNOWN. Không auto-backfill chỉ
-vì cùng ID/mongo_id. Unknown/local trùng Source PK bị BLOCKED_SOURCE_OWNERSHIP;
-operator phải audit và duyệt ownership riêng trước khi sync, không bulk đổi marker.
-Fingerprint trạng thái bảo vệ thay đổi nội bộ; nguồn tái xuất hiện phải giữ created_at
-và mapping đã duyệt. Cùng PK nhưng thực thể mới/remap sẽ bị chặn, không tự phục hồi.
-
-Pre-flight READ-ONLY: kiểm `python -m alembic current`/`heads`, backup/restore, quyền
-reader và đúng DB. Code head 0015 cần operator duyệt migration; **không tự chạy**
-`python -m alembic upgrade head` trên DB đang dùng. Sau migration đã duyệt/restart:
-
-```bash
-etl reconcile-master --stream resources --dry-run
-etl reconcile-master --stream all --dry-run
-```
-
-Preview không ghi Master/Mongo/checkpoint. Report có source_count, pages, fingerprint,
-known-source/local/unknown exclusions, candidates/already-inactive và tối đa 20 ID mẫu.
-Quét bảng gốc trong read-only REPEATABLE READ, kiểm RLS/view/dependency/completeness;
-không suy parent bị xóa từ aggregate JOIN. Nguồn rỗng, giảm mạnh, lỗi trang/quyền/schema,
-local mutation hoặc vượt ngưỡng → BLOCKED. JSON adapter không được reconcile/apply.
-
-Chỉ sau khi operator duyệt plan fingerprint và phạm vi ảnh hưởng:
-
-```bash
-etl reconcile-master --stream resources --apply --fingerprint <APPROVED_FINGERPRINT>
-```
-
-Apply quét lại, so fingerprint, khóa Master, đọc nguồn lại, kiểm toàn write-set trước
-mọi UPDATE; commit một transaction giới hạn (mặc định tối đa 100 row, tỷ lệ 10%).
-Vượt ngưỡng không apply một phần. Không tự tăng RECONCILE_MAX_AFFECTED/MAX_RATIO để
-vượt guard. PG source/target khác DB nên không có atomic distributed snapshot: nguồn
-có thể tái xuất hiện sau lần kiểm cuối, khi đó Full/Incremental sau sẽ restore nếu
-ownership/identity/state còn hợp lệ. Không tuyên bố CDC hoặc loại bỏ hoàn toàn race.
-
-Đích chỉ inactive và deleted_at/grade_deleted_at nếu chưa có. source_missing_at là
-thời điểm **ghi nhận mất nguồn**, không phải thời điểm người dùng xóa. Giữ deleted_by,
-created_at/PK/mongo_id, quan hệ, resource_versions/jobs/tasks/content_units, toàn bộ
-Mongo users/resources/ocr_pages/units/content_bags. Row đã inactive không viết lại
-ngày xóa; chạy lại preview/apply mới idempotent. Reconcile không đổi counters/mode PG.
-
-Sau apply: SELECT trạng thái/provenance, đối chiếu count/hash lịch sử PG và BSON
-Mongo; API detail/version/content và enqueue/retry không trả/khởi tạo nội dung đã
-thu hồi. Job đang chạy/finalization được giữ theo state machine, không kill/xóa history.
-Không tự cleanup hoặc rollback downgrade (guard chặn khi có audit/mapping). Restore
-chỉ từ Source hợp lệ hoặc quy trình operator đã duyệt; không reset marker tùy tiện.
-
-Giao diện phân biệt cấu hình Auto với từng lần chạy thực tế (mode/thời điểm/run ID).
-Nút **Đồng bộ Full** gọi full=true; **Chạy Incremental** gọi full=false và có xác nhận.
-Đổi dropdown chỉ lưu lịch Auto, không chạy ngay. `Đã đọc (ứng viên)` gồm cả bản ghi
-replay/SKIPPED, không phải số thêm/cập nhật. Với PostgreSQL, replay mặc định 300 giây
-**tính từ checkpoint timestamp**, không phải cửa sổ 300 giây gần giờ hiện tại;
-chờ lâu không bảo đảm đọc 0. Giữ GREATEST timestamps của parent và đối soát Full định kỳ
-cho writer commit muộn quá replay. Không thay số liệu hoặc tắt replay để làm đẹp bảng.
-
-```bash
-etl --help
-etl sync-master --stream resources --incremental
-etl ingest-resource --resource-id RESOURCE_ID --bucket BUCKET --object-key FILE_KEY
-etl create-ocr-job --resource-version-id VERSION_ID
-etl etl-status --resource-version-id VERSION_ID
-etl resume-etl --resource-version-id VERSION_ID
-etl postprocess --resource-version-id VERSION_ID
-etl recover-stale-ocr-tasks
-```
-
-Thay ID/bucket/key bằng giá trị thực trong kho đích; không chạy postprocess trước khi OCR hoàn tất.
-Demo trên **DB riêng**: đặt `SOURCE_ADAPTER=json`, tắt identity bootstrap, rồi chạy
-`etl demo-run --fixture-resource-id resource-1`. JSON không hỗ trợ Auto/nhập file ERD.
-
-## 6. Cập nhật sau khi pull
-
-Giữ .env hiện tại, đối chiếu biến mới trong .env.example, rồi chạy:
-
-```bash
-python -m pip install -e '.[dev]'
-docker compose up --build -d
-docker compose logs master-migrate source-migrate
-cd frontend
-npm.cmd install
-cd ..
-```
-
-Nếu dùng DB ngoài Compose, chạy migration host ở mục 3. Sau migration thành công,
-restart backend và **tất cả worker**; `--reload` chỉ áp dụng cho backend.
-CLI đọc .env mỗi lần chạy, không cần mở lại terminal.
-
-## 7. Kiểm thử
-
-Backend tại thư mục gốc:
-
-```bash
-python -m pytest -q -p no:cacheprovider
-python -m ruff check src tests alembic alembic_source scripts
-```
-
-Integration cần **DB test riêng**, không trỏ vào DB đang dùng. Tạo hai DB test trước,
-thay tài khoản/mật khẩu trong ví dụ và export trong terminal Git Bash:
-
-```bash
-export TEST_DATABASE_URL='postgresql+psycopg://etl:<password>@127.0.0.1:5432/etl_test'
-export TEST_SOURCE_DATABASE_URL='postgresql+psycopg://etl_source_admin:<password>@127.0.0.1:5433/etl_source_test'
-export TEST_MONGO_URI='mongodb://127.0.0.1:27018'
-python -m pytest tests/integration -q -p no:cacheprovider
-```
-
-Mật khẩu có ký tự đặc biệt cần URL-encode. Chỉ thêm biến vào .env không đủ cho fixture
-đọc `os.environ`. Thiếu cấu hình/runtime sẽ SKIP, không phải integration PASS.
-
-Frontend:
-
-```bash
-cd frontend
-npm.cmd run build
-npm.cmd run lint
-```
-
-Test logic chế độ/kết quả/poll không cần framework UI mới (đã chạy với Node 22.17):
-
-```bash
-node --experimental-strip-types --test tests/masterSyncResults.test.mjs
-```
-
-Quy trình nghiệm thu một MongoDB database nằm ở mục 5 phía trên.
-QA không fallback sang database ứng dụng; tên database test phải chứa thành phần
-`test` riêng (ví dụ `etl_test`, `etl_source_test`). Không dùng `docker compose up`
-để pre-flight read-only vì service migration có thể ghi database.
-
-## 8. Lỗi thường gặp và dừng hệ thống
-
-| Hiện tượng | Cách xử lý |
-| --- | --- |
-| API 500 sau pull, báo thiếu bảng/cột | Kiểm tra traceback, đúng URL Master và migration head; không phải mọi lỗi 500 đều do schema |
-| 503 khi đọc nguồn | Kiểm tra DB/reader, SELECT trên resource_versions, kho file và thông báo lỗi cụ thể |
-| Auto không chạy | Kiểm tra baseline, công tắc, Master worker và chu kỳ; restart sau đổi config |
-| PARTIAL, metadata thiếu | Kiểm tra mapping và đầu vào metadata thật trong etl_content; không bật bootstrap để lấp thiếu |
-| SHARED_MONGO_CONFLICT_* | shared yêu cầu SOURCE_MONGO_ENABLED=false và MASTER_MONGO_IDENTITY_BOOTSTRAP=false; operator phê duyệt cấu hình rồi restart |
-| BLOCKED_MONGO_ID_MAPPING | Đối soát mapping/duplicate/ObjectId; không tự đổi ID hay xóa document |
-| OCR_PENDING kéo dài | Kiểm tra OCR worker; chỉ chạy API chưa đủ |
-| BLOCKED_OCR_RUNTIME / OCR_FAILED | Kiểm tra Tesseract path, vie+eng, worker log; restart rồi retry |
-| File nhập xong nhưng chưa CONTENT_READY | Kiểm tra OCR/finalization/MongoDB và etl-status |
-| 422 | Đọc response validation, kiểm tra payload và phiên bản backend; không mặc định lỗi kết nối |
-
-Dừng backend/frontend/worker bằng `Ctrl + C`, dừng DB bằng:
+Dừng API/Frontend/worker bằng **Ctrl+C** trong từng terminal. Dừng database nhưng giữ dữ liệu:
 
 ```bash
 docker compose stop
 ```
 
-Chạy lại DB bằng `docker compose up --build -d`, rồi chạy các terminal ở mục 4.
-**Không dùng docker compose down -v để sửa lỗi: lệnh này xóa volume dữ liệu.**
+Lệnh kiểm tra mã nguồn, chạy từ thư mục gốc:
+
+```bash
+python -m pytest tests/unit -q
+python -m ruff check .
+npm.cmd --prefix frontend run build
+npm.cmd --prefix frontend run lint
+git diff --check
+```
+
+Integration tests chỉ chạy khi đã cấu hình các biến `TEST_*` trỏ đến database kiểm thử cô lập theo fixture; không dùng database Dev/Production đang có học liệu.
+
+Một số lệnh vận hành:
+
+```bash
+etl --help
+etl sync-master --stream all --incremental
+etl reconcile-master --stream all --dry-run
+python -m data_sync_etl.adapters.mongo.schema --inventory
+```
+
+## 8. Lỗi thường gặp
+
+| Hiện tượng | Cần kiểm tra |
+| --- | --- |
+| `BLOCKED_INDEX_SCHEMA` / schema chưa hợp lệ | Chạy `schema --check`, xem `docker compose logs mongo-init`. Database cũ cần kế hoạch sửa schema được duyệt; không bỏ guard hoặc xóa dữ liệu. |
+| `BLOCKED_EMBEDDING_RUNTIME` / HTTP 503 khi Index | Đúng `.venv`, đã cài extra embeddings, đủ file model và manifest khớp revision; chạy lại kiểm tra mục 4.3. |
+| `INVALID_EMBEDDING` | Model, cấu hình và schema ContentBag phải cùng 384 chiều. |
+| Thiếu Tesseract / thiếu ngôn ngữ | Kiểm tra đường dẫn, `--list-langs` và mục 3; cài `pip` không cung cấp Tesseract binary. |
+| Không thấy tự đồng bộ | Worker đang chạy, nhóm đã bật, đến lịch chạy; có baseline Full nếu Incremental yêu cầu. |
+| Trạng thái nguồn chưa được phép nhập | Kiểm tra lifecycle của phiên bản nguồn và `SOURCE_FILE_ALLOWED_STATUSES`; retry không tự phê duyệt tài liệu Draft. |
+| Health 503 / không kết nối database | Kiểm tra Docker, cổng, tài khoản và mật khẩu thực tế; sửa `.env` không đổi mật khẩu trong volume cũ. |
+| API trả 400/422 | Xem response trong Network/Swagger và log Backend; không thể kết luận nguyên nhân chỉ từ dòng access log. |
+| Cổng 8000/3000 đang dùng | Dừng đúng Backend/Frontend Dev cũ bằng Ctrl+C, không kill tiến trình chưa xác định. |
+
+Sau khi sửa `.env`, khởi động lại Backend và các worker liên quan để nạp cấu hình mới.

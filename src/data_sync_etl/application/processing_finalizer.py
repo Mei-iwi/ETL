@@ -7,12 +7,14 @@ from data_sync_etl.ports.repositories import UnitOfWork
 
 
 class ProcessingFinalizer:
-    def __init__(self, uow: UnitOfWork, post_process, projector, max_attempts=3, retry_seconds=30):
+    def __init__(self, uow: UnitOfWork, post_process, projector, max_attempts=3, retry_seconds=30,
+                 on_content_ready=None):
         self.uow = uow
         self.postprocess = post_process
         self.projector = projector
         self.max_attempts = max_attempts
         self.retry_seconds = retry_seconds
+        self.on_content_ready = on_content_ready
 
     def finalize(self, job_id: str) -> dict | None:
         with self.uow() as repo:
@@ -156,6 +158,8 @@ class ProcessingFinalizer:
                         retry_request["id"],
                         {"status": "COMPLETED", "finished_at": now()},
                     )
+                if self.on_content_ready is not None:
+                    self.on_content_ready(repo, version_id)
         except Exception:
             with self.uow() as repo:
                 repo.update(

@@ -27,3 +27,20 @@ def test_native_engine_does_not_claim_scanned_ocr_support():
     data = CapabilityService(200, 40, 256, 'native').describe()
     assert data['processing']['scanned_pdf_ocr'] is False
     assert data['processing']['normalized_content'] is True
+
+
+def test_available_local_model_is_not_inferred_or_claimed_verified_by_http():
+    class Unprobed:
+        model_id, dimension = 'local-test-only', 384
+
+        def available(self):
+            return True
+
+        def ready(self):
+            return False
+
+    data = CapabilityService(200, 40, 256, 'native', embedding_runtime=Unprobed()).describe()
+    assert data['representations']['vector']['runtime_status'] == 'NOT_VERIFIED'
+    assert not data['representations']['vector']['enabled']
+    assert data['representations']['vector']['dimensions'] == 384
+    assert data['representations']['representation_unit'] == 'content_bag'

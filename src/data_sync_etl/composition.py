@@ -1,5 +1,8 @@
+from dataclasses import replace
+
 from pymongo import MongoClient
 
+from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
 from data_sync_etl.adapters.extraction import NativeDocumentExtractor
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
 from data_sync_etl.adapters.mongo.foundation_store import (
@@ -26,6 +29,7 @@ from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
 from data_sync_etl.application.get_processing_job import GetProcessingJob
 from data_sync_etl.application.get_resource_detail import GetResourceDetail
+from data_sync_etl.application.indexing import IndexingService
 from data_sync_etl.application.ingestion import ResourceIngestion
 from data_sync_etl.application.list_resource_lookups import ListResourceLookups
 from data_sync_etl.application.list_resource_versions import ListResourceVersions
@@ -181,11 +185,11 @@ class Container:
                 connect=False,
             )
             mongo_database = self.mongo_client[self.settings.mongo_database]
-            # This stage stops at OCR/ContentUnits; do not write Bag/indexing state.
-            self.documents = MongoContentStore(mongo_database, invalidate_content_bags=False)
+            # Invalidation is independent of model inference; snapshot guards remain authoritative.
+            self.documents = MongoContentStore(mongo_database)
             self.metadata_documents = MongoMetadataStore(mongo_database)
             self.content_reader = MongoContentReader(mongo_database)
-            self.content_bags = MongoBagStore(mongo_database, self.settings.vector_dimension)
+            self.content_bags = MongoBagStore(mongo_database, self.settings.index_embedding_dimension)
         else:
             self.documents = documents
 
@@ -237,12 +241,23 @@ class Container:
             self.documents,
         )
 
+        self.indexing = IndexingService(
+            self.uow, self.content_reader if documents is None else None,
+            LocalSentenceEmbedding(self.settings.index_embedding_model_path,
+                                   self.settings.index_embedding_model_id,
+                                   self.settings.index_embedding_model_version,
+                                   self.settings.index_embedding_dimension), self.settings,
+            bags=self.content_bags,
+        )
+        self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
+
         self.processing_finalizer = ProcessingFinalizer(
             self.uow,
             self.postprocess,
             self.mongo_projector,
             max_attempts=self.settings.finalization_max_attempts,
             retry_seconds=self.settings.finalization_retry_seconds,
+            on_content_ready=self.indexing.enqueue_auto,
         )
         self.process_version = ProcessResourceVersion(
             self.uow,
@@ -262,7 +277,14 @@ class Container:
         self.worker = OCRWorker(
             self.ocr,
             on_job_terminal=self.processing_finalizer.finalize,
-            reconcile=self.processing_finalizer.reconcile_once,
+            reconcile=self.reconcile_processing,
             recovery_interval_seconds=self.settings.ocr_recovery_interval_seconds,
         )
+        self._prefer_index_reconcile = False
+
+    def reconcile_processing(self):
+        self._prefer_index_reconcile = not self._prefer_index_reconcile
+        if self._prefer_index_reconcile:
+            return self.indexing.once() or self.processing_finalizer.reconcile_once()
+        return self.processing_finalizer.reconcile_once() or self.indexing.once()
 
