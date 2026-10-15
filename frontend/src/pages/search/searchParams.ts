@@ -1,0 +1,29 @@
+import type { SearchMethod, SearchRequest } from '../../types/search'
+
+export const methods: { value: SearchMethod; label: string; description: string }[] = [
+    { value: 'bow', label: 'BoW', description: 'So khớp tập từ khóa nhị phân của ContentBag.' },
+    { value: 'vector', label: 'Vector', description: 'Độ tương đồng cosine giữa truy vấn và vector ContentBag.' },
+    { value: 'hybrid', label: 'Hybrid', description: 'Kết hợp thứ hạng BoW và Vector bằng RRF (k = 60).' },
+]
+
+export function readSearch(params: URLSearchParams): SearchRequest {
+    const method = params.get('method')
+    const number = (key: string, fallback: number, max: number) => {
+        const value = Number(params.get(key))
+        return Number.isInteger(value) && value >= 1 && value <= max ? value : fallback
+    }
+    return {
+        query: (params.get('q') || '').normalize('NFC').trim(),
+        method: methods.some(item => item.value === method) ? method as SearchMethod : 'hybrid',
+        filters: Object.fromEntries(['subject_id', 'grade_level_id', 'resource_type_code', 'resource_id', 'resource_version_id']
+            .map(key => [key, params.get(key) || null])),
+        page: number('page', 1, 10001), size: 5,
+    }
+}
+
+export function writeSearch(request: SearchRequest) {
+    const params = new URLSearchParams({ q: request.query.normalize('NFC').trim(), method: request.method,
+        page: String(request.page), size: String(request.size) })
+    for (const [key, value] of Object.entries(request.filters)) if (value) params.set(key, value)
+    return params
+}

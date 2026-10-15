@@ -9,6 +9,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
 from data_sync_etl.adapters.persistence.resource_metadata import ResourceMetadataRepositoryMixin
+from data_sync_etl.adapters.persistence.search_reader import SearchRepositoryMixin
 from data_sync_etl.db.models import (
     MODELS,
     ContentUnit,
@@ -49,7 +50,7 @@ def utc(value):
     return value
 
 
-class SQLAlchemyRepository(ResourceMetadataRepositoryMixin):
+class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixin):
     def __init__(self, session):
         self.session = session
 

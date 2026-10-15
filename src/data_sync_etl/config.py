@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     index_max_units: int = Field(default=10000, ge=1, le=50000)
     index_max_source_chars: int = Field(default=10000000, ge=1, le=50000000)
     index_timeout_seconds: int = Field(default=300, ge=1, le=3600)
+    search_max_bags: int = Field(default=2000, ge=1, le=10000)
+    search_timeout_seconds: int = Field(default=15, ge=1, le=120)
+    search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)
+    app_environment: Literal['development', 'test', 'staging', 'production'] | None = None
+    search_internal_dev_enabled: bool = False
+
+    @model_validator(mode='after')
+    def validate_search_grants(self):
+        if self.search_internal_dev_enabled and self.app_environment != 'development':
+            raise ValueError('Local demo Search is restricted to Development')
+        return self
 
     @model_validator(mode="after")
     def validate_chunk_overlap(self):

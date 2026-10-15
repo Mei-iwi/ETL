@@ -291,6 +291,16 @@ class MongoContentReader:
 
 
 class MongoBagStore:
+    def search_candidates(self, version_ids, *, model, limit):
+        """Read at most cap+1, allowing caller to reject an incomplete global ranking."""
+        if not 1 <= limit <= 10001 or len(version_ids) > 10000:
+            raise DomainError('Search candidate bounds exceeded')
+        selector = {'resource_version_id': {'$in': [identifier(v) for v in version_ids]},
+                    'is_current': True, 'embedding_model': model}
+        fields = {field.alias or key: 1 for key, field in ContentBagDocument.model_fields.items()}
+        return [checked(ContentBagDocument, data) for data in
+                self.database.content_bags.find(selector, fields).sort('_id', 1).limit(limit).max_time_ms(5000)]
+
     def __init__(self, database, dimension: int):
         if type(dimension) is not int or not 1 <= dimension <= 4096:
             raise DomainError("Invalid embedding dimension")

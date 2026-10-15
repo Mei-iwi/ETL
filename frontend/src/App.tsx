@@ -3,6 +3,7 @@ import {
   Routes,
   Route,
   Navigate,
+  useLocation,
 } from 'react-router'
 import './App.css'
 
@@ -18,9 +19,7 @@ import { LibraryIndexingPage } from './pages/library/LibraryIndexingPage'
 import { LibraryResourceDetailPage } from './pages/library/LibraryResourceDetailPage'
 import { LibraryVersionHistoryPage } from './pages/library/LibraryVersionHistoryPage'
 
-import { MaterialSearchPage } from './pages/search/MaterialSearchPage'
 import { QueryMethodPage } from './pages/search/QueryMethodPage'
-import { SearchResultpage } from './pages/search/SearchResultPage'
 
 import { EvaluationDataPage } from './pages/experiments/EvaluationDataPage'
 import { EvaluationResultsPage } from './pages/experiments/EvalutionResultsPage'
@@ -64,10 +63,10 @@ export default function App() {
             <Route path=':resourceId/update-version' element={<LibraryUpdateVersion />}/>
           </Route>
           <Route path='search'>
-            <Route index element={<Navigate to='materials' />} />
-            <Route path='materials' element={<MaterialSearchPage />} />
+            <Route index element={<Navigate to='query-methods' replace />} />
+            <Route path='materials' element={<SearchAlias />} />
             <Route path='query-methods' element={<QueryMethodPage />} />
-            <Route path='result' element={<SearchResultpage />} />
+            <Route path='result' element={<SearchAlias />} />
           </Route>
           <Route path='experiments'>
             <Route index element={<Navigate to='evaluation-data' />} />
@@ -87,4 +86,9 @@ export default function App() {
       </Routes >
     </BrowserRouter >
   )
+}
+
+function SearchAlias() {
+  const { search } = useLocation()
+  return <Navigate to={`/search/query-methods${search}`} replace />
 }

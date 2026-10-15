@@ -326,3 +326,48 @@ python -m data_sync_etl.adapters.mongo.schema --inventory
 | Cổng 8000/3000 đang dùng | Dừng đúng Backend/Frontend Dev cũ bằng Ctrl+C, không kill tiến trình chưa xác định. |
 
 Sau khi sửa `.env`, khởi động lại Backend và các worker liên quan để nạp cấu hình mới.
+
+## 9. Tra cứu học liệu
+
+Mở **Tra cứu → Phương pháp truy vấn** (trang mặc định), chọn BoW/Vector/Hybrid, nhập truy vấn và bộ lọc. Khung tìm kiếm cố định; kết quả cuộn riêng, 5 học liệu mỗi trang. Danh sách hiển thị keyword, độ tương đồng Vector, vị trí Chunk và điểm/xếp hạng, không hiển thị văn bản trích xuất. Tiêu chí được giữ trong URL để quay lại kết quả.
+
+- `POST /api/v1/search`: JSON gồm `query`, `method`, `filters`, `page`, `size`. Xem hợp đồng đầy đủ tại Swagger.
+- `GET /api/v1/chunks/{context_id}/context?neighbors=1`: mở **Ngữ cảnh** ở trang chi tiết học liệu đi từ kết quả tìm kiếm; trả đoạn đã chọn và tối đa 2 đoạn liền kề mỗi bên trong cùng ContentUnit. Mã lấy từ Search API, không dùng ID hash của Chunk preview nhóm 3. Nội dung đổi trả `409 CONTEXT_STALE`; quyền truy xuất không còn hoặc token sai trả 404. Token là locator có fingerprint, không phải thông tin xác thực.
+- `GET /api/v1/resource-versions/{id}/file`: xem PDF/ảnh/văn bản; thêm `download=true` để tải tệp, hoặc `view=text` để xem văn bản trích xuất (tối đa 200.000 ký tự). API yêu cầu cùng policy LOCAL_DEMO, phiên bản CONTENT_READY + Index READY và toàn bộ ContentUnit được phép truy xuất. Tệp Office xem bản văn bản hoặc tải về để giữ định dạng; tệp trên 30 MB tải về thay vì xem trực tiếp trên giao diện.
+- BoW: cosine trên tập keyword nhị phân, không phải TF-IDF/BM25. Vector: cosine với vector ContentBag cùng model/revision. Hybrid: RRF với k=60.
+- Chỉ xếp hạng các Bag có overlap BoW > 0 hoặc cosine Vector > 0 trong nhánh tương ứng; nhánh không khớp không được cộng rank. Điểm là của Bag, không phải điểm vector riêng cho Chunk.
+- Mỗi kết quả là một học liệu, lấy Bag khớp tốt nhất. Mặc định dùng version_number lớn nhất trong các lifecycle `INGESTED`, `APPROVED`, `PUBLISHED`, sau đó bắt buộc CONTENT_READY + Index READY; không tự lùi về phiên bản cũ nếu bản mới chưa READY. Filter phiên bản cụ thể được kiểm tra riêng.
+- Public: chặn mặc định vì chưa có hợp đồng quyền công khai đáng tin cậy; PUBLISHED hay APPROVED không tự cấp quyền công khai toàn văn.
+- LOCAL_DEMO: dữ liệu thử nghiệm được phép dùng, PUBLISHED + active + CONTENT_READY + Index READY; chỉ nới mặc định UNREVIEWED + retrieval_eligible=false. Search và Context dùng cùng policy, chặn cả Bag nếu có thành viên bị từ chối; không sửa review flags hoặc lập lại chỉ mục.
+- `SEARCH_MAX_BAGS=2000`, `SEARCH_TIMEOUT_SECONDS=15` là mặc định. Vector/Hybrid có ngân sách nạp model riêng `SEARCH_MODEL_WARMUP_TIMEOUT_SECONDS=60`; Frontend đợi Search tối đa 90 giây, Context 20 giây. Vượt giới hạn phải thu hẹp bộ lọc; không lấy một phần kho rồi nhận là kết quả toàn kho. Không tự chuyển sang BoW khi model lỗi.
+
+### Tra cứu thử nghiệm nội bộ (LOCAL_DEMO)
+
+Tái sử dụng một cờ opt-in, mặc định tắt. Chỉ bật khi người vận hành đã xác nhận **toàn bộ kho thử nghiệm** được phép khai thác, trên máy Development cô lập (không Production, LAN hoặc proxy công khai):
+
+```dotenv
+APP_ENVIRONMENT=development
+ADMIN_ENABLED=true
+SEARCH_INTERNAL_DEV_ENABLED=true
+```
+
+Chạy `python -m uvicorn data_sync_etl.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers`, rồi mở giao diện local. API kiểm tra launch arguments, peer, server, Host/Origin và từ chối forwarded headers; launcher không xác minh được trả 403. Không bật demo trong container/proxy không kiểm soát. Không cần Basic credentials hoặc allowlist ID; các biến SEARCH_DEV_* và SEARCH_INTERNAL_DEV_RESOURCE_IDS cũ không còn cấp quyền. Không ghi credentials vào Frontend. Khi tắt cờ, Search trả rỗng với thông báo chưa đủ quyền công khai; Context trả 404. REJECTED, hạn chế, source-missing, inactive, chưa phát hành/chưa READY vẫn bị chặn.
+
+Sau này có thể nối Principal/role từ hệ thống đăng nhập hoặc Identity Provider vào policy `SearchAccess.allows` tại rìa API, giữ nguyên các endpoint hiện có. LOCAL_DEMO không phải đăng nhập; quyền công khai thật cần quyết định nghiệp vụ riêng, không suy ra từ PUBLISHED.
+
+Kiểm thử Search cô lập, không dùng database Dev:
+
+```bash
+python -m pytest tests/unit/test_search.py tests/unit/test_search_context.py tests/unit/test_search_access.py tests/unit/test_resource_file.py tests/integration/test_search_integration.py -q
+npm.cmd --prefix frontend run build
+node --experimental-strip-types --test frontend/tests/searchApi.test.mjs
+node --test frontend/tests/searchUi.test.mjs
+```
+
+Test browser dùng Edge headless và HTTP fixture cục bộ. Integration test dùng SQLAlchemy/SQLite cùng Mongo/model doubles đúng contract; không thay thế nghiệm thu model thật và database thực tế.
+
+Nếu đã cài model mục 4, có thể chạy thêm model thật với database SQLite tạm và Mongo double, không ghi vào Dev:
+
+```bash
+ETL_SEARCH_REAL_MODEL=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest tests/integration/test_search_integration.py -q
+```
