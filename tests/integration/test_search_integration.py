@@ -20,7 +20,7 @@ def test_search_384_dimension_end_to_end(searchable):
     assert c.indexing.once()
     assert c.indexing.status(version['id'])['index_status'] == 'READY'
     before = deepcopy(c.documents.units), deepcopy(c.indexing.bags.rows)
-    with TestClient(create_app(c)) as api:
+    with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
         for method in ('bow', 'vector', 'hybrid'):
             response = api.post('/api/v1/search', json={'query': 'page text', 'method': method})
             assert response.status_code == 200, response.text
@@ -52,7 +52,7 @@ def test_real_local_model_search_and_context(searchable):
     assert c.indexing.once()
     assert c.indexing.status(version['id'])['index_status'] == 'READY'
     assert len(c.indexing.embedding.embed('Học liệu tiếng Việt về phép tính và phân số.')) == 384
-    with TestClient(create_app(c)) as api:
+    with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
         for method in ('bow', 'vector', 'hybrid'):
             response = api.post('/api/v1/search', json={'query': 'page text', 'method': method})
             assert response.status_code == 200, response.text

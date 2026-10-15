@@ -78,7 +78,8 @@ class SearchResponse(StrictDTO):
     ranking_algorithm: str
     representation_unit: Literal['content_bag']
     ready_bag_count: int
-    message: Literal['OK', 'NO_READY_INDEX', 'QUERY_NO_KEYWORDS']
+    message: Literal['OK', 'NO_READY_INDEX', 'NO_ACCESSIBLE_CONTENT', 'QUERY_NO_KEYWORDS', 'PUBLIC_ACCESS_UNCONFIRMED']
+    access_scope: Literal['public', 'local_demo'] = 'public'
 
 
 class ContextChunk(StrictDTO):
@@ -100,6 +101,7 @@ class Heading(StrictDTO):
 
 
 class ContextResponse(StrictDTO):
+    access_scope: Literal['public', 'local_demo'] = 'public'
     resource_id: str
     resource_title: str
     resource_version_id: str
@@ -125,12 +127,14 @@ class SearchErrorResponse(StrictDTO):
     detail: SearchErrorDetail
 
 
-SEARCH_ERROR_RESPONSES = {status: {'model': SearchErrorResponse} for status in (404, 409, 422, 503)}
+SEARCH_ERROR_RESPONSES = {status: {'model': SearchErrorResponse} for status in (401, 403, 404, 409, 422, 503)}
 
 
 MESSAGES = {
+    'SEARCH_ACCESS_RESTRICTED': 'Truy cập tìm kiếm nội bộ bị hạn chế.',
     'SEARCH_LIMIT_EXCEEDED': 'Kho dữ liệu vượt giới hạn tìm kiếm. Hãy thu hẹp bộ lọc.',
     'SEARCH_TIMEOUT': 'Tìm kiếm quá thời gian. Hãy thu hẹp bộ lọc.',
+    'SEARCH_MODEL_WARMUP_TIMEOUT': 'Nạp model quá thời gian. Vui lòng thử lại.',
     'SEARCH_INDEX_STALE': 'Chỉ mục vừa thay đổi. Vui lòng tìm lại.',
     'BLOCKED_EMBEDDING_RUNTIME': 'Model embedding chưa sẵn sàng. Có thể chọn BoW.',
     'INVALID_EMBEDDING': 'Vector hoặc số chiều model không hợp lệ.',

@@ -23,7 +23,7 @@ def test_context_matches_search_snippet_and_is_read_only(searchable):
     before = deepcopy(c.documents.units), deepcopy(c.indexing.bags.rows)
     with c.uow() as repo:
         runs = repo.find('etl_stage_runs', {})
-    with TestClient(create_app(c)) as api:
+    with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
         response = api.get(result['context_url'])
         assert response.status_code == 200, response.text
         data = response.json()
@@ -80,7 +80,7 @@ def test_stale_and_revoked_context(searchable, change):
                 repo.update('master_learning_resources', version['resource_id'], {'publication_status': 'DRAFT'})
             else:
                 repo.update('content_units', unit_id, {'retrieval_eligible': False})
-    with TestClient(create_app(c)) as api:
+    with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
         response = api.get(f'/api/v1/chunks/{token}/context')
         assert response.status_code == (409 if change == 'fingerprint' else 404)
         assert item['snippet'] not in response.text
@@ -92,7 +92,7 @@ def test_changed_current_text_returns_stale_not_old_content(searchable):
     with c.uow() as repo:
         repo.update('content_unit_texts', item['content_unit_id'], {'text': 'New current content'})
     c.documents.units[item['content_unit_id']]['text'] = 'New current content'
-    with TestClient(create_app(c)) as api:
+    with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
         response = api.get(item['context_url'])
         assert response.status_code == 409
         assert response.json()['detail']['code'] == 'CONTEXT_STALE'

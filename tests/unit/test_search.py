@@ -1,5 +1,6 @@
 import math
 from copy import deepcopy
+from functools import partial
 
 import pytest
 from conftest import completed
@@ -8,13 +9,21 @@ from fastapi.testclient import TestClient
 from data_sync_etl.application.search import SearchService
 from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.domain.search import binary_score, cosine, normalize_query, ranks, rrf
+from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.domain.search_context import decode_context, encode_context
 from data_sync_etl.main import create_app
 from tests.indexing_support import setup_index, structured_projection
 
 
 @pytest.fixture
-def searchable(container, request):
+def searchable(container, request, monkeypatch):
+    # Isolated fixtures attest a verified loopback Uvicorn launch; real runtime
+    # acceptance checks the actual process separately.
+    monkeypatch.setattr('sys.argv', ['uvicorn/__main__.py', 'app', '--host', '127.0.0.1', '--no-proxy-headers'])
+    monkeypatch.setattr('data_sync_etl.api.search_access.container_runtime', lambda: False)
+    container.settings.app_environment = 'development'
+    container.settings.search_internal_dev_enabled = True
+    container.settings.admin_enabled = True
     index = setup_index(container)
     options = getattr(request, 'param', False)
     options = options if isinstance(options, dict) else {'structured': options}
@@ -32,7 +41,15 @@ def searchable(container, request):
             if options.get('mixed'):
                 repo.update('content_units', units[0]['id'], {'parent_unit_id': None})
             for unit in units:
-                repo.update('content_units', unit['id'], {'retrieval_eligible': True})
+                repo.update('content_units', unit['id'], {
+                    'retrieval_eligible': not options.get('unreviewed', False),
+                    'review_status': options.get('review_status', 'UNREVIEWED' if options.get('unreviewed') else 'APPROVED')})
+            if options.get('rejected_leaf'):
+                repo.update('content_units', units[0]['id'], {'review_status': 'REJECTED'})
+            if options.get('restricted_parent'):
+                for unit in units:
+                    if unit['parent_unit_id'] is None:
+                        repo.update('content_units', unit['id'], {'retrieval_eligible': False})
         return result
 
     container.postprocess.run_locked = reviewed
@@ -43,6 +60,8 @@ def searchable(container, request):
         deepcopy(bag) for bag in sorted(index.bags.rows.values(), key=lambda bag: bag.id)
         if bag.resource_version_id in ids and bag.embedding_model == model and bag.is_current][:limit]
     container.search = SearchService(index, container.settings, index.bags)
+    container.search.search = partial(container.search.search, access=SearchAccess('local_demo'))
+    container.search.context = partial(container.search.context, access=SearchAccess('local_demo'))
     return container, version
 
 
@@ -77,7 +96,7 @@ def test_context_locator_round_trip():
 ])
 def test_api_validation(searchable, body):
     c, _ = searchable
-    with TestClient(create_app(c)) as api:
+    with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
         response = api.post('/api/v1/search', json=body)
         assert response.status_code == 422
         assert response.json()['detail']['code'] == 'REQUEST_VALIDATION_ERROR'
@@ -93,7 +112,7 @@ def test_api_ranking_grouping_filters_and_read_only(searchable, method):
         subjects = repo.find('resource_subjects', {'resource_id': version['resource_id']})
         grades = repo.find('resource_grade_levels', {'resource_id': version['resource_id']})
         resource = repo.get('master_learning_resources', version['resource_id'])
-    with TestClient(create_app(c)) as api:
+    with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
         payload = {'query': 'page text', 'method': method}
         result = api.post('/api/v1/search', json=payload)
         assert result.status_code == 200, result.text
@@ -141,7 +160,7 @@ def test_no_keywords_no_match_model_error_and_cap(searchable):
     assert c.search.search('và của', 'bow')['message'] == 'QUERY_NO_KEYWORDS'
     assert c.search.search('missingword', 'bow')['total'] == 0
     c.indexing.embedding.embed = lambda _: (_ for _ in ()).throw(IndexingError('BLOCKED_EMBEDDING_RUNTIME', 503))
-    with TestClient(create_app(c)) as api:
+    with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
         assert api.post('/api/v1/search', json={'query': 'page', 'method': 'vector'}).status_code == 503
         assert api.post('/api/v1/search', json={'query': 'page', 'method': 'bow'}).status_code == 200
         c.settings.search_max_bags = 1
@@ -181,7 +200,7 @@ def test_timeout_and_adapter_failure_are_safe(searchable):
     c, _ = searchable
     from data_sync_etl.domain.search import SearchError
     c.search._deadline = lambda started: (_ for _ in ()).throw(SearchError('SEARCH_TIMEOUT'))
-    with TestClient(create_app(c)) as api:
+    with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
         response = api.post('/api/v1/search', json={'query': 'page', 'method': 'bow'})
         assert response.status_code == 503 and response.json()['detail']['code'] == 'SEARCH_TIMEOUT'
         c.indexing.bags.ensure_ready = lambda: (_ for _ in ()).throw(RuntimeError('mongodb://secret'))
@@ -218,3 +237,30 @@ def test_mongo_selector_is_bounded_and_read_only():
     cursor.max_time_ms.assert_called_once_with(5000)
     database.content_bags.update_one.assert_not_called()
     database.create_collection.assert_not_called()
+
+
+@pytest.mark.parametrize('warmup,query_time,code', [
+    (20, 0, None), (61, 0, 'SEARCH_MODEL_WARMUP_TIMEOUT'), (20, 16, 'SEARCH_TIMEOUT'),
+])
+def test_cold_model_has_separate_bounded_budget(searchable, monkeypatch, warmup, query_time, code):
+    from importlib import import_module
+
+    from data_sync_etl.domain.search import SearchError
+
+    c, _ = searchable
+    clock = [0.0]
+    monkeypatch.setattr(import_module('data_sync_etl.application.search'), 'monotonic', lambda: clock[0])
+    def prepare():
+        clock[0] += warmup
+    original = c.indexing.embedding.embed
+    def embed(text):
+        clock[0] += query_time
+        return original(text)
+    c.indexing.embedding.prepare = prepare
+    c.indexing.embedding.embed = embed
+    if code:
+        with pytest.raises(SearchError) as error:
+            c.search.search('page', 'hybrid')
+        assert error.value.code == code
+    else:
+        assert c.search.search('page', 'hybrid')['total'] == 1

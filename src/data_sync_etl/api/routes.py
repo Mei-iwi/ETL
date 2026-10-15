@@ -1,8 +1,20 @@
 from ipaddress import ip_address
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.responses import FileResponse, PlainTextResponse
 
 from data_sync_etl.api.indexing_schemas import (
     ERROR_RESPONSES,
@@ -38,6 +50,7 @@ from data_sync_etl.api.resource_metadata_schemas import (
 )
 from data_sync_etl.api.resource_schemas import ResouceListResponse, ResourceDetailResponse
 from data_sync_etl.api.resource_version_schemas import CreateResourceVersionResponse
+from data_sync_etl.api.search_access import search_access
 from data_sync_etl.api.search_schemas import (
     SEARCH_ERROR_RESPONSES,
     ContextResponse,
@@ -138,7 +151,9 @@ def health(request: Request):
              summary='Tra cứu học liệu theo BoW, Vector hoặc Hybrid')
 def search_materials(body: SearchRequest, request: Request):
     try:
-        return request.app.state.container.search.search(**body.model_dump())
+        return request.app.state.container.search.search(**body.model_dump(), access=search_access(request))
+    except HTTPException:
+        raise
     except Exception as exc:
         raise search_error(exc) from None
 
@@ -149,9 +164,42 @@ def search_materials(body: SearchRequest, request: Request):
 def chunk_context(context_id: Annotated[str, Path(min_length=1, max_length=256)], request: Request,
                   neighbors: Annotated[int, Query(ge=0, le=2)] = 1):
     try:
-        return request.app.state.container.search.context(context_id, neighbors)
+        return request.app.state.container.search.context(context_id, neighbors, access=search_access(request))
+    except HTTPException:
+        raise
     except Exception as exc:
         raise search_error(exc) from None
+
+@router.get('/api/v1/resource-versions/{id}/file', tags=[TAG_MASTER],
+            summary='Xem hoặc tải tệp học liệu được phép truy xuất')
+def resource_file(id: ResourceId, request: Request, download: bool = False, view: Literal['file', 'text'] = 'file'):
+    container = request.app.state.container
+    try:
+        version = container.search.file_version(id, access=search_access(request), include_text=view == 'text')
+    except Exception as exc:
+        raise search_error(exc) from None
+    if view == 'text':
+        return PlainTextResponse(version['preview_text'],
+                                 headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
+    suffix = PurePosixPath(version['storage_object_key']).suffix.lower()
+    media_types = {'.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                   '.txt': 'text/plain', '.csv': 'text/plain',
+                   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'}
+    if suffix not in media_types:
+        raise HTTPException(415, 'Không hỗ trợ xem định dạng tệp này.')
+    bucket, key = version['storage_bucket'], version['storage_object_key']
+    try:
+        if not container.storage.exists(bucket, key):
+            raise DomainError('File unavailable')
+        path = container.storage.get_local_path(bucket, key)
+    except (DomainError, OSError):
+        raise HTTPException(404, 'Tệp chưa sẵn sàng hoặc không còn tồn tại.') from None
+    return FileResponse(path, media_type=media_types[suffix], filename=f'hoc-lieu-{id}{suffix}',
+                        content_disposition_type='attachment' if download else 'inline',
+                        headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
+
 
 @router.get(
         '/api/v1/system/capabilities',

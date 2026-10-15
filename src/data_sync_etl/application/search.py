@@ -5,6 +5,7 @@ from time import monotonic
 from data_sync_etl.application.content_bags import bag_structure, representation_mode
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
 from data_sync_etl.domain.search import SearchError, binary_score, cosine, normalize_query, rrf
+from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.domain.search_context import decode_context, encode_context
 from data_sync_etl.ports.search import SearchBagReader
 
@@ -30,33 +31,73 @@ class SearchService:
         except IndexingError:
             return None
 
-    def _snippets(self, snapshot, keywords, started):
+    def _allowed_units(self, repo, snapshot, access):
+        resource = repo.get('master_learning_resources', snapshot[0]['resource_id'])
+        nodes = {unit['id']: unit for unit in snapshot[2]}
+        allowed = set()
+        for unit in snapshot[2]:
+            if not access.allows(resource or {}, snapshot[0], unit):
+                continue
+            ancestor = unit
+            while ancestor is not None and access.allows(resource, snapshot[0], ancestor):
+                ancestor = nodes.get(ancestor['parent_unit_id'])
+            if ancestor is None:
+                allowed.add(unit['id'])
+        return allowed
+
+    @staticmethod
+    def _metadata(repo, filters, access, limit):
+        if access.scope != 'local_demo':
+            return []  # No existing contract can prove public full-text rights.
+        return repo.search_versions(filters, limit=limit)
+
+    def _snippets(self, snapshot, keywords, started, allowed):
         roots = bag_structure(snapshot[2])
+        # Bag scores include ALL member keywords/vectors. Never expose a Bag that
+        # embeds denied descendants, even when another leaf could supply a snippet.
+        roots = {root: leaves for root, leaves in roots.items() if set(leaves) <= allowed}
         leaf_root = {leaf: root for root, leaves in roots.items() for leaf in leaves}
         best = {}
         for chunk in self.indexing._preview(snapshot):
             self._deadline(started)
             root = leaf_root.get(chunk['content_unit_id'])
-            if root is None or not chunk['retrieval_eligible'] or len(chunk['text']) > 20000:
+            if root is None or chunk['content_unit_id'] not in allowed or len(chunk['text']) > 20000:
                 continue
             score, _ = binary_score(keywords, self.indexing.extractor.extract(chunk['text']))
             if root not in best or score > best[root][0]:
                 best[root] = (score, chunk)
         return roots, best
 
-    def search(self, query, method='hybrid', filters=None, page=1, size=10):
+    def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None):
+        access = access or SearchAccess()
         started, filters = monotonic(), filters or {}
         query = normalize_query(query)
+        if access.scope != 'local_demo':
+            return {'query': query, 'method': method, 'page': page, 'size': size,
+                    'total': 0, 'total_pages': 0, 'items': [], 'ready_bag_count': 0,
+                    'representation_unit': 'content_bag', 'access_scope': 'public',
+                    'ranking_algorithm': {'bow': 'binary-keyword-cosine-v1',
+                                          'vector': 'bag-cosine-v1', 'hybrid': 'rrf-v1'}[method],
+                    'message': 'PUBLIC_ACCESS_UNCONFIRMED'}
         keywords = self.indexing.extractor.extract(query)
         if self.bags is None:
             raise SearchError('SEARCH_SCHEMA_UNAVAILABLE')
         self.bags.ensure_ready()
         vector = None
         if method in ('vector', 'hybrid'):
+            # Loading a local model is distinct from executing a bounded query.
+            # Preserve the query deadline (including prior schema work), but do not
+            # spend it on first-use imports/weights. Both phases remain bounded.
+            warmup_started = monotonic()
+            self.indexing.embedding.prepare()
+            warmup_seconds = monotonic() - warmup_started
+            if warmup_seconds > self.settings.search_model_warmup_timeout_seconds:
+                raise SearchError('SEARCH_MODEL_WARMUP_TIMEOUT')
+            started += warmup_seconds
             vector = validate_vector(self.indexing.embedding.embed(query), self.settings.index_embedding_dimension)
             self._deadline(started)
         with self.indexing.uow() as repo:
-            metadata = repo.search_versions(filters, limit=self.settings.search_max_bags + 1)
+            metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
         if len(metadata) > self.settings.search_max_bags:
             raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
         by_version = {row['version_id']: row for row in metadata}
@@ -70,13 +111,14 @@ class SearchService:
             self._deadline(started)
             with self.indexing.uow() as repo:
                 snapshot = self._ready_snapshot(repo, version_id)
+                allowed = self._allowed_units(repo, snapshot, access) if snapshot else set()
             if snapshot is None:
                 continue
             source_chars += sum(len(unit['text']) for unit in snapshot[2])
             if source_chars > self.settings.index_max_source_chars:
                 raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
             snapshots[version_id] = snapshot
-            roots, snippets = self._snippets(snapshot, keywords, started)
+            roots, snippets = self._snippets(snapshot, keywords, started, allowed)
             for bag in (bag for bag in candidates if bag.resource_version_id == version_id):
                 self._deadline(started)
                 # Candidate may have been fetched before a concurrent invalidation.
@@ -122,12 +164,16 @@ class SearchService:
         # Recheck metadata and snapshots after ranking; never publish a known stale vector.
         if grouped:
             with self.indexing.uow() as repo:
-                fresh_ids = {row['version_id'] for row in repo.search_versions(filters,
-                    limit=self.settings.search_max_bags + 1)}
+                fresh_ids = {row['version_id'] for row in self._metadata(repo, filters, access,
+                    self.settings.search_max_bags + 1)}
                 for version_id in {item['resource_version_id'] for item in grouped.values()}:
                     fresh = self._ready_snapshot(repo, version_id)
                     if version_id not in fresh_ids or fresh is None or fresh[3] != snapshots[version_id][3]:
                         raise SearchError('SEARCH_INDEX_STALE', 409)
+                    allowed = self._allowed_units(repo, fresh, access)
+                    if any(not set(bag_structure(fresh[2])[item['bag_id']]) <= allowed
+                           for item in grouped.values() if item['resource_version_id'] == version_id):
+                        raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
         self._deadline(started)
         items = sorted(grouped.values(), key=lambda item: (-item['score'], item['resource_id']))
         for item in items:
@@ -137,19 +183,40 @@ class SearchService:
                 'total_pages': (total + size - 1) // size, 'items': items[offset:offset+size],
                 'ranking_algorithm': {'bow': 'binary-keyword-cosine-v1', 'vector': 'bag-cosine-v1',
                                       'hybrid': 'rrf-v1'}[method],
-                'representation_unit': 'content_bag', 'ready_bag_count': ready_count,
+                'representation_unit': 'content_bag', 'ready_bag_count': ready_count, 'access_scope': access.scope,
                 'message': 'QUERY_NO_KEYWORDS' if not keywords and method == 'bow' else
-                           'NO_READY_INDEX' if not ready_count else 'OK'}
+                           'NO_READY_INDEX' if metadata and not snapshots else
+                           'NO_ACCESSIBLE_CONTENT' if not ready_count else 'OK'}
 
-    def context(self, token, neighbors=1):
+    def file_version(self, version_id, *, access=None, include_text=False):
+        """A whole file requires permission for every unit, including parents."""
+        access = access or SearchAccess()
+        if access.scope != 'local_demo':
+            raise SearchError('CONTEXT_NOT_FOUND', 404)
+        with self.indexing.uow() as repo:
+            snapshot = self._ready_snapshot(repo, version_id)
+            if snapshot is None or not snapshot[2]:
+                raise SearchError('CONTEXT_NOT_FOUND', 404)
+            if not {unit['id'] for unit in snapshot[2]} <= self._allowed_units(repo, snapshot, access):
+                raise SearchError('CONTEXT_NOT_FOUND', 404)
+            result = dict(snapshot[0])  # Storage coordinates never become a JSON response.
+            if include_text:
+                content = '\n\n'.join(unit['text'] for unit in snapshot[2] if unit['text'])
+                result['preview_text'] = content[:200000] + ('\n… Tải tệp để xem toàn bộ.' if len(content) > 200000 else '')
+            return result
+
+    def context(self, token, neighbors=1, *, access=None):
+        access = access or SearchAccess()
         started = monotonic()
         version_id, unit_id, ordinal, fingerprint = decode_context(token)
+        if access.scope != 'local_demo':
+            raise SearchError('CONTEXT_NOT_FOUND', 404)
         if self.bags is None:
             raise SearchError('SEARCH_SCHEMA_UNAVAILABLE')
         self.bags.ensure_ready()
         filters = {'resource_version_id': version_id}
         with self.indexing.uow() as repo:
-            rows = repo.search_versions(filters, limit=1)
+            rows = self._metadata(repo, filters, access, 1)
             if not rows:
                 raise SearchError('CONTEXT_NOT_FOUND', 404)
             try:
@@ -160,7 +227,8 @@ class SearchService:
             unit = nodes.get(unit_id)
             roots = bag_structure(snapshot[2])
             root = next((key for key, leaves in roots.items() if unit_id in leaves), None)
-            if unit is None or not unit['retrieval_eligible'] or root is None:
+            allowed = self._allowed_units(repo, snapshot, access)
+            if unit is None or root is None or not set(roots[root]) <= allowed:
                 raise SearchError('CONTEXT_NOT_FOUND', 404)
             if snapshot[3][:32] != fingerprint:
                 raise SearchError('CONTEXT_STALE', 409)
@@ -189,11 +257,14 @@ class SearchService:
             current = nodes.get(current['parent_unit_id'])
         with self.indexing.uow() as repo:
             fresh = self._ready_snapshot(repo, version_id)
-            if not repo.search_versions(filters, limit=1):
+            if not self._metadata(repo, filters, access, 1):
                 raise SearchError('CONTEXT_NOT_FOUND', 404)
             if fresh is None or fresh[3] != snapshot[3]:
                 raise SearchError('CONTEXT_STALE', 409)
+            if not set(roots[root]) <= self._allowed_units(repo, fresh, access):
+                raise SearchError('CONTEXT_NOT_FOUND', 404)
         self._deadline(started)
         return {**{key: value for key, value in rows[0].items() if key != 'version_id'},
                 'resource_version_id': version_id, 'context_id': token, 'content_unit_id': unit_id,
-                'bag_id': root, 'heading_path': list(reversed(path)), 'neighbors': neighbors, 'chunks': chunks}
+                'bag_id': root, 'heading_path': list(reversed(path)), 'neighbors': neighbors,
+                'chunks': chunks, 'access_scope': access.scope}
