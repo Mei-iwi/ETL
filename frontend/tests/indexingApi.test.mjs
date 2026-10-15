@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { startIndex, getChunks, IndexingApiError } from '../src/services/indexingApi.ts'
+import { startIndex, getChunks, getIndexStatus, reindex, IndexingApiError } from '../src/services/indexingApi.ts'
 
 test('start index is explicit POST with encoded version and abort signal', async () => {
     const old = globalThis.fetch
@@ -38,5 +38,20 @@ test('chunks pagination and unit filter use GET with encoded parameters', async 
             return Response.json({ items: [], total: 0 })
         }
         assert.equal((await getChunks('v/1', 10, undefined, 'u/1')).total, 0)
+    } finally { globalThis.fetch = old }
+})
+
+test('status is read-only and reindex only sends an explicit POST', async () => {
+    const old = globalThis.fetch
+    const calls = []
+    try {
+        globalThis.fetch = async (path, init) => {
+            calls.push([path, init.method])
+            return Response.json({ index_status: 'PENDING' })
+        }
+        await getIndexStatus('v/1')
+        await reindex('v/1')
+        assert.deepEqual(calls, [['/api/v1/resource-versions/v%2F1/index-status', 'GET'],
+            ['/api/v1/resource-versions/v%2F1/reindex', 'POST']])
     } finally { globalThis.fetch = old }
 })

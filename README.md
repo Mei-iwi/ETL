@@ -22,11 +22,14 @@ không đồng bộ nguồn hay chạy OCR ngầm khi bấm lập chỉ mục.
 Model là tùy chọn: `python -m pip install -e '.[embeddings]'` khi người vận hành
 đồng ý cài runtime. Provision model sentence-transformers đa ngôn ngữ vào thư mục
 local trước; tạo `etl-model-revision.txt` bên trong, chứa revision đã provision.
+Thư mục phải có `modules.json` và trọng số `.safetensors` của model đầy đủ.
 Cấu hình `INDEX_EMBEDDING_MODEL_PATH`, `INDEX_EMBEDDING_MODEL_ID`,
 `INDEX_EMBEDDING_MODEL_VERSION` (khớp file revision), `INDEX_EMBEDDING_DIMENSION`
 (đúng model). Không dùng `VECTOR_DIMENSION=256` của content_bags để ép chiều model.
 Runtime chỉ đọc model local, không tự download lúc startup/worker. Model thiếu,
 không đọc được hoặc sai chiều sẽ bị chặn; không có vector giả thay thế.
+API Capabilities kiểm tra model local khi được gọi (lần đầu có thể chậm do load
+model), cache runtime đã kiểm tra trong process; không load model lúc khởi động app.
 
 Mongo installer bổ sung duy nhất collection `indexed_chunks`, hai index theo
 version/run/sequence và version/run/unit; giữ nguyên 5 collection cũ.
@@ -56,6 +59,44 @@ mạng tối đa 3 lần, timeout mỗi request 15 giây; không tự POST khi m
 Enqueue và projection COMPLETED cùng transaction PostgreSQL. Model/schema thiếu
 được ghi nhận FAILED/BLOCKED_RUNTIME, không queue/retry vô hạn. Không backfill các
 phiên bản đã CONTENT_READY trước khi bật cờ; metadata sync không tạo index job.
+
+`POST /api/v1/resource-versions/{id}/reindex` tạo run mới theo cấu hình hiện tại,
+không chạy lại OCR hoặc xóa lịch sử. Trên giao diện, nút Tái lập chỉ mục có hộp
+xác nhận/hủy. Không gửi tham số model/chunk từ client; thay cấu hình vận hành đã
+duyệt rồi gọi API. Nếu run mới thất bại, run cũ chỉ được xem khi fingerprint vẫn
+đúng; không gắn nhãn READY cho nội dung/cấu hình mới chưa index thành công.
+
+Ba worker vẫn là các lệnh hiện có (mỗi lệnh ở một terminal):
+
+```bash
+etl run-master-sync-worker --worker-id master-1
+etl run-source-file-worker --worker-id file-1
+etl run-ocr-worker --worker-id ocr-1
+```
+
+Không cần worker lập chỉ mục riêng. Dùng `--once` khi muốn xử lý một lượt có giới
+hạn. Giới hạn mặc định: 10.000 units, 10.000 chunks, 10 triệu ký tự nguồn và deadline
+300 giây kiểm tra giữa các lượt encode. Một lần encode native đang chạy không bị
+kill cưỡng bức; không publish nếu vượt deadline. Giới hạn vượt phải báo lỗi, không
+cắt tài liệu rồi báo thành công. Muốn thay nội dung model local phải provision
+revision mới và đổi `INDEX_EMBEDDING_MODEL_VERSION` trước khi reindex.
+
+Kiểm thử riêng nhóm lập chỉ mục:
+
+```bash
+python -m pytest tests/unit/test_indexing.py -q
+cd frontend
+npm.cmd run build
+node --experimental-strip-types --test tests/indexingApi.test.mjs
+node --test tests/indexingUi.test.mjs
+```
+
+Test UI dùng bản build React với HTTP fixture local và Edge headless (có thể đặt
+`ETL_TEST_BROWSER` tới executable tương thích Chromium), không gọi API/DB thật.
+`tests/integration/test_indexing_integration.py` cần PostgreSQL/MongoDB test cô lập;
+test luồng nguồn nằm trong `tests/integration/source_postgres/test_file_import_flow.py`.
+Embedding trong các test là test double, không phải bằng chứng chất lượng model
+ngữ nghĩa thật. Chỉ nghiệm thu runtime ngữ nghĩa sau khi provision/cài model local.
 
 ## 1. Cài đặt
 

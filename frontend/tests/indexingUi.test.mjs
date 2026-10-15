@@ -20,21 +20,31 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
     let postCount = 0
     let blocked = false
     let statusReads = 0
+    let activeRun = null
+    let pendingReads = 0
+    let reindexCount = 0
+    let blockStatus = false
     const server = createServer(async (req, res) => {
         const path = new URL(req.url, 'http://localhost').pathname
         function json(body, status = 200) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
         if (path === '/health') return json({ status: 'ok', database: 'ok' })
         if (path === '/api/v1/resources') return json({ items: [{ id: 'resource-test', title: 'Học liệu kiểm thử' }], pagination: { total: 1 } })
-        if (path === '/api/v1/resources/resource-test/versions') return json([{ id: 'version-test', resource_id: 'resource-test', version_number: 1 }])
+        if (path === '/api/v1/resources/resource-test/versions') return json([
+            { id: 'version-test', resource_id: 'resource-test', version_number: 1 },
+            { id: 'version-two', resource_id: 'resource-test', version_number: 2 },
+        ])
         if (path.endsWith('/index-status')) {
             statusReads++
-            return json({ resource_version_id: 'version-test', processing_status: 'CONTENT_READY',
-                index_status: postCount === 1 && !blocked ? 'PENDING' : 'NOT_STARTED', auto_enabled: false,
-                latest_run_id: postCount === 1 ? 'run-test' : null, published_run_id: null, chunk_count: 0,
+            const second = path.includes('version-two')
+            const state = blockStatus ? 'BLOCKED_RUNTIME' : !second && activeRun ? (++pendingReads < 2 ? 'PENDING' : 'READY') : 'NOT_STARTED'
+            return json({ resource_version_id: second ? 'version-two' : 'version-test', processing_status: 'CONTENT_READY',
+                index_status: state, auto_enabled: false,
+                latest_run_id: second ? null : activeRun, published_run_id: state === 'READY' ? activeRun : null, chunk_count: 0,
                 bow_ready: false, vector_ready: false, embedding_model: 'ui-test-only', embedding_dimension: 3,
-                message: postCount === 1 && !blocked ? 'Chờ lập chỉ mục.' : 'Chưa lập chỉ mục.' })
+                message: state === 'BLOCKED_RUNTIME' ? 'Không thể tạo vector vì chưa cấu hình model.' : state === 'PENDING' ? 'Chờ lập chỉ mục.' : state === 'READY' ? 'Hoàn thành lập chỉ mục.' : 'Chưa lập chỉ mục.' })
         }
         if (path.endsWith('/chunks')) {
+            if (path.includes('version-two')) return json({ items: [], total: 0, index_run_id: null, index_status: 'NOT_STARTED', offset: 0, limit: 10 })
             const offset = Number(new URL(req.url, 'http://localhost').searchParams.get('offset'))
             return json({ resource_version_id: 'version-test', index_run_id: 'old-run', index_status: 'READY', total: 11, offset, limit: 10,
                 items: Array.from({ length: offset === 0 ? 10 : 1 }, (_, i) => ({ id: `chunk-${offset + i + 1}`, content_unit_id: 'unit-test',
@@ -44,8 +54,15 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         }
         if (path.endsWith('/index') && req.method === 'POST') {
             postCount++
+            if (!blocked) { activeRun = 'run-test'; pendingReads = 0 }
             return blocked ? json({ detail: { code: 'BLOCKED_EMBEDDING_RUNTIME', message: 'Chưa có model local.' } }, 503)
                 : json({ resource_version_id: 'version-test', index_run_id: 'run-test', index_status: 'PENDING', action: 'QUEUED' }, 202)
+        }
+        if (path.endsWith('/reindex') && req.method === 'POST') {
+            reindexCount++
+            activeRun = 'rebuild-test'
+            pendingReads = 0
+            return json({ resource_version_id: 'version-test', index_run_id: activeRun, index_status: 'PENDING', action: 'QUEUED' }, 202)
         }
         if (path.startsWith('/api/')) return json({ detail: 'fixture not found' }, 404)
         const target = path.startsWith('/assets/') ? resolve(root, 'dist', '.' + path) : join(root, 'dist/index.html')
@@ -89,7 +106,11 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         ws.addEventListener('message', event => {
             const data = JSON.parse(event.data)
             const request = pending.get(data.id)
-            if (request) { pending.delete(data.id); data.error ? request.reject(new Error(data.error.message)) : request.resolve(data.result) }
+            if (request) {
+                pending.delete(data.id)
+                if (data.error) request.reject(new Error(data.error.message))
+                else request.resolve(data.result)
+            }
         })
         await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }))
         await call('Page.enable')
@@ -111,12 +132,34 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         await waitFor(() => evaluate("document.body.textContent.includes('Chờ lập chỉ mục.')"))
         const readCount = statusReads
         await waitFor(async () => { await delay(200); return statusReads > readCount })
+        await waitFor(() => evaluate("document.body.textContent.includes('Hoàn thành lập chỉ mục.')"))
+        const terminalReads = statusReads
+        await delay(4300)
+        assert.equal(statusReads, terminalReads, 'polling stops at READY')
         blocked = true
+        activeRun = null
         await open()
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Xây dựng chỉ mục') && !b.disabled)"))
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')).click()")
         await waitFor(() => evaluate("document.body.textContent.includes('Chưa có model local.')"))
         assert.equal(postCount, 2)
+        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').click()")
+        await waitFor(() => evaluate("document.querySelector('dialog')?.open"))
+        await evaluate("Array.from(document.querySelectorAll('dialog button')).find(b => b.textContent === 'Hủy').click()")
+        assert.equal(reindexCount, 0)
+        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').click()")
+        await waitFor(() => evaluate("document.querySelector('dialog')?.open"))
+        await evaluate("Array.from(document.querySelectorAll('dialog button')).find(b => b.textContent === 'Xác nhận').click()")
+        await waitFor(() => evaluate("document.body.textContent.includes('rebuild-test')"))
+        assert.equal(reindexCount, 1)
+        blockStatus = true
+        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Thử tải lại trạng thái').click()")
+        await waitFor(() => evaluate("document.body.textContent.includes('Không thể tạo vector vì chưa cấu hình model.')"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').disabled"), true)
+        blockStatus = false
+        await evaluate("const select = document.querySelector('#index-version'); select.value = 'version-two'; select.dispatchEvent(new Event('change', { bubbles: true }))")
+        await waitFor(() => evaluate("document.body.textContent.includes('Chưa lập chỉ mục.') && !document.body.textContent.includes('rebuild-test')"))
+        assert.equal(await evaluate("document.querySelectorAll('details').length"), 0, 'previous version chunks are not rendered')
     } finally {
         if (ws?.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ id: ++sequence, method: 'Browser.close' })); ws.close() }
         browser.kill()

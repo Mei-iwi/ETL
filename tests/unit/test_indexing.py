@@ -49,9 +49,9 @@ class MemoryIndexStore:
     def upsert(self, document):
         self.rows[document["_id"]] = deepcopy(document)
 
-    def artifacts(self, version_id, run_id, limit):
+    def artifacts(self, version_id, run_id, limit, offset=0):
         return sorted([deepcopy(doc) for doc in self.rows.values() if doc["resource_version_id"] == version_id
-                       and doc["index_run_id"] == run_id], key=lambda doc: doc["chunk_sequence"])[:limit]
+                       and doc["index_run_id"] == run_id], key=lambda doc: doc["chunk_sequence"])[offset:offset + limit]
 
 
 def setup_index(container):
@@ -333,3 +333,157 @@ def test_auto_queue_same_transaction_as_projection(container, monkeypatch):
     assert index.status(version["id"])["index_status"] == "READY"
     assert container.processing_finalizer.finalize(job["id"])["status"] == "ALREADY_COMPLETED"
     assert captured == [1]
+
+
+def test_reindex_api_keeps_completed_run_and_never_restarts_ocr(container):
+    version, job = completed(container)
+    index = setup_index(container)
+    original_units = deepcopy(container.documents.units)
+    with TestClient(create_app(container)) as client:
+        base = f"/api/v1/resource-versions/{version['id']}"
+        first = client.post(base + "/index").json()
+        index.once()
+        second = client.post(base + "/reindex", json={})
+        assert second.status_code == 202, second.text
+        assert second.json()["index_run_id"] != first["index_run_id"]
+        assert client.post(base + "/reindex").status_code == 409
+        assert client.get(base + "/index-status").json()["published_run_id"] == first["index_run_id"]
+        assert index.once()
+        status = client.get(base + "/index-status").json()
+        assert status["index_status"] == "READY"
+        assert status["published_run_id"] == second.json()["index_run_id"]
+        assert client.post(base + "/reindex", json={"chunk_size_words": 1}).status_code == 422
+        assert client.post("/api/v1/resource-versions/missing/reindex").status_code == 404
+        index.embedding.enabled = False
+        assert client.post(base + "/reindex").status_code == 503
+    with container.uow() as repo:
+        assert repo.count("ocr_jobs", {}) == 1
+        assert repo.get("ocr_jobs", job["id"])["status"] == "COMPLETED"
+        assert len(index._runs(repo, version["id"])) == 2
+    assert container.documents.units == original_units
+
+
+def test_reindex_failure_preserves_previous_valid_generation(container):
+    version, _ = completed(container)
+    index = setup_index(container)
+    first = index.enqueue(version["id"])
+    index.once()
+    saved = deepcopy(index.store.rows)
+    second = index.enqueue(version["id"], force=True)
+    index.embedding.embed = lambda text: [0, 0, 0]
+    index.once()
+    status = index.status(version["id"])
+    assert status["index_status"] == "FAILED"
+    assert status["published_run_id"] == first["index_run_id"]
+    assert index.chunks(version["id"])["total"] == len(saved)
+    assert index.store.rows == saved
+    index.embedding.embed = lambda text: [0.1, 0.2, 0.3]
+    third = index.enqueue(version["id"], force=True)
+    assert third["index_run_id"] != second["index_run_id"]
+    index.once()
+    assert index.status(version["id"])["published_run_id"] == third["index_run_id"]
+
+
+def test_chunk_limits_and_deadline_fail_without_partial_publication(container, monkeypatch):
+    version, _ = completed(container)
+    index = setup_index(container)
+    container.settings.index_max_chunks = 1
+    index.enqueue(version["id"])
+    index.once()
+    with container.uow() as repo:
+        run = index._runs(repo, version["id"])[0]
+    assert run["status"] == "FAILED" and run["error_message"] == "INDEX_LIMIT_EXCEEDED"
+    assert index.chunks(version["id"])["items"] == []
+    container.settings.index_max_chunks = 100
+    index.enqueue(version["id"], force=True)
+    clock = iter([0, 0, 1000])
+    monkeypatch.setattr("data_sync_etl.application.indexing.monotonic", lambda: next(clock))
+    index.once()
+    assert index.status(version["id"])["index_status"] == "FAILED"
+
+
+def test_index_isolation_and_active_resource_guards(container):
+    first, _ = completed(container)
+    index = setup_index(container)
+    index.enqueue(first["id"])
+    index.once()
+    with container.uow() as repo:
+        other = repo.insert("resource_versions", {
+            **{k: v for k, v in first.items() if k not in ("id", "mongo_id")},
+            "version_number": 2, "parent_version_id": first["id"],
+        })
+    assert index.chunks(other["id"])["items"] == []
+    with container.uow() as repo:
+        repo.update("master_learning_resources", first["resource_id"], {"is_active": False})
+    with TestClient(create_app(container)) as client:
+        for suffix in ("chunks", "index-status"):
+            assert client.get(f"/api/v1/resource-versions/{first['id']}/{suffix}").status_code == 404
+        for suffix in ("index", "reindex"):
+            assert client.post(f"/api/v1/resource-versions/{first['id']}/{suffix}").status_code == 404
+
+
+def test_openapi_exposes_exact_four_indexing_routes(container):
+    paths = create_app(container).openapi()["paths"]
+    for suffix, method in (("index", "post"), ("chunks", "get"), ("index-status", "get"), ("reindex", "post")):
+        operation = paths[f"/api/v1/resource-versions/{{id}}/{suffix}"][method]
+        assert operation["tags"] == ["Data Chunking and Representation"]
+        assert "503" in operation["responses"] and "422" in operation["responses"]
+    assert not any("resouce-versions" in path for path in paths)
+
+
+def test_local_embedding_probe_does_not_download_and_rejects_dimension(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
+
+    (tmp_path / "modules.json").write_text('[{"path":""}]', encoding="utf-8")
+    (tmp_path / "etl-model-revision.txt").write_text("revision-1", encoding="utf-8")
+    (tmp_path / "model.safetensors").write_bytes(b"test fixture only, not a real model")
+    monkeypatch.setattr("data_sync_etl.adapters.embeddings.find_spec", lambda _: True)
+    calls = []
+
+    def construct(path, **kwargs):
+        calls.append(kwargs)
+        assert path == str(tmp_path.resolve())
+        assert kwargs == {"local_files_only": True, "device": "cpu"}
+        return SimpleNamespace(get_sentence_embedding_dimension=lambda: 3,
+                               encode=lambda *args, **kw: SimpleNamespace(tolist=lambda: [0.1, 0.2, 0.3]))
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", SimpleNamespace(SentenceTransformer=construct))
+    model = LocalSentenceEmbedding(tmp_path, "test-only", "revision-1", 3)
+    assert calls == [] and model.available()
+    assert model.ready() and model.ready()
+    assert len(calls) == 1
+    assert model.embed("Tiếng Việt") == [0.1, 0.2, 0.3]
+    wrong = LocalSentenceEmbedding(tmp_path, "test-only", "revision-1", 2)
+    assert not wrong.ready()
+
+
+def test_artifact_verification_pages_vectors_and_preserves_offsets(container):
+    version, _ = completed(container)
+    index = setup_index(container)
+    container.settings.chunk_size_words = 20
+    container.settings.chunk_overlap_words = 0
+    text = "Học liệu tiếng Việt\n" * 600
+    with container.uow() as repo:
+        unit = repo.find("content_units", {"resource_version_id": version["id"]}, order=("sequence_no",))[0]
+        repo.update("content_unit_texts", unit["id"], {"text": text})
+    index.store.documents.units[unit["id"]]["text"] = text
+    original = index.store.artifacts
+    offsets = []
+
+    def pages(version_id, run_id, limit, offset=0):
+        assert limit <= 100
+        offsets.append(offset)
+        return original(version_id, run_id, limit, offset)
+
+    index.store.artifacts = pages
+    index.enqueue(version["id"])
+    index.once()
+    assert index.status(version["id"])["index_status"] == "READY"
+    assert 100 in offsets
+    chunks = index.chunks(version["id"], offset=100)
+    assert len(chunks["items"]) == 10
+    for chunk in chunks["items"]:
+        assert text[chunk["char_start"]:chunk["char_end"]] == chunk["text"]

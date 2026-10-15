@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from data_sync_etl.domain.indexing import IndexingError
 
@@ -38,6 +38,10 @@ class IndexRequestResponse(BaseModel):
     index_status: Literal["PENDING", "RUNNING", "READY"]
     action: Literal["QUEUED", "IN_PROGRESS", "ALREADY_INDEXED"]
     status_url: str
+
+
+class ReindexRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 IndexStatus = Literal["CONTENT_NOT_READY", "NOT_STARTED", "PENDING", "RUNNING", "READY",

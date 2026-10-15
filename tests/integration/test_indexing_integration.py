@@ -76,12 +76,19 @@ def test_real_index_api_worker_consistency(index_context):
         assert chunks["items"][0]["vector_ready"]
         assert "embedding" not in chunks["items"][0]
         assert api.post(base + "/index").status_code == 200
+        rebuilt = api.post(base + "/reindex")
+        assert rebuilt.status_code == 202
+        assert api.post(base + "/reindex").status_code == 409
+        assert c.worker.once("integration-reindex")
+        status = api.get(base + "/index-status").json()
+        assert status["published_run_id"] == rebuilt.json()["index_run_id"]
+        assert status["index_status"] == "READY"
         assert api.get("/api/v1/resource-versions/missing/chunks").status_code == 404
     assert all(list(db[name].find({})) == docs for name, docs in preserved.items())
     assert initialize(db)["ready"]
     docs = list(db.indexed_chunks.find({}))
-    assert len(docs) == 2
-    assert all(doc["index_run_id"] == status["published_run_id"] for doc in docs)
+    assert len(docs) == 4
+    assert sum(doc["index_run_id"] == status["published_run_id"] for doc in docs) == 2
     assert all(sum(doc["bow_tf"].values()) == doc["bow_length"] for doc in docs)
     assert all(not doc["retrieval_eligible"] for doc in docs)
 

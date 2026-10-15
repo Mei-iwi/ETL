@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { getChunks, getIndexResources, getIndexStatus, getIndexVersions, IndexingApiError, startIndex } from '../../services/indexingApi'
+import { getChunks, getIndexResources, getIndexStatus, getIndexVersions, IndexingApiError, reindex, startIndex } from '../../services/indexingApi'
 import type { ChunksResult, IndexRequestResult, IndexStatusResult, ResourceOption, VersionOption } from '../../types/indexing'
 import styles from './LibraryPages.module.css'
 
@@ -79,6 +79,7 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
     const [statusError, setStatusError] = useState('')
     const [refresh, setRefresh] = useState(0)
     const controller = useRef<AbortController | null>(null)
+    const [confirming, setConfirming] = useState(false)
     useEffect(() => () => controller.current?.abort(), [])
 
     useEffect(() => {
@@ -109,14 +110,14 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
         return () => { active = false; window.clearTimeout(timer); current?.abort() }
     }, [versionId, refresh])
 
-    async function build() {
+    async function build(force = false) {
         controller.current?.abort()
         const current = new AbortController()
         controller.current = current
         setBusy(true)
         setError('')
         try {
-            const data = await startIndex(versionId, current.signal)
+            const data = await (force ? reindex : startIndex)(versionId, current.signal)
             if (!current.signal.aborted) { setResult(data); setRefresh(value => value + 1) }
         } catch (err) {
             if (!current.signal.aborted) setError(err instanceof Error ? err.message : 'Không thể xếp hàng lập chỉ mục.')
@@ -139,18 +140,40 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
                 <p className={styles.resultItem}><span className={styles.resultLabel}>BoW / Vector</span><span className={styles.resultValue}>{status.bow_ready ? 'BoW sẵn sàng' : 'Chưa có BoW'} · {status.vector_ready ? 'Vector sẵn sàng' : 'Chưa có vector'}</span></p>
                 <p className={styles.resultItem}><span className={styles.resultLabel}>Model / số chiều</span><span className={styles.resultValue}>{status.embedding_model ?? 'Chưa cấu hình'} · {status.embedding_dimension ?? '—'}</span></p>
                 <p className={styles.resultItem}><span className={styles.resultLabel}>Lần chạy gần nhất</span><span className={styles.resultValue}>{status.latest_run_id ?? '—'}</span></p>
+                {status.published_run_id && status.published_run_id !== status.latest_run_id && <p className={styles.resultItem}><span className={styles.resultLabel}>Chỉ mục cũ còn hợp lệ</span><span className={styles.resultValue}>{status.published_run_id}</span></p>}
+                {status.published_run_id && status.published_run_id !== status.latest_run_id && <p className={styles.resultItem}><span className={styles.resultLabel}>Chỉ mục cũ còn hợp lệ</span><span className={styles.resultValue}>{status.published_run_id}</span></p>}
             </div>
         </>}
         {result && <p role="status">Yêu cầu: {result.index_run_id}</p>}
         {statusError && <p className={styles.alert} role="alert">{statusError}</p>}
         {error && <p className={styles.alert} role="alert">{error}</p>}
         <div className={styles.actions}>
-            <button className={styles.primaryButton} disabled={!canBuild || status?.index_status === 'FAILED'} onClick={() => void build()}>
+            <button className={styles.primaryButton} disabled={!canBuild || status?.index_status === 'FAILED' || status?.index_status === 'READY'} onClick={() => void build()}>
                 {busy ? 'Đang gửi yêu cầu...' : 'Xây dựng chỉ mục'}
             </button>
+            <button className={styles.secondaryButton} disabled={!canBuild} onClick={() => setConfirming(true)}>Tái lập chỉ mục</button>
             <button className={styles.primaryButton} disabled={busy} onClick={() => setRefresh(value => value + 1)}>Thử tải lại trạng thái</button>
         </div>
+        {confirming && <ReindexConfirmation onCancel={() => setConfirming(false)} onConfirm={() => { setConfirming(false); void build(true) }} />}
     </div><ChunkList key={`${status?.published_run_id ?? versionId}:${refresh}`} versionId={versionId} /></>
+}
+
+function ReindexConfirmation({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+    const dialog = useRef<HTMLDialogElement>(null)
+    useEffect(() => {
+        const element = dialog.current
+        element?.showModal()
+        return () => element?.close()
+    }, [])
+    return <dialog ref={dialog} className={styles.indexDialog} aria-labelledby="reindex-title" aria-describedby="reindex-description"
+        onCancel={event => { event.preventDefault(); onCancel() }}>
+        <h2 id="reindex-title">Tái lập chỉ mục?</h2>
+        <p id="reindex-description">Xây dựng lại Chunk, BoW và vector theo cấu hình hiện tại. Nội dung gốc và lịch sử được giữ nguyên.</p>
+        <div className={styles.actions}>
+            <button className={styles.primaryButton} onClick={onCancel}>Hủy</button>
+            <button className={styles.secondaryButton} onClick={onConfirm}>Xác nhận</button>
+        </div>
+    </dialog>
 }
 
 function ChunkList({ versionId }: { versionId: string }) {

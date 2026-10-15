@@ -8,6 +8,9 @@ from pymongo import MongoClient
 from sqlalchemy import inspect, text
 
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
+from data_sync_etl.adapters.mongo.index_store import MongoIndexStore
+from data_sync_etl.adapters.mongo.schema import initialize
+from data_sync_etl.application.indexing import IndexingService
 from data_sync_etl.application.sync import MasterSync
 
 pytestmark = pytest.mark.postgres
@@ -117,6 +120,53 @@ def test_local_source_to_real_postgresql_and_mongo(source, pg_container, mongo_t
         c.sync.run(full=True)
         assert c.source_file_worker.run("file-test", once=True) is False
         assert counts == (database.ocr_pages.count_documents({}), database.mongo_content_units.count_documents({}))
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize("auto_enabled", [False, True])
+def test_source_file_to_index_with_existing_workers(source, pg_container, mongo_test_database, tmp_path, auto_enabled):
+    class ModelDouble:
+        model_id, version, dimension = "source-flow-test-double", "v1", 3
+
+        def available(self):
+            return True
+
+        def prepare(self):
+            pass
+
+        def embed(self, text):
+            return [0.1, 0.2, 0.3]
+
+    c = pg_container
+    client = MongoClient(mongo_test_database[0], serverSelectionTimeoutMS=3000, timeoutMS=10000)
+    try:
+        db = client[mongo_test_database[1]]
+        initialize(db, apply=True)
+        c.mongo_projector.documents = MongoContentStore(db, invalidate_content_bags=False)
+        c.settings.index_auto_enabled = auto_enabled
+        c.indexing = IndexingService(c.uow, MongoIndexStore(db), ModelDouble(), c.settings)
+        c.processing_finalizer.on_content_ready = c.indexing.enqueue_auto
+        original = setup_import(source, c, tmp_path)
+        with c.uow() as repo:
+            assert repo.count("etl_stage_runs", {"stage": "INDEX_BUILD"}) == 0
+        assert c.source_file_worker.once("source-file-index-test")
+        for _ in range(10):
+            if not c.worker.once("ocr-index-test"):
+                break
+        with c.uow() as repo:
+            version = repo.find("resource_versions", limit=1)[0]
+            assert repo.count("etl_stage_runs", {"stage": "INDEX_BUILD"}) == int(auto_enabled)
+            assert repo.count("ocr_jobs", {}) == 1
+        assert c.indexing.status(version["id"])["index_status"] == ("READY" if auto_enabled else "NOT_STARTED")
+        if not auto_enabled:
+            c.indexing.enqueue(version["id"])
+            assert c.worker.once("manual-index-test")
+        assert db.indexed_chunks.count_documents({"resource_version_id": version["id"]}) > 0
+        assert c.source_file_import.list_files()["items"][0]["etl_status"] == "CONTENT_READY"
+        c.sync.run(full=False)
+        assert not c.source_file_worker.once("same-source-test")
+        assert original.exists()
     finally:
         client.close()
 

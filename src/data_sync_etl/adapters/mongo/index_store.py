@@ -30,7 +30,7 @@ class MongoIndexStore:
     def upsert(self, document):
         self.database.indexed_chunks.replace_one({"_id": document["_id"]}, document, upsert=True)
 
-    def artifacts(self, version_id, run_id, limit):
+    def artifacts(self, version_id, run_id, limit, offset=0):
         return list(self.database.indexed_chunks.find(
             {"resource_version_id": version_id, "index_run_id": run_id}
-        ).sort("chunk_sequence", 1).limit(limit))
+        ).sort("chunk_sequence", 1).skip(offset).limit(limit))

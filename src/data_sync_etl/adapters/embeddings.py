@@ -56,7 +56,12 @@ class LocalSentenceEmbedding:
                 self._checked = True
 
     def ready(self):
-        return self._checked and self.available()
+        # Capabilities is an explicit runtime check, never executed during startup.
+        try:
+            self.prepare()
+            return True
+        except Exception:
+            return False
 
     def identity(self):
         # No local path in public contracts, fingerprints or logs.

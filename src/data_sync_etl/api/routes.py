@@ -9,6 +9,7 @@ from data_sync_etl.api.indexing_schemas import (
     ChunksResponse,
     IndexRequestResponse,
     IndexStatusResponse,
+    ReindexRequest,
     index_error,
 )
 from data_sync_etl.api.master_sync_schemas import (
@@ -675,6 +676,17 @@ def index_status(id: ResourceId, request: Request):
 @router.post("/admin/resource-versions/{id}/postprocess")
 def postprocess(id: ResourceId, request: Request):
     return services(request).postprocess.run(id)
+
+
+@router.post("/api/v1/resource-versions/{id}/reindex", tags=[TAG_INDEXING],
+             status_code=202, response_model=IndexRequestResponse, responses=ERROR_RESPONSES,
+             summary="Xếp hàng tái lập chỉ mục, giữ nguyên nội dung và lịch sử")
+def reindex_version(id: ResourceId, request: Request, body: ReindexRequest | None = None):
+    container = services(request)
+    try:
+        return container.indexing.enqueue(id, force=True)
+    except Exception as exc:
+        raise index_error(exc) from None
 
 
 @router.get("/admin/resource-versions/{id}/etl-status")

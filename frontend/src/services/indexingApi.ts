@@ -49,3 +49,7 @@ export function getChunks(versionId: string, offset = 0, signal?: AbortSignal, c
 export function getIndexStatus(versionId: string, signal?: AbortSignal) {
     return request<IndexStatusResult>(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/index-status`, signal)
 }
+
+export function reindex(versionId: string, signal?: AbortSignal) {
+    return request<IndexRequestResult>(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/reindex`, signal, 'POST')
+}

@@ -11,10 +11,11 @@ from data_sync_etl.domain.indexing import (
     validate_vector,
     word_windows,
 )
+from data_sync_etl.ports.indexing import IndexEmbeddingPort, IndexStorePort
 
 
 class IndexingService:
-    def __init__(self, uow, store, embedding, settings):
+    def __init__(self, uow, store: IndexStorePort | None, embedding: IndexEmbeddingPort, settings):
         self.uow, self.store, self.embedding, self.settings = uow, store, embedding, settings
 
     def _version(self, repo, version_id):
@@ -103,14 +104,23 @@ class IndexingService:
                 }
 
     def _verified(self, snapshot, run):
-        docs = self.store.artifacts(snapshot[0]["id"], run["id"], self.settings.index_max_chunks + 1)
-        expected = list(self._expected(snapshot, run["id"]))
-        if not expected or len(docs) != len(expected):
+        expected = iter(self._expected(snapshot, run["id"]))
+        wanted = next(expected, None)
+        docs, offset = [], 0
+        while True:
+            batch = self.store.artifacts(snapshot[0]["id"], run["id"], 100, offset)
+            for doc in batch:
+                if wanted is None or any(doc.get(k) != v for k, v in wanted.items()):
+                    raise IndexingError("INDEX_ARTIFACT_INVALID", 503)
+                validate_vector(doc.get("embedding", []), self.embedding.dimension)
+                # Verification is paged; never retain all raw vectors in API/worker memory.
+                docs.append({k: v for k, v in doc.items() if k != "embedding"})
+                wanted = next(expected, None)
+            offset += len(batch)
+            if len(batch) < 100:
+                break
+        if wanted is not None or not docs:
             raise IndexingError("INDEX_ARTIFACT_INVALID", 503)
-        for doc, wanted in zip(docs, expected, strict=True):
-            if any(doc.get(k) != v for k, v in wanted.items()):
-                raise IndexingError("INDEX_ARTIFACT_INVALID", 503)
-            validate_vector(doc.get("embedding", []), self.embedding.dimension)
         return docs
 
     def enqueue(self, version_id, *, force=False):
@@ -187,12 +197,16 @@ class IndexingService:
                 if monotonic() - started > self.settings.index_timeout_seconds:
                     raise IndexingError("INDEX_LIMIT_EXCEEDED")
                 vector = validate_vector(self.embedding.embed(doc["text"]), self.embedding.dimension)
+                if monotonic() - started > self.settings.index_timeout_seconds:
+                    raise IndexingError("INDEX_LIMIT_EXCEEDED")
                 self.store.upsert({**doc, "embedding": vector, "created_at": run["created_at"], "updated_at": now()})
             self._verified(snapshot, run)
             with self.uow() as repo:
                 current = self._snapshot(repo, version_id)
                 if current[3] != snapshot[3]:
                     raise IndexingError("INDEX_SOURCE_CHANGED")
+                if monotonic() - started > self.settings.index_timeout_seconds:
+                    raise IndexingError("INDEX_LIMIT_EXCEEDED")
                 repo.update("etl_stage_runs", run["id"], {"status": "COMPLETED", "finished_at": now(), "error_message": None})
         except Exception as exc:
             code = exc.code if isinstance(exc, IndexingError) else "INDEX_FAILED"
@@ -242,7 +256,7 @@ class IndexingService:
             "latest_run_id": latest["id"] if latest else None,
             "published_run_id": published["id"] if published else None,
             "chunk_count": len(docs), "bow_ready": bool(docs),
-            "vector_ready": bool(docs) and self.embedding.available(),
+            "vector_ready": bool(docs) and status != "BLOCKED_RUNTIME" and self.embedding.available(),
             "algorithm": "word_window_v1", "chunk_size_words": self.settings.chunk_size_words,
             "chunk_overlap_words": self.settings.chunk_overlap_words,
             "embedding_model": self.embedding.model_id or None,
