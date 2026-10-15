@@ -54,12 +54,14 @@ class ContentReadPort(Protocol):
 
 
 class KeywordExtractorPort(Protocol):
+    version: str
     def extract(self, text: str) -> list[str]: ...
 
 
 class LeafKeywordDocumentPort(Protocol):
     def get_unit(self, unit_id: str) -> ContentUnitDocument | None: ...
     def update_leaf_keywords(self, document: ContentUnitDocument, keywords: list[str]) -> None: ...
+    def content_fingerprint(self, version_id: str, *, generation: int | None = None) -> str: ...
 
 
 class EmbeddingPort(Protocol):
@@ -71,6 +73,8 @@ class EmbeddingPort(Protocol):
 
 
 class ContentBagPort(Protocol):
+    dimension: int
+    def ensure_ready(self) -> None: ...
     def upsert_bag(self, document: ContentBagDocument) -> None: ...
     def get_bag(self, root_id: str) -> ContentBagDocument | None: ...
     def bag_candidates(

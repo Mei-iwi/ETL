@@ -1,4 +1,4 @@
-"""Opt-in bag builder. Not wired to workers until PG hierarchy and a real model exist."""
+"""Bag roots must be real PostgreSQL ContentUnits, never synthetic Chunk entities."""
 
 from dataclasses import dataclass
 
@@ -31,6 +31,54 @@ class BagBuildResult:
     status: str
     reason: str | None
     bags: list[ContentBagDocument]
+
+
+def bag_structure(units):
+    """Validate the entire tree, return selected roots and their descendant leaf IDs."""
+    nodes = {u['id']: u for u in units}
+    if len(nodes) != len(units) or len({u['resource_version_id'] for u in units}) > 1:
+        raise DomainError('Invalid hierarchy membership')
+    children = {key: [] for key in nodes}
+    for node in units:
+        parent = node['parent_unit_id']
+        if parent is not None:
+            if parent not in nodes:
+                raise DomainError('Missing or cross-version parent')
+            children[parent].append(node['id'])
+    done = set()
+    for key in nodes:
+        path = set()
+        current = key
+        while current is not None and current not in done:
+            if current in path:
+                raise DomainError('Cycle in hierarchy')
+            path.add(current)
+            current = nodes[current]['parent_unit_id']
+        done.update(path)
+    kind = next((k for k in ('CHAPTER', 'LESSON', 'SECTION')
+                 if any(u['unit_type'] == k for u in units)), None)
+    roots = {}
+    for node in units:
+        if node['unit_type'] != kind:
+            continue
+        parent = node['parent_unit_id']
+        while parent is not None and nodes[parent]['unit_type'] != kind:
+            parent = nodes[parent]['parent_unit_id']
+        if parent is not None:
+            continue
+        if not children[node['id']]:
+            raise DomainError('Bag root requires descendant content leaves')
+        pending, leaves = [node['id']], []
+        while pending:
+            current = pending.pop()
+            if children[current]:
+                pending.extend(children[current])
+            else:
+                if nodes[current]['unit_type'] in ('CHAPTER', 'LESSON', 'SECTION'):
+                    raise DomainError('Outline node requires descendant content leaves')
+                leaves.append(current)
+        roots[node['id']] = sorted(leaves)
+    return roots
 
 
 class ContentBagBuilder:
@@ -119,6 +167,8 @@ class ContentBagBuilder:
         roots.sort(key=lambda u: (u.sequence_no, u.id))
         bags = []
         for root in roots:
+            if not children[root.id]:
+                return BagBuildResult('DEFERRED', 'Bag root requires descendant content leaves', [])
             pending = [root.id]
             collected = []
             while pending:
@@ -126,6 +176,8 @@ class ContentBagBuilder:
                 if children[current]:
                     pending.extend(children[current])
                 else:
+                    if by_id[current].unit_type in ('CHAPTER', 'LESSON', 'SECTION'):
+                        return BagBuildResult('DEFERRED', 'Outline node requires descendant content leaves', [])
                     leaf = leaf_by_id.get(current)
                     if leaf is None or leaf.keywords is None:
                         return BagBuildResult("DEFERRED", "Leaf keywords not supplied", [])

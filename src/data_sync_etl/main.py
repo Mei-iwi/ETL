@@ -141,7 +141,7 @@ def create_app(container=None):
                 }
             )
         endpoint = request.scope.get("endpoint")
-        if getattr(endpoint, "__name__", "") in {"index_version", "indexed_chunks", "index_status", "reindex_version"}:
+        if getattr(endpoint, "__name__", "") in {"index_version", "chunk_preview", "index_status", "reindex_version"}:
             return JSONResponse(status_code=422, content={"detail": {
                 "code": "REQUEST_VALIDATION_ERROR", "phase": "indexing",
                 "message": "Tham số lập chỉ mục không hợp lệ.", "fields": fields,

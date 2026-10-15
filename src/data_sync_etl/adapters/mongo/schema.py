@@ -116,23 +116,6 @@ def contracts(dimension: int) -> dict[str, dict]:
         "bsonType": "string",
         "pattern": "^[0-9a-f]{64}$",
     }
-    properties["indexed_chunks"] = {
-        **{key: string(maximum=30, minimum=1) for key in
-           ("resource_id", "resource_version_id", "content_unit_id", "index_run_id")},
-        **{key: integer() for key in ("source_projection_generation", "chunk_sequence", "unit_chunk_sequence")},
-        "page_from": integer(True), "page_to": integer(True),
-        "review_status": string(maximum=30, minimum=1), "retrieval_eligible": {"bsonType": "bool"},
-        "char_start": integer(minimum=0), "char_end": integer(), "text": string(minimum=1),
-        "bow_tf": {"bsonType": "object", "additionalProperties": integer()},
-        "bow_length": integer(minimum=0),
-        "embedding_model": string(maximum=255, minimum=1),
-        "embedding_version": string(maximum=128, minimum=1),
-        "embedding_dimension": {**integer(), "maximum": 4096},
-        "embedding": {"bsonType": "array", "minItems": 1, "maxItems": 4096,
-                      "items": {"bsonType": "double", "minimum": -1.7976931348623157e308,
-                                "maximum": 1.7976931348623157e308}},
-        "content_fingerprint": {"bsonType": "string", "pattern": "^[0-9a-f]{64}$"},
-    }
     required = {
         "users": [],
         "learning_resources": [],
@@ -153,7 +136,6 @@ def contracts(dimension: int) -> dict[str, dict]:
             "embedding",
             "embedding_model",
         ],
-        "indexed_chunks": list(properties["indexed_chunks"]),
     }
     validators = {}
     for name, fields in properties.items():
@@ -264,18 +246,6 @@ def contracts(dimension: int) -> dict[str, dict]:
             False,
         ]
     }
-    validators["indexed_chunks"]["$expr"] = {"$cond": [
-        {"$and": [{"$isArray": "$embedding"}, {"$eq": [{"$type": "$text"}, "string"]},
-                  {"$eq": [{"$type": "$char_start"}, "int"]},
-                  {"$eq": [{"$type": "$char_end"}, "int"]}]},
-        {"$and": [
-            {"$eq": [{"$size": "$embedding"}, "$embedding_dimension"]},
-            {"$gt": ["$char_end", "$char_start"]},
-            {"$eq": [{"$strLenCP": "$text"}, {"$subtract": ["$char_end", "$char_start"]}]},
-            {"$or": [{"$eq": ["$page_from", None]}, {"$eq": ["$page_to", None]},
-                     {"$gte": ["$page_to", "$page_from"]}]},
-            {"$anyElementTrue": [{"$map": {"input": "$embedding", "as": "v", "in": {"$ne": ["$$v", 0]}}}]},
-        ]}, False]}
     return validators
 
 
@@ -304,10 +274,6 @@ INDEXES = {
         Index("bags_version_type", (("resource_version_id", 1), ("unit_type", 1))),
         Index("bags_keywords", (("keywords", 1),)),
     ],
-    "indexed_chunks": [
-        Index("chunks_version_run_sequence", (("resource_version_id", 1), ("index_run_id", 1), ("chunk_sequence", 1)), True),
-        Index("chunks_version_run_unit", (("resource_version_id", 1), ("index_run_id", 1), ("content_unit_id", 1))),
-    ],
 }
 
 
@@ -320,6 +286,30 @@ def compatible_index(existing: dict, expected: Index) -> bool:
         )
         and "expireAfterSeconds" not in existing
     )
+
+
+def inventory(database) -> dict:
+    """Read-only inventory is independent of validator compatibility; never hide legacy extras."""
+    expected = set(INDEXES)
+    catalog = {row['name']: row for row in database.list_collections()}
+    collections = []
+    for name, entry in sorted(catalog.items()):
+        options = entry.get('options', {})
+        props = options.get('validator', {}).get('$jsonSchema', {}).get('properties', {})
+        stats = database.command('collStats', name)
+        collections.append({
+            'name': name, 'documents': database[name].count_documents({}),
+            'size_bytes': stats.get('size', 0),
+            'indexes': [idx['name'] for idx in database[name].list_indexes()],
+            'embedding_validator_min_items': props.get('embedding', {}).get('minItems'),
+            'embedding_validator_max_items': props.get('embedding', {}).get('maxItems'),
+        })
+    extras = sorted(set(catalog) - expected)
+    missing = sorted(expected - set(catalog))
+    return {'database': database.name, 'mode': 'inventory', 'expected': sorted(expected),
+            'actual': collections, 'extra_collections': extras, 'missing_collections': missing,
+            'warnings': (['EXTRA_COLLECTION_PRESENT'] if extras else [])
+                        + (['MISSING_EXPECTED_COLLECTIONS'] if missing else [])}
 
 
 def initialize(database, *, dimension=256, apply=False, validation_level="strict") -> dict:
@@ -336,6 +326,8 @@ def initialize(database, *, dimension=256, apply=False, validation_level="strict
         "indexes": 0,
         "legacy_invalid": {},
         "ready": True,
+        "extra_collections": sorted(set(catalog) - set(validators)),
+        "warnings": ['EXTRA_COLLECTION_PRESENT'] if set(catalog) - set(validators) else [],
     }
     pending_indexes = {}
     for name, validator in validators.items():
@@ -423,6 +415,7 @@ def main(argv=None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="Read-only catalog and legacy audit")
     mode.add_argument("--apply", action="store_true", help="Explicit non-destructive DDL")
+    mode.add_argument("--inventory", action="store_true", help="Read-only collection inventory, including legacy extras")
     parser.add_argument("--validation-level", choices=("strict", "moderate"), default="strict")
     args = parser.parse_args(argv)
     client = None
@@ -430,9 +423,12 @@ def main(argv=None) -> int:
         settings = Settings()
         client = MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=3000, timeoutMS=30000)
         client.admin.command("ping")
+        if args.inventory:
+            print(json.dumps(inventory(client[settings.mongo_database]), ensure_ascii=True))
+            return 0
         report = initialize(
             client[settings.mongo_database],
-            dimension=settings.vector_dimension,
+            dimension=settings.index_embedding_dimension,
             apply=args.apply,
             validation_level=args.validation_level,
         )

@@ -10,7 +10,13 @@ from data_sync_etl.adapters.mongo.foundation_store import (
     MongoMetadataStore,
     checked,
 )
-from data_sync_etl.adapters.mongo.schema import INDEXES, Index, compatible_index, contracts
+from data_sync_etl.adapters.mongo.schema import (
+    INDEXES,
+    Index,
+    compatible_index,
+    contracts,
+    inventory,
+)
 from data_sync_etl.application.content_bags import ContentBagBuilder, StructuredUnit
 from data_sync_etl.application.leaf_keywords import SaveLeafKeywords
 from data_sync_etl.domain.core import DomainError, now
@@ -257,8 +263,14 @@ def test_reject_invalid_tree(change):
 
 
 def test_contract_indexes_and_fencing_filter():
-    assert len(contracts(2)) == 6
-    assert sum(len(indexes) for indexes in INDEXES.values()) == 8
+    assert len(contracts(2)) == 5
+    optional = leaf().bson()
+    optional.pop('markdown')
+    with pytest.raises(ValidationError):
+        ContentUnitDocument.model_validate(optional)
+    with pytest.raises(ValidationError):
+        ContentUnitDocument.model_validate({**optional, 'markdown': None})
+    assert sum(len(indexes) for indexes in INDEXES.values()) == 6
     expected = Index("test", (("job_id", 1), ("page_num", 1)), True)
     assert compatible_index({"key": dict(expected.keys), "unique": True}, expected)
     for options in (
@@ -268,6 +280,22 @@ def test_contract_indexes_and_fencing_filter():
     ):
         assert not compatible_index({"key": dict(expected.keys), **options}, expected)
     assert generation_filter(None) == {"projection_generation": {"$exists": False}}
+
+
+def test_inventory_reports_legacy_without_creating_or_mutating_collection():
+    database = MagicMock()
+    database.name = 'unit-test-catalog-only'
+    database.list_collections.return_value = [{'name': name} for name in [*INDEXES, 'indexed_chunks']]
+    database.__getitem__.return_value.count_documents.return_value = 5
+    database.__getitem__.return_value.list_indexes.return_value = []
+    database.command.return_value = {'size': 0}
+    report = inventory(database)
+    assert report['extra_collections'] == ['indexed_chunks']
+    assert report['warnings'] == ['EXTRA_COLLECTION_PRESENT']
+    assert len(report['actual']) == 6
+    database.create_collection.assert_not_called()
+    database.drop_collection.assert_not_called()
+    database.__getitem__.return_value.update_many.assert_not_called()
 
 
 def test_adapters_validate_before_writing_and_bound_reads():

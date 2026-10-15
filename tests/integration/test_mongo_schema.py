@@ -14,7 +14,7 @@ from data_sync_etl.adapters.mongo.foundation_store import (
     MongoContentReader,
     MongoMetadataStore,
 )
-from data_sync_etl.adapters.mongo.schema import INDEXES, contracts, initialize
+from data_sync_etl.adapters.mongo.schema import INDEXES, contracts, initialize, inventory
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.mongo_documents import (
     ContentBagDocument,
@@ -92,15 +92,7 @@ def samples():
             "is_current": True,
             "projection_generation": 1,
         },
-        "indexed_chunks": {
-            **common, "resource_id": "r-1", "resource_version_id": "v-1",
-            "content_unit_id": "u-1", "index_run_id": "run-1",
-            "source_projection_generation": 1, "chunk_sequence": 1, "unit_chunk_sequence": 1,
-            "page_from": 1, "page_to": 1, "review_status": "UNREVIEWED", "retrieval_eligible": False,
-            "char_start": 0, "char_end": 4, "text": "test", "bow_tf": {"test": 1}, "bow_length": 1,
-            "embedding_model": "fixture-only", "embedding_version": "1", "embedding_dimension": 2,
-            "embedding": [0.2, 0.8], "content_fingerprint": "a" * 64,
-        },
+
     }
 
 
@@ -108,8 +100,8 @@ def test_installer_catalog_idempotent_read_only_check_and_preserve(mongo_db):
     assert not initialize(mongo_db, dimension=2)["ready"]
     assert mongo_db.list_collection_names() == []
     report = initialize(mongo_db, dimension=2, apply=True)
-    assert report["ready"] and report["collections"] == report["validators"] == 6
-    assert report["indexes"] == 8
+    assert report["ready"] and report["collections"] == report["validators"] == 5
+    assert report["indexes"] == 6
     for name, data in samples().items():
         mongo_db[name].insert_one(data)
     assert initialize(mongo_db, dimension=2, apply=True)["ready"]
@@ -121,6 +113,18 @@ def test_installer_catalog_idempotent_read_only_check_and_preserve(mongo_db):
         indexes = list(mongo_db[name].list_indexes())
         assert len(indexes) == 1 + len(INDEXES[name])
         assert mongo_db[name].count_documents({}) == 1
+
+
+def test_inventory_five_collections_and_dimension_mismatch(mongo_db):
+    initialize(mongo_db, dimension=384, apply=True)
+    report = inventory(mongo_db)
+    assert report['warnings'] == [] and report['extra_collections'] == []
+    assert len(report['actual']) == 5
+    assert initialize(mongo_db, dimension=384)['ready']
+    assert initialize(mongo_db, dimension=384, apply=True)['extra_collections'] == []
+    with pytest.raises(DomainError, match='Incompatible Mongo validator'):
+        initialize(mongo_db, dimension=256, apply=True)
+    assert initialize(mongo_db, dimension=384)['ready']
 
 
 @pytest.mark.parametrize(
@@ -142,6 +146,7 @@ def test_installer_catalog_idempotent_read_only_check_and_preserve(mongo_db):
         ("ocr_pages", {"source_checksum": ""}),
         ("mongo_content_units", {"page_from": 2, "page_to": 1}),
         ("mongo_content_units", {"content_unit_id": "wrong"}),
+        ("mongo_content_units", {"markdown": None}),
         ("mongo_content_units", {"keywords": [{"word": "x"}]}),
         ("content_bags", {"embedding": [0.0, 0.0]}),
         ("content_bags", {"embedding": [float("nan"), 1.0]}),

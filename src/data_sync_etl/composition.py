@@ -10,7 +10,6 @@ from data_sync_etl.adapters.mongo.foundation_store import (
     MongoContentReader,
     MongoMetadataStore,
 )
-from data_sync_etl.adapters.mongo.index_store import MongoIndexStore
 from data_sync_etl.adapters.ocr.engines import (
     FakeOCREngine,
     PyMuPDFPDFProcessor,
@@ -186,11 +185,11 @@ class Container:
                 connect=False,
             )
             mongo_database = self.mongo_client[self.settings.mongo_database]
-            # This stage stops at OCR/ContentUnits; do not write Bag/indexing state.
-            self.documents = MongoContentStore(mongo_database, invalidate_content_bags=False)
+            # Invalidation is independent of model inference; snapshot guards remain authoritative.
+            self.documents = MongoContentStore(mongo_database)
             self.metadata_documents = MongoMetadataStore(mongo_database)
             self.content_reader = MongoContentReader(mongo_database)
-            self.content_bags = MongoBagStore(mongo_database, self.settings.vector_dimension)
+            self.content_bags = MongoBagStore(mongo_database, self.settings.index_embedding_dimension)
         else:
             self.documents = documents
 
@@ -243,11 +242,12 @@ class Container:
         )
 
         self.indexing = IndexingService(
-            self.uow, MongoIndexStore(mongo_database) if documents is None else None,
+            self.uow, self.content_reader if documents is None else None,
             LocalSentenceEmbedding(self.settings.index_embedding_model_path,
                                    self.settings.index_embedding_model_id,
                                    self.settings.index_embedding_model_version,
                                    self.settings.index_embedding_dimension), self.settings,
+            bags=self.content_bags,
         )
         self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
 
@@ -280,7 +280,11 @@ class Container:
             reconcile=self.reconcile_processing,
             recovery_interval_seconds=self.settings.ocr_recovery_interval_seconds,
         )
+        self._prefer_index_reconcile = False
 
     def reconcile_processing(self):
+        self._prefer_index_reconcile = not self._prefer_index_reconcile
+        if self._prefer_index_reconcile:
+            return self.indexing.once() or self.processing_finalizer.reconcile_once()
         return self.processing_finalizer.reconcile_once() or self.indexing.once()
 

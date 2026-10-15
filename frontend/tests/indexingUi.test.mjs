@@ -24,6 +24,11 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
     let pendingReads = 0
     let reindexCount = 0
     let blockStatus = false
+    let structureBlocked = false
+    let waitingForOcr = false
+    let ocrReads = 0
+    let forcedState = null
+    let autoEnabled = false
     const server = createServer(async (req, res) => {
         const path = new URL(req.url, 'http://localhost').pathname
         function json(body, status = 200) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
@@ -36,21 +41,23 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         if (path.endsWith('/index-status')) {
             statusReads++
             const second = path.includes('version-two')
-            const state = blockStatus ? 'BLOCKED_RUNTIME' : !second && activeRun ? (++pendingReads < 2 ? 'PENDING' : 'READY') : 'NOT_STARTED'
-            return json({ resource_version_id: second ? 'version-two' : 'version-test', processing_status: 'CONTENT_READY',
-                index_status: state, auto_enabled: false,
+            const state = forcedState ?? (waitingForOcr && ++ocrReads < 2 ? 'CONTENT_NOT_READY' : structureBlocked ? 'BLOCKED_STRUCTURE' : blockStatus ? 'BLOCKED_RUNTIME' : !second && activeRun ? (++pendingReads < 2 ? 'PENDING' : 'READY') : 'NOT_STARTED')
+            return json({ resource_version_id: second ? 'version-two' : 'version-test', processing_status: state === 'CONTENT_NOT_READY' ? 'OCR_PENDING' : 'CONTENT_READY',
+                index_status: state, auto_enabled: autoEnabled, bag_count: state === 'READY' ? 1 : 0,
+                bags: state === 'READY' ? [{ id: 'root-test', title: 'Test Bag', unit_type: 'CHAPTER', keywords: ['toán'], embedding_text: 'toán', embedding_model: 'ui-test-only@1', embedding_dimension: 3, vector_ready: true }] : [],
                 latest_run_id: second ? null : activeRun, published_run_id: state === 'READY' ? activeRun : null, chunk_count: 0,
-                bow_ready: false, vector_ready: false, embedding_model: 'ui-test-only', embedding_dimension: 3,
+                error_code: state === 'BLOCKED_STRUCTURE' ? 'BAG_STRUCTURE_UNAVAILABLE' : state === 'BLOCKED_RUNTIME' ? 'BLOCKED_EMBEDDING_RUNTIME' : null,
+                bow_ready: state === 'READY', vector_ready: state === 'READY', embedding_model: 'ui-test-only', embedding_dimension: 3,
                 message: state === 'BLOCKED_RUNTIME' ? 'Không thể tạo vector vì chưa cấu hình model.' : state === 'PENDING' ? 'Chờ lập chỉ mục.' : state === 'READY' ? 'Hoàn thành lập chỉ mục.' : 'Chưa lập chỉ mục.' })
         }
         if (path.endsWith('/chunks')) {
-            if (path.includes('version-two')) return json({ items: [], total: 0, index_run_id: null, index_status: 'NOT_STARTED', offset: 0, limit: 10 })
+            if (path.includes('version-two') || waitingForOcr && ocrReads < 2) return json({ items: [], total: 0, index_run_id: null, index_status: waitingForOcr ? 'CONTENT_NOT_READY' : 'PREVIEW', representation_status: waitingForOcr ? 'CONTENT_NOT_READY' : 'PREVIEW', chunk_storage: 'transient', offset: 0, limit: 10 })
             const offset = Number(new URL(req.url, 'http://localhost').searchParams.get('offset'))
-            return json({ resource_version_id: 'version-test', index_run_id: 'old-run', index_status: 'READY', total: 11, offset, limit: 10,
+            return json({ resource_version_id: 'version-test', index_run_id: null, index_status: 'PREVIEW', representation_status: 'PREVIEW', chunk_storage: 'transient', total: 11, offset, limit: 10,
                 items: Array.from({ length: offset === 0 ? 10 : 1 }, (_, i) => ({ id: `chunk-${offset + i + 1}`, content_unit_id: 'unit-test',
                     chunk_sequence: offset + i + 1, unit_chunk_sequence: 1, page_from: 2, page_to: 2,
-                    char_start: 0, char_end: 17, text: 'Văn bản tiếng Việt', bow_top_terms: [{ term: 'việt', frequency: 1 }],
-                    bow_term_count: 4, vector_ready: true, embedding_model: 'ui-test-only', embedding_dimension: 3 })) })
+                    char_start: 0, char_end: 17, text: 'Văn bản tiếng Việt', review_status: 'UNREVIEWED', retrieval_eligible: false,
+                    leaf_keywords: ['toán'] })) })
         }
         if (path.endsWith('/index') && req.method === 'POST') {
             postCount++
@@ -126,7 +133,7 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         await waitFor(() => evaluate("document.body.textContent.includes('Chunk 11') && !document.body.textContent.includes('Chunk 10')"))
         await evaluate("document.querySelector('details').open = true")
         assert.equal(await evaluate("document.querySelector('details').textContent.includes('Văn bản tiếng Việt')"), true)
-        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')).click()")
+        await evaluate("const buildButton = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')); buildButton.click(); buildButton.click()")
         await waitFor(() => evaluate("document.body.textContent.includes('run-test')"))
         assert.equal(postCount, 1)
         await waitFor(() => evaluate("document.body.textContent.includes('Chờ lập chỉ mục.')"))
@@ -157,6 +164,38 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         await waitFor(() => evaluate("document.body.textContent.includes('Không thể tạo vector vì chưa cấu hình model.')"))
         assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').disabled"), true)
         blockStatus = false
+        structureBlocked = true
+        await open()
+        await waitFor(() => evaluate("document.body.textContent.includes('BLOCKED_STRUCTURE')"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')).disabled"), true)
+        assert.equal(await evaluate("document.querySelectorAll('details').length > 0"), true)
+        structureBlocked = false
+        waitingForOcr = true
+        activeRun = null
+        const beforeWaitPosts = postCount
+        await open()
+        await waitFor(() => evaluate("document.body.textContent.includes('Đang đợi OCR/chuẩn hóa')"))
+        const hiddenReads = statusReads
+        await evaluate("Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'))")
+        await delay(4200)
+        assert.equal(statusReads, hiddenReads, 'hidden tab pauses polling')
+        await evaluate("delete document.hidden; document.dispatchEvent(new Event('visibilitychange'))")
+        await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent === 'Xây dựng chỉ mục' && !b.disabled)"))
+        await waitFor(() => evaluate("document.body.textContent.includes('Danh sách Chunk (11)')"))
+        assert.equal(postCount, beforeWaitPosts, 'OCR completion never triggers an implicit POST')
+        waitingForOcr = false
+        forcedState = 'FAILED'
+        await open()
+        await waitFor(() => evaluate("document.body.textContent.includes('FAILED')"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').disabled"), false)
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Xây dựng chỉ mục').disabled"), true)
+        forcedState = 'STALE'
+        autoEnabled = true
+        await open()
+        await waitFor(() => evaluate("document.body.textContent.includes('STALE') && document.body.textContent.includes('Chỉ mục sẽ tự được tạo')"))
+        assert.equal(postCount, beforeWaitPosts)
+        forcedState = null
+        autoEnabled = false
         await evaluate("const select = document.querySelector('#index-version'); select.value = 'version-two'; select.dispatchEvent(new Event('change', { bubbles: true }))")
         await waitFor(() => evaluate("document.body.textContent.includes('Chưa lập chỉ mục.') && !document.body.textContent.includes('rebuild-test')"))
         assert.equal(await evaluate("document.querySelectorAll('details').length"), 0, 'previous version chunks are not rendered')

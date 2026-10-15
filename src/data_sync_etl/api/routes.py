@@ -647,7 +647,7 @@ def ingest(id: ResourceId, body: IngestInput, request: Request):
 @router.get("/api/v1/resource-versions/{id}/chunks", tags=[TAG_INDEXING],
             response_model=ChunksResponse, responses=ERROR_RESPONSES,
             summary="Xem Chunk và thông tin biểu diễn đã công bố")
-def indexed_chunks(id: ResourceId, request: Request,
+def chunk_preview(id: ResourceId, request: Request,
                    offset: Annotated[int, Query(ge=0)] = 0,
                    limit: Annotated[int, Query(ge=1, le=100)] = 10,
                    content_unit_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None):

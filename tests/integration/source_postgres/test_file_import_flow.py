@@ -8,10 +8,11 @@ from pymongo import MongoClient
 from sqlalchemy import inspect, text
 
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
-from data_sync_etl.adapters.mongo.index_store import MongoIndexStore
-from data_sync_etl.adapters.mongo.schema import initialize
+from data_sync_etl.adapters.mongo.foundation_store import MongoBagStore, MongoContentReader
+from data_sync_etl.adapters.mongo.schema import contracts, initialize
 from data_sync_etl.application.indexing import IndexingService
 from data_sync_etl.application.sync import MasterSync
+from data_sync_etl.domain.indexing import IndexingError
 
 pytestmark = pytest.mark.postgres
 
@@ -142,10 +143,11 @@ def test_source_file_to_index_with_existing_workers(source, pg_container, mongo_
     client = MongoClient(mongo_test_database[0], serverSelectionTimeoutMS=3000, timeoutMS=10000)
     try:
         db = client[mongo_test_database[1]]
-        initialize(db, apply=True)
+        initialize(db, apply=True, dimension=3)
+        c.settings.index_embedding_dimension = 3
         c.mongo_projector.documents = MongoContentStore(db, invalidate_content_bags=False)
         c.settings.index_auto_enabled = auto_enabled
-        c.indexing = IndexingService(c.uow, MongoIndexStore(db), ModelDouble(), c.settings)
+        c.indexing = IndexingService(c.uow, MongoContentReader(db), ModelDouble(), c.settings, bags=MongoBagStore(db, 3))
         c.processing_finalizer.on_content_ready = c.indexing.enqueue_auto
         original = setup_import(source, c, tmp_path)
         with c.uow() as repo:
@@ -158,11 +160,12 @@ def test_source_file_to_index_with_existing_workers(source, pg_container, mongo_
             version = repo.find("resource_versions", limit=1)[0]
             assert repo.count("etl_stage_runs", {"stage": "INDEX_BUILD"}) == int(auto_enabled)
             assert repo.count("ocr_jobs", {}) == 1
-        assert c.indexing.status(version["id"])["index_status"] == ("READY" if auto_enabled else "NOT_STARTED")
+        assert c.indexing.status(version["id"])["index_status"] == "BLOCKED_STRUCTURE"
         if not auto_enabled:
-            c.indexing.enqueue(version["id"])
-            assert c.worker.once("manual-index-test")
-        assert db.indexed_chunks.count_documents({"resource_version_id": version["id"]}) > 0
+            with pytest.raises(IndexingError, match="BAG_STRUCTURE_UNAVAILABLE"):
+                c.indexing.enqueue(version["id"])
+        assert c.indexing.chunks(version["id"])["total"] > 0
+        assert set(db.list_collection_names()) == set(contracts(3))
         assert c.source_file_import.list_files()["items"][0]["etl_status"] == "CONTENT_READY"
         c.sync.run(full=False)
         assert not c.source_file_worker.once("same-source-test")

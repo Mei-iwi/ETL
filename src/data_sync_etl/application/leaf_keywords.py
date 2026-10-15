@@ -17,4 +17,7 @@ class SaveLeafKeywords:
         observed = self.documents.get_unit(unit_id)
         if observed is None or observed.resource_version_id != unit["resource_version_id"]:
             raise DomainError("Leaf projection unavailable or version mismatch")
+        from data_sync_etl.domain.mongo_documents import normalize_keywords
+        if observed.keywords == normalize_keywords(keywords):
+            return
         self.documents.update_leaf_keywords(observed, keywords)

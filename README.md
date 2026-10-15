@@ -3,9 +3,8 @@
 Đồng bộ PostgreSQL nguồn → Master Data; đối soát metadata tại chỗ trong **một MongoDB
 database `etl_content`**, không copy Mongo nguồn → đích;
 nhập file local, trích xuất/OCR, chuẩn hóa và lưu Content Units. Frontend React hỗ trợ
-quản lý, đồng bộ và retry. Nhóm lập chỉ mục bổ sung Chunk theo cửa sổ từ, BoW/TF và
-embedding ngữ nghĩa bằng model local tùy chọn. Chưa triển khai Search hoặc đánh giá;
-không sử dụng `content_bags` để lưu Chunk.
+quản lý, đồng bộ và retry. Nhóm 3 bổ sung Chunk preview tạm, keyword leaf và
+ContentBag với embedding local. Chưa triển khai Search hoặc đánh giá.
 
 Master Sync chỉ đồng bộ metadata; nội dung hoàn tất khi đạt `CONTENT_READY`.
 `COMPLETED` trên API/giao diện đồng bộ là PostgreSQL Master, không xác nhận Mongo
@@ -14,59 +13,57 @@ Hỗ trợ **PDF, DOCX, XLSX, TXT, CSV, PPTX, PNG, JPG, JPEG**; không tiếp nh
 
 ### Lập chỉ mục học liệu
 
-Trang `/library/indexing` chọn học liệu và phiên bản. `POST
-/api/v1/resource-versions/{id}/index` chỉ xếp hàng `INDEX_BUILD` vào `etl_stage_runs`
-sau `CONTENT_READY`; worker OCR hiện có xử lý lúc nhàn rỗi. Không có daemon mới,
-không đồng bộ nguồn hay chạy OCR ngầm khi bấm lập chỉ mục.
+Trang `/library/indexing` giữ layout/menu và bốn API:
+- `POST /api/v1/resource-versions/{id}/index`: xếp hàng INDEX_BUILD, trả 202;
+  cùng fingerprint đã hợp lệ trả 200 ALREADY_INDEXED, đang chạy trả IN_PROGRESS.
+- `GET /api/v1/resource-versions/{id}/chunks?offset=0&limit=10`: Chunk preview ngay sau
+  CONTENT_READY, không cần index READY. Có nguồn, trang, Unicode offsets và lọc content_unit_id.
+- `GET /api/v1/resource-versions/{id}/index-status`: tách OCR/Index, trả số Chunk preview,
+  Bag root/title/type/keywords/model/số chiều. Không trả vector thô.
+- `POST /api/v1/resource-versions/{id}/reindex`: xác nhận/hủy trên UI, tính lại Bag/vector,
+  không chạy lại OCR, không nhận cấu hình model từ client.
 
-Model là tùy chọn: `python -m pip install -e '.[embeddings]'` khi người vận hành
-đồng ý cài runtime. Provision model sentence-transformers đa ngôn ngữ vào thư mục
-local trước; tạo `etl-model-revision.txt` bên trong, chứa revision đã provision.
-Thư mục phải có `modules.json` và trọng số `.safetensors` của model đầy đủ.
-Cấu hình `INDEX_EMBEDDING_MODEL_PATH`, `INDEX_EMBEDDING_MODEL_ID`,
-`INDEX_EMBEDDING_MODEL_VERSION` (khớp file revision), `INDEX_EMBEDDING_DIMENSION`
-(đúng model). Không dùng `VECTOR_DIMENSION=256` của content_bags để ép chiều model.
-Runtime chỉ đọc model local, không tự download lúc startup/worker. Model thiếu,
-không đọc được hoặc sai chiều sẽ bị chặn; không có vector giả thay thế.
-API Capabilities kiểm tra model local khi được gọi (lần đầu có thể chậm do load
-model), cache runtime đã kiểm tra trong process; không load model lúc khởi động app.
+Schema mong đợi đúng **5 collection**: users, learning_resources, ocr_pages,
+mongo_content_units, content_bags. Database cũ vẫn có `indexed_chunks` với dữ liệu legacy;
+code mới không đọc/ghi collection đó. Không tự drop hoặc copy vector Chunk sang Bag.
+Contract, API mẫu và backup/rollback: [nhóm 3](docs/group3-five-collections.md).
 
-Mongo installer bổ sung duy nhất collection `indexed_chunks`, hai index theo
-version/run/sequence và version/run/unit; giữ nguyên 5 collection cũ.
-Chạy kiểm tra trước: `python -m data_sync_etl.adapters.mongo.schema --check`.
-Chỉ chạy cùng lệnh với `--apply` thay `--check` trên DB test/demo cô lập, hoặc sau
-khi operator duyệt backup/schema của DB thật. App không tự cài schema lúc startup.
-Không cần PostgreSQL migration cho nhóm lập chỉ mục.
+Chunk chỉ là cửa sổ từ tạm, không persist Chunk/TF/vector từng Chunk.
+`mongo_content_units._id` bằng PG ContentUnit ID. Keywords dành cho leaf, tối đa 5,
+NFC/casefold/trim/unique. Thuật toán `nfc-casefold-unigram-stopwords-v1` đếm token chữ
+bằng regex, bỏ stopword Việt/Anh, xếp frequency giảm dần rồi theo chữ, lấy tối đa 5.
+Đây là unigram, **không phải** tách từ ghép tiếng Việt hay TF-IDF; không lưu frequency.
 
-`CONTENT_READY` chỉ xác nhận nội dung ETL; chỉ mục chỉ READY sau khi worker ghi và
-verify đủ Chunk/BoW/vector cùng fingerprint, rồi đánh dấu stage COMPLETED.
-Review/eligibility không được nâng quyền: có thể xem Chunk chưa duyệt trong workspace
-quản lý, không có nghĩa được công bố trong Search. Lỗi index không đổi kết quả OCR.
+Bag dùng ID root ContentUnit thật CHAPTER, fallback LESSON rồi SECTION.
+BoW là tập keyword unique của leaf descendants; `embedding_text=' | '.join(keywords)`.
+Model embedding chuỗi keyword đó. Chỉ PAGE_TEXT hoặc *_TEXT không có cây hợp lệ sẽ
+BLOCKED_STRUCTURE nhưng vẫn xem Chunk được. Không tạo root giả hoặc backfill dữ liệu thật.
+DOCX mới có OOXML outline/Heading 1–3 được giữ thành CHAPTER/LESSON/SECTION với parent
+thật trong Postprocess. Paragraph/table giữ leaf text; không suy luận heading từ chữ.
+Outline cấp khác/chưa chắc chắn, TXT/CSV/PDF scan không có cây vẫn bị chặn Bag.
+Review/retrieval flags giữ nguyên; workspace quản lý không đồng nghĩa công bố Search.
 
-`GET /api/v1/resource-versions/{id}/chunks?offset=0&limit=10` xem Chunk của run
-đã công bố, có thể lọc `content_unit_id`. Trang chỉ mục hiển thị phân trang, vị trí
-nguồn, văn bản mở rộng, top term BoW và model/số chiều; không trả mảng vector thô.
-Run ghi dở/FAILED hoặc fingerprint cũ không được công bố thành chỉ mục hiện hành.
+Model local optional: `python -m pip install -e '.[embeddings]'` khi được phép.
+Provision model ngoài Git, pin revision vào `etl-model-revision.txt`, cấu hình
+INDEX_EMBEDDING_MODEL_PATH/ID/VERSION và INDEX_EMBEDDING_DIMENSION.
+**INDEX_EMBEDDING_DIMENSION là nguồn chiều cho model, Bag store và schema CLI**.
+VECTOR_DIMENSION chỉ còn tương thích cấu hình cũ, không ép model 384 thành 256.
+Validator live cũ 256 sẽ BLOCKED_INDEX_SCHEMA: cần operator duyệt thay đổi riêng.
+Model load/probe trong worker, không tải mạng hoặc load khi app startup/HTTP status.
+Capabilities chỉ báo runtime đã probe trong process đó; không tự load model.
 
-`GET /api/v1/resource-versions/{id}/index-status` tách processing_status và
-index_status: CONTENT_NOT_READY, NOT_STARTED, PENDING, RUNNING, READY, FAILED,
-STALE, BLOCKED_RUNTIME. Giao diện polling 4 giây khi PENDING/RUNNING, retry lỗi
-mạng tối đa 3 lần, timeout mỗi request 15 giây; không tự POST khi mở trang.
+Luồng: source → Master Sync → import → OCR → Postprocess → PG ContentUnits
+→ Mongo projection → CONTENT_READY → INDEX_BUILD → keyword leaf → Bag → vector → READY.
+READY chỉ khi run mới nhất COMPLETED, tất cả Bag đúng source/hierarchy/generation/
+fingerprint/model/dimension. Reindex PENDING/RUNNING/FAILED không công bố Bag ghi dở.
+ID Bag cố định nên vector có thể bị thay thế; **PG giữ lịch sử chạy, không giữ mọi
+vector lịch sử Mongo**. Lỗi index không biến CONTENT_READY thành lỗi OCR.
 
-`INDEX_AUTO_ENABLED=false` mặc định. Chỉ bật sau khi model, Mongo schema và worker
-được kiểm tra. Luồng: Master Sync → nhập file → OCR → Postprocess → Mongo projection
-→ CONTENT_READY → INDEX_BUILD/PENDING (khi bật auto) → OCR worker nhàn rỗi → index.
-Enqueue và projection COMPLETED cùng transaction PostgreSQL. Model/schema thiếu
-được ghi nhận FAILED/BLOCKED_RUNTIME, không queue/retry vô hạn. Không backfill các
-phiên bản đã CONTENT_READY trước khi bật cờ; metadata sync không tạo index job.
-
-`POST /api/v1/resource-versions/{id}/reindex` tạo run mới theo cấu hình hiện tại,
-không chạy lại OCR hoặc xóa lịch sử. Trên giao diện, nút Tái lập chỉ mục có hộp
-xác nhận/hủy. Không gửi tham số model/chunk từ client; thay cấu hình vận hành đã
-duyệt rồi gọi API. Nếu run mới thất bại, run cũ chỉ được xem khi fingerprint vẫn
-đúng; không gắn nhãn READY cho nội dung/cấu hình mới chưa index thành công.
-
-Ba worker vẫn là các lệnh hiện có (mỗi lệnh ở một terminal):
+INDEX_AUTO_ENABLED=false mặc định. Auto xếp hàng đúng một lần sau projection trong
+transaction/lock hiện có, không backfill, không retry vô hạn và không POST ngầm từ React.
+Worker OCR hiện có xử lý indexing khi nhàn rỗi và dành một lượt reconcile sau tối đa
+5 OCR tasks liên tiếp; finalization/indexing luân phiên ưu tiên để tránh starvation.
+Không thêm worker/bảng/queue:
 
 ```bash
 etl run-master-sync-worker --worker-id master-1
@@ -74,29 +71,34 @@ etl run-source-file-worker --worker-id file-1
 etl run-ocr-worker --worker-id ocr-1
 ```
 
-Không cần worker lập chỉ mục riêng. Dùng `--once` khi muốn xử lý một lượt có giới
-hạn. Giới hạn mặc định: 10.000 units, 10.000 chunks, 10 triệu ký tự nguồn và deadline
-300 giây kiểm tra giữa các lượt encode. Một lần encode native đang chạy không bị
-kill cưỡng bức; không publish nếu vượt deadline. Giới hạn vượt phải báo lỗi, không
-cắt tài liệu rồi báo thành công. Muốn thay nội dung model local phải provision
-revision mới và đổi `INDEX_EMBEDDING_MODEL_VERSION` trước khi reindex.
+Giới hạn: 10.000 units, 10.000 Chunk preview, 10 triệu ký tự và deadline 300 giây.
+Một lần encode native không bị kill cưỡng bức, kết quả vượt deadline không được công bố.
+Model local MiniLM 384 chiều có context hữu hạn; keyword ngắn vẫn cần đánh giá chất lượng
+trên học liệu thật, không suy ra chất lượng tìm kiếm từ kiểm tra vector.
 
-Kiểm thử riêng nhóm lập chỉ mục:
+Kiểm thử (TEST_* chỉ trỏ đến database test riêng):
 
 ```bash
-python -m pytest tests/unit/test_indexing.py -q
+python -m pytest tests/unit -q
+python -m pytest tests/integration/test_indexing_integration.py tests/integration/test_mongo_schema.py -q
+# Model thật, opt-in, không dùng database đang vận hành:
+export ETL_TEST_REAL_EMBEDDING=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+python -m pytest tests/integration/source_postgres/test_local_embedding_runtime.py -q -s
+# Thêm ETL_TEST_REAL_UI=1 sau khi build frontend để test UI với backend test thật.
 cd frontend
 npm.cmd run build
+npm.cmd run lint
 node --experimental-strip-types --test tests/indexingApi.test.mjs
 node --test tests/indexingUi.test.mjs
 ```
 
-Test UI dùng bản build React với HTTP fixture local và Edge headless (có thể đặt
-`ETL_TEST_BROWSER` tới executable tương thích Chromium), không gọi API/DB thật.
-`tests/integration/test_indexing_integration.py` cần PostgreSQL/MongoDB test cô lập;
-test luồng nguồn nằm trong `tests/integration/source_postgres/test_file_import_flow.py`.
-Embedding trong các test là test double, không phải bằng chứng chất lượng model
-ngữ nghĩa thật. Chỉ nghiệm thu runtime ngữ nghĩa sau khi provision/cài model local.
+Các fixture tạo schema PostgreSQL/database Mongo UUID riêng và chỉ dọn dữ liệu test sở hữu.
+Fixture structured khai báo rõ hierarchy để nghiệm thu Bag, không sửa hierarchy dữ liệu thật.
+Model double chỉ chứng minh logic; bài opt-in dùng model local thật, pin revision.
+Model lưu ngoài repository; không đưa trọng số vào Git.
+Schema CLI `python -m data_sync_etl.adapters.mongo.schema --check` chỉ đọc;
+`--apply` chỉ chạy DB cô lập hoặc sau phê duyệt schema/backup riêng.
+Extra collections được cảnh báo EXTRA_COLLECTION_PRESENT, không tự xóa.
 
 ## 1. Cài đặt
 

@@ -6,6 +6,10 @@ from pydantic import BaseModel, ConfigDict
 from data_sync_etl.domain.indexing import IndexingError
 
 MESSAGES = {
+    "BAG_STRUCTURE_UNAVAILABLE": "Có thể xem Chunk, chưa thể xây ContentBag vì chưa có CHAPTER/LESSON/SECTION hợp lệ.",
+    "BAG_STRUCTURE_INVALID": "Cấu trúc nội dung có parent thiếu, khác phiên bản hoặc vòng lặp.",
+    "LEAF_KEYWORDS_UNAVAILABLE": "Chưa có từ khóa hợp lệ cho ContentUnit lá.",
+    "INVALID_INDEX_QUERY": "Tham số xem Chunk không hợp lệ.",
     "VERSION_NOT_FOUND": "Không tìm thấy phiên bản học liệu.",
     "CONTENT_NOT_READY": "Chưa hoàn tất trích xuất và chuẩn hóa nội dung.",
     "BLOCKED_EMBEDDING_RUNTIME": "Không thể tạo vector vì chưa cấu hình model local hợp lệ.",
@@ -45,12 +49,7 @@ class ReindexRequest(BaseModel):
 
 
 IndexStatus = Literal["CONTENT_NOT_READY", "NOT_STARTED", "PENDING", "RUNNING", "READY",
-                      "FAILED", "STALE", "BLOCKED_RUNTIME"]
-
-
-class BowTerm(BaseModel):
-    term: str
-    frequency: int
+                      "FAILED", "STALE", "BLOCKED_RUNTIME", "BLOCKED_STRUCTURE"]
 
 
 class ChunkItem(BaseModel):
@@ -65,23 +64,30 @@ class ChunkItem(BaseModel):
     text: str
     review_status: str
     retrieval_eligible: bool
-    bow_top_terms: list[BowTerm]
-    bow_term_count: int
-    bow_length: int
-    vector_ready: bool
-    embedding_model: str
-    embedding_version: str
-    embedding_dimension: int
+    leaf_keywords: list[str]
 
 
 class ChunksResponse(BaseModel):
     resource_version_id: str
     index_run_id: str | None
-    index_status: IndexStatus
+    index_status: Literal['PREVIEW', 'CONTENT_NOT_READY']
+    representation_status: Literal['PREVIEW', 'CONTENT_NOT_READY']
+    chunk_storage: Literal['transient']
     total: int
     offset: int
     limit: int
     items: list[ChunkItem]
+
+
+class BagSummary(BaseModel):
+    id: str
+    unit_type: Literal['CHAPTER', 'LESSON', 'SECTION']
+    title: str | None
+    keywords: list[str]
+    embedding_text: str
+    embedding_model: str
+    embedding_dimension: int
+    vector_ready: bool
 
 
 class IndexStatusResponse(BaseModel):
@@ -92,12 +98,18 @@ class IndexStatusResponse(BaseModel):
     latest_run_id: str | None
     published_run_id: str | None
     chunk_count: int
+    chunk_preview_count: int
+    bag_count: int
+    bags: list[BagSummary]
+    representation_unit: Literal['content_bag']
+    chunk_storage: Literal['transient']
     bow_ready: bool
     vector_ready: bool
     algorithm: str
     chunk_size_words: int
     chunk_overlap_words: int
     embedding_model: str | None
+    embedding_version: str | None
     embedding_dimension: int | None
     started_at: datetime | None
     finished_at: datetime | None

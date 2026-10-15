@@ -221,7 +221,7 @@ def test_composition_prioritizes_source_over_identity_bootstrap(source, pg_conta
     runtime = Container(settings, pg_container.engine)
     try:
         assert runtime.master_metadata_projection is runtime.mongo_metadata_sync
-        assert not runtime.documents.invalidate_content_bags
+        assert runtime.documents.invalidate_content_bags
         runtime.sync.run(full=True)
         assert dst.learning_resources.find_one({'_id': 'MRES-1'})['description'] == 'Source description'
         assert dst.learning_resources.find_one({'_id': 'resource-2'}) is None
@@ -403,7 +403,7 @@ def test_shared_metadata_and_bags_unchanged_through_native_pdf_etl(source, pg_co
         runtime.mongo_projector.project(version['id'], job['id'], generation=1)
         assert db.mongo_content_units.count_documents({'resource_version_id': version['id']}) == 2
         assert snapshot(db) == before and BSON.encode(db.content_bags.find_one({'_id': 'sentinel'})) == bag
-        assert set(db.list_collection_names()) == {'users', 'learning_resources', 'ocr_pages', 'mongo_content_units', 'content_bags', 'indexed_chunks'}
+        assert set(db.list_collection_names()) == {'users', 'learning_resources', 'ocr_pages', 'mongo_content_units', 'content_bags'}
     finally:
         runtime.close()
         client.close()

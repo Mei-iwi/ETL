@@ -298,6 +298,23 @@ class MongoBagStore:
         self.dimension = dimension
         self.reader = MongoContentReader(database)
 
+    def ensure_ready(self):
+        from data_sync_etl.adapters.mongo.schema import INDEXES, compatible_index, contracts
+        from data_sync_etl.domain.indexing import IndexingError
+
+        catalog = {row['name']: row for row in self.database.list_collections()}
+        for name, validator in contracts(self.dimension).items():
+            entry = catalog.get(name, {})
+            options = entry.get('options', {})
+            if (options.get('validator') != validator
+                    or options.get('validationLevel', 'strict') != 'strict'
+                    or options.get('validationAction', 'error') != 'error'):
+                raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+            installed = list(self.database[name].list_indexes())
+            if any(not any(compatible_index(i, expected) for i in installed)
+                   for expected in INDEXES[name]):
+                raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+
     def _current(self, document):
         if (
             not document.is_current

@@ -53,7 +53,8 @@ class NativeDocumentExtractor:
             if not texts:
                 raise DomainError('EMPTY_EXTRACTED_CONTENT')
             return OCRResult('\n\n'.join(texts), engine_name='native_' + extension[1:],
-                             metadata={'source_type': extension[1:], 'logical_units': units})
+                             metadata={'source_type': extension[1:], 'logical_units': units,
+                                       **({'structure_version': 'docx-outline-v1'} if extension == '.docx' else {})})
         except DomainError:
             raise
         except UnicodeError:
@@ -64,6 +65,7 @@ class NativeDocumentExtractor:
     @staticmethod
     def docx(path):
         from docx import Document
+        from docx.oxml.ns import qn
         from docx.table import Table
         from docx.text.paragraph import Paragraph
         document = Document(path)
@@ -71,8 +73,24 @@ class NativeDocumentExtractor:
             if index > MAX_UNITS:
                 raise DomainError('EXTRACTION_LIMIT_EXCEEDED')
             if isinstance(block, Paragraph):
+                # Trust OOXML outline levels (including inherited styles), not text regex.
+                level, style, visited = None, block.style, set()
+                paragraph_properties = block._p.pPr
+                properties = [paragraph_properties] if paragraph_properties is not None else []
+                while style is not None and style.style_id not in visited:
+                    visited.add(style.style_id)
+                    if style.element.pPr is not None:
+                        properties.append(style.element.pPr)
+                    style = style.base_style
+                for props in properties:
+                    outline = props.find(qn('w:outlineLvl'))
+                    if outline is not None:
+                        value = outline.get(qn('w:val'))
+                        level = int(value) + 1 if value is not None and value.isdigit() else 0
+                        break
                 yield block.text, f'Word · Đoạn {index}', {'block': index, 'kind': 'paragraph',
-                                                        'style': block.style.name if block.style else ''}
+                                                        'style': block.style.name if block.style else '',
+                                                        **({'heading_level': level} if level is not None and level != 10 else {})}
             elif isinstance(block, Table):
                 for row_index, row in enumerate(block.rows, 1):
                     if row_index > MAX_ROWS or len(row.cells) > MAX_COLUMNS:
