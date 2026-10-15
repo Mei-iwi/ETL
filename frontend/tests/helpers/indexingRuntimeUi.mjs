@@ -26,7 +26,8 @@ const server = createServer(async (req, res) => {
     } catch { res.writeHead(500); res.end('Acceptance fixture unavailable') }
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-const origin = `http://127.0.0.1:${server.address().port}`
+const origin = process.env.ETL_RUNTIME_FRONTEND_URL || `http://127.0.0.1:${server.address().port}`
+assert.match(origin, /^http:\/\/127\.0\.0\.1:\d+$/)
 const profile = await mkdtemp(join(tmpdir(), 'etl-real-model-ui-'))
 const browser = spawn(process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', [
     '--headless=new', '--no-first-run', '--disable-extensions', '--disable-gpu', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank',
@@ -69,11 +70,14 @@ try {
     await call('Page.navigate', { url: `${origin}/library/indexing?${new URLSearchParams({ resourceId, versionId })}` })
     await waitFor(() => evaluate("document.body.textContent.includes('Vector sẵn sàng') && document.body.textContent.includes('384') && document.body.textContent.includes('READY')"))
     assert.equal((await status()).latest_run_id, initial.latest_run_id, 'mount never POSTs')
+    await evaluate("Array.from(document.querySelectorAll('nav[aria-label=\"Phân đoạn và chỉ mục\"] a')).find(a => a.textContent === 'Phân đoạn').click()")
+    await waitFor(() => evaluate("document.querySelector('[data-index-panel=chunks]')?.hidden === false"))
     await waitFor(() => evaluate("Array.from(document.querySelectorAll('article h4')).filter(h => h.textContent.startsWith('Chunk ')).length === 10"))
-    await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tiếp').click()")
+    await evaluate("Array.from(document.querySelectorAll('[data-index-panel=chunks] button')).find(b => b.textContent === 'Tiếp').click()")
     await waitFor(() => evaluate("document.body.textContent.includes('Chunk 11')"))
-    await evaluate("document.querySelector('details').open = true")
-    assert.ok(await evaluate("document.querySelector('details p').textContent.length > 0"))
+    await evaluate("document.querySelector('[data-index-panel=chunks] details').open = true")
+    assert.ok(await evaluate("document.querySelector('[data-index-panel=chunks] details p').textContent.length > 0"))
+    await evaluate("Array.from(document.querySelectorAll('nav[aria-label=\"Phân đoạn và chỉ mục\"] a')).find(a => a.textContent === 'Chỉ mục').click()")
     await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').click()")
     await waitFor(() => evaluate("document.querySelector('dialog')?.open"))
     await evaluate("Array.from(document.querySelectorAll('dialog button')).find(b => b.textContent === 'Hủy').click()")
@@ -90,7 +94,7 @@ try {
         throw new Error(`${error.message}; ${JSON.stringify({ index_status: lastStatus?.index_status,
             error_code: lastStatus?.error_code, new_run: lastStatus?.latest_run_id !== initial.latest_run_id })}`)
     })
-    await waitFor(() => evaluate(`document.body.textContent.includes(${JSON.stringify(rebuilt.latest_run_id)}) && document.body.textContent.includes('ContentBag đã sẵn sàng.')`))
+    await waitFor(() => evaluate(`document.body.textContent.includes(${JSON.stringify(rebuilt.latest_run_id)}) && document.body.textContent.includes('Chỉ mục sẵn sàng.')`))
     console.log(JSON.stringify({ real_backend: true, real_model: true, index_status: rebuilt.index_status, chunks: rebuilt.chunk_count, dimension: rebuilt.embedding_dimension, ui: 'PASS', reindex_dialog: 'PASS' }))
 } finally {
     if (ws?.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ id: ++sequence, method: 'Browser.close' })); ws.close() }

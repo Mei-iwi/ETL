@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, resolve, sep } from 'node:path'
@@ -44,12 +44,12 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
             const second = path.includes('version-two')
             const state = forcedState ?? (waitingForOcr && ++ocrReads < 2 ? 'CONTENT_NOT_READY' : structureBlocked ? 'BLOCKED_STRUCTURE' : blockStatus ? 'BLOCKED_RUNTIME' : !second && activeRun ? (++pendingReads < 2 ? 'PENDING' : 'READY') : 'NOT_STARTED')
             return json({ resource_version_id: second ? 'version-two' : 'version-test', processing_status: state === 'CONTENT_NOT_READY' ? 'OCR_PENDING' : 'CONTENT_READY',
-                index_status: state, representation_mode: state === 'BLOCKED_STRUCTURE' ? 'unavailable' : 'fallback', auto_enabled: autoEnabled, bag_count: state === 'READY' ? 1 : 0,
-                bags: state === 'READY' ? [{ id: 'root-test', title: 'Test Bag', unit_type: 'PAGE_TEXT', representation_mode: 'fallback', keywords: ['toán'], embedding_text: 'toán', embedding_model: 'ui-test-only@1', embedding_dimension: 3, vector_ready: true }] : [],
+                index_status: state, representation_mode: state === 'BLOCKED_STRUCTURE' ? 'unavailable' : 'fallback', auto_enabled: autoEnabled, bag_count: state === 'READY' ? 7 : 0,
+                bags: state === 'READY' ? Array.from({ length: 7 }, (_, i) => ({ id: `root-test-${i}`, title: `Test Bag ${i + 1}`, unit_type: 'PAGE_TEXT', representation_mode: 'fallback', keywords: ['toán'], embedding_text: 'toán', embedding_model: 'ui-test-only@1', embedding_dimension: 3, vector_ready: true })) : [],
                 latest_run_id: second ? null : activeRun, published_run_id: state === 'READY' ? activeRun : null, chunk_count: 0,
-                error_code: state === 'BLOCKED_STRUCTURE' ? 'BAG_STRUCTURE_UNAVAILABLE' : state === 'BLOCKED_RUNTIME' ? blockCode : null,
+                error_code: state === 'BLOCKED_STRUCTURE' ? 'BAG_STRUCTURE_UNAVAILABLE' : state === 'BLOCKED_RUNTIME' || state === 'FAILED' ? blockCode : null,
                 bow_ready: state === 'READY', vector_ready: state === 'READY', embedding_model: 'ui-test-only', embedding_dimension: 3,
-                message: state === 'BLOCKED_RUNTIME' ? 'Không thể tạo vector vì chưa cấu hình model.' : state === 'PENDING' ? 'Chờ lập chỉ mục.' : state === 'READY' ? 'Hoàn thành lập chỉ mục.' : 'Chưa lập chỉ mục.' })
+                message: state === 'BLOCKED_RUNTIME' ? 'Model chưa sẵn sàng.' : state === 'PENDING' ? 'Đang chờ xử lý.' : state === 'READY' ? 'Chỉ mục sẵn sàng.' : 'Chưa lập chỉ mục.' })
         }
         if (path.endsWith('/chunks')) {
             if (path.includes('version-two') || waitingForOcr && ocrReads < 2) return json({ items: [], total: 0, index_run_id: null, index_status: waitingForOcr ? 'CONTENT_NOT_READY' : 'PREVIEW', representation_status: waitingForOcr ? 'CONTENT_NOT_READY' : 'PREVIEW', chunk_storage: 'transient', offset: 0, limit: 10 })
@@ -63,7 +63,7 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         if (path.endsWith('/index') && req.method === 'POST') {
             postCount++
             if (!blocked) { activeRun = 'run-test'; pendingReads = 0 }
-            return blocked ? json({ detail: { code: 'BLOCKED_EMBEDDING_RUNTIME', message: 'Chưa có model local.' } }, 503)
+            return blocked ? json({ detail: { code: 'BLOCKED_EMBEDDING_RUNTIME', message: 'Model chưa sẵn sàng.' } }, 503)
                 : json({ resource_version_id: 'version-test', index_run_id: 'run-test', index_status: 'PENDING', action: 'QUEUED' }, 202)
         }
         if (path.endsWith('/reindex') && req.method === 'POST') {
@@ -122,6 +122,17 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         })
         await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }))
         await call('Page.enable')
+        await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
+        async function tab(label) {
+            await evaluate(`Array.from(document.querySelectorAll('nav[aria-label="Phân đoạn và chỉ mục"] a')).find(a => a.textContent === ${JSON.stringify(label)}).click()`)
+        }
+        async function capture(name) {
+            if (!process.env.ETL_TEST_CAPTURE_LAYOUT) return
+            const folder = resolve(root, '../.test-tmp/indexing-layout')
+            await mkdir(folder, { recursive: true })
+            const shot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true })
+            await writeFile(join(folder, name + '.png'), Buffer.from(shot.data, 'base64'))
+        }
         async function open() {
             await call('Page.navigate', { url: `${origin}/library/indexing?resourceId=resource-test&versionId=version-test` })
             await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Xây dựng chỉ mục'))"))
@@ -131,17 +142,43 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         await waitFor(() => evaluate("document.body.textContent.includes('Không cấu trúc (Fallback)')"))
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Xây dựng chỉ mục') && !b.disabled)"))
         await waitFor(() => evaluate("document.body.textContent.includes('Danh sách Chunk (11)')"))
-        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Tiếp').click()")
+        await tab('Phân đoạn')
+        assert.equal(await evaluate("document.querySelector('[data-index-panel=chunks]').hidden"), false)
+        assert.equal(await evaluate("document.querySelector('[data-index-panel=index]').hidden"), true)
+        assert.equal(await evaluate("new URL(location.href).searchParams.get('view')"), 'chunks')
+        assert.equal(await evaluate("new URL(location.href).searchParams.get('resourceId')"), 'resource-test')
+        await capture('chunks-desktop')
+        await evaluate("Array.from(document.querySelectorAll('[data-index-panel=chunks] button')).find(b => b.textContent.trim() === 'Tiếp').click()")
         await waitFor(() => evaluate("document.body.textContent.includes('Chunk 11') && !document.body.textContent.includes('Chunk 10')"))
-        await evaluate("document.querySelector('details').open = true")
-        assert.equal(await evaluate("document.querySelector('details').textContent.includes('Văn bản tiếng Việt')"), true)
+        await evaluate("document.querySelector('[data-index-panel=chunks] details').open = true")
+        assert.equal(await evaluate("document.querySelector('[data-index-panel=chunks] details').textContent.includes('Văn bản tiếng Việt')"), true)
+        await tab('Chỉ mục')
+        await tab('Phân đoạn')
+        assert.equal(await evaluate("document.querySelector('[data-index-panel=chunks]').textContent.includes('Chunk 11')"), true, 'pagination is preserved when switching views')
+        await tab('Chỉ mục')
+        assert.equal(postCount, 0, 'switching views never POSTs')
         await evaluate("const buildButton = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')); buildButton.click(); buildButton.click()")
         await waitFor(() => evaluate("document.body.textContent.includes('run-test')"))
         assert.equal(postCount, 1)
-        await waitFor(() => evaluate("document.body.textContent.includes('Chờ lập chỉ mục.')"))
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('[data-index-panel=index] [role=status]')).color"), 'rgb(161, 98, 7)')
+        await waitFor(() => evaluate("document.body.textContent.includes('Đang chờ xử lý.')"))
         const readCount = statusReads
         await waitFor(async () => { await delay(200); return statusReads > readCount })
-        await waitFor(() => evaluate("document.body.textContent.includes('Hoàn thành lập chỉ mục.')"))
+        await waitFor(() => evaluate("document.body.textContent.includes('Chỉ mục sẵn sàng.')"))
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('[data-index-panel=index] [role=status]')).color"), 'rgb(21, 128, 61)')
+        await capture('index-desktop')
+        await tab('ContentBag')
+        assert.equal(await evaluate("document.querySelectorAll('[data-index-panel=bags] article').length"), 6)
+        await evaluate("Array.from(document.querySelectorAll('[data-index-panel=bags] button')).find(b => b.textContent === 'Tiếp').click()")
+        assert.equal(await evaluate("document.querySelectorAll('[data-index-panel=bags] article').length"), 1)
+        await evaluate("Array.from(document.querySelectorAll('[data-index-panel=bags] button')).find(b => b.textContent === 'Trước').click()")
+        await capture('bags-desktop')
+        await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+        await capture('bags-mobile')
+        assert.equal(await evaluate("document.querySelector('[data-index-panel=bags]').getBoundingClientRect().width <= innerWidth"), true)
+        await tab('Chỉ mục')
+        await capture('index-mobile')
+        await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
         const terminalReads = statusReads
         await delay(4300)
         assert.equal(statusReads, terminalReads, 'polling stops at READY')
@@ -150,31 +187,35 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         await open()
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Xây dựng chỉ mục') && !b.disabled)"))
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')).click()")
-        await waitFor(() => evaluate("document.body.textContent.includes('Chưa có model local.')"))
+        await waitFor(() => evaluate("document.body.textContent.includes('Model chưa sẵn sàng.')"))
         assert.equal(postCount, 2)
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('[role=alert]')).color"), 'rgb(185, 28, 28)')
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').click()")
         await waitFor(() => evaluate("document.querySelector('dialog')?.open"))
         await evaluate("Array.from(document.querySelectorAll('dialog button')).find(b => b.textContent === 'Hủy').click()")
         assert.equal(reindexCount, 0)
+        assert.equal(await evaluate("document.querySelector('dialog')"), null)
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').click()")
         await waitFor(() => evaluate("document.querySelector('dialog')?.open"))
+        assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('dialog button')).map(b => b.textContent)"), ['Xác nhận', 'Hủy'])
+        await capture('confirm-desktop')
         await evaluate("Array.from(document.querySelectorAll('dialog button')).find(b => b.textContent === 'Xác nhận').click()")
         await waitFor(() => evaluate("document.body.textContent.includes('rebuild-test')"))
         assert.equal(reindexCount, 1)
         blockStatus = true
-        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Thử tải lại trạng thái').click()")
-        await waitFor(() => evaluate("document.body.textContent.includes('Không thể tạo vector vì chưa cấu hình model.')"))
+        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tải lại trạng thái').click()")
+        await waitFor(() => evaluate("document.body.textContent.includes('Model chưa sẵn sàng.')"))
         assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').disabled"), true)
         blockCode = 'BLOCKED_INDEX_SCHEMA'
         const beforeSchemaPosts = postCount
-        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Thử tải lại trạng thái').click()")
-        await waitFor(() => evaluate("document.body.textContent.includes('Schema MongoDB chưa tương thích với ContentBag')"))
+        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tải lại trạng thái').click()")
+        await waitFor(() => evaluate("document.body.textContent.includes('Schema MongoDB chưa hợp lệ')"))
         assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Xây dựng chỉ mục').disabled"), true)
         assert.equal(await evaluate("document.querySelectorAll('details').length > 0"), true)
         assert.equal(postCount, beforeSchemaPosts)
         blockStatus = false
         activeRun = null
-        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Thử tải lại trạng thái').click()")
+        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tải lại trạng thái').click()")
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent === 'Xây dựng chỉ mục' && !b.disabled)"))
         assert.equal(postCount, beforeSchemaPosts, 'schema refresh never implicitly enqueues')
         blockStatus = false
@@ -188,7 +229,7 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         activeRun = null
         const beforeWaitPosts = postCount
         await open()
-        await waitFor(() => evaluate("document.body.textContent.includes('Đang đợi OCR/chuẩn hóa')"))
+        await waitFor(() => evaluate("document.body.textContent.includes('Đang chờ nội dung.')"))
         const hiddenReads = statusReads
         await evaluate("Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'))")
         await delay(4200)
@@ -201,18 +242,19 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         forcedState = 'FAILED'
         await open()
         await waitFor(() => evaluate("document.body.textContent.includes('FAILED')"))
+        assert.equal(await evaluate("document.body.textContent.includes('Schema MongoDB chưa hợp lệ')"), false, 'historical schema failure is not a current runtime blocker')
         assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').disabled"), false)
         assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Xây dựng chỉ mục').disabled"), true)
         forcedState = 'STALE'
         autoEnabled = true
         await open()
-        await waitFor(() => evaluate("document.body.textContent.includes('STALE') && document.body.textContent.includes('Chỉ mục sẽ tự được tạo')"))
+        await waitFor(() => evaluate("document.body.textContent.includes('STALE') && document.body.textContent.includes('Chỉ mục cần cập nhật.')"))
         assert.equal(postCount, beforeWaitPosts)
         forcedState = null
         autoEnabled = false
         await evaluate("const select = document.querySelector('#index-version'); select.value = 'version-two'; select.dispatchEvent(new Event('change', { bubbles: true }))")
         await waitFor(() => evaluate("document.body.textContent.includes('Chưa lập chỉ mục.') && !document.body.textContent.includes('rebuild-test')"))
-        assert.equal(await evaluate("document.querySelectorAll('details').length"), 0, 'previous version chunks are not rendered')
+        assert.equal(await evaluate("document.querySelectorAll('[data-index-panel=chunks] details').length"), 0, 'previous version chunks are not rendered')
     } finally {
         if (ws?.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ id: ++sequence, method: 'Browser.close' })); ws.close() }
         browser.kill()

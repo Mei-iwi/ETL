@@ -107,6 +107,9 @@ Model lưu ngoài repository; không đưa trọng số vào Git.
 Chẩn đoán schema/index/dimension và kế hoạch quản trị có phê duyệt:
 [BLOCKED_INDEX_SCHEMA](docs/group3-schema-diagnostics.md).
 
+Kết quả migration Dev đã được duyệt, nghiệm thu Index/Reindex/auto và URL Backend mới:
+[Nghiệm thu ContentBag Dev](docs/indexing-dev-acceptance.md).
+
 Schema CLI `python -m data_sync_etl.adapters.mongo.schema --check` chỉ đọc;
 `--apply` chỉ chạy DB cô lập hoặc sau phê duyệt schema/backup riêng.
 Extra collections được cảnh báo EXTRA_COLLECTION_PRESENT, không tự xóa.

@@ -259,6 +259,7 @@ class IndexingService:
                 snapshot, code = None, exc.code
         latest = runs[0] if runs else None
         status, summaries, published, mode = 'CONTENT_NOT_READY', [], None, 'unavailable'
+        historical_failure = False
         if snapshot:
             status = 'NOT_STARTED'
             try:
@@ -274,8 +275,9 @@ class IndexingService:
                         status, published = 'READY', latest['id']
                     else:
                         status = latest['status']
-                        if status == 'FAILED' and code in ('BLOCKED_EMBEDDING_RUNTIME', 'BLOCKED_INDEX_SCHEMA', 'INVALID_EMBEDDING'):
-                            status = 'BLOCKED_RUNTIME'
+                        historical_failure = status == 'FAILED'
+                        # _runtime() above describes CURRENT blockers. A failed run's
+                        # error is historical and must not lock Reindex after recovery.
             except IndexingError as exc:
                 code = exc.code
                 status = ('BLOCKED_STRUCTURE' if code in ('BAG_STRUCTURE_UNAVAILABLE', 'BAG_STRUCTURE_INVALID')
@@ -302,7 +304,7 @@ class IndexingService:
             'embedding_version': self.embedding.version or None,
             'embedding_dimension': self.embedding.dimension if self.embedding.model_id else None,
             'started_at': latest['started_at'] if latest else None, 'finished_at': latest['finished_at'] if latest else None,
-            'error_code': code, 'message': {
+            'error_code': code, 'message': messages[status] if historical_failure else {
                 'BLOCKED_EMBEDDING_RUNTIME': 'Chưa xác nhận được model embedding local hợp lệ; cần kiểm tra runtime và revision.',
                 'BLOCKED_INDEX_SCHEMA': 'Schema MongoDB chưa tương thích ContentBag; cần kiểm tra validator, số chiều và indexes.',
                 'INVALID_EMBEDDING': 'Vector hoặc số chiều model/ContentBag không hợp lệ.',

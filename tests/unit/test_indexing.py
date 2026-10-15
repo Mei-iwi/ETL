@@ -133,11 +133,37 @@ def test_bad_embedding_never_published(container, vector):
     index.embedding.embed = lambda _: vector
     assert index.once()
     status = index.status(version["id"])
-    assert status["index_status"] == "BLOCKED_RUNTIME" and not status["vector_ready"]
+    assert status["index_status"] == "FAILED" and not status["vector_ready"]
     assert status['error_code'] == 'INVALID_EMBEDDING'
     assert index.chunks(version["id"])["total"] == 3
     with pytest.raises(IndexingError, match="REINDEX_REQUIRED"):
         index.enqueue(version["id"])
+
+
+@pytest.mark.parametrize('code', ['BLOCKED_INDEX_SCHEMA', 'BLOCKED_EMBEDDING_RUNTIME', 'INVALID_EMBEDDING'])
+def test_historical_runtime_failure_allows_reindex_but_current_blocker_still_blocks(container, code):
+    index, version, _ = ready(container, False)
+    first = index.enqueue(version['id'])
+    with container.uow() as repo:
+        repo.update('etl_stage_runs', first['index_run_id'], {'status': 'FAILED', 'error_message': code})
+    with TestClient(create_app(container)) as api:
+        base = f"/api/v1/resource-versions/{version['id']}"
+        state = api.get(base + '/index-status').json()
+        assert state['index_status'] == 'FAILED' and state['error_code'] == code
+        assert 'có thể tái lập chỉ mục' in state['message']
+        original_ready = index.bags.ensure_ready
+        def fail():
+            raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+        index.bags.ensure_ready = fail
+        assert api.get(base + '/index-status').json()['index_status'] == 'BLOCKED_RUNTIME'
+        assert api.post(base + '/reindex').status_code == 503
+        index.bags.ensure_ready = original_ready
+        assert api.post(base + '/reindex').status_code == 202
+        assert index.once()
+        assert api.get(base + '/index-status').json()['index_status'] == 'READY'
+    with container.uow() as repo:
+        historical = repo.get('etl_stage_runs', first['index_run_id'])
+        assert historical['status'] == 'FAILED' and historical['error_message'] == code
 
 
 def test_partial_write_no_publication_and_restart(container):
