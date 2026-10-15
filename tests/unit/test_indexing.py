@@ -23,6 +23,9 @@ class TestEmbedding:
     def available(self):
         return self.enabled
 
+    def ready(self):
+        return self.enabled
+
     def prepare(self):
         if not self.enabled:
             raise IndexingError("BLOCKED_EMBEDDING_RUNTIME", 503)
@@ -54,6 +57,7 @@ class MemoryIndexStore:
 def setup_index(container):
     service = IndexingService(container.uow, MemoryIndexStore(container.documents), TestEmbedding(), container.settings)
     container.indexing = service
+    container.processing_finalizer.on_content_ready = service.enqueue_auto
     container.settings.admin_enabled = True
     return service
 
@@ -246,3 +250,86 @@ def test_chunks_mongo_failure_and_tampered_artifact(container):
         assert response.status_code == 503
         assert response.json()["detail"]["code"] == "INDEX_UNAVAILABLE"
         assert "private" not in response.text
+
+
+def test_status_api_transitions_and_capabilities(container):
+    version = ingest(container)
+    index = setup_index(container)
+    path = f"/api/v1/resource-versions/{version['id']}/index-status"
+    with TestClient(create_app(container)) as client:
+        assert client.get(path).json()["index_status"] == "CONTENT_NOT_READY"
+        container.ocr.create_job(version["id"])
+        while container.worker.once("test"):
+            pass
+        assert client.get(path).json()["index_status"] == "NOT_STARTED"
+        run = index.enqueue(version["id"])
+        assert client.get(path).json()["index_status"] == "PENDING"
+        with container.uow() as repo:
+            repo.update("etl_stage_runs", run["index_run_id"], {"status": "RUNNING"})
+        assert client.get(path).json()["index_status"] == "RUNNING"
+        index.once()
+        data = client.get(path).json()
+        assert data["index_status"] == "READY" and data["processing_status"] == "CONTENT_READY"
+        assert data["vector_ready"] and data["bow_ready"] and data["chunk_count"] == 3
+        container.settings.chunk_overlap_words += 1
+        assert client.get(path).json()["index_status"] == "STALE"
+        index.embedding.enabled = False
+        blocked = client.get(path).json()
+        assert blocked["index_status"] == "BLOCKED_RUNTIME" and not blocked["vector_ready"]
+        assert client.get("/api/v1/resource-versions/missing/index-status").status_code == 404
+        invalid = client.get(f"/api/v1/resource-versions/{'x' * 31}/index-status")
+        assert invalid.status_code == 422 and invalid.json()["detail"]["phase"] == "indexing"
+        capabilities = client.get("/api/v1/system/capabilities").json()
+        assert capabilities["processing"]["chunking"]["enabled"]
+        assert capabilities["representations"]["bag_of_words"]
+        assert not capabilities["representations"]["vector"]["semantic"]
+        assert not capabilities["retrieval"]["modes"]
+
+
+@pytest.mark.parametrize("enabled,model,expected", [(False, True, None), (True, True, "COMPLETED"), (True, False, "FAILED")])
+def test_auto_only_at_new_content_ready_and_no_backfill(container, enabled, model, expected):
+    index = setup_index(container)
+    index.embedding.enabled = model
+    container.settings.index_auto_enabled = enabled
+    # Master metadata sync alone creates no index stage.
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        assert repo.count("etl_stage_runs", {"stage": "INDEX_BUILD"}) == 0
+    version = ingest(container)
+    job = container.ocr.create_job(version["id"])
+    while container.worker.once("auto-test"):
+        pass
+    with container.uow() as repo:
+        stages = index._runs(repo, version["id"])
+        assert (stages[0]["status"] if stages else None) == expected
+        from data_sync_etl.application.processing_state import processing_state
+
+        assert processing_state(repo, repo.get("ocr_jobs", job["id"])) == "CONTENT_READY"
+    # Enabling later does not sweep historical CONTENT_READY versions.
+    container.settings.index_auto_enabled = True
+    for _ in range(3):
+        container.worker.once("auto-test")
+    with container.uow() as repo:
+        assert len(index._runs(repo, version["id"])) == len(stages)
+
+
+def test_auto_queue_same_transaction_as_projection(container, monkeypatch):
+    index = setup_index(container)
+    container.settings.index_auto_enabled = True
+    version = ingest(container)
+    job = container.ocr.create_job(version["id"])
+    captured = []
+
+    def callback(repo, version_id):
+        projections = repo.find("etl_stage_runs", {"stage": "MONGO_PROJECTION", "resource_version_id": version_id})
+        assert projections[-1]["status"] == "COMPLETED"
+        index.enqueue_auto(repo, version_id)
+        captured.append(repo.count("etl_stage_runs", {"stage": "INDEX_BUILD"}))
+
+    monkeypatch.setattr(container.processing_finalizer, "on_content_ready", callback)
+    while container.worker.once("auto-test"):
+        pass
+    assert captured == [1]
+    assert index.status(version["id"])["index_status"] == "READY"
+    assert container.processing_finalizer.finalize(job["id"])["status"] == "ALREADY_COMPLETED"
+    assert captured == [1]

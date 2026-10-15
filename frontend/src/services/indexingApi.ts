@@ -1,4 +1,4 @@
-import type { ChunksResult, IndexRequestResult, ResourceOption, VersionOption } from '../types/indexing'
+import type { ChunksResult, IndexRequestResult, IndexStatusResult, ResourceOption, VersionOption } from '../types/indexing'
 
 export class IndexingApiError extends Error {
     status: number
@@ -12,7 +12,8 @@ export class IndexingApiError extends Error {
 }
 
 async function request<T>(path: string, signal?: AbortSignal, method = 'GET'): Promise<T> {
-    const response = await fetch(path, { method, signal, headers: { Accept: 'application/json' } })
+    const combined = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15000)])
+    const response = await fetch(path, { method, signal: combined, headers: { Accept: 'application/json' } })
     const body: unknown = await response.json().catch(() => null)
     if (!response.ok) {
         const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null
@@ -43,4 +44,8 @@ export function getChunks(versionId: string, offset = 0, signal?: AbortSignal, c
     const params = new URLSearchParams({ offset: String(offset), limit: '10' })
     if (contentUnitId) params.set('content_unit_id', contentUnitId)
     return request<ChunksResult>(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/chunks?${params}`, signal)
+}
+
+export function getIndexStatus(versionId: string, signal?: AbortSignal) {
+    return request<IndexStatusResult>(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/index-status`, signal)
 }

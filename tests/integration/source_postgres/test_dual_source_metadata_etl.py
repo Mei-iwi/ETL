@@ -403,7 +403,7 @@ def test_shared_metadata_and_bags_unchanged_through_native_pdf_etl(source, pg_co
         runtime.mongo_projector.project(version['id'], job['id'], generation=1)
         assert db.mongo_content_units.count_documents({'resource_version_id': version['id']}) == 2
         assert snapshot(db) == before and BSON.encode(db.content_bags.find_one({'_id': 'sentinel'})) == bag
-        assert set(db.list_collection_names()) == {'users', 'learning_resources', 'ocr_pages', 'mongo_content_units', 'content_bags'}
+        assert set(db.list_collection_names()) == {'users', 'learning_resources', 'ocr_pages', 'mongo_content_units', 'content_bags', 'indexed_chunks'}
     finally:
         runtime.close()
         client.close()

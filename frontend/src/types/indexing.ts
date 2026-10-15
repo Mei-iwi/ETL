@@ -38,3 +38,24 @@ export type ChunksResult = {
     limit: number
     items: ChunkItem[]
 }
+
+export type IndexStatusResult = {
+    resource_version_id: string
+    processing_status: string
+    index_status: 'CONTENT_NOT_READY' | 'NOT_STARTED' | 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'STALE' | 'BLOCKED_RUNTIME'
+    auto_enabled: boolean
+    latest_run_id: string | null
+    published_run_id: string | null
+    chunk_count: number
+    bow_ready: boolean
+    vector_ready: boolean
+    algorithm: string
+    chunk_size_words: number
+    chunk_overlap_words: number
+    embedding_model: string | null
+    embedding_dimension: number | null
+    started_at: string | null
+    finished_at: string | null
+    error_code: string | null
+    message: string
+}

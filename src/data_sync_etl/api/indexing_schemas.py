@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -77,6 +78,27 @@ class ChunksResponse(BaseModel):
     offset: int
     limit: int
     items: list[ChunkItem]
+
+
+class IndexStatusResponse(BaseModel):
+    resource_version_id: str
+    processing_status: str
+    index_status: IndexStatus
+    auto_enabled: bool
+    latest_run_id: str | None
+    published_run_id: str | None
+    chunk_count: int
+    bow_ready: bool
+    vector_ready: bool
+    algorithm: str
+    chunk_size_words: int
+    chunk_overlap_words: int
+    embedding_model: str | None
+    embedding_dimension: int | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    error_code: str | None
+    message: str
 
 
 def index_error(exc: Exception):

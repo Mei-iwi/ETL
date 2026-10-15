@@ -8,6 +8,7 @@ from data_sync_etl.api.indexing_schemas import (
     ERROR_RESPONSES,
     ChunksResponse,
     IndexRequestResponse,
+    IndexStatusResponse,
     index_error,
 )
 from data_sync_etl.api.master_sync_schemas import (
@@ -659,6 +660,16 @@ def indexed_chunks(id: ResourceId, request: Request,
 @router.post("/admin/resource-versions/{id}/ocr-jobs")
 def create_job(id: ResourceId, request: Request, body: JobInput | None = None):
     return services(request).ocr.create_job(id, body.triggered_by if body else None)
+
+
+@router.get("/api/v1/resource-versions/{id}/index-status", tags=[TAG_INDEXING],
+            response_model=IndexStatusResponse, responses=ERROR_RESPONSES,
+            summary="Theo dõi trạng thái lập chỉ mục, tách biệt OCR")
+def index_status(id: ResourceId, request: Request):
+    try:
+        return request.app.state.container.indexing.status(id)
+    except Exception as exc:
+        raise index_error(exc) from None
 
 
 @router.post("/admin/resource-versions/{id}/postprocess")

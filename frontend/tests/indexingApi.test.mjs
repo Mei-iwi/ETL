@@ -9,7 +9,9 @@ test('start index is explicit POST with encoded version and abort signal', async
         globalThis.fetch = async (path, init) => {
             assert.equal(path, '/api/v1/resource-versions/a%2Fb/index')
             assert.equal(init.method, 'POST')
-            assert.equal(init.signal, controller.signal)
+            assert.equal(init.signal.aborted, false)
+            controller.abort()
+            assert.equal(init.signal.aborted, true)
             return Response.json({ action: 'QUEUED', index_run_id: 'run-1' }, { status: 202 })
         }
         assert.equal((await startIndex('a/b', controller.signal)).index_run_id, 'run-1')

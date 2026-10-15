@@ -1,5 +1,6 @@
 """Optional, local-only runtime. Construction/startup never downloads or loads a model."""
 
+import json
 from importlib.util import find_spec
 from pathlib import Path
 from threading import Lock
@@ -18,8 +19,18 @@ class LocalSentenceEmbedding:
         self._checked = False
 
     def available(self):
-        return bool(self.path and self.model_id.strip() and self.version.strip()
-                    and Path(self.path).is_dir() and find_spec("sentence_transformers"))
+        if not (self.path and self.model_id.strip() and self.version.strip()
+                and Path(self.path).is_dir() and find_spec("sentence_transformers")):
+            return False
+        try:
+            root = Path(self.path).resolve()
+            manifest = root / "etl-model-revision.txt"
+            modules = json.loads((root / "modules.json").read_text(encoding="utf-8"))
+            return (manifest.read_text(encoding="utf-8").strip() == self.version
+                    and bool(modules) and any(root.rglob("*.safetensors"))
+                    and all((root / module.get("path", "")).resolve().is_relative_to(root) for module in modules))
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
 
     def prepare(self):
         if not self.available():

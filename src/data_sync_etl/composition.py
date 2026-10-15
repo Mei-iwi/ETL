@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from pymongo import MongoClient
 
 from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
@@ -247,6 +249,7 @@ class Container:
                                    self.settings.index_embedding_model_version,
                                    self.settings.index_embedding_dimension), self.settings,
         )
+        self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
 
         self.processing_finalizer = ProcessingFinalizer(
             self.uow,
@@ -254,6 +257,7 @@ class Container:
             self.mongo_projector,
             max_attempts=self.settings.finalization_max_attempts,
             retry_seconds=self.settings.finalization_retry_seconds,
+            on_content_ready=self.indexing.enqueue_auto,
         )
         self.process_version = ProcessResourceVersion(
             self.uow,

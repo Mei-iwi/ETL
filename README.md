@@ -45,6 +45,18 @@ quản lý, không có nghĩa được công bố trong Search. Lỗi index khô
 nguồn, văn bản mở rộng, top term BoW và model/số chiều; không trả mảng vector thô.
 Run ghi dở/FAILED hoặc fingerprint cũ không được công bố thành chỉ mục hiện hành.
 
+`GET /api/v1/resource-versions/{id}/index-status` tách processing_status và
+index_status: CONTENT_NOT_READY, NOT_STARTED, PENDING, RUNNING, READY, FAILED,
+STALE, BLOCKED_RUNTIME. Giao diện polling 4 giây khi PENDING/RUNNING, retry lỗi
+mạng tối đa 3 lần, timeout mỗi request 15 giây; không tự POST khi mở trang.
+
+`INDEX_AUTO_ENABLED=false` mặc định. Chỉ bật sau khi model, Mongo schema và worker
+được kiểm tra. Luồng: Master Sync → nhập file → OCR → Postprocess → Mongo projection
+→ CONTENT_READY → INDEX_BUILD/PENDING (khi bật auto) → OCR worker nhàn rỗi → index.
+Enqueue và projection COMPLETED cùng transaction PostgreSQL. Model/schema thiếu
+được ghi nhận FAILED/BLOCKED_RUNTIME, không queue/retry vô hạn. Không backfill các
+phiên bản đã CONTENT_READY trước khi bật cờ; metadata sync không tạo index job.
+
 ## 1. Cài đặt
 
 Cần Python ≥ 3.12, Node.js 20.x (≥ 20.19) hoặc ≥ 22.12, Docker Desktop/Compose.

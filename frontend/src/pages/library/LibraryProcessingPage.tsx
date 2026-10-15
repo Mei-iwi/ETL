@@ -262,6 +262,7 @@ export function LibraryProcessingPage() {
                 {resourceId ? '← Quay lại chi tiết học liệu' : '← Quay lại danh sách học liệu'}
             </Link>
             <header className={styles.pageHeader}><h1>Xử lý dữ liệu</h1></header>
+            {contentReady && <Link className={styles.backLink} to={`/library/indexing?${new URLSearchParams({ resourceId, versionId })}`}>Phân đoạn / chỉ mục →</Link>}
 
             <div className={styles.card}>
                 <div className={styles.versionBox}>

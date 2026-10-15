@@ -19,12 +19,21 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
 }, async () => {
     let postCount = 0
     let blocked = false
+    let statusReads = 0
     const server = createServer(async (req, res) => {
         const path = new URL(req.url, 'http://localhost').pathname
         function json(body, status = 200) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
         if (path === '/health') return json({ status: 'ok', database: 'ok' })
         if (path === '/api/v1/resources') return json({ items: [{ id: 'resource-test', title: 'Học liệu kiểm thử' }], pagination: { total: 1 } })
         if (path === '/api/v1/resources/resource-test/versions') return json([{ id: 'version-test', resource_id: 'resource-test', version_number: 1 }])
+        if (path.endsWith('/index-status')) {
+            statusReads++
+            return json({ resource_version_id: 'version-test', processing_status: 'CONTENT_READY',
+                index_status: postCount === 1 && !blocked ? 'PENDING' : 'NOT_STARTED', auto_enabled: false,
+                latest_run_id: postCount === 1 ? 'run-test' : null, published_run_id: null, chunk_count: 0,
+                bow_ready: false, vector_ready: false, embedding_model: 'ui-test-only', embedding_dimension: 3,
+                message: postCount === 1 && !blocked ? 'Chờ lập chỉ mục.' : 'Chưa lập chỉ mục.' })
+        }
         if (path.endsWith('/chunks')) {
             const offset = Number(new URL(req.url, 'http://localhost').searchParams.get('offset'))
             return json({ resource_version_id: 'version-test', index_run_id: 'old-run', index_status: 'READY', total: 11, offset, limit: 10,
@@ -90,6 +99,7 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         }
         await open()
         assert.equal(postCount, 0)
+        await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Xây dựng chỉ mục') && !b.disabled)"))
         await waitFor(() => evaluate("document.body.textContent.includes('Danh sách Chunk (11)')"))
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Tiếp').click()")
         await waitFor(() => evaluate("document.body.textContent.includes('Chunk 11') && !document.body.textContent.includes('Chunk 10')"))
@@ -98,8 +108,12 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')).click()")
         await waitFor(() => evaluate("document.body.textContent.includes('run-test')"))
         assert.equal(postCount, 1)
+        await waitFor(() => evaluate("document.body.textContent.includes('Chờ lập chỉ mục.')"))
+        const readCount = statusReads
+        await waitFor(async () => { await delay(200); return statusReads > readCount })
         blocked = true
         await open()
+        await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Xây dựng chỉ mục') && !b.disabled)"))
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')).click()")
         await waitFor(() => evaluate("document.body.textContent.includes('Chưa có model local.')"))
         assert.equal(postCount, 2)

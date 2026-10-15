@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { getChunks, getIndexResources, getIndexVersions, startIndex } from '../../services/indexingApi'
-import type { ChunksResult, IndexRequestResult, ResourceOption, VersionOption } from '../../types/indexing'
+import { getChunks, getIndexResources, getIndexStatus, getIndexVersions, IndexingApiError, startIndex } from '../../services/indexingApi'
+import type { ChunksResult, IndexRequestResult, IndexStatusResult, ResourceOption, VersionOption } from '../../types/indexing'
 import styles from './LibraryPages.module.css'
 
 export function LibraryIndexingPage() {
@@ -75,8 +75,39 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
     const [result, setResult] = useState<IndexRequestResult | null>(null)
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
+    const [status, setStatus] = useState<IndexStatusResult | null>(null)
+    const [statusError, setStatusError] = useState('')
+    const [refresh, setRefresh] = useState(0)
     const controller = useRef<AbortController | null>(null)
     useEffect(() => () => controller.current?.abort(), [])
+
+    useEffect(() => {
+        let active = true
+        let timer: number | undefined
+        let current: AbortController | null = null
+        let failures = 0
+        async function poll() {
+            current = new AbortController()
+            try {
+                const data = await getIndexStatus(versionId, current.signal)
+                if (!active) return
+                setStatus(data)
+                setStatusError('')
+                failures = 0
+                if (data.index_status === 'PENDING' || data.index_status === 'RUNNING') {
+                    timer = window.setTimeout(() => void poll(), 4000)
+                }
+            } catch (err) {
+                if (!active) return
+                setStatusError(err instanceof IndexingApiError ? err.message : 'Không cập nhật được trạng thái chỉ mục.')
+                if ((!(err instanceof IndexingApiError) || err.status >= 500) && failures < 3) {
+                    timer = window.setTimeout(() => void poll(), 4000 * 2 ** failures++)
+                }
+            }
+        }
+        void poll()
+        return () => { active = false; window.clearTimeout(timer); current?.abort() }
+    }, [versionId, refresh])
 
     async function build() {
         controller.current?.abort()
@@ -86,22 +117,40 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
         setError('')
         try {
             const data = await startIndex(versionId, current.signal)
-            if (!current.signal.aborted) setResult(data)
+            if (!current.signal.aborted) { setResult(data); setRefresh(value => value + 1) }
         } catch (err) {
             if (!current.signal.aborted) setError(err instanceof Error ? err.message : 'Không thể xếp hàng lập chỉ mục.')
         } finally { if (!current.signal.aborted) setBusy(false) }
     }
+    const running = status?.index_status === 'PENDING' || status?.index_status === 'RUNNING'
+    const canBuild = status?.processing_status === 'CONTENT_READY' && status.index_status !== 'BLOCKED_RUNTIME'
+        && !running && !statusError && !busy
     return <><div className={styles.resultCard}>
-        <h2>Xây dựng chỉ mục</h2>
+        <h2>Trạng thái chỉ mục</h2>
         <p className={styles.resultValue}>{versionId}</p>
-        {result && <p role="status">{result.index_status} · {result.index_run_id}</p>}
+        {!status && !statusError && <p role="status">Đang tải trạng thái...</p>}
+        {status && <>
+            <p className={styles.statusMessage} role="status">{status.message}</p>
+            <div className={styles.resultGrid}>
+                <p className={styles.resultItem}><span className={styles.resultLabel}>Trích xuất / OCR</span><span className={styles.resultValue}>{status.processing_status}</span></p>
+                <p className={styles.resultItem}><span className={styles.resultLabel}>Chỉ mục</span><span className={styles.resultValue}>{status.index_status}</span></p>
+                <p className={styles.resultItem}><span className={styles.resultLabel}>Tự động</span><span className={styles.resultValue}>{status.auto_enabled ? 'Bật' : 'Tắt'}</span></p>
+                <p className={styles.resultItem}><span className={styles.resultLabel}>Số Chunk</span><span className={styles.resultValue}>{status.chunk_count}</span></p>
+                <p className={styles.resultItem}><span className={styles.resultLabel}>BoW / Vector</span><span className={styles.resultValue}>{status.bow_ready ? 'BoW sẵn sàng' : 'Chưa có BoW'} · {status.vector_ready ? 'Vector sẵn sàng' : 'Chưa có vector'}</span></p>
+                <p className={styles.resultItem}><span className={styles.resultLabel}>Model / số chiều</span><span className={styles.resultValue}>{status.embedding_model ?? 'Chưa cấu hình'} · {status.embedding_dimension ?? '—'}</span></p>
+                <p className={styles.resultItem}><span className={styles.resultLabel}>Lần chạy gần nhất</span><span className={styles.resultValue}>{status.latest_run_id ?? '—'}</span></p>
+            </div>
+        </>}
+        {result && <p role="status">Yêu cầu: {result.index_run_id}</p>}
+        {statusError && <p className={styles.alert} role="alert">{statusError}</p>}
         {error && <p className={styles.alert} role="alert">{error}</p>}
         <div className={styles.actions}>
-            <button className={styles.primaryButton} disabled={busy || result?.index_status === 'PENDING' || result?.index_status === 'RUNNING'} onClick={() => void build()}>
+            <button className={styles.primaryButton} disabled={!canBuild || status?.index_status === 'FAILED'} onClick={() => void build()}>
                 {busy ? 'Đang gửi yêu cầu...' : 'Xây dựng chỉ mục'}
             </button>
+            <button className={styles.primaryButton} disabled={busy} onClick={() => setRefresh(value => value + 1)}>Thử tải lại trạng thái</button>
         </div>
-    </div><ChunkList key={result?.index_run_id ?? versionId} versionId={versionId} /></>
+    </div><ChunkList key={`${status?.published_run_id ?? versionId}:${refresh}`} versionId={versionId} /></>
 }
 
 function ChunkList({ versionId }: { versionId: string }) {

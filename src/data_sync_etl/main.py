@@ -140,6 +140,12 @@ def create_app(container=None):
                     "type": error.get("type", "invalid"),
                 }
             )
+        endpoint = request.scope.get("endpoint")
+        if getattr(endpoint, "__name__", "") in {"index_version", "indexed_chunks", "index_status", "reindex_version"}:
+            return JSONResponse(status_code=422, content={"detail": {
+                "code": "REQUEST_VALIDATION_ERROR", "phase": "indexing",
+                "message": "Tham số lập chỉ mục không hợp lệ.", "fields": fields,
+            }})
         return JSONResponse(
             status_code=422,
             content={

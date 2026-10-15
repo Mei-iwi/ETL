@@ -41,7 +41,7 @@ def bag_of_words(text: str):
 
 
 def validate_vector(vector, dimension: int):
-    if (len(vector) != dimension or not vector or
+    if (not isinstance(vector, (list, tuple)) or len(vector) != dimension or not vector or
             any(isinstance(v, bool) or not isinstance(v, (float, int))
                 or not math.isfinite(v) for v in vector) or not any(vector)):
         raise IndexingError("INVALID_EMBEDDING", 503)

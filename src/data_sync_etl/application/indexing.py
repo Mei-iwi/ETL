@@ -116,6 +116,12 @@ class IndexingService:
     def enqueue(self, version_id, *, force=False):
         with self.uow.processing_lock(version_id) as acquired:
             if not acquired:
+                with self.uow() as repo:
+                    self._version(repo, version_id)
+                    inflight = next((r for r in self._runs(repo, version_id)
+                                     if r["status"] in ("PENDING", "RUNNING")), None)
+                if inflight and not force:
+                    return self._queued(version_id, inflight, "IN_PROGRESS")
                 raise IndexingError("INDEX_ALREADY_RUNNING")
             with self.uow() as repo:
                 snapshot = self._snapshot(repo, version_id)
@@ -222,6 +228,14 @@ class IndexingService:
             status = "READY"
         elif latest:
             status = "STALE"
+        messages = {
+            "CONTENT_NOT_READY": "Chưa hoàn tất trích xuất và chuẩn hóa nội dung.",
+            "NOT_STARTED": "Chưa lập chỉ mục.", "PENDING": "Chờ lập chỉ mục.",
+            "RUNNING": "Đang tạo Chunk và vector.", "READY": "Hoàn thành lập chỉ mục.",
+            "FAILED": "Lập chỉ mục thất bại; có thể tái lập chỉ mục.",
+            "STALE": "Nội dung hoặc cấu hình đã thay đổi; cần tạo lại chỉ mục.",
+            "BLOCKED_RUNTIME": "Không thể tạo vector vì chưa cấu hình model local hợp lệ.",
+        }
         return {
             "resource_version_id": version_id, "processing_status": state, "index_status": status,
             "auto_enabled": self.settings.index_auto_enabled,
@@ -236,7 +250,32 @@ class IndexingService:
             "started_at": latest["started_at"] if latest else None,
             "finished_at": latest["finished_at"] if latest else None,
             "error_code": code,
+            "message": messages[status],
         }
+
+    def enqueue_auto(self, repo, version_id):
+        """Called only in the transaction completing a new Mongo projection, under its lock."""
+        if not self.settings.index_auto_enabled:
+            return
+        try:
+            snapshot = self._snapshot(repo, version_id)
+            fingerprint = snapshot[3]
+            if any(r["input_fingerprint"] == fingerprint for r in self._runs(repo, version_id)):
+                return
+            if not self.embedding.available():
+                raise IndexingError("BLOCKED_EMBEDDING_RUNTIME", 503)
+            self.store.ensure_ready()
+            code = None
+        except Exception as exc:
+            fingerprint = None
+            code = exc.code if isinstance(exc, IndexingError) else "INDEX_UNAVAILABLE"
+        # Persist even a blocked attempt, rather than an infinite auto retry or silent success.
+        repo.insert("etl_stage_runs", {
+            "resource_version_id": version_id, "stage": "INDEX_BUILD",
+            "status": "FAILED" if code else "PENDING", "input_fingerprint": fingerprint,
+            "error_message": code, "started_at": now(), "created_at": now(),
+            "finished_at": now() if code else None,
+        })
 
     def chunks(self, version_id, *, offset=0, limit=10, content_unit_id=None):
         status = self.status(version_id)

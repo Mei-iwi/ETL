@@ -265,7 +265,9 @@ def contracts(dimension: int) -> dict[str, dict]:
         ]
     }
     validators["indexed_chunks"]["$expr"] = {"$cond": [
-        {"$isArray": "$embedding"},
+        {"$and": [{"$isArray": "$embedding"}, {"$eq": [{"$type": "$text"}, "string"]},
+                  {"$eq": [{"$type": "$char_start"}, "int"]},
+                  {"$eq": [{"$type": "$char_end"}, "int"]}]},
         {"$and": [
             {"$eq": [{"$size": "$embedding"}, "$embedding_dimension"]},
             {"$gt": ["$char_end", "$char_start"]},

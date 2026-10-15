@@ -92,6 +92,15 @@ def samples():
             "is_current": True,
             "projection_generation": 1,
         },
+        "indexed_chunks": {
+            **common, "resource_id": "r-1", "resource_version_id": "v-1",
+            "content_unit_id": "u-1", "index_run_id": "run-1",
+            "source_projection_generation": 1, "chunk_sequence": 1, "unit_chunk_sequence": 1,
+            "page_from": 1, "page_to": 1, "review_status": "UNREVIEWED", "retrieval_eligible": False,
+            "char_start": 0, "char_end": 4, "text": "test", "bow_tf": {"test": 1}, "bow_length": 1,
+            "embedding_model": "fixture-only", "embedding_version": "1", "embedding_dimension": 2,
+            "embedding": [0.2, 0.8], "content_fingerprint": "a" * 64,
+        },
     }
 
 
@@ -99,8 +108,8 @@ def test_installer_catalog_idempotent_read_only_check_and_preserve(mongo_db):
     assert not initialize(mongo_db, dimension=2)["ready"]
     assert mongo_db.list_collection_names() == []
     report = initialize(mongo_db, dimension=2, apply=True)
-    assert report["ready"] and report["collections"] == report["validators"] == 5
-    assert report["indexes"] == 6
+    assert report["ready"] and report["collections"] == report["validators"] == 6
+    assert report["indexes"] == 8
     for name, data in samples().items():
         mongo_db[name].insert_one(data)
     assert initialize(mongo_db, dimension=2, apply=True)["ready"]
