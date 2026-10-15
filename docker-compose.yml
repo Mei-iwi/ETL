@@ -57,6 +57,21 @@ services:
       source-postgres:
         condition: service_healthy
     restart: "no"
+  mongo-init:
+    image: etl-master-data-runtime:local
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DATABASE: ${MONGO_DATABASE:-etl_content}
+      INDEX_EMBEDDING_DIMENSION: ${INDEX_EMBEDDING_DIMENSION:-384}
+    command: ["python", "-m", "data_sync_etl.adapters.mongo.schema", "--bootstrap-empty"]
+    depends_on:
+      master-migrate:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: "no"
   mongo:
     image: mongo:8.0
     ports:

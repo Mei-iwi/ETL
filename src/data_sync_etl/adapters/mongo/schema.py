@@ -459,6 +459,21 @@ def initialize(database, *, dimension, apply=False, validation_level="strict") -
     return checked
 
 
+def bootstrap_empty(database, *, dimension) -> dict:
+    """Compose first-run only: never repair an existing incompatible database."""
+    if next(database.list_collections(), None) is not None:
+        report = check_schema(database, dimension=dimension, audit_documents=True)
+        if not report['schema_ready']:
+            raise DomainError(
+                'Existing Mongo schema is not ready; run --check, back up and obtain '
+                'approval before --apply. No schema changed.'
+            )
+    else:
+        report = initialize(database, dimension=dimension, apply=True)
+    report['mode'] = 'bootstrap-empty'
+    return report
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Check/apply Mongo schemas additively without deleting data"
@@ -466,6 +481,8 @@ def main(argv=None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="Read-only catalog and legacy audit")
     mode.add_argument("--apply", action="store_true", help="Explicit non-destructive DDL")
+    mode.add_argument("--bootstrap-empty", action="store_true",
+                      help="Initialize an empty DB; otherwise check only, never repair existing schemas")
     mode.add_argument("--inventory", action="store_true", help="Read-only collection inventory, including legacy extras")
     parser.add_argument("--validation-level", choices=("strict", "moderate"), default="strict")
     args = parser.parse_args(argv)
@@ -477,6 +494,13 @@ def main(argv=None) -> int:
         if args.inventory:
             print(json.dumps(inventory(client[settings.mongo_database]), ensure_ascii=True))
             return 0
+        if args.bootstrap_empty:
+            if args.validation_level != 'strict':
+                raise DomainError('Bootstrap requires strict validation')
+            report = bootstrap_empty(client[settings.mongo_database],
+                                     dimension=settings.index_embedding_dimension)
+            print(json.dumps(report, ensure_ascii=True))
+            return 0 if report['schema_ready'] else 1
         report = initialize(
             client[settings.mongo_database],
             dimension=settings.index_embedding_dimension,

@@ -125,3 +125,49 @@ def test_cli_check_emits_json_for_incompatible_schema(monkeypatch, capsys,
 def test_installer_requires_explicit_dimension():
     with pytest.raises(TypeError, match='dimension'):
         initialize(MagicMock())
+
+
+def test_empty_bootstrap_uses_existing_installer_and_explicit_dimension(monkeypatch):
+    from data_sync_etl.adapters.mongo import schema
+
+    database, catalog, _ = catalog_database()
+    catalog.clear()
+    installer = MagicMock(return_value={'schema_ready': True})
+    monkeypatch.setattr(schema, 'initialize', installer)
+    assert schema.bootstrap_empty(database, dimension=384)['mode'] == 'bootstrap-empty'
+    installer.assert_called_once_with(database, dimension=384, apply=True)
+
+
+def test_bootstrap_ready_database_is_read_only():
+    from data_sync_etl.adapters.mongo.schema import bootstrap_empty
+
+    database, _, collections = catalog_database()
+    assert bootstrap_empty(database, dimension=384)['schema_ready']
+    database.command.assert_not_called()
+    database.create_collection.assert_not_called()
+    for collection in collections.values():
+        collection.create_index.assert_not_called()
+
+
+@pytest.mark.parametrize('problem', ['missing_collection', 'dimension', 'missing_index', 'invalid_data', 'validators'])
+def test_bootstrap_never_repairs_existing_database(problem):
+    from data_sync_etl.adapters.mongo.schema import bootstrap_empty
+
+    database, catalog, collections = catalog_database()
+    if problem == 'missing_collection':
+        catalog.pop()
+    elif problem == 'dimension':
+        catalog[-1]['options']['validator'] = contracts(256)['content_bags']
+    elif problem == 'missing_index':
+        collections['content_bags'].list_indexes.return_value = []
+    elif problem == 'validators':
+        for row in catalog:
+            row['options'] = {}
+    else:
+        collections['users'].count_documents.return_value = 1
+    with pytest.raises(DomainError, match='No schema changed'):
+        bootstrap_empty(database, dimension=384)
+    database.command.assert_not_called()
+    database.create_collection.assert_not_called()
+    for collection in collections.values():
+        collection.create_index.assert_not_called()

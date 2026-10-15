@@ -202,11 +202,11 @@ Bật Docker Desktop, kiểm tra mật khẩu/URL trước khi chạy; sao lưu 
 ```bash
 docker compose up --build -d
 docker compose ps -a
-docker compose logs master-migrate source-migrate
+docker compose logs master-migrate source-migrate mongo-init
 ```
 
 Compose chạy PostgreSQL Master (5432), PostgreSQL nguồn (5433), MongoDB (27018).
-Hai service migration phải kết thúc `Exited (0)`; không tự seed dữ liệu nguồn
+Ba service `master-migrate`, `source-migrate`, `mongo-init` phải kết thúc `Exited (0)`; không tự seed dữ liệu nguồn
 hoặc chạy backend/worker. Nếu đổi cổng trong .env, cập nhật URL tương ứng.
 
 Migration trên host (khi cập nhật code hoặc kiểm tra thủ công):
@@ -244,6 +244,14 @@ Cập nhật mật khẩu vào `SOURCE_DATABASE_URL`; không dùng owner làm re
 Script cấp SELECT cả `resource_versions` và kiểm tra reader không có quyền ghi.
 
 ### MongoDB
+
+Compose có service một lần `mongo-init`, dùng contract Python hiện hành để tạo đủ
+5 collection, validator và 6 index cho **database mới trống**, gồm `content_bags`
+với `INDEX_EMBEDDING_DIMENSION` (mặc định 384). Chờ service này thành công trước khi
+chạy Backend/worker. Database đã hợp lệ thì chạy lại không thay đổi schema.
+Database đã có dữ liệu hoặc schema cũ không tương thích: bootstrap dừng, không tự
+repair/migrate; cần kiểm tra, backup/restore verification và phê duyệt riêng.
+`docker compose up --build -d` không tự xóa named volume. Không dùng `down -v` để sửa lỗi.
 
 ```bash
 python -m data_sync_etl.adapters.mongo.schema --check
