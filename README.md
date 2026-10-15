@@ -332,7 +332,9 @@ Sau khi sửa `.env`, khởi động lại Backend và các worker liên quan đ
 Mở **Tra cứu → Tìm kiếm học liệu**, nhập truy vấn, chọn BoW/Vector/Hybrid và bộ lọc. Trang Phương pháp truy vấn cho phép chọn chế độ; trang Kết quả giữ tiêu chí trong URL, có phân trang và thử lại.
 
 - `POST /api/v1/search`: JSON gồm `query`, `method`, `filters`, `page`, `size`. Xem hợp đồng đầy đủ tại Swagger.
+- `GET /api/v1/chunks/{context_id}/context?neighbors=1`: mở nút **Ngữ cảnh** tại kết quả; trả đoạn đã chọn và tối đa 2 đoạn liền kề mỗi bên trong cùng ContentUnit. Mã lấy từ Search API, không dùng ID hash của Chunk preview nhóm 3. Nội dung đổi trả `409 CONTEXT_STALE`; quyền truy xuất không còn hoặc token sai trả 404. Token là locator có fingerprint, không phải thông tin xác thực.
 - BoW: cosine trên tập keyword nhị phân, không phải TF-IDF/BM25. Vector: cosine với vector ContentBag cùng model/revision. Hybrid: RRF với k=60.
+- Chỉ xếp hạng các Bag có overlap BoW > 0 hoặc cosine Vector > 0 trong nhánh tương ứng; nhánh không khớp không được cộng rank. Điểm là của Bag, không phải điểm vector riêng cho Chunk.
 - Mỗi kết quả là một học liệu, lấy Bag khớp tốt nhất. Mặc định dùng version_number lớn nhất trong các lifecycle `INGESTED`, `APPROVED`, `PUBLISHED`, sau đó bắt buộc CONTENT_READY + Index READY; không tự lùi về phiên bản cũ nếu bản mới chưa READY. Filter phiên bản cụ thể được kiểm tra riêng.
 - Chỉ đọc học liệu active/PUBLISHED và leaf có `retrieval_eligible=true`; không tự phê duyệt, OCR hay lập chỉ mục từ Search. Content Units mới mặc định chưa có quyền truy xuất.
 - `SEARCH_MAX_BAGS=2000`, `SEARCH_TIMEOUT_SECONDS=15` là mặc định. Vượt giới hạn phải thu hẹp bộ lọc; không lấy một phần kho rồi nhận là kết quả toàn kho. Vector/Hybrid cần model local hợp lệ, không tự chuyển sang BoW khi model lỗi.
@@ -340,10 +342,16 @@ Mở **Tra cứu → Tìm kiếm học liệu**, nhập truy vấn, chọn BoW/V
 Kiểm thử Search cô lập, không dùng database Dev:
 
 ```bash
-python -m pytest tests/unit/test_search.py tests/integration/test_search_integration.py -q
+python -m pytest tests/unit/test_search.py tests/unit/test_search_context.py tests/integration/test_search_integration.py -q
 npm.cmd --prefix frontend run build
 node --experimental-strip-types --test frontend/tests/searchApi.test.mjs
 node --test frontend/tests/searchUi.test.mjs
 ```
 
 Test browser dùng Edge headless và HTTP fixture cục bộ. Integration test dùng SQLAlchemy/SQLite cùng Mongo/model doubles đúng contract; không thay thế nghiệm thu model thật và database thực tế.
+
+Nếu đã cài model mục 4, có thể chạy thêm model thật với database SQLite tạm và Mongo double, không ghi vào Dev:
+
+```bash
+ETL_SEARCH_REAL_MODEL=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest tests/integration/test_search_integration.py -q
+```

@@ -16,19 +16,27 @@ from tests.indexing_support import setup_index, structured_projection
 @pytest.fixture
 def searchable(container, request):
     index = setup_index(container)
-    if getattr(request, 'param', False):
+    options = getattr(request, 'param', False)
+    options = options if isinstance(options, dict) else {'structured': options}
+    if options.get('structured'):
         structured_projection(container)
+    if options.get('texts'):
+        container.settings.chunk_size_words = 20
+        container.settings.chunk_overlap_words = 5
     original = container.postprocess.run_locked
 
     def reviewed(version_id, **kwargs):
         result = original(version_id, **kwargs)
         with container.uow() as repo:
-            for unit in repo.find('content_units', {'resource_version_id': version_id}):
+            units = repo.find('content_units', {'resource_version_id': version_id}, order=('sequence_no',))
+            if options.get('mixed'):
+                repo.update('content_units', units[0]['id'], {'parent_unit_id': None})
+            for unit in units:
                 repo.update('content_units', unit['id'], {'retrieval_eligible': True})
         return result
 
     container.postprocess.run_locked = reviewed
-    version, _ = completed(container)
+    version, _ = completed(container, texts=options.get('texts'))
     index.enqueue(version['id'])
     assert index.once()
     index.bags.search_candidates = lambda ids, model, limit: [
@@ -179,3 +187,34 @@ def test_timeout_and_adapter_failure_are_safe(searchable):
         c.indexing.bags.ensure_ready = lambda: (_ for _ in ()).throw(RuntimeError('mongodb://secret'))
         response = api.post('/api/v1/search', json={'query': 'page', 'method': 'bow'})
         assert response.status_code == 503 and 'secret' not in response.text
+
+
+@pytest.mark.parametrize('searchable', [{'structured': True, 'mixed': True}], indirect=True)
+def test_mixed_bags_do_not_double_count_resource(searchable):
+    c, version = searchable
+    assert c.indexing.status(version['id'])['representation_mode'] == 'mixed'
+    result = c.search.search('page', 'hybrid')
+    assert result['total'] == 1 and result['items'][0]['matched_bag_count'] == 2
+
+
+def test_mongo_selector_is_bounded_and_read_only():
+    from unittest.mock import MagicMock
+
+    from data_sync_etl.adapters.mongo.foundation_store import MongoBagStore
+
+    database = MagicMock()
+    database.with_options.return_value = database
+    cursor = MagicMock()
+    database.content_bags.find.return_value = cursor
+    cursor.sort.return_value = cursor
+    cursor.limit.return_value = cursor
+    cursor.max_time_ms.return_value = cursor
+    cursor.__iter__.return_value = iter([])
+    assert MongoBagStore(database, 384).search_candidates(['version'], model='model@revision', limit=2001) == []
+    selector, projection = database.content_bags.find.call_args.args
+    assert selector == {'resource_version_id': {'$in': ['version']}, 'is_current': True, 'embedding_model': 'model@revision'}
+    assert projection['embedding'] == 1
+    cursor.limit.assert_called_once_with(2001)
+    cursor.max_time_ms.assert_called_once_with(5000)
+    database.content_bags.update_one.assert_not_called()
+    database.create_collection.assert_not_called()

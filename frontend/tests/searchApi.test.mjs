@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { SearchApiError, searchMaterials } from '../src/services/searchApi.ts'
+import { SearchApiError, getChunkContext, searchMaterials } from '../src/services/searchApi.ts'
 import { readSearch, writeSearch } from '../src/pages/search/searchParams.ts'
 
 test('search sends exactly one POST with JSON criteria and encoded URL state', async () => {
@@ -54,4 +54,17 @@ test('URL defaults and bounds are safe and methods are never arbitrary', () => {
     assert.equal(request.method, 'hybrid')
     assert.equal(request.page, 1)
     assert.equal(request.size, 10)
+})
+
+test('context uses the search locator, encoded GET and bounded neighbors', async () => {
+    const old = globalThis.fetch
+    try {
+        globalThis.fetch = async (path, init) => {
+            assert.equal(path, '/api/v1/chunks/a%2Fb/context?neighbors=2')
+            assert.equal(init.method, 'GET')
+            assert.equal(init.body, undefined)
+            return Response.json({ chunks: [{ text: 'Nguồn thật' }] })
+        }
+        assert.equal((await getChunkContext('a/b', undefined, 2)).chunks[0].text, 'Nguồn thật')
+    } finally { globalThis.fetch = old }
 })

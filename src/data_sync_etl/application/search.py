@@ -3,8 +3,9 @@
 from time import monotonic
 
 from data_sync_etl.application.content_bags import bag_structure, representation_mode
-from data_sync_etl.domain.indexing import IndexingError, validate_vector
+from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
 from data_sync_etl.domain.search import SearchError, binary_score, cosine, normalize_query, rrf
+from data_sync_etl.domain.search_context import decode_context, encode_context
 from data_sync_etl.ports.search import SearchBagReader
 
 
@@ -104,7 +105,6 @@ class SearchService:
             if row['resource_id'] in grouped:
                 continue
             # A reversible, snapshot-bound identifier is added by the context helper.
-            from data_sync_etl.domain.search_context import encode_context
             snapshot = snapshots[bag.resource_version_id]
             token = encode_context(bag.resource_version_id, chunk['content_unit_id'],
                                    chunk['unit_chunk_sequence'], snapshot[3])
@@ -140,3 +140,60 @@ class SearchService:
                 'representation_unit': 'content_bag', 'ready_bag_count': ready_count,
                 'message': 'QUERY_NO_KEYWORDS' if not keywords and method == 'bow' else
                            'NO_READY_INDEX' if not ready_count else 'OK'}
+
+    def context(self, token, neighbors=1):
+        started = monotonic()
+        version_id, unit_id, ordinal, fingerprint = decode_context(token)
+        if self.bags is None:
+            raise SearchError('SEARCH_SCHEMA_UNAVAILABLE')
+        self.bags.ensure_ready()
+        filters = {'resource_version_id': version_id}
+        with self.indexing.uow() as repo:
+            rows = repo.search_versions(filters, limit=1)
+            if not rows:
+                raise SearchError('CONTEXT_NOT_FOUND', 404)
+            try:
+                snapshot = self.indexing._snapshot(repo, version_id)
+            except IndexingError:
+                raise SearchError('CONTEXT_NOT_FOUND', 404) from None
+            nodes = {unit['id']: unit for unit in snapshot[2]}
+            unit = nodes.get(unit_id)
+            roots = bag_structure(snapshot[2])
+            root = next((key for key, leaves in roots.items() if unit_id in leaves), None)
+            if unit is None or not unit['retrieval_eligible'] or root is None:
+                raise SearchError('CONTEXT_NOT_FOUND', 404)
+            if snapshot[3][:32] != fingerprint:
+                raise SearchError('CONTEXT_STALE', 409)
+            if self._ready_snapshot(repo, version_id) is None:
+                raise SearchError('CONTEXT_NOT_FOUND', 404)
+        chunks = []
+        for sequence, (start, end, text) in enumerate(word_windows(
+                unit['text'], self.settings.chunk_size_words, self.settings.chunk_overlap_words), 1):
+            self._deadline(started)
+            if sequence > self.settings.index_max_chunks:
+                raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+            if ordinal - neighbors <= sequence <= ordinal + neighbors:
+                if len(text) > 20000:
+                    raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+                chunks.append({'id': digest([version_id, unit_id, sequence, snapshot[3]])[:30],
+                    'content_unit_id': unit_id, 'unit_chunk_sequence': sequence,
+                    'char_start': start, 'char_end': end, 'page_from': unit['page_from'],
+                    'page_to': unit['page_to'], 'text': text, 'selected': sequence == ordinal})
+            if sequence > ordinal + neighbors:
+                break
+        if not any(chunk['selected'] for chunk in chunks):
+            raise SearchError('CONTEXT_NOT_FOUND', 404)
+        path, current = [], unit
+        while current is not None:
+            path.append({'content_unit_id': current['id'], 'title': current['title'], 'unit_type': current['unit_type']})
+            current = nodes.get(current['parent_unit_id'])
+        with self.indexing.uow() as repo:
+            fresh = self._ready_snapshot(repo, version_id)
+            if not repo.search_versions(filters, limit=1):
+                raise SearchError('CONTEXT_NOT_FOUND', 404)
+            if fresh is None or fresh[3] != snapshot[3]:
+                raise SearchError('CONTEXT_STALE', 409)
+        self._deadline(started)
+        return {**{key: value for key, value in rows[0].items() if key != 'version_id'},
+                'resource_version_id': version_id, 'context_id': token, 'content_unit_id': unit_id,
+                'bag_id': root, 'heading_path': list(reversed(path)), 'neighbors': neighbors, 'chunks': chunks}

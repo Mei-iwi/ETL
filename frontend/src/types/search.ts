@@ -48,3 +48,26 @@ export type SearchResponse = {
     ready_bag_count: number
     message: 'OK' | 'NO_READY_INDEX' | 'QUERY_NO_KEYWORDS'
 }
+
+export type ChunkContext = {
+    resource_id: string
+    resource_title: string
+    resource_version_id: string
+    version_number: number
+    context_id: string
+    content_unit_id: string
+    bag_id: string
+    neighbors: number
+    heading_path: { content_unit_id: string; title: string | null; unit_type: string }[]
+    chunks: {
+        id: string
+        content_unit_id: string
+        unit_chunk_sequence: number
+        char_start: number
+        char_end: number
+        page_from: number | null
+        page_to: number | null
+        text: string
+        selected: boolean
+    }[]
+}

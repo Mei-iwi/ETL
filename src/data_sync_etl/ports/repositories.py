@@ -1,8 +1,10 @@
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
+from data_sync_etl.ports.search import SearchMetadataReader
 
-class Repository(Protocol):
+
+class Repository(SearchMetadataReader, Protocol):
     def source_metadata_page(self, stream: str, after: str | None, size: int) -> list[dict]: ...
     def metadata_sync_state(self, stream: str, record_id: str) -> dict | None: ...
     def metadata_subject_exists(self, subject_id: str) -> bool: ...

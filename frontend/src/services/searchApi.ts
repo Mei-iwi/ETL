@@ -1,4 +1,4 @@
-import type { SearchRequest, SearchResponse } from '../types/search'
+import type { ChunkContext, SearchRequest, SearchResponse } from '../types/search'
 
 export class SearchApiError extends Error {
     status: number
@@ -32,4 +32,8 @@ async function request<T>(path: string, signal?: AbortSignal, payload?: SearchRe
 
 export function searchMaterials(payload: SearchRequest, signal?: AbortSignal) {
     return request<SearchResponse>('/api/v1/search', signal, payload)
+}
+
+export function getChunkContext(id: string, signal?: AbortSignal, neighbors = 1) {
+    return request<ChunkContext>(`/api/v1/chunks/${encodeURIComponent(id)}/context?neighbors=${neighbors}`, signal)
 }

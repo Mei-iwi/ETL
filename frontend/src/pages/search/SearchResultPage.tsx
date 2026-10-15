@@ -5,6 +5,7 @@ import type { SearchResponse } from '../../types/search'
 import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
 import { readSearch, writeSearch } from './searchParams'
+import { SearchContext } from './SearchContext'
 
 export function SearchResultpage() {
     const [params] = useSearchParams()
@@ -57,6 +58,7 @@ function SearchResults({ params }: { params: URLSearchParams }) {
                         {item.matched_keywords.length > 0 && <p>Từ khóa: {item.matched_keywords.join(', ')}</p>}
                         <p className={styles.snippet}>{item.snippet}</p>
                         <p className={styles.metadata}>Trang {item.page_from ?? '—'}–{item.page_to ?? '—'} · {item.content_unit_id}</p>
+                        <SearchContext id={item.context_id} />
                     </article>)}
                     {result.total_pages > 1 && <nav aria-label="Phân trang kết quả" className={styles.pagination}>
                         <button className={layout.primaryButton} disabled={result.page <= 1} onClick={() => setParams(writeSearch({ ...criteria, page: result.page - 1 }))}>Trước</button>

@@ -38,7 +38,13 @@ from data_sync_etl.api.resource_metadata_schemas import (
 )
 from data_sync_etl.api.resource_schemas import ResouceListResponse, ResourceDetailResponse
 from data_sync_etl.api.resource_version_schemas import CreateResourceVersionResponse
-from data_sync_etl.api.search_schemas import SearchRequest, SearchResponse, search_error
+from data_sync_etl.api.search_schemas import (
+    SEARCH_ERROR_RESPONSES,
+    ContextResponse,
+    SearchRequest,
+    SearchResponse,
+    search_error,
+)
 from data_sync_etl.api.subject_schemas import (
     RecommendedSubjectListResponse,
     SubjectListResponse,
@@ -128,10 +134,22 @@ def health(request: Request):
 
 
 @router.post('/api/v1/search', tags=[TAG_SEARCH], response_model=SearchResponse,
+             responses=SEARCH_ERROR_RESPONSES,
              summary='Tra cứu học liệu theo BoW, Vector hoặc Hybrid')
 def search_materials(body: SearchRequest, request: Request):
     try:
         return request.app.state.container.search.search(**body.model_dump())
+    except Exception as exc:
+        raise search_error(exc) from None
+
+
+@router.get('/api/v1/chunks/{context_id}/context', tags=[TAG_SEARCH], response_model=ContextResponse,
+            responses=SEARCH_ERROR_RESPONSES,
+            summary='Xem Chunk đã chọn và các Chunk liền kề trong cùng ContentUnit')
+def chunk_context(context_id: Annotated[str, Path(min_length=1, max_length=256)], request: Request,
+                  neighbors: Annotated[int, Query(ge=0, le=2)] = 1):
+    try:
+        return request.app.state.container.search.context(context_id, neighbors)
     except Exception as exc:
         raise search_error(exc) from None
 

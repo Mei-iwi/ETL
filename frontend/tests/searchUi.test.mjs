@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, resolve, sep } from 'node:path'
@@ -16,7 +16,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 test('search form, methods, results, pagination, empty, error/retry and mobile layout', {
     skip: !existsSync(executable) || !existsSync(join(root, 'dist/index.html')), timeout: 60000,
 }, async () => {
-    let postCount = 0, mode = 'results'
+    let postCount = 0, contextCount = 0, mode = 'results'
     const bodies = []
     const server = createServer(async (req, res) => {
         const url = new URL(req.url, 'http://localhost')
@@ -41,6 +41,13 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
                 score: .03, score_components: { bow: .5, vector: .7 }, matched_bag_count: 1, matched_keywords: ['toán'],
                 snippet: 'Văn bản <script>không được thực thi</script>', page_from: 2, page_to: 2, content_unit_id: 'unit-1', context_id: 'token-1',
             }] })
+        }
+        if (url.pathname === '/api/v1/chunks/token-1/context') {
+            contextCount++
+            return json({ resource_id: 'r1', resource_version_id: 'v1', content_unit_id: 'unit-1',
+                heading_path: [{ title: 'Chương kiểm thử', unit_type: 'CHAPTER' }],
+                chunks: [{ id: 'c1', content_unit_id: 'unit-1', unit_chunk_sequence: 1, char_start: 0,
+                    char_end: 20, page_from: 2, page_to: 2, selected: true, text: 'Nội dung ngữ cảnh được chọn' }] })
         }
         if (url.pathname.startsWith('/api/')) return json({ detail: 'not found' }, 404)
         const file = url.pathname.startsWith('/assets/') ? resolve(root, 'dist', '.' + url.pathname) : join(root, 'dist/index.html')
@@ -97,12 +104,29 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await waitFor(() => evaluate("document.querySelector('#search-grade')?.disabled === false"))
         await evaluate("Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(document.querySelector('#search-query'), 'toán'); document.querySelector('#search-query').dispatchEvent(new Event('input', { bubbles: true }))")
         await evaluate("document.querySelector('#search-grade').value='g1'; document.querySelector('#search-grade').dispatchEvent(new Event('change', { bubbles: true }))")
-        await evaluate("document.querySelector('form').requestSubmit()")
+        await evaluate("document.querySelector('#search-query').focus()")
+        await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+            nativeVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' })
+        await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
         await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 1')"))
         assert.equal(postCount, 1, 'only one POST on submission, including React StrictMode')
         assert.equal(bodies[0].method, 'bow')
         assert.equal(bodies[0].filters.grade_level_id, 'g1')
         assert.equal(await evaluate("document.querySelector('article script')"), null)
+        assert.equal(contextCount, 0, 'context is lazy, never fetched for every result on mount')
+        await click('Ngữ cảnh')
+        await waitFor(() => evaluate("document.body.textContent.includes('Nội dung ngữ cảnh được chọn')"))
+        assert.equal(contextCount, 1)
+        async function capture(name) {
+            if (!process.env.ETL_TEST_CAPTURE_LAYOUT) return
+            const directory = resolve(root, '../.test-tmp/search-layout')
+            await mkdir(directory, { recursive: true })
+            const result = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true })
+            await writeFile(join(directory, name + '.png'), Buffer.from(result.data, 'base64'))
+        }
+        await capture('search-context-desktop')
+        await click('Đóng ngữ cảnh')
+        assert.equal(await evaluate("document.querySelector('section[aria-label=\"Ngữ cảnh học liệu\"]')"), null)
         await click('Tiếp')
         await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 2')"))
         assert.equal(bodies.at(-1).page, 2)
@@ -124,6 +148,9 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 1')"))
         await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
         assert.equal(await evaluate("document.querySelector('article').getBoundingClientRect().width <= innerWidth"), true)
+        await click('Ngữ cảnh')
+        await waitFor(() => evaluate("document.body.textContent.includes('Nội dung ngữ cảnh được chọn')"))
+        await capture('search-context-mobile')
     } finally {
         if (ws) ws.close()
         browser.kill()

@@ -81,6 +81,53 @@ class SearchResponse(StrictDTO):
     message: Literal['OK', 'NO_READY_INDEX', 'QUERY_NO_KEYWORDS']
 
 
+class ContextChunk(StrictDTO):
+    id: str
+    content_unit_id: str
+    unit_chunk_sequence: int
+    char_start: int
+    char_end: int
+    page_from: int | None
+    page_to: int | None
+    text: str
+    selected: bool
+
+
+class Heading(StrictDTO):
+    content_unit_id: str
+    title: str | None
+    unit_type: str
+
+
+class ContextResponse(StrictDTO):
+    resource_id: str
+    resource_title: str
+    resource_version_id: str
+    version_number: int
+    provider_name: str | None
+    resource_type_code: str
+    context_id: str
+    content_unit_id: str
+    bag_id: str
+    heading_path: list[Heading]
+    neighbors: int
+    chunks: list[ContextChunk]
+
+
+class SearchErrorDetail(StrictDTO):
+    code: str
+    phase: Literal['search']
+    message: str
+    fields: list[dict[str, str]] | None = None
+
+
+class SearchErrorResponse(StrictDTO):
+    detail: SearchErrorDetail
+
+
+SEARCH_ERROR_RESPONSES = {status: {'model': SearchErrorResponse} for status in (404, 409, 422, 503)}
+
+
 MESSAGES = {
     'SEARCH_LIMIT_EXCEEDED': 'Kho dữ liệu vượt giới hạn tìm kiếm. Hãy thu hẹp bộ lọc.',
     'SEARCH_TIMEOUT': 'Tìm kiếm quá thời gian. Hãy thu hẹp bộ lọc.',
