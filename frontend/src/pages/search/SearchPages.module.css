@@ -1,0 +1,32 @@
+.filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.stack {
+    display: grid;
+    gap: 18px;
+}
+
+.resultHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.resultHeader h2 { margin: 0; font-size: 20px; }
+.metadata { color: #64748b; font-size: 14px; overflow-wrap: anywhere; }
+.snippet { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.success { color: #15803d; }
+.pending { color: #a16207; }
+.error { color: #b91c1c; }
+.pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; }
+.context { border-top: 1px solid #e2e8f0; margin-top: 16px; padding-top: 16px; }
+.selected { border-left: 3px solid #2563eb; padding-left: 12px; }
+
+@media (max-width: 640px) {
+    .filters { grid-template-columns: 1fr; }
+}

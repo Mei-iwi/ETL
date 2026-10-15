@@ -326,3 +326,24 @@ python -m data_sync_etl.adapters.mongo.schema --inventory
 | Cổng 8000/3000 đang dùng | Dừng đúng Backend/Frontend Dev cũ bằng Ctrl+C, không kill tiến trình chưa xác định. |
 
 Sau khi sửa `.env`, khởi động lại Backend và các worker liên quan để nạp cấu hình mới.
+
+## 9. Tra cứu học liệu
+
+Mở **Tra cứu → Tìm kiếm học liệu**, nhập truy vấn, chọn BoW/Vector/Hybrid và bộ lọc. Trang Phương pháp truy vấn cho phép chọn chế độ; trang Kết quả giữ tiêu chí trong URL, có phân trang và thử lại.
+
+- `POST /api/v1/search`: JSON gồm `query`, `method`, `filters`, `page`, `size`. Xem hợp đồng đầy đủ tại Swagger.
+- BoW: cosine trên tập keyword nhị phân, không phải TF-IDF/BM25. Vector: cosine với vector ContentBag cùng model/revision. Hybrid: RRF với k=60.
+- Mỗi kết quả là một học liệu, lấy Bag khớp tốt nhất. Mặc định dùng version_number lớn nhất trong các lifecycle `INGESTED`, `APPROVED`, `PUBLISHED`, sau đó bắt buộc CONTENT_READY + Index READY; không tự lùi về phiên bản cũ nếu bản mới chưa READY. Filter phiên bản cụ thể được kiểm tra riêng.
+- Chỉ đọc học liệu active/PUBLISHED và leaf có `retrieval_eligible=true`; không tự phê duyệt, OCR hay lập chỉ mục từ Search. Content Units mới mặc định chưa có quyền truy xuất.
+- `SEARCH_MAX_BAGS=2000`, `SEARCH_TIMEOUT_SECONDS=15` là mặc định. Vượt giới hạn phải thu hẹp bộ lọc; không lấy một phần kho rồi nhận là kết quả toàn kho. Vector/Hybrid cần model local hợp lệ, không tự chuyển sang BoW khi model lỗi.
+
+Kiểm thử Search cô lập, không dùng database Dev:
+
+```bash
+python -m pytest tests/unit/test_search.py tests/integration/test_search_integration.py -q
+npm.cmd --prefix frontend run build
+node --experimental-strip-types --test frontend/tests/searchApi.test.mjs
+node --test frontend/tests/searchUi.test.mjs
+```
+
+Test browser dùng Edge headless và HTTP fixture cục bộ. Integration test dùng SQLAlchemy/SQLite cùng Mongo/model doubles đúng contract; không thay thế nghiệm thu model thật và database thực tế.

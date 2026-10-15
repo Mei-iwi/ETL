@@ -45,6 +45,7 @@ from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
+from data_sync_etl.application.search import SearchService
 from data_sync_etl.application.source_file_import import SourceFileImportService
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
 from data_sync_etl.application.sync import MasterSync
@@ -250,6 +251,7 @@ class Container:
             bags=self.content_bags,
         )
         self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
+        self.search = SearchService(self.indexing, self.settings, self.content_bags)
 
         self.processing_finalizer = ProcessingFinalizer(
             self.uow,

@@ -38,6 +38,7 @@ from data_sync_etl.api.resource_metadata_schemas import (
 )
 from data_sync_etl.api.resource_schemas import ResouceListResponse, ResourceDetailResponse
 from data_sync_etl.api.resource_version_schemas import CreateResourceVersionResponse
+from data_sync_etl.api.search_schemas import SearchRequest, SearchResponse, search_error
 from data_sync_etl.api.subject_schemas import (
     RecommendedSubjectListResponse,
     SubjectListResponse,
@@ -124,6 +125,15 @@ def health(request: Request):
         return {"status": "ok", "database": "ok"}
     except Exception:
         raise HTTPException(503, "Database unavailable") from None
+
+
+@router.post('/api/v1/search', tags=[TAG_SEARCH], response_model=SearchResponse,
+             summary='Tra cứu học liệu theo BoW, Vector hoặc Hybrid')
+def search_materials(body: SearchRequest, request: Request):
+    try:
+        return request.app.state.container.search.search(**body.model_dump())
+    except Exception as exc:
+        raise search_error(exc) from None
 
 @router.get(
         '/api/v1/system/capabilities',
