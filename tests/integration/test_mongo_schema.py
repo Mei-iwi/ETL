@@ -121,6 +121,10 @@ def test_inventory_five_collections_and_dimension_mismatch(mongo_db):
     assert report['warnings'] == [] and report['extra_collections'] == []
     assert len(report['actual']) == 5
     assert initialize(mongo_db, dimension=384)['ready']
+    mismatch = initialize(mongo_db, dimension=256)
+    assert not mismatch['schema_ready']
+    assert {item['path'] for item in mismatch['validator_mismatches']} == {
+        'content_bags.embedding.minItems', 'content_bags.embedding.maxItems'}
     assert initialize(mongo_db, dimension=384, apply=True)['extra_collections'] == []
     with pytest.raises(DomainError, match='Incompatible Mongo validator'):
         initialize(mongo_db, dimension=256, apply=True)
@@ -153,7 +157,7 @@ def test_inventory_five_collections_and_dimension_mismatch(mongo_db):
         ("content_bags", {"embedding": [float("inf"), 1.0]}),
         ("content_bags", {"embedding": [1.0]}),
         ("content_bags", {"embedding_text": "wrong"}),
-        ("content_bags", {"unit_type": "PAGE_TEXT"}),
+        ("content_bags", {"unit_type": "MP3_TEXT"}),
     ],
 )
 def test_real_negative_validators(mongo_db, collection, changes):

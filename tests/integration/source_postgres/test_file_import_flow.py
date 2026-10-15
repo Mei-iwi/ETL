@@ -12,7 +12,6 @@ from data_sync_etl.adapters.mongo.foundation_store import MongoBagStore, MongoCo
 from data_sync_etl.adapters.mongo.schema import contracts, initialize
 from data_sync_etl.application.indexing import IndexingService
 from data_sync_etl.application.sync import MasterSync
-from data_sync_etl.domain.indexing import IndexingError
 
 pytestmark = pytest.mark.postgres
 
@@ -160,10 +159,10 @@ def test_source_file_to_index_with_existing_workers(source, pg_container, mongo_
             version = repo.find("resource_versions", limit=1)[0]
             assert repo.count("etl_stage_runs", {"stage": "INDEX_BUILD"}) == int(auto_enabled)
             assert repo.count("ocr_jobs", {}) == 1
-        assert c.indexing.status(version["id"])["index_status"] == "BLOCKED_STRUCTURE"
+        assert c.indexing.status(version["id"])["index_status"] == ("READY" if auto_enabled else "NOT_STARTED")
         if not auto_enabled:
-            with pytest.raises(IndexingError, match="BAG_STRUCTURE_UNAVAILABLE"):
-                c.indexing.enqueue(version["id"])
+            c.indexing.enqueue(version["id"])
+            assert c.worker.once("manual-fallback")
         assert c.indexing.chunks(version["id"])["total"] > 0
         assert set(db.list_collection_names()) == set(contracts(3))
         assert c.source_file_import.list_files()["items"][0]["etl_status"] == "CONTENT_READY"

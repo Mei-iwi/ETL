@@ -9,6 +9,7 @@ from pymongo.errors import PyMongoError
 
 from data_sync_etl.config import Settings
 from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.mongo_documents import FALLBACK_BAG_TYPES, STRUCTURED_BAG_TYPES
 
 SCHEMA_VERSION = "etl-mongo-foundation-v1"
 
@@ -94,7 +95,7 @@ def contracts(dimension: int) -> dict[str, dict]:
         },
         "content_bags": {
             **projected,
-            "unit_type": {"enum": ["CHAPTER", "LESSON", "SECTION"]},
+            "unit_type": {"enum": [*STRUCTURED_BAG_TYPES, *FALLBACK_BAG_TYPES]},
             "title": string(True, 500),
             "keywords": {**strings(), "minItems": 1},
             "embedding_text": string(minimum=1),
@@ -297,13 +298,23 @@ def inventory(database) -> dict:
         options = entry.get('options', {})
         props = options.get('validator', {}).get('$jsonSchema', {}).get('properties', {})
         stats = database.command('collStats', name)
+        installed_indexes = [_index_spec(idx) for idx in database[name].list_indexes()]
         collections.append({
             'name': name, 'documents': database[name].count_documents({}),
             'size_bytes': stats.get('size', 0),
-            'indexes': [idx['name'] for idx in database[name].list_indexes()],
+            'indexes': [idx['name'] for idx in installed_indexes],
+            'index_specifications': installed_indexes,
+            'validation_level': options.get('validationLevel', 'strict'),
+            'validation_action': options.get('validationAction', 'error'),
             'embedding_validator_min_items': props.get('embedding', {}).get('minItems'),
             'embedding_validator_max_items': props.get('embedding', {}).get('maxItems'),
         })
+        if name == 'content_bags':
+            collections[-1]['embedding_lengths'] = list(database[name].aggregate([
+                {'$group': {'_id': {'$cond': [{'$isArray': '$embedding'},
+                                             {'$size': '$embedding'}, 'NOT_ARRAY']},
+                            'documents': {'$sum': 1}}}, {'$sort': {'_id': 1}},
+            ]))
     extras = sorted(set(catalog) - expected)
     missing = sorted(expected - set(catalog))
     return {'database': database.name, 'mode': 'inventory', 'expected': sorted(expected),
@@ -312,100 +323,140 @@ def inventory(database) -> dict:
                         + (['MISSING_EXPECTED_COLLECTIONS'] if missing else [])}
 
 
-def initialize(database, *, dimension=256, apply=False, validation_level="strict") -> dict:
-    """Preflight everything before DDL; DDL is resumable, not a multi-collection transaction."""
+def _validator_differences(expected, actual, path):
+    """Only schema metadata is inspected; document values never enter this report."""
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        result = []
+        for key in sorted(expected.keys() | actual.keys()):
+            child = path if key in ("$jsonSchema", "properties") else f"{path}.{key}"
+            if key not in expected or key not in actual:
+                result.append({"path": child, "expected": expected.get(key),
+                               "actual": actual.get(key)})
+            else:
+                result.extend(_validator_differences(expected[key], actual[key], child))
+        return result
+    if expected != actual:
+        return [{"path": path, "expected": expected, "actual": actual}]
+    return []
+
+
+def _index_spec(index):
+    return {key: value for key, value in index.items()
+            if key in ("name", "key", "unique", "sparse", "partialFilterExpression",
+                       "collation", "hidden", "expireAfterSeconds")}
+
+
+def check_schema(database, *, dimension, validation_level="strict", audit_documents=False):
+    """Shared read-only guard. HTTP/worker checks never scan stored documents."""
     if validation_level not in ("strict", "moderate"):
         raise DomainError("Unsupported validation level")
     validators = contracts(dimension)
     catalog = {row["name"]: row for row in database.list_collections()}
     report = {
-        "schema_version": SCHEMA_VERSION,
-        "mode": "apply" if apply else "check",
-        "collections": 0,
-        "validators": 0,
-        "indexes": 0,
-        "legacy_invalid": {},
-        "ready": True,
-        "extra_collections": sorted(set(catalog) - set(validators)),
-        "warnings": ['EXTRA_COLLECTION_PRESENT'] if set(catalog) - set(validators) else [],
+        "database": database.name, "schema_version": SCHEMA_VERSION, "mode": "check",
+        "effective_expected_dimension": dimension, "audit_documents": audit_documents,
+        "collections": 0, "validators": 0, "indexes": 0, "legacy_invalid": {},
+        "missing_collections": [], "validator_mismatches": [], "validation_mismatches": [],
+        "missing_indexes": [], "incompatible_indexes": [], "incompatible_collections": [],
+        "duplicate_indexes": [], "extra_collections": sorted(set(catalog) - set(validators)),
+        "warnings": ["EXTRA_COLLECTION_PRESENT"] if set(catalog) - set(validators) else [],
+        "installed_indexes": {}, "schema_ready": True,
     }
-    pending_indexes = {}
     for name, validator in validators.items():
         entry = catalog.get(name)
-        if entry and entry.get("type") != "collection":
-            raise DomainError(f"Incompatible Mongo collection: {name}")
+        if not entry:
+            report["missing_collections"].append(name)
+        elif entry.get("type") != "collection":
+            report["incompatible_collections"].append(name)
+            continue
+        report["collections"] += bool(entry)
         options = entry.get("options", {}) if entry else {}
         installed = options.get("validator", {})
-        if installed and installed != validator:
-            raise DomainError(f"Incompatible Mongo validator: {name}; review migration manually")
-        ready_validator = (
-            installed == validator
-            and options.get("validationLevel", "strict") == validation_level
-            and options.get("validationAction", "error") == "error"
-        )
-        report["collections"] += bool(entry)
-        report["validators"] += bool(ready_validator)
-        report["ready"] &= bool(entry and ready_validator)
+        differences = _validator_differences(validator, installed, name)
+        report["validator_mismatches"].extend(differences)
+        level = options.get("validationLevel", "strict")
+        action = options.get("validationAction", "error")
+        for field, expected, actual in (
+            ("validationLevel", validation_level, level), ("validationAction", "error", action)
+        ):
+            if actual != expected:
+                report["validation_mismatches"].append({
+                    "path": f"{name}.{field}", "expected": expected, "actual": actual})
+        report["validators"] += bool(entry and not differences
+                                     and level == validation_level and action == "error")
         indexes = list(database[name].list_indexes()) if entry else []
-        pending_indexes[name] = []
+        report["installed_indexes"][name] = [_index_spec(i) for i in indexes]
         for expected in INDEXES[name]:
-            matches = [
-                idx
-                for idx in indexes
-                if idx["name"] == expected.name or tuple(idx["key"].items()) == expected.keys
-            ]
+            matches = [idx for idx in indexes if idx["name"] == expected.name
+                       or tuple(idx["key"].items()) == expected.keys]
+            item = {"collection": name, "name": expected.name,
+                    "expected": {"key": list(expected.keys), "unique": expected.unique}}
             if any(not compatible_index(idx, expected) for idx in matches):
-                raise DomainError(f"Incompatible Mongo index: {name}/{expected.name}")
-            report["indexes"] += bool(matches)
-            if not matches:
-                report["ready"] = False
-                pending_indexes[name].append(expected)
-                if entry and expected.unique:
-                    group = {key: {"$ifNull": [f"${key}", None]} for key, _ in expected.keys}
-                    duplicate = next(
-                        database[name].aggregate(
-                            [
-                                {"$group": {"_id": group, "n": {"$sum": 1}}},
-                                {"$match": {"n": {"$gt": 1}}},
-                                {"$limit": 1},
-                            ],
-                            allowDiskUse=True,
-                        ),
-                        None,
-                    )
-                    if duplicate:
-                        raise DomainError(f"Legacy duplicate keys: {name}/{expected.name}")
-        invalid = database[name].count_documents({"$nor": [validator]}) if entry else 0
-        report["legacy_invalid"][name] = invalid
-        if invalid and validation_level == "strict":
-            report["ready"] = False
-        if apply and invalid and validation_level == "strict":
-            raise DomainError(
-                f"Legacy invalid documents: {name}; audit/backfill or explicitly use moderate"
-            )
-    if apply:
-        for name, validator in validators.items():
-            if name not in catalog:
-                database.create_collection(
-                    name,
-                    validator=validator,
-                    validationLevel=validation_level,
-                    validationAction="error",
-                )
+                report["incompatible_indexes"].append({
+                    **item, "actual": [_index_spec(i) for i in matches]})
+            elif matches:
+                report["indexes"] += 1
             else:
-                database.command(
-                    "collMod",
-                    name,
-                    validator=validator,
-                    validationLevel=validation_level,
-                    validationAction="error",
-                )
-            for idx in pending_indexes[name]:
-                database[name].create_index(list(idx.keys), name=idx.name, unique=idx.unique)
-        checked = initialize(database, dimension=dimension, validation_level=validation_level)
-        checked["mode"] = "apply"
-        return checked
+                report["missing_indexes"].append(item)
+                if audit_documents and entry and expected.unique:
+                    group = {key: {"$ifNull": [f"${key}", None]} for key, _ in expected.keys}
+                    duplicate = next(database[name].aggregate([
+                        {"$group": {"_id": group, "n": {"$sum": 1}}},
+                        {"$match": {"n": {"$gt": 1}}}, {"$limit": 1},
+                    ], allowDiskUse=True), None)
+                    if duplicate:
+                        report["duplicate_indexes"].append(item)
+        if audit_documents:
+            report["legacy_invalid"][name] = (
+                database[name].count_documents({"$nor": [validator]}) if entry else 0)
+    report["schema_ready"] = not any(report[key] for key in (
+        "missing_collections", "validator_mismatches", "validation_mismatches",
+        "missing_indexes", "incompatible_indexes", "incompatible_collections", "duplicate_indexes",
+    ))
+    if audit_documents and validation_level == "strict" and any(report["legacy_invalid"].values()):
+        report["schema_ready"] = False
+    report["ready"] = report["schema_ready"]
     return report
+
+
+def initialize(database, *, dimension, apply=False, validation_level="strict") -> dict:
+    """Audit all collections before explicit additive DDL; never migrate incompatible schemas."""
+    report = check_schema(database, dimension=dimension, validation_level=validation_level,
+                          audit_documents=True)
+    if not apply:
+        return report
+    validators = contracts(dimension)
+    catalog = {row["name"]: row for row in database.list_collections()}
+    # Preflight ALL collections and indexes before the first write.
+    if report["incompatible_collections"]:
+        raise DomainError("Incompatible Mongo collection; review migration manually")
+    if any(catalog.get(name, {}).get("options", {}).get("validator")
+           and catalog[name]["options"]["validator"] != validator
+           for name, validator in validators.items()):
+        raise DomainError("Incompatible Mongo validator; review migration manually")
+    if any(catalog.get(item["path"].split(".")[0], {}).get("options", {}).get("validator")
+           for item in report["validation_mismatches"]):
+        raise DomainError("Incompatible Mongo validation options; review migration manually")
+    if report["incompatible_indexes"]:
+        raise DomainError("Incompatible Mongo index; review migration manually")
+    if report["duplicate_indexes"]:
+        raise DomainError("Legacy duplicate keys; review migration manually")
+    if validation_level == "strict" and any(report["legacy_invalid"].values()):
+        raise DomainError("Legacy invalid documents; audit/backfill or explicitly use moderate")
+    for name, validator in validators.items():
+        if name not in catalog:
+            database.create_collection(name, validator=validator, validationLevel=validation_level,
+                                       validationAction="error")
+        elif not catalog[name].get("options", {}).get("validator"):
+            database.command("collMod", name, validator=validator,
+                             validationLevel=validation_level, validationAction="error")
+    for item in report["missing_indexes"]:
+        idx = next(i for i in INDEXES[item["collection"]] if i.name == item["name"])
+        database[item["collection"]].create_index(list(idx.keys), name=idx.name, unique=idx.unique)
+    checked = check_schema(database, dimension=dimension, validation_level=validation_level,
+                           audit_documents=True)
+    checked["mode"] = "apply"
+    return checked
 
 
 def main(argv=None) -> int:

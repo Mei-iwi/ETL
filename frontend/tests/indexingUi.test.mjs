@@ -24,6 +24,7 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
     let pendingReads = 0
     let reindexCount = 0
     let blockStatus = false
+    let blockCode = 'BLOCKED_EMBEDDING_RUNTIME'
     let structureBlocked = false
     let waitingForOcr = false
     let ocrReads = 0
@@ -43,10 +44,10 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
             const second = path.includes('version-two')
             const state = forcedState ?? (waitingForOcr && ++ocrReads < 2 ? 'CONTENT_NOT_READY' : structureBlocked ? 'BLOCKED_STRUCTURE' : blockStatus ? 'BLOCKED_RUNTIME' : !second && activeRun ? (++pendingReads < 2 ? 'PENDING' : 'READY') : 'NOT_STARTED')
             return json({ resource_version_id: second ? 'version-two' : 'version-test', processing_status: state === 'CONTENT_NOT_READY' ? 'OCR_PENDING' : 'CONTENT_READY',
-                index_status: state, auto_enabled: autoEnabled, bag_count: state === 'READY' ? 1 : 0,
-                bags: state === 'READY' ? [{ id: 'root-test', title: 'Test Bag', unit_type: 'CHAPTER', keywords: ['toán'], embedding_text: 'toán', embedding_model: 'ui-test-only@1', embedding_dimension: 3, vector_ready: true }] : [],
+                index_status: state, representation_mode: state === 'BLOCKED_STRUCTURE' ? 'unavailable' : 'fallback', auto_enabled: autoEnabled, bag_count: state === 'READY' ? 1 : 0,
+                bags: state === 'READY' ? [{ id: 'root-test', title: 'Test Bag', unit_type: 'PAGE_TEXT', representation_mode: 'fallback', keywords: ['toán'], embedding_text: 'toán', embedding_model: 'ui-test-only@1', embedding_dimension: 3, vector_ready: true }] : [],
                 latest_run_id: second ? null : activeRun, published_run_id: state === 'READY' ? activeRun : null, chunk_count: 0,
-                error_code: state === 'BLOCKED_STRUCTURE' ? 'BAG_STRUCTURE_UNAVAILABLE' : state === 'BLOCKED_RUNTIME' ? 'BLOCKED_EMBEDDING_RUNTIME' : null,
+                error_code: state === 'BLOCKED_STRUCTURE' ? 'BAG_STRUCTURE_UNAVAILABLE' : state === 'BLOCKED_RUNTIME' ? blockCode : null,
                 bow_ready: state === 'READY', vector_ready: state === 'READY', embedding_model: 'ui-test-only', embedding_dimension: 3,
                 message: state === 'BLOCKED_RUNTIME' ? 'Không thể tạo vector vì chưa cấu hình model.' : state === 'PENDING' ? 'Chờ lập chỉ mục.' : state === 'READY' ? 'Hoàn thành lập chỉ mục.' : 'Chưa lập chỉ mục.' })
         }
@@ -127,6 +128,7 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         }
         await open()
         assert.equal(postCount, 0)
+        await waitFor(() => evaluate("document.body.textContent.includes('Không cấu trúc (Fallback)')"))
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Xây dựng chỉ mục') && !b.disabled)"))
         await waitFor(() => evaluate("document.body.textContent.includes('Danh sách Chunk (11)')"))
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Tiếp').click()")
@@ -163,6 +165,18 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Thử tải lại trạng thái').click()")
         await waitFor(() => evaluate("document.body.textContent.includes('Không thể tạo vector vì chưa cấu hình model.')"))
         assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').disabled"), true)
+        blockCode = 'BLOCKED_INDEX_SCHEMA'
+        const beforeSchemaPosts = postCount
+        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Thử tải lại trạng thái').click()")
+        await waitFor(() => evaluate("document.body.textContent.includes('Schema MongoDB chưa tương thích với ContentBag')"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Xây dựng chỉ mục').disabled"), true)
+        assert.equal(await evaluate("document.querySelectorAll('details').length > 0"), true)
+        assert.equal(postCount, beforeSchemaPosts)
+        blockStatus = false
+        activeRun = null
+        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Thử tải lại trạng thái').click()")
+        await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(b => b.textContent === 'Xây dựng chỉ mục' && !b.disabled)"))
+        assert.equal(postCount, beforeSchemaPosts, 'schema refresh never implicitly enqueues')
         blockStatus = false
         structureBlocked = true
         await open()

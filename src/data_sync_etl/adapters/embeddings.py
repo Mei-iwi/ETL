@@ -43,12 +43,14 @@ class LocalSentenceEmbedding:
                     model = SentenceTransformer(str(Path(self.path).resolve()),
                                                 local_files_only=True, device="cpu")
                     if model.get_sentence_embedding_dimension() != self.dimension:
-                        raise ValueError("Dimension mismatch")
+                        raise IndexingError("INVALID_EMBEDDING", 503)
                     # Configured revision must match the operator's provisioned manifest.
                     manifest = Path(self.path) / "etl-model-revision.txt"
                     if not manifest.is_file() or manifest.read_text(encoding="utf-8").strip() != self.version:
                         raise ValueError("Model revision unavailable")
                     self._model = model
+                except IndexingError:
+                    raise
                 except Exception:
                     raise IndexingError("BLOCKED_EMBEDDING_RUNTIME", 503) from None
             if not self._checked:

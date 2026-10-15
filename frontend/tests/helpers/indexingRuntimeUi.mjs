@@ -81,7 +81,15 @@ try {
     await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').click()")
     await waitFor(() => evaluate("document.querySelector('dialog')?.open"))
     await evaluate("Array.from(document.querySelectorAll('dialog button')).find(b => b.textContent === 'Xác nhận').click()")
-    const rebuilt = await waitFor(async () => { const data = await status(); return data.index_status === 'READY' && data.latest_run_id !== initial.latest_run_id ? data : null })
+    let lastStatus
+    const rebuilt = await waitFor(async () => {
+        lastStatus = await status()
+        if (lastStatus.index_status === 'FAILED') throw new Error(`Reindex failed: ${lastStatus.error_code}`)
+        return lastStatus.index_status === 'READY' && lastStatus.latest_run_id !== initial.latest_run_id ? lastStatus : null
+    }).catch(error => {
+        throw new Error(`${error.message}; ${JSON.stringify({ index_status: lastStatus?.index_status,
+            error_code: lastStatus?.error_code, new_run: lastStatus?.latest_run_id !== initial.latest_run_id })}`)
+    })
     await waitFor(() => evaluate(`document.body.textContent.includes(${JSON.stringify(rebuilt.latest_run_id)}) && document.body.textContent.includes('ContentBag đã sẵn sàng.')`))
     console.log(JSON.stringify({ real_backend: true, real_model: true, index_status: rebuilt.index_status, chunks: rebuilt.chunk_count, dimension: rebuilt.embedding_dimension, ui: 'PASS', reindex_dialog: 'PASS' }))
 } finally {

@@ -153,9 +153,9 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
         && status.error_code !== 'LEAF_KEYWORDS_UNAVAILABLE'
         && !running && !statusError && !busy
     const guidance = status?.index_status === 'BLOCKED_STRUCTURE'
-        ? 'Cần tài liệu có outline/Heading thật (DOCX Heading 1–3) hoặc cây ContentUnit hợp lệ từ nguồn. Vẫn có thể xem Chunk bên dưới.'
+        ? 'Kiểm tra parent, vòng lặp và đơn vị lá của nguồn. Tài liệu không có Heading được tự xử lý Fallback nếu có leaf hợp lệ; vẫn có thể xem Chunk bên dưới.'
         : status?.error_code === 'BLOCKED_INDEX_SCHEMA'
-            ? 'Quản trị viên cần đối chiếu validator/index và số chiều ContentBag trong môi trường dev; giao diện không tự sửa database.'
+            ? 'Schema MongoDB chưa tương thích với ContentBag (validator, index hoặc dimension). Quản trị viên cần kiểm tra cấu hình môi trường Dev. Giao diện không tự sửa database.'
             : status?.error_code === 'INVALID_EMBEDDING'
                 ? 'Kiểm tra model, revision và số chiều giữa runtime, cấu hình và validator MongoDB.'
                 : status?.index_status === 'BLOCKED_RUNTIME'
@@ -169,10 +169,12 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
         {!status && !statusError && <p role="status">Đang tải trạng thái...</p>}
         {status && <>
             <p className={styles.statusMessage} role="status">{status.message}</p>
-            {status.auto_enabled && <p>Chỉ mục sẽ tự được tạo khi phiên bản đạt CONTENT_READY và có cấu trúc hợp lệ.</p>}
+            {status.auto_enabled && <p>Chỉ mục sẽ tự được tạo sau CONTENT_READY theo phương thức phù hợp: Có cấu trúc, Fallback hoặc Hỗn hợp.</p>}
+            {!status.auto_enabled && status.index_status === 'NOT_STARTED' && <p>Có thể xây dựng chỉ mục một lần cho phiên bản hiện có; phương thức được chọn tự động.</p>}
             <div className={styles.resultGrid}>
                 <p className={styles.resultItem}><span className={styles.resultLabel}>Trích xuất / OCR</span><span className={styles.resultValue}>{status.processing_status}</span></p>
                 <p className={styles.resultItem}><span className={styles.resultLabel}>Chỉ mục</span><span className={styles.resultValue}>{status.index_status}</span></p>
+                <p className={styles.resultItem}><span className={styles.resultLabel}>Phương thức</span><span className={styles.resultValue}>{{ structured: 'Có cấu trúc', fallback: 'Không cấu trúc (Fallback)', mixed: 'Hỗn hợp', unavailable: 'Chưa xác định' }[status.representation_mode]}</span></p>
                 <p className={styles.resultItem}><span className={styles.resultLabel}>Tự động sau chuẩn hóa</span><span className={styles.resultValue}>{status.auto_enabled ? 'Bật' : 'Tắt'}</span></p>
                 <p className={styles.resultItem}><span className={styles.resultLabel}>Số Chunk</span><span className={styles.resultValue}>{status.chunk_count}</span></p>
                 <p className={styles.resultItem}><span className={styles.resultLabel}>ContentBag / Vector</span><span className={styles.resultValue}>{status.bag_count} Bag · {status.vector_ready ? 'Vector sẵn sàng' : 'Chưa có vector'}</span></p>
@@ -197,7 +199,7 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
         <section className={styles.resultCard}>
             <h2>ContentBag ({status?.bag_count ?? 0})</h2>
             {status?.bags.map(bag => <article className={styles.contentItem} key={bag.id}>
-                <h4>{bag.title ?? bag.id} · {bag.unit_type}</h4>
+                <h4>{bag.title ?? `Đơn vị nội dung ${bag.id}`} · {bag.unit_type}</h4>
                 <p>BoW: {bag.keywords.join(', ')}</p>
                 <details><summary>Xem chuỗi embedding</summary><p>{bag.embedding_text}</p></details>
                 <p>Vector ContentBag: {bag.vector_ready ? 'Sẵn sàng' : 'Chưa có'}</p>

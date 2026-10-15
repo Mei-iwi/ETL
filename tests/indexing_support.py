@@ -54,13 +54,19 @@ class MemoryBags:
     def ensure_ready(self):
         pass
 
+    def invalidate_other_roots(self, version_id, root_ids, generation):
+        for key, doc in self.rows.items():
+            if doc.resource_version_id == version_id and key not in root_ids and doc.projection_generation <= generation:
+                doc.is_current = False
+
     def upsert_bag(self, document):
         assert document.content_fingerprint == self.reader.content_fingerprint(document.resource_version_id,
                                                                     generation=document.projection_generation)
         self.rows[document.id] = deepcopy(document)
 
     def get_bag(self, root_id):
-        return deepcopy(self.rows.get(root_id))
+        doc = self.rows.get(root_id)
+        return deepcopy(doc) if doc and doc.is_current else None
 
 
 def setup_index(c):

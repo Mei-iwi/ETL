@@ -9,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 DocumentId = Annotated[str, Field(strict=True, min_length=1, max_length=30)]
 Int32 = Annotated[int, Field(strict=True, ge=1, le=2**31 - 1)]
+STRUCTURED_BAG_TYPES = ('CHAPTER', 'LESSON', 'SECTION')
+# Actual native source_type values emitted by the existing Postprocessor; no media types.
+FALLBACK_BAG_TYPES = ('PAGE_TEXT', 'TXT_TEXT', 'CSV_TEXT', 'DOCX_TEXT', 'XLSX_TEXT', 'PPTX_TEXT', 'IMAGE_TEXT')
+BagUnitType = Literal['CHAPTER', 'LESSON', 'SECTION', 'PAGE_TEXT', 'TXT_TEXT', 'CSV_TEXT',
+                      'DOCX_TEXT', 'XLSX_TEXT', 'PPTX_TEXT', 'IMAGE_TEXT']
 
 
 def normalize_keywords(values: list[str]) -> list[str]:
@@ -142,7 +147,7 @@ class ContentUnitDocument(ProjectedDocument):
 
 
 class ContentBagDocument(ProjectedDocument):
-    unit_type: Literal["CHAPTER", "LESSON", "SECTION"]
+    unit_type: BagUnitType
     title: Annotated[str, Field(max_length=500)] | None = None
     keywords: list[str]
     embedding_text: str

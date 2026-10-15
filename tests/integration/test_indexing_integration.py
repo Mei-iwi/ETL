@@ -120,6 +120,55 @@ def test_real_lock_restart_and_failed_rebuild(index_context):
     assert index.status(version["id"])["index_status"] == "READY"
 
 
+def test_schema_block_both_posts_and_readonly_status_then_operator_test_fix(index_context):
+    """DDL is simulated ONLY on the fixture's UUID test database, never Dev."""
+    c, db, index = index_context
+    version = finish(c, structured=False)
+    original_options = db.content_bags.options()
+    db.command('collMod', 'content_bags', validator=contracts(256)['content_bags'])
+    before = {name: list(db[name].find({})) for name in contracts(3)}
+    with c.uow() as repo:
+        before_runs = index._runs(repo, version['id'])
+    with TestClient(create_app(c)) as api:
+        base = f"/api/v1/resource-versions/{version['id']}"
+        for endpoint in ('/index', '/reindex'):
+            response = api.post(base + endpoint)
+            assert response.status_code == 503
+            assert response.json()['detail']['code'] == 'BLOCKED_INDEX_SCHEMA'
+        status = api.get(base + '/index-status').json()
+        assert status['error_code'] == 'BLOCKED_INDEX_SCHEMA'
+        assert status['processing_status'] == 'CONTENT_READY'
+        assert api.get(base + '/chunks').json()['total'] == 2
+        assert db.content_bags.options()['validator'] == contracts(256)['content_bags']
+        assert before == {name: list(db[name].find({})) for name in contracts(3)}
+        with c.uow() as repo:
+            assert index._runs(repo, version['id']) == before_runs
+        # Explicit test operator action; the service never performs this repair.
+        db.command('collMod', 'content_bags', validator=original_options['validator'])
+        assert api.post(base + '/index').status_code == 202
+        assert c.worker.once('schema-test-index')
+        assert api.get(base + '/index-status').json()['index_status'] == 'READY'
+        assert api.post(base + '/reindex').status_code == 202
+        assert c.worker.once('schema-test-reindex')
+        assert api.get(base + '/index-status').json()['index_status'] == 'READY'
+
+
+def test_worker_schema_error_never_repairs_database(index_context):
+    c, db, index = index_context
+    version = finish(c)
+    index.enqueue(version['id'])
+    db.content_bags.drop_index('bags_keywords')  # Isolated negative fixture only.
+    before = list(db.content_bags.list_indexes())
+    assert c.worker.once('schema-worker-failure')
+    with c.uow() as repo:
+        run = index._runs(repo, version['id'])[0]
+        assert run['status'] == 'FAILED'
+        assert run['error_message'] == 'BLOCKED_INDEX_SCHEMA'
+    assert list(db.content_bags.list_indexes()) == before
+    assert db.content_bags.count_documents({}) == 0
+    assert index.status(version['id'])['processing_status'] == 'CONTENT_READY'
+
+
 @pytest.mark.parametrize("structured", [False, True])
 def test_auto_and_unstructured_content_ready(index_context, structured):
     c, db, index = index_context
@@ -127,9 +176,10 @@ def test_auto_and_unstructured_content_ready(index_context, structured):
     version = finish(c, structured)
     status = index.status(version["id"])
     assert status["processing_status"] == "CONTENT_READY"
-    assert status["index_status"] == ("READY" if structured else "BLOCKED_STRUCTURE")
+    assert status["index_status"] == 'READY'
+    assert status['representation_mode'] == ('structured' if structured else 'fallback')
     assert index.chunks(version["id"])["total"] == 2
-    assert db.content_bags.count_documents({}) == int(structured)
+    assert db.content_bags.count_documents({}) == (1 if structured else 2)
     with c.uow() as repo:
         assert len(index._runs(repo, version["id"])) == 1
         index.enqueue_auto(repo, version["id"])

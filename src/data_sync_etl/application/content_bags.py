@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.mongo_documents import (
+    FALLBACK_BAG_TYPES,
+    STRUCTURED_BAG_TYPES,
     ContentBagDocument,
     ContentUnitDocument,
     DocumentId,
@@ -55,30 +57,50 @@ def bag_structure(units):
             path.add(current)
             current = nodes[current]['parent_unit_id']
         done.update(path)
-    kind = next((k for k in ('CHAPTER', 'LESSON', 'SECTION')
-                 if any(u['unit_type'] == k for u in units)), None)
-    roots = {}
-    for node in units:
-        if node['unit_type'] != kind:
+    def order(key):
+        return nodes[key].get('sequence_no', 0), key
+    # Iterative postorder computes the highest structural level in each subtree.
+    traversal, pending = [], sorted((key for key in nodes if nodes[key]['parent_unit_id'] is None), key=order)
+    while pending:
+        key = pending.pop()
+        traversal.append(key)
+        pending.extend(children[key])
+    rank = {kind: index for index, kind in enumerate(STRUCTURED_BAG_TYPES)}
+    best = {}
+    for key in reversed(traversal):
+        best[key] = min([rank.get(nodes[key]['unit_type'], 99), *[best[ch] for ch in children[key]]])
+        if nodes[key]['unit_type'] in rank and not children[key]:
+            raise DomainError('Outline node requires descendant content leaves')
+    roots, covered = {}, set()
+    pending = sorted((key for key in nodes if nodes[key]['parent_unit_id'] is None), key=order, reverse=True)
+    while pending:
+        key = pending.pop()
+        kind = nodes[key]['unit_type']
+        if kind in rank and rank[kind] == best[key]:
+            descendants, leaves = [key], []
+            while descendants:
+                current = descendants.pop()
+                if children[current]:
+                    descendants.extend(children[current])
+                elif nodes[current].get('text', '').strip():
+                    leaves.append(current)
+            if leaves:
+                roots[key] = sorted(leaves, key=order)
+                covered.update(leaves)
             continue
-        parent = node['parent_unit_id']
-        while parent is not None and nodes[parent]['unit_type'] != kind:
-            parent = nodes[parent]['parent_unit_id']
-        if parent is not None:
-            continue
-        if not children[node['id']]:
-            raise DomainError('Bag root requires descendant content leaves')
-        pending, leaves = [node['id']], []
-        while pending:
-            current = pending.pop()
-            if children[current]:
-                pending.extend(children[current])
-            else:
-                if nodes[current]['unit_type'] in ('CHAPTER', 'LESSON', 'SECTION'):
-                    raise DomainError('Outline node requires descendant content leaves')
-                leaves.append(current)
-        roots[node['id']] = sorted(leaves)
-    return roots
+        pending.extend(sorted(children[key], key=order, reverse=True))
+    for key in sorted(nodes, key=order):
+        node = nodes[key]
+        if (not children[key] and key not in covered and node['unit_type'] in FALLBACK_BAG_TYPES
+                and node.get('text', '').strip()):
+            roots[key] = [key]
+    return dict(sorted(roots.items(), key=lambda item: order(item[0])))
+
+
+def representation_mode(units, roots):
+    by_id = {u['id']: u for u in units}
+    modes = {'structured' if by_id[key]['unit_type'] in STRUCTURED_BAG_TYPES else 'fallback' for key in roots}
+    return next(iter(modes)) if len(modes) == 1 else 'mixed' if modes else 'unavailable'
 
 
 class ContentBagBuilder:
@@ -136,16 +158,10 @@ class ContentBagBuilder:
                 or leaf.projection_generation != generation
             ):
                 raise DomainError("Non-leaf, stale or cross-version keyword membership")
-        selected = next(
-            (
-                kind
-                for kind in ("CHAPTER", "LESSON", "SECTION")
-                if any(u.unit_type == kind for u in nodes)
-            ),
-            None,
-        )
-        if selected is None:
-            return BagBuildResult("DEFERRED", "CHAPTER/LESSON/SECTION hierarchy unavailable", [])
+        roots = bag_structure([{**u.model_dump(), 'text': leaf_by_id[u.id].text if u.id in leaf_by_id else ''}
+                               for u in nodes])
+        if not roots:
+            return BagBuildResult("DEFERRED", "No eligible content leaves", [])
         model = self.embedding
         if model is None:
             return BagBuildResult("BLOCKED", "Real embedding runtime not configured", [])
@@ -155,33 +171,15 @@ class ContentBagBuilder:
             or not 1 <= model.dimension <= 4096
         ):
             raise DomainError("Invalid embedding runtime configuration")
-        roots = []
-        for node in nodes:
-            if node.unit_type != selected:
-                continue
-            parent = node.parent_unit_id
-            while parent is not None and by_id[parent].unit_type != selected:
-                parent = by_id[parent].parent_unit_id
-            if parent is None:
-                roots.append(node)
-        roots.sort(key=lambda u: (u.sequence_no, u.id))
         bags = []
-        for root in roots:
-            if not children[root.id]:
-                return BagBuildResult('DEFERRED', 'Bag root requires descendant content leaves', [])
-            pending = [root.id]
+        for root_id, membership in roots.items():
+            root = by_id[root_id]
             collected = []
-            while pending:
-                current = pending.pop()
-                if children[current]:
-                    pending.extend(children[current])
-                else:
-                    if by_id[current].unit_type in ('CHAPTER', 'LESSON', 'SECTION'):
-                        return BagBuildResult('DEFERRED', 'Outline node requires descendant content leaves', [])
-                    leaf = leaf_by_id.get(current)
-                    if leaf is None or leaf.keywords is None:
-                        return BagBuildResult("DEFERRED", "Leaf keywords not supplied", [])
-                    collected.extend(leaf.keywords)
+            for key in membership:
+                leaf = leaf_by_id.get(key)
+                if leaf is None or not leaf.keywords:
+                    return BagBuildResult("DEFERRED", "Leaf keywords not supplied", [])
+                collected.extend(leaf.keywords)
             keywords = normalize_keywords(collected)
             if not keywords:
                 return BagBuildResult("DEFERRED", "Leaf keyword extraction pending", [])
@@ -195,7 +193,7 @@ class ContentBagBuilder:
                     ContentBagDocument(
                         _id=root.id,
                         resource_version_id=version_id,
-                        unit_type=selected,
+                        unit_type=root.unit_type,
                         title=root.title,
                         keywords=keywords,
                         embedding_text=text,

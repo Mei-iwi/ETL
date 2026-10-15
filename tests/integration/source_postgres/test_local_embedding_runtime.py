@@ -30,9 +30,11 @@ SAMPLES = (
 )
 
 
-def write_structured_docx(path, repetitions=8):
+def write_structured_docx(path, repetitions=8, mixed=False):
     from docx import Document
     document = Document()
+    if mixed:
+        document.add_paragraph('Giới thiệu học liệu và kiến thức tổng quát.')
     document.add_heading('Chương kiến thức tự nhiên', 1)
     document.add_heading('Bài học và vận dụng', 2)
     document.add_heading('Nội dung học tập', 3)
@@ -61,8 +63,8 @@ def real_embedding():
     return model
 
 
-@pytest.fixture
-def real_context(source, pg_container, mongo_test_database, tmp_path, real_embedding):
+@pytest.fixture(params=["structured", "fallback", "mixed"])
+def real_context(source, pg_container, mongo_test_database, tmp_path, real_embedding, request):
     c = pg_container
     client = MongoClient(mongo_test_database[0], serverSelectionTimeoutMS=3000, timeoutMS=10000)
     db = client[mongo_test_database[1]]
@@ -81,12 +83,16 @@ def real_context(source, pg_container, mongo_test_database, tmp_path, real_embed
     c.processing_finalizer.on_content_ready = c.indexing.enqueue_auto
     original = setup_import(source, c, tmp_path)
     original_bytes = original.read_bytes()
-    content = original.with_suffix(".docx")
-    write_structured_docx(content)
+    source.indexing_mode = request.param
+    content = original.with_suffix(".txt" if request.param == "fallback" else ".docx")
+    if request.param == "fallback":
+        content.write_text("\n".join([" ".join(SAMPLES) * 8] * 3), encoding="utf-8")
+    else:
+        write_structured_docx(content, mixed=request.param == "mixed")
     with source.engine.begin() as connection:
-        connection.execute(text("UPDATE resource_versions SET storage_object_key='native.docx',"
+        connection.execute(text("UPDATE resource_versions SET storage_object_key=:object_key,"
                                 "source_hash=:hash,updated_at=now() WHERE id='source-local-1'"),
-                           {"hash": sha256(content.read_bytes()).hexdigest()})
+                           {"hash": sha256(content.read_bytes()).hexdigest(), "object_key": content.name})
     try:
         yield c, db, source
         assert original.read_bytes() == original_bytes
@@ -108,9 +114,11 @@ def import_and_finish(c, expected_jobs=1):
 
 
 def test_manual_real_model_index_and_reindex(real_context, monkeypatch):
-    c, db, _ = real_context
+    c, db, source = real_context
     version = import_and_finish(c)
     protected = {name: list(db[name].find({})) for name in ("users", "learning_resources", "ocr_pages")}
+    with c.uow() as repo:
+        preserved_units = repo.find('content_units', {'resource_version_id': version['id']}, order=('sequence_no',))
     index = c.indexing
     observed, inputs = [], []
     original_embed = index.embedding.embed
@@ -129,11 +137,21 @@ def test_manual_real_model_index_and_reindex(real_context, monkeypatch):
         assert c.worker.once("real-model-index")
         status = api.get(base + "/index-status").json()
         assert status["index_status"] == "READY" and status["processing_status"] == "CONTENT_READY"
-        assert status["bag_count"] == 1 and status["vector_ready"]
+        assert status["bag_count"] == {"structured": 1, "fallback": 3, "mixed": 2}[source.indexing_mode] and status["vector_ready"]
+        assert status["representation_mode"] == source.indexing_mode
         docs = list(db.content_bags.find({}))
-        assert len(docs) == 1 and set(observed) == {"RUNNING"}
+        assert len(docs) == status["bag_count"] and set(observed) == {"RUNNING"}
+        for artifact in docs:
+            assert len(artifact['embedding']) == 384 and all(isfinite(v) for v in artifact['embedding']) and any(artifact['embedding'])
+            assert artifact['embedding_text'] == ' | '.join(artifact['keywords'])
+        assert all(len(d.get('keywords') or []) <= 5 for d in db.mongo_content_units.find({}))
         doc = docs[0]
-        assert inputs == [doc["embedding_text"]]
+        assert sorted(inputs) == sorted(d["embedding_text"] for d in docs)
+        with c.uow() as repo:
+            units = repo.find("content_units", {"resource_version_id": version["id"]})
+            if source.indexing_mode == "fallback":
+                assert all(u["unit_type"] == "TXT_TEXT" and u["parent_unit_id"] is None for u in units)
+                assert {d["_id"] for d in docs} == {u["id"] for u in units}
         assert doc["embedding_text"] == " | ".join(doc["keywords"])
         assert doc["embedding_model"] == f"{index.embedding.model_id}@{index.embedding.version}"
         assert len(doc["embedding"]) == 384 and all(isfinite(v) for v in doc["embedding"]) and any(doc["embedding"])
@@ -144,7 +162,7 @@ def test_manual_real_model_index_and_reindex(real_context, monkeypatch):
         assert second.status_code == 202 and second.json()["index_run_id"] != first.json()["index_run_id"]
         assert api.get(base + "/index-status").json()["published_run_id"] is None
         assert c.worker.once("real-model-reindex")
-        assert db.content_bags.count_documents({}) == 1
+        assert db.content_bags.count_documents({}) == status["bag_count"]
         original_upsert = index.bags.upsert_bag
         def fail_storage(document, **kwargs):
             raise RuntimeError("Isolated test outage")
@@ -160,6 +178,7 @@ def test_manual_real_model_index_and_reindex(real_context, monkeypatch):
         assert index.status(version["id"])["index_status"] == "READY"
         with c.uow() as repo:
             assert repo.count("ocr_jobs", {}) == 1
+            assert repo.find('content_units', {'resource_version_id': version['id']}, order=('sequence_no',)) == preserved_units
         assert set(db.list_collection_names()) == {"users", "learning_resources", "ocr_pages", "mongo_content_units", "content_bags"}
         print("REAL_BAG_ACCEPTED keyword_embedding=PASS dimension=384 manual=PASS reindex=PASS")
     assert all(list(db[name].find({})) == docs for name, docs in protected.items())
@@ -173,15 +192,18 @@ def test_auto_real_model_source_to_index_no_backfill(real_context):
     assert not c.worker.once("no-real-model-backfill")
     with c.uow() as repo:
         assert repo.count("etl_stage_runs", {"stage": "INDEX_BUILD"}) == 0
-    updated = c.source_files.root / "books" / "updated.docx"
-    write_structured_docx(updated, 9)
+    updated = c.source_files.root / "books" / ("updated.txt" if source.indexing_mode == "fallback" else "updated.docx")
+    if source.indexing_mode == "fallback":
+        updated.write_text("\n".join([" ".join(SAMPLES) * 9] * 3), encoding="utf-8")
+    else:
+        write_structured_docx(updated, 9, mixed=source.indexing_mode == "mixed")
     with source.engine.begin() as connection:
         connection.execute(text(
             "INSERT INTO resource_versions (id,resource_id,parent_version_id,version_number,"
             "lifecycle_status,storage_bucket,storage_object_key,source_hash,uploaded_by,created_at,updated_at) "
-            "SELECT 'source-local-2',resource_id,id,2,'APPROVED',storage_bucket,'updated.docx',"
+            "SELECT 'source-local-2',resource_id,id,2,'APPROVED',storage_bucket,:object_key,"
             ":hash,uploaded_by,now(),now() FROM resource_versions WHERE id='source-local-1'"
-        ), {"hash": sha256(updated.read_bytes()).hexdigest()})
+        ), {"hash": sha256(updated.read_bytes()).hexdigest(), "object_key": updated.name})
     # Existing file discovery resumes after a Master Sync; exercise that real ordering.
     c.sync.run(full=False)
     c.source_file_import.discover_once()
@@ -198,7 +220,7 @@ def test_auto_real_model_source_to_index_no_backfill(real_context):
     assert not c.worker.once("unchanged-real-model-index")
     with c.uow() as repo:
         assert repo.count("etl_stage_runs", {"stage": "INDEX_BUILD"}) == 1
-    assert db.content_bags.count_documents({}) == state["bag_count"] == 1
+    assert db.content_bags.count_documents({}) == state["bag_count"]
     c.settings.index_auto_enabled = False
     print(f"REAL_AUTO_ACCEPTED version={version['id']} chunks={state['chunk_count']} auto=PASS duplicate_prevention=PASS")
 
@@ -250,7 +272,7 @@ def test_react_ui_against_real_model_and_isolated_backend(real_context):
         assert script.is_file(), "Local real-browser acceptance harness must be present"
         result = subprocess.run(["node", str(script)], cwd=root, env=env, capture_output=True,
                                 text=True, encoding="utf-8", timeout=90, check=False)
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == 0, result.stdout + result.stderr + f" worker_error_types={errors}"
         assert not errors
         print(result.stdout.strip())
     finally:

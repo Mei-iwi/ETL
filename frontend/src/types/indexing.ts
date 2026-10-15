@@ -46,9 +46,10 @@ export type IndexStatusResult = {
     chunk_count: number
     chunk_preview_count: number
     bag_count: number
+    representation_mode: 'structured' | 'fallback' | 'mixed' | 'unavailable'
     representation_unit: 'content_bag'
     chunk_storage: 'transient'
-    bags: { id: string; unit_type: string; title: string | null; keywords: string[]; embedding_text: string;
+    bags: { id: string; unit_type: string; representation_mode: 'structured' | 'fallback'; title: string | null; keywords: string[]; embedding_text: string;
         embedding_model: string; embedding_dimension: number; vector_ready: boolean }[]
     bow_ready: boolean
     vector_ready: boolean

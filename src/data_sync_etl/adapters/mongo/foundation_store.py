@@ -298,22 +298,19 @@ class MongoBagStore:
         self.dimension = dimension
         self.reader = MongoContentReader(database)
 
+    def invalidate_other_roots(self, version_id, root_ids, generation):
+        self.database.content_bags.update_many(
+            {'resource_version_id': identifier(version_id), '_id': {'$nin': list(root_ids)},
+             **generation_filter(generation)},
+            {'$set': {'is_current': False, 'updated_at': now()}},
+        )
+
     def ensure_ready(self):
-        from data_sync_etl.adapters.mongo.schema import INDEXES, compatible_index, contracts
+        from data_sync_etl.adapters.mongo.schema import check_schema
         from data_sync_etl.domain.indexing import IndexingError
 
-        catalog = {row['name']: row for row in self.database.list_collections()}
-        for name, validator in contracts(self.dimension).items():
-            entry = catalog.get(name, {})
-            options = entry.get('options', {})
-            if (options.get('validator') != validator
-                    or options.get('validationLevel', 'strict') != 'strict'
-                    or options.get('validationAction', 'error') != 'error'):
-                raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
-            installed = list(self.database[name].list_indexes())
-            if any(not any(compatible_index(i, expected) for i in installed)
-                   for expected in INDEXES[name]):
-                raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+        if not check_schema(self.database, dimension=self.dimension)['schema_ready']:
+            raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
 
     def _current(self, document):
         if (

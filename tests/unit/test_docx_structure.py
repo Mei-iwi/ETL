@@ -54,14 +54,14 @@ def test_docx_real_hierarchy_auto_index_idempotent(container, levels, root):
     assert len({p['text'] for p in previews}) == len(previews)
 
 
-def test_unsupported_docx_outline_stays_flat(container):
+def test_unsupported_docx_outline_uses_real_flat_leaves(container):
     index = setup_index(container)
     version = finish_docx(container, (1, 4), True)
     status = index.status(version['id'])
     assert status['processing_status'] == 'CONTENT_READY'
-    assert status['index_status'] == 'BLOCKED_STRUCTURE'
+    assert status['index_status'] == 'READY' and status['representation_mode'] == 'fallback'
     assert index.chunks(version['id'])['total'] == 4
-    assert not index.bags.rows
+    assert len(index.bags.rows) == 4
 
 
 def test_extractor_uses_outline_not_title_text(tmp_path):

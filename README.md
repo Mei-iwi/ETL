@@ -26,7 +26,7 @@ Trang `/library/indexing` giữ layout/menu và bốn API:
 Schema mong đợi đúng **5 collection**: users, learning_resources, ocr_pages,
 mongo_content_units, content_bags. Database cũ vẫn có `indexed_chunks` với dữ liệu legacy;
 code mới không đọc/ghi collection đó. Không tự drop hoặc copy vector Chunk sang Bag.
-Contract, API mẫu và backup/rollback: [nhóm 3](docs/group3-five-collections.md).
+Contract Structured/Fallback và lưu ý triển khai: [nhóm 3](docs/group3-structured-fallback.md).
 
 Chunk chỉ là cửa sổ từ tạm, không persist Chunk/TF/vector từng Chunk.
 `mongo_content_units._id` bằng PG ContentUnit ID. Keywords dành cho leaf, tối đa 5,
@@ -34,13 +34,20 @@ NFC/casefold/trim/unique. Thuật toán `nfc-casefold-unigram-stopwords-v1` đ�
 bằng regex, bỏ stopword Việt/Anh, xếp frequency giảm dần rồi theo chữ, lấy tối đa 5.
 Đây là unigram, **không phải** tách từ ghép tiếng Việt hay TF-IDF; không lưu frequency.
 
-Bag dùng ID root ContentUnit thật CHAPTER, fallback LESSON rồi SECTION.
-BoW là tập keyword unique của leaf descendants; `embedding_text=' | '.join(keywords)`.
-Model embedding chuỗi keyword đó. Chỉ PAGE_TEXT hoặc *_TEXT không có cây hợp lệ sẽ
-BLOCKED_STRUCTURE nhưng vẫn xem Chunk được. Không tạo root giả hoặc backfill dữ liệu thật.
+Bag tự chọn Structured/Fallback/Mixed. Subtree có cấu trúc dùng ContentUnit root thật
+CHAPTER, ưu tiên tiếp theo LESSON/SECTION theo từng cây. Leaf chưa được phủ tạo đúng
+một fallback Bag bằng chính ID và type của leaf, không gộp leaf đầu làm cha các leaf khác.
+BoW là keyword union của membership; `embedding_text=' | '.join(keywords)`.
+Model embedding chuỗi keyword đó, không embedding từng Chunk preview.
+DESIGN_DELTA: mở rộng enum content_bags.unit_type so với Excel (4) cho các leaf thật:
+PAGE_TEXT, TXT_TEXT, CSV_TEXT, DOCX_TEXT, XLSX_TEXT, PPTX_TEXT, IMAGE_TEXT.
+Không đổi type/parent/ID PG, không tạo root giả, collection/bảng mới hoặc backfill dữ liệu thật.
 DOCX mới có OOXML outline/Heading 1–3 được giữ thành CHAPTER/LESSON/SECTION với parent
 thật trong Postprocess. Paragraph/table giữ leaf text; không suy luận heading từ chữ.
-Outline cấp khác/chưa chắc chắn, TXT/CSV/PDF scan không có cây vẫn bị chặn Bag.
+Outline không chắc chắn giữ flat; TXT/CSV/PDF scan/ảnh có leaf text hợp lệ dùng Fallback.
+Cây lỗi orphan/cycle/cross-version vẫn BLOCKED_STRUCTURE, không fallback để che lỗi.
+`representation_mode` của index-status là structured/fallback/mixed/unavailable;
+UI hiển thị phương thức tự chọn, không yêu cầu người dùng chọn hoặc sửa Heading.
 Review/retrieval flags giữ nguyên; workspace quản lý không đồng nghĩa công bố Search.
 
 Model local optional: `python -m pip install -e '.[embeddings]'` khi được phép.
@@ -48,7 +55,8 @@ Provision model ngoài Git, pin revision vào `etl-model-revision.txt`, cấu h�
 INDEX_EMBEDDING_MODEL_PATH/ID/VERSION và INDEX_EMBEDDING_DIMENSION.
 **INDEX_EMBEDDING_DIMENSION là nguồn chiều cho model, Bag store và schema CLI**.
 VECTOR_DIMENSION chỉ còn tương thích cấu hình cũ, không ép model 384 thành 256.
-Validator live cũ 256 sẽ BLOCKED_INDEX_SCHEMA: cần operator duyệt thay đổi riêng.
+Validator live cũ 256 hoặc enum chỉ ba root sẽ BLOCKED_INDEX_SCHEMA: cần operator
+duyệt schema enum/dimension sau backup. Code không tự collMod hoặc áp dụng lên live.
 Model load/probe trong worker, không tải mạng hoặc load khi app startup/HTTP status.
 Capabilities chỉ báo runtime đã probe trong process đó; không tự load model.
 
@@ -96,6 +104,9 @@ Các fixture tạo schema PostgreSQL/database Mongo UUID riêng và chỉ dọn 
 Fixture structured khai báo rõ hierarchy để nghiệm thu Bag, không sửa hierarchy dữ liệu thật.
 Model double chỉ chứng minh logic; bài opt-in dùng model local thật, pin revision.
 Model lưu ngoài repository; không đưa trọng số vào Git.
+Chẩn đoán schema/index/dimension và kế hoạch quản trị có phê duyệt:
+[BLOCKED_INDEX_SCHEMA](docs/group3-schema-diagnostics.md).
+
 Schema CLI `python -m data_sync_etl.adapters.mongo.schema --check` chỉ đọc;
 `--apply` chỉ chạy DB cô lập hoặc sau phê duyệt schema/backup riêng.
 Extra collections được cảnh báo EXTRA_COLLECTION_PRESENT, không tự xóa.
@@ -308,7 +319,7 @@ Trong etl_content, `users`/`learning_resources` là **dữ liệu mở rộng g�
 được quản lý nhập trực tiếp, không phải clone Master. `_id` String bằng PG nguồn.mongo_id
 và Master.mongo_id, có thể khác PG PK. Metadata có thể nhập trước/sau PG sync.
 Thêm document Mongo không chạy PG sync ngầm hoặc kích hoạt Incremental/CDC.
-`ocr_pages`/`mongo_content_units` là đầu ra ETL; `content_bags` giữ nguyên, runtime không ghi.
+`ocr_pages`/`mongo_content_units` là đầu ra ETL; INDEX_BUILD ghi `content_bags` khi đủ điều kiện.
 
 Master Full/Incremental/Auto chỉ sync PG, log SKIP_PG_SHARED_METADATA_VALIDATION để
 tránh quét metadata ở mỗi tick. Hai CLI sau **chỉ đọc**, không bootstrap hoặc copy-self:

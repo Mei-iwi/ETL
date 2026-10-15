@@ -2,7 +2,12 @@
 
 from time import monotonic
 
-from data_sync_etl.application.content_bags import ContentBagBuilder, StructuredUnit, bag_structure
+from data_sync_etl.application.content_bags import (
+    ContentBagBuilder,
+    StructuredUnit,
+    bag_structure,
+    representation_mode,
+)
 from data_sync_etl.application.leaf_keywords import SaveLeafKeywords
 from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import DomainError, now
@@ -70,11 +75,16 @@ class IndexingService:
             raise IndexingError('EMPTY_CONTENT')
         children = {u['parent_unit_id'] for u in content if u['parent_unit_id'] is not None}
         keywords = {u['id']: self.extractor.extract(u['text']) for u in content if u['id'] not in children}
+        try:
+            membership = bag_structure(content)
+        except DomainError:
+            membership = {'invalid_hierarchy': []}  # Preview remains independent; _roots rejects indexing.
         fingerprint = digest({
             'version': version_id, 'source_hash': version['source_hash'], 'projection': projections[0]['id'], 'generation': generation,
             'units': [{k: u[k] for k in ('id', 'parent_unit_id', 'unit_type', 'title', 'sequence_no',
                                         'text', 'page_from', 'page_to', 'review_status', 'retrieval_eligible')} for u in content],
-            'keywords': keywords, 'extractor': self.extractor.version, 'bag_algorithm': 'pg-root-keyword-union-v1',
+            'keywords': keywords, 'extractor': self.extractor.version, 'bag_algorithm': 'pg-structured-leaf-fallback-v2',
+            'membership': membership,
             'chunk_algorithm': 'word_window_v1', 'size': self.settings.chunk_size_words,
             'overlap': self.settings.chunk_overlap_words,
             'model': [self.embedding.model_id, self.embedding.version, self.embedding.dimension],
@@ -124,6 +134,7 @@ class IndexingService:
                 raise IndexingError('INDEX_ARTIFACT_INVALID', 503)
             validate_vector(bag.embedding, self.embedding.dimension)
             result.append({'id': root, 'unit_type': bag.unit_type, 'title': bag.title, 'keywords': bag.keywords,
+                           'representation_mode': representation_mode(snapshot[2], {root: leaves}),
                            'embedding_text': bag.embedding_text, 'embedding_model': bag.embedding_model,
                            'embedding_dimension': self.embedding.dimension, 'vector_ready': True})
         return result
@@ -225,6 +236,7 @@ class IndexingService:
                 if fresh[3] != snapshot[3] or owner['status'] != 'RUNNING':
                     raise IndexingError('INDEX_SOURCE_CHANGED')
                 self._verified(fresh, run)
+                self.bags.invalidate_other_roots(version_id, list(roots), fresh[1])
                 self._deadline(started)
                 repo.update('etl_stage_runs', run['id'], {'status': 'COMPLETED', 'finished_at': now(), 'error_message': None})
         except Exception as exc:
@@ -246,11 +258,12 @@ class IndexingService:
             except IndexingError as exc:
                 snapshot, code = None, exc.code
         latest = runs[0] if runs else None
-        status, summaries, published = 'CONTENT_NOT_READY', [], None
+        status, summaries, published, mode = 'CONTENT_NOT_READY', [], None, 'unavailable'
         if snapshot:
             status = 'NOT_STARTED'
             try:
-                self._roots(snapshot)
+                roots = self._roots(snapshot)
+                mode = representation_mode(snapshot[2], roots)
                 self._runtime()
                 if latest:
                     code = latest['error_message'] if latest['status'] == 'FAILED' else None
@@ -274,7 +287,7 @@ class IndexingService:
             'RUNNING': 'Đang trích từ khóa và tạo vector ContentBag.', 'READY': 'ContentBag đã sẵn sàng.',
             'FAILED': 'Xây dựng ContentBag thất bại; có thể tái lập chỉ mục.',
             'STALE': 'Nội dung hoặc cấu hình đã thay đổi; cần xây dựng lại ContentBag.',
-            'BLOCKED_STRUCTURE': 'Có thể xem Chunk, chưa thể xây ContentBag vì chưa có CHAPTER/LESSON/SECTION hợp lệ.',
+            'BLOCKED_STRUCTURE': 'Cấu trúc nội dung không hợp lệ hoặc chưa có leaf phù hợp để xây ContentBag; vẫn có thể xem Chunk.',
             'BLOCKED_RUNTIME': 'Chưa thể xây ContentBag: cần kiểm tra model, số chiều hoặc schema MongoDB.'}
         count = sum(1 for _ in self._preview(snapshot)) if snapshot else 0
         return {
@@ -282,8 +295,9 @@ class IndexingService:
             'auto_enabled': self.settings.index_auto_enabled, 'latest_run_id': latest['id'] if latest else None,
             'published_run_id': published, 'chunk_count': count, 'chunk_preview_count': count,
             'representation_unit': 'content_bag', 'chunk_storage': 'transient', 'bag_count': len(summaries), 'bags': summaries,
+            'representation_mode': mode,
             'bow_ready': bool(summaries), 'vector_ready': bool(summaries) and status == 'READY',
-            'algorithm': 'pg-root-keyword-union-v1', 'chunk_size_words': self.settings.chunk_size_words,
+            'algorithm': 'pg-structured-leaf-fallback-v2', 'chunk_size_words': self.settings.chunk_size_words,
             'chunk_overlap_words': self.settings.chunk_overlap_words, 'embedding_model': self.embedding.model_id or None,
             'embedding_version': self.embedding.version or None,
             'embedding_dimension': self.embedding.dimension if self.embedding.model_id else None,

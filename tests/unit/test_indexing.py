@@ -79,17 +79,15 @@ def test_queue_worker_bags_and_api_contract(container):
     assert all(len(d["keywords"] or []) <= 5 for d in container.documents.units.values())
 
 
-def test_unstructured_preview_does_not_write_or_enqueue(container):
+def test_flat_preview_does_not_write_then_manual_fallback(container):
     index, version, _ = ready(container, False)
     before = deepcopy(container.documents.units)
     with TestClient(create_app(container)) as api:
         base = f"/api/v1/resource-versions/{version['id']}"
         status = api.get(base + "/index-status").json()
-        assert status["index_status"] == "BLOCKED_STRUCTURE"
+        assert status["index_status"] == "NOT_STARTED"
+        assert status['representation_mode'] == 'fallback'
         assert status["processing_status"] == "CONTENT_READY"
-        for suffix in ("index", "reindex"):
-            response = api.post(base + "/" + suffix)
-            assert response.status_code == 409 and response.json()["detail"]["code"] == "BAG_STRUCTURE_UNAVAILABLE"
         chunks = api.get(base + "/chunks").json()
         assert chunks["total"] == 3 and chunks["index_run_id"] is None
         assert api.get(base + "/chunks?offset=100").json()["items"] == []
@@ -99,6 +97,16 @@ def test_unstructured_preview_does_not_write_or_enqueue(container):
     assert container.documents.units == before and not index.bags.rows
     with container.uow() as repo:
         assert repo.count("etl_stage_runs", {"stage": "INDEX_BUILD"}) == 0
+    with TestClient(create_app(container)) as api:
+        assert api.post(base + '/index').status_code == 202
+        assert index.once()
+        data = api.get(base + '/index-status').json()
+        assert data['index_status'] == 'READY' and data['bag_count'] == 3
+        assert data['representation_mode'] == 'fallback'
+    with container.uow() as repo:
+        units = repo.find('content_units', {'resource_version_id': version['id']})
+        assert all(u['parent_unit_id'] is None and u['unit_type'] == 'PAGE_TEXT' for u in units)
+        assert set(index.bags.rows) == {u['id'] for u in units}
 
 
 @pytest.mark.parametrize("failure", ["missing_model", "dimension", "schema"])
@@ -242,7 +250,7 @@ def test_auto_new_projection_only_no_backfill(container, structured, enabled):
         runs = index._runs(repo, version["id"])
         assert len(runs) == int(enabled)
         if enabled:
-            assert runs[0]["status"] == ("COMPLETED" if structured else "FAILED")
+            assert runs[0]["status"] == 'COMPLETED'
             index.enqueue_auto(repo, version["id"])
             assert len(index._runs(repo, version["id"])) == 1
     assert index.status(version["id"])["processing_status"] == "CONTENT_READY"
@@ -349,6 +357,6 @@ def test_local_embedding_probe_does_not_download_and_rejects_dimension(tmp_path,
     assert len(calls) == 1
     assert model.embed("Tiếng Việt") == [0.1, 0.2, 0.3]
     wrong = LocalSentenceEmbedding(tmp_path, "test-only", "revision-1", 2)
-    with pytest.raises(IndexingError):
+    with pytest.raises(IndexingError, match="INVALID_EMBEDDING"):
         wrong.prepare()
     assert not wrong.ready()

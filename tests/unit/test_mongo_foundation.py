@@ -193,7 +193,7 @@ def test_bag_fallback_and_fixture_embedding(root_type):
         {"embedding": [float("nan"), 1.0]},
         {"embedding": [float("inf"), 1.0]},
         {"embedding_text": "invented"},
-        {"unit_type": "PAGE_TEXT"},
+        {"unit_type": "MP3_TEXT"},
         {"keywords": None},
         {"embedding_model": " "},
     ):
@@ -210,7 +210,7 @@ def test_no_hierarchy_or_model_no_bags():
     units = [tree()[1].model_copy(update={"parent_unit_id": None})]
     assert (
         builder.build("v-1", units, [leaf()], generation=1, content_fingerprint="a" * 64).status
-        == "DEFERRED"
+        == "BLOCKED"
     )
 
 

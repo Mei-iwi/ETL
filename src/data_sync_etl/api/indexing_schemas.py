@@ -4,9 +4,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from data_sync_etl.domain.indexing import IndexingError
+from data_sync_etl.domain.mongo_documents import BagUnitType
 
 MESSAGES = {
-    "BAG_STRUCTURE_UNAVAILABLE": "Có thể xem Chunk, chưa thể xây ContentBag vì chưa có CHAPTER/LESSON/SECTION hợp lệ.",
+    "BAG_STRUCTURE_UNAVAILABLE": "Chưa có root hoặc ContentUnit lá tương thích để xây ContentBag; vẫn có thể xem Chunk.",
     "BAG_STRUCTURE_INVALID": "Cấu trúc nội dung có parent thiếu, khác phiên bản hoặc vòng lặp.",
     "LEAF_KEYWORDS_UNAVAILABLE": "Chưa có từ khóa hợp lệ cho ContentUnit lá.",
     "INVALID_INDEX_QUERY": "Tham số xem Chunk không hợp lệ.",
@@ -81,7 +82,8 @@ class ChunksResponse(BaseModel):
 
 class BagSummary(BaseModel):
     id: str
-    unit_type: Literal['CHAPTER', 'LESSON', 'SECTION']
+    unit_type: BagUnitType
+    representation_mode: Literal['structured', 'fallback']
     title: str | None
     keywords: list[str]
     embedding_text: str
@@ -100,6 +102,7 @@ class IndexStatusResponse(BaseModel):
     chunk_count: int
     chunk_preview_count: int
     bag_count: int
+    representation_mode: Literal['structured', 'fallback', 'mixed', 'unavailable']
     bags: list[BagSummary]
     representation_unit: Literal['content_bag']
     chunk_storage: Literal['transient']
