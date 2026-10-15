@@ -140,6 +140,12 @@
     overflow-y: auto;
 }
 
+.app-content-search {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 @media (max-width: 960px) {
     .app-header {
         flex-wrap: wrap;

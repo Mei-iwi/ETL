@@ -25,12 +25,26 @@ test('search sends exactly one POST with JSON criteria and encoded URL state', a
     } finally { globalThis.fetch = old }
 })
 
-for (const status of [422, 503]) test(`structured ${status} is not silently downgraded to BoW`, async () => {
+for (const status of [401, 403, 422, 503]) test(`structured ${status} is not silently downgraded to BoW`, async () => {
     const old = globalThis.fetch
     try {
         globalThis.fetch = async () => Response.json({ detail: { code: 'TEST_ERROR', message: 'Không thể tìm.' } }, { status })
         await assert.rejects(searchMaterials({ query: 'x', method: 'vector', filters: {}, page: 1, size: 10 }),
             error => error instanceof SearchApiError && error.status === status && error.code === 'TEST_ERROR')
+    } finally { globalThis.fetch = old }
+})
+
+test('client never injects credentials or a self-declared internal scope', async () => {
+    const old = globalThis.fetch
+    try {
+        globalThis.fetch = async (path, init) => {
+            assert.equal(init.headers.Authorization, undefined)
+            assert.equal(init.headers['X-Internal'], undefined)
+            assert.equal(JSON.parse(init.body).internal, undefined)
+            return Response.json({ detail: 'Authentication required' }, { status: 401 })
+        }
+        await assert.rejects(searchMaterials({ query: 'x', method: 'bow', filters: {}, page: 1, size: 10 }),
+            error => error.status === 401 && error.message.includes('Yêu cầu xác thực'))
     } finally { globalThis.fetch = old }
 })
 
@@ -53,7 +67,8 @@ test('URL defaults and bounds are safe and methods are never arbitrary', () => {
     assert.equal(request.query, 'abc')
     assert.equal(request.method, 'hybrid')
     assert.equal(request.page, 1)
-    assert.equal(request.size, 10)
+    assert.equal(request.size, 5)
+    assert.equal(readSearch(new URLSearchParams('size=50')).size, 5)
 })
 
 test('context uses the search locator, encoded GET and bounded neighbors', async () => {

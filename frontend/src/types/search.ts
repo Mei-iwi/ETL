@@ -46,10 +46,12 @@ export type SearchResponse = {
     ranking_algorithm: string
     representation_unit: 'content_bag'
     ready_bag_count: number
-    message: 'OK' | 'NO_READY_INDEX' | 'QUERY_NO_KEYWORDS'
+    message: 'OK' | 'NO_READY_INDEX' | 'NO_ACCESSIBLE_CONTENT' | 'QUERY_NO_KEYWORDS' | 'PUBLIC_ACCESS_UNCONFIRMED'
+    access_scope?: 'public' | 'local_demo'
 }
 
 export type ChunkContext = {
+    access_scope?: 'public' | 'local_demo'
     resource_id: string
     resource_title: string
     resource_version_id: string

@@ -17,7 +17,7 @@ export function readSearch(params: URLSearchParams): SearchRequest {
         method: methods.some(item => item.value === method) ? method as SearchMethod : 'hybrid',
         filters: Object.fromEntries(['subject_id', 'grade_level_id', 'resource_type_code', 'resource_id', 'resource_version_id']
             .map(key => [key, params.get(key) || null])),
-        page: number('page', 1, 10001), size: number('size', 10, 50),
+        page: number('page', 1, 10001), size: 5,
     }
 }
 

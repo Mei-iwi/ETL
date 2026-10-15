@@ -5,14 +5,8 @@ import type { SearchResponse } from '../../types/search'
 import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
 import { readSearch, writeSearch } from './searchParams'
-import { SearchContext } from './SearchContext'
 
-export function SearchResultpage() {
-    const [params] = useSearchParams()
-    return <SearchResults key={params.toString()} params={params} />
-}
-
-function SearchResults({ params }: { params: URLSearchParams }) {
+export function SearchResults({ params }: { params: URLSearchParams }) {
     const criteria = readSearch(params)
     const [, setParams] = useSearchParams()
     const [result, setResult] = useState<SearchResponse | null>(null)
@@ -32,33 +26,35 @@ function SearchResults({ params }: { params: URLSearchParams }) {
             .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Tìm kiếm thất bại.') })
         return () => controller.abort()
     }, [encoded, attempt])
-    return <section className={layout.page}>
-        <header className={layout.pageHeader}><h1>Kết quả tìm kiếm</h1></header>
+    return <section className={styles.results} aria-label="Kết quả tìm kiếm" tabIndex={0}>
         <div className={styles.stack}>
-            <div className={`${layout.card} ${styles.resultHeader}`}>
-                <span>{criteria.query || 'Chưa nhập truy vấn'} · {criteria.method.toUpperCase()}</span>
-                <Link to={`/search/materials?${params}`} className={layout.primaryButton}>Sửa tìm kiếm</Link>
-            </div>
             {!criteria.query ? <p role="status">Nhập truy vấn để tìm kiếm.</p> : error ?
                 <div className={layout.card}><p role="alert" className={styles.error}>{error}</p>
                     <button className={layout.primaryButton} onClick={() => { setError(''); setResult(null); setAttempt(value => value + 1) }}>Thử lại</button></div> :
                 !result ? <p role="status" className={styles.pending}>Đang tìm kiếm…</p> : <>
-                    <p role="status" className={styles.success}>{result.total} học liệu · {result.ranking_algorithm}</p>
+                    <div className={styles.resultSummary}>
+                        <p role="status" className={styles.success}>{result.total} kết quả</p>
+                        {result.access_scope === 'local_demo' && <p role="status" className={styles.metadata}>Tra cứu thử nghiệm nội bộ</p>}
+                    </div>
                     {result.items.length === 0 && <div className={layout.card}>
-                        <p>{result.message === 'NO_READY_INDEX' ? 'Chưa có học liệu được lập chỉ mục và đủ điều kiện truy xuất.' :
+                        <p>{result.message === 'PUBLIC_ACCESS_UNCONFIRMED' ? 'Chưa có học liệu đủ quyền truy xuất công khai.' :
+                            result.message === 'NO_READY_INDEX' ? 'Chưa có học liệu lập chỉ mục sẵn sàng.' :
+                            result.message === 'NO_ACCESSIBLE_CONTENT' ? 'Không có nội dung được phép truy xuất trong phạm vi hiện tại.' :
                             result.message === 'QUERY_NO_KEYWORDS' ? 'Truy vấn không có từ khóa phù hợp.' : 'Không tìm thấy học liệu phù hợp.'}</p>
-                        {result.message === 'NO_READY_INDEX' && <Link to="/library/indexing">Phân đoạn và chỉ mục</Link>}
                     </div>}
-                    {result.items.map(item => <article key={item.resource_id} className={layout.card}>
-                        <div className={styles.resultHeader}><h2><Link to={`/library/${encodeURIComponent(item.resource_id)}`}>{item.resource_title}</Link></h2>
-                            <span>Điểm {item.score.toFixed(4)}</span></div>
-                        <p className={styles.metadata}>Phiên bản {item.version_number} · {item.provider_name || item.resource_type_code} · {item.representation_mode}
-                            {' · '}{item.matched_bag_count} ContentBag phù hợp</p>
-                        <p className={styles.metadata}>{Object.entries(item.score_components).map(([key, value]) => `${key}: ${value?.toFixed(4)}`).join(' · ')}</p>
-                        {item.matched_keywords.length > 0 && <p>Từ khóa: {item.matched_keywords.join(', ')}</p>}
-                        <p className={styles.snippet}>{item.snippet}</p>
-                        <p className={styles.metadata}>Trang {item.page_from ?? '—'}–{item.page_to ?? '—'} · {item.content_unit_id}</p>
-                        <SearchContext id={item.context_id} />
+                    {result.items.map((item, index) => <article key={item.resource_id} className={styles.searchResult}>
+                        <p className={styles.source}>{item.provider_name || item.resource_type_code} · Phiên bản {item.version_number}</p>
+                        <div className={styles.resultHeader}><h2><Link to={`/library/${encodeURIComponent(item.resource_id)}?${new URLSearchParams({ versionId: item.resource_version_id, contextId: item.context_id, returnTo: `/search/query-methods?${params}` })}`}>{item.resource_title}</Link></h2></div>
+                        <dl className={styles.searchFacts}>
+                            <div><dt>Xếp hạng</dt><dd>#{(result.page - 1) * result.size + index + 1}</dd></div>
+                            {Number.isFinite(item.score) && <div><dt>Điểm {criteria.method.toUpperCase()}</dt><dd>{item.score.toFixed(4)}</dd></div>}
+                            {item.score_components.bow !== undefined && <div><dt>BoW</dt><dd>{item.score_components.bow.toFixed(4)}</dd></div>}
+                            {item.score_components.vector !== undefined && <div><dt>Tương đồng Vector</dt><dd>{item.score_components.vector.toFixed(4)}</dd></div>}
+                            <div><dt>ContentBag phù hợp</dt><dd>{item.matched_bag_count}</dd></div>
+                            <div><dt>Chunk</dt><dd>{item.page_from != null ? `Trang ${item.page_from}${item.page_to != null && item.page_to !== item.page_from ? `–${item.page_to}` : ''}` : 'Đoạn phù hợp'}</dd></div>
+                        </dl>
+                        <div className={styles.keywords}><span>Keyword</span>{item.matched_keywords.length ? item.matched_keywords.map(keyword =>
+                            <span className={styles.keyword} key={keyword}>{keyword}</span>) : <span className={styles.metadata}>Không có từ khóa trùng khớp</span>}</div>
                     </article>)}
                     {result.total_pages > 1 && <nav aria-label="Phân trang kết quả" className={styles.pagination}>
                         <button className={layout.primaryButton} disabled={result.page <= 1} onClick={() => setParams(writeSearch({ ...criteria, page: result.page - 1 }))}>Trước</button>

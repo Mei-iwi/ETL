@@ -7,6 +7,7 @@ import type { SearchMethod } from '../../types/search'
 import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
 import { methods, readSearch, writeSearch } from './searchParams'
+import { SearchResults } from './SearchResultPage'
 
 export function MaterialSearchPage() {
     const [params] = useSearchParams()
@@ -34,18 +35,20 @@ function SearchForm({ params }: { params: URLSearchParams }) {
         event.preventDefault()
         const normalized = query.normalize('NFC').trim()
         if (!normalized || normalized.length > 300) { setError('Nhập truy vấn từ 1 đến 300 ký tự.'); return }
-        navigate(`/search/result?${writeSearch({ query: normalized, method, filters, page: 1, size: 10 })}`)
+        navigate(`/search/query-methods?${writeSearch({ query: normalized, method, filters, page: 1, size: 5 })}`)
     }
-    return <section className={layout.page}>
-        <header className={layout.pageHeader}><h1>Tìm kiếm học liệu</h1></header>
-        <form className={`${layout.card} ${layout.form}`} onSubmit={submit}>
-            <div className={layout.field}><label htmlFor="search-query">Truy vấn</label>
-                <input id="search-query" value={query} onChange={event => setQuery(event.target.value)} maxLength={300} required /></div>
-            <div className={layout.field}><label htmlFor="search-method">Phương pháp</label>
-                <select id="search-method" value={method} onChange={event => setMethod(event.target.value as SearchMethod)}>
-                    {methods.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-                </select></div>
-            <div className={styles.filters}>
+    return <section className={`${layout.page} ${styles.searchPage}`}>
+        <header className={`${layout.pageHeader} ${styles.pageHeader}`}><h1>Tra cứu học liệu</h1></header>
+        <form className={`${layout.card} ${layout.form} ${styles.searchForm}`} onSubmit={submit}>
+            <fieldset className={styles.methodPicker}><legend className={styles.visuallyHidden}>Phương pháp truy vấn</legend>
+                {methods.map(item => <button key={item.value} type="button" aria-pressed={method === item.value}
+                    className={method === item.value ? styles.methodActive : styles.methodButton}
+                    onClick={() => setMethod(item.value)}>{item.label}</button>)}
+            </fieldset>
+            <div className={styles.searchBar}><div className={layout.field}><label htmlFor="search-query" className={styles.visuallyHidden}>Tìm kiếm học liệu</label>
+                <input id="search-query" value={query} onChange={event => setQuery(event.target.value)} maxLength={300} placeholder="Nhập nội dung cần tìm…" required /></div>
+                <button type="submit" className={layout.primaryButton}>Tìm kiếm</button></div>
+            <details className={styles.filterPanel}><summary>Bộ lọc{Object.values(filters).filter(Boolean).length > 0 && ` (${Object.values(filters).filter(Boolean).length})`}</summary><div className={styles.filterBody}><div className={styles.filters}>
                 <div className={layout.field}><label htmlFor="search-grade">Khối lớp</label>
                     <select id="search-grade" disabled={!catalog} value={filters.grade_level_id || ''}
                         onChange={event => setFilters({ ...filters, grade_level_id: event.target.value || null, subject_id: null })}>
@@ -63,10 +66,13 @@ function SearchForm({ params }: { params: URLSearchParams }) {
                         <option value="">Tất cả</option>{catalog?.types.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
                     </select></div>
             </div>
+            <div className={layout.actions}>
+                <button type="button" className={layout.secondaryButton} onClick={() => setFilters({})}>Xóa bộ lọc</button></div>
+            </div>
+            </details>
             {catalogError && <p role="status" className={styles.pending}>{catalogError}</p>}
             {error && <p role="alert" className={styles.error}>{error}</p>}
-            <div className={layout.actions}><button type="submit" className={layout.primaryButton}>Tìm kiếm</button>
-                <button type="button" className={layout.secondaryButton} onClick={() => setFilters({})}>Xóa bộ lọc</button></div>
         </form>
+        {initial.query && <SearchResults key={params.toString()} params={params} />}
     </section>
 }

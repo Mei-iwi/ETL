@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useParams, useSearchParams } from 'react-router'
 import styles from './LibraryResourceDetailPage.module.css'
+import { ResourceFilePanel } from './ResourceFilePanel'
 
 type Subject = {
     id: string
@@ -32,6 +33,10 @@ type ResourceDetail = {
 
 export function LibraryResourceDetailPage() {
     const { resourceId } = useParams<{ resourceId: string }>()
+    const [params] = useSearchParams()
+    const returnTo = params.get('returnTo')
+    const backTo = returnTo?.startsWith('/search/query-methods?') ? returnTo : '/library/list'
+    const backLabel = backTo === '/library/list' ? '← Quay lại danh sách học liệu' : '← Quay lại kết quả tìm kiếm'
 
     const [resource, setResource] = useState<ResourceDetail | null>(null)
     const [loading, setLoading] = useState(true)
@@ -97,8 +102,8 @@ export function LibraryResourceDetailPage() {
     if (error || !resource) {
         return (
             <section className={styles.page}>
-                <Link className={styles.backLink} to="/library/list">
-                    ← Quay lại danh sách học liệu
+                <Link className={styles.backLink} to={backTo}>
+                    {backLabel}
                 </Link>
                 <p className={styles.error} role="alert">
                     {error || 'Không có dữ liệu học liệu.'}
@@ -109,17 +114,17 @@ export function LibraryResourceDetailPage() {
 
     return (
         <section className={styles.page}>
-            <Link className={styles.backLink} to="/library/list">
-                ← Quay lại danh sách học liệu
+            <Link className={styles.backLink} to={backTo}>
+                {backLabel}
             </Link>
 
             <header className={styles.header}>
-                <h1 className={styles.eyebrow}>Chi tiết học liệu</h1>
-                <h3>{resource.title}</h3>
-                {/* <p className={styles.subtitle}>
-                    Mã học liệu: {resource.id}
-                </p> */}
+                <p className={styles.eyebrow}>Chi tiết học liệu</p>
+                <h1>{resource.title}</h1>
             </header>
+
+            <ResourceFilePanel key={`${resource.id}:${params.get('versionId')}`} resourceId={resource.id}
+                versionId={params.get('versionId')} contextId={params.get('contextId')} />
 
             <section className={styles.panel}>
                 <h2>Thông tin chung</h2>
@@ -130,16 +135,8 @@ export function LibraryResourceDetailPage() {
                         <dd>{resource.provider_name}</dd>
                     </div>
                     <div>
-                        <dt>Mã đơn vị cung cấp</dt>
-                        <dd>{resource.provider_id}</dd>
-                    </div>
-                    <div>
                         <dt>Loại học liệu</dt>
                         <dd>{resource.resource_type_name_vi}</dd>
-                    </div>
-                    <div>
-                        <dt>Mã loại học liệu</dt>
-                        <dd>{resource.resource_type_code}</dd>
                     </div>
                     <div>
                         <dt>Trạng thái xuất bản</dt>
