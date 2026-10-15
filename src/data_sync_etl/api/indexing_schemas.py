@@ -39,6 +39,46 @@ class IndexRequestResponse(BaseModel):
     status_url: str
 
 
+IndexStatus = Literal["CONTENT_NOT_READY", "NOT_STARTED", "PENDING", "RUNNING", "READY",
+                      "FAILED", "STALE", "BLOCKED_RUNTIME"]
+
+
+class BowTerm(BaseModel):
+    term: str
+    frequency: int
+
+
+class ChunkItem(BaseModel):
+    id: str
+    content_unit_id: str
+    chunk_sequence: int
+    unit_chunk_sequence: int
+    page_from: int | None
+    page_to: int | None
+    char_start: int
+    char_end: int
+    text: str
+    review_status: str
+    retrieval_eligible: bool
+    bow_top_terms: list[BowTerm]
+    bow_term_count: int
+    bow_length: int
+    vector_ready: bool
+    embedding_model: str
+    embedding_version: str
+    embedding_dimension: int
+
+
+class ChunksResponse(BaseModel):
+    resource_version_id: str
+    index_run_id: str | None
+    index_status: IndexStatus
+    total: int
+    offset: int
+    limit: int
+    items: list[ChunkItem]
+
+
 def index_error(exc: Exception):
     from fastapi import HTTPException
 

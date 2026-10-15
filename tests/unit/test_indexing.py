@@ -196,3 +196,53 @@ def test_production_adapter_is_local_only(tmp_path):
     assert not model.available()
     with pytest.raises(IndexingError, match="BLOCKED_EMBEDDING_RUNTIME"):
         model.prepare()
+
+
+def test_chunks_api_pagination_filter_stale_and_no_raw_vectors(container):
+    version, _ = completed(container)
+    index = setup_index(container)
+    base = f"/api/v1/resource-versions/{version['id']}"
+    with TestClient(create_app(container)) as client:
+        assert client.get(base + "/chunks").json()["items"] == []
+        index.enqueue(version["id"])
+        assert client.get(base + "/chunks").json()["items"] == []
+        assert index.once()
+        response = client.get(base + "/chunks?limit=1&offset=1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 3
+        assert len(data["items"]) == 1
+        chunk = data["items"][0]
+        assert chunk["chunk_sequence"] == 2
+        assert "embedding" not in chunk and "bow_tf" not in chunk
+        assert client.get(base + "/chunks?offset=100").json()["items"] == []
+        unit = chunk["content_unit_id"]
+        assert client.get(base + f"/chunks?content_unit_id={unit}").json()["total"] == 1
+        assert client.get(base + "/chunks?content_unit_id=other").json()["items"] == []
+        assert client.get(base + "/chunks?limit=101").status_code == 422
+        assert client.get(base + "/chunks?offset=-1").status_code == 422
+        assert client.get("/api/v1/resource-versions/missing/chunks").status_code == 404
+        container.settings.chunk_size_words += 1
+        stale = client.get(base + "/chunks").json()
+        assert stale["index_status"] == "STALE" and stale["items"] == []
+
+
+def test_chunks_mongo_failure_and_tampered_artifact(container):
+    version, _ = completed(container)
+    index = setup_index(container)
+    index.enqueue(version["id"])
+    index.once()
+    doc = next(iter(index.store.rows.values()))
+    doc["bow_length"] += 1
+    with TestClient(create_app(container)) as client:
+        path = f"/api/v1/resource-versions/{version['id']}/chunks"
+        assert client.get(path).status_code == 503
+
+        def unavailable(*args):
+            raise RuntimeError("private Mongo URI")
+
+        index.store.source_units = unavailable
+        response = client.get(path)
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "INDEX_UNAVAILABLE"
+        assert "private" not in response.text

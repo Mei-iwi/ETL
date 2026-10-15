@@ -4,7 +4,12 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
-from data_sync_etl.api.indexing_schemas import ERROR_RESPONSES, IndexRequestResponse, index_error
+from data_sync_etl.api.indexing_schemas import (
+    ERROR_RESPONSES,
+    ChunksResponse,
+    IndexRequestResponse,
+    index_error,
+)
 from data_sync_etl.api.master_sync_schemas import (
     MasterSyncAutoRequest,
     MasterSyncRequest,
@@ -635,6 +640,20 @@ def index_version(id: ResourceId, request: Request, response: Response):
 @router.post("/admin/resources/{id}/versions/ingest")
 def ingest(id: ResourceId, body: IngestInput, request: Request):
     return services(request).ingestion.run(id, body.bucket, body.object_key, body.uploaded_by)
+
+
+@router.get("/api/v1/resource-versions/{id}/chunks", tags=[TAG_INDEXING],
+            response_model=ChunksResponse, responses=ERROR_RESPONSES,
+            summary="Xem Chunk và thông tin biểu diễn đã công bố")
+def indexed_chunks(id: ResourceId, request: Request,
+                   offset: Annotated[int, Query(ge=0)] = 0,
+                   limit: Annotated[int, Query(ge=1, le=100)] = 10,
+                   content_unit_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None):
+    try:
+        return request.app.state.container.indexing.chunks(
+            id, offset=offset, limit=limit, content_unit_id=content_unit_id)
+    except Exception as exc:
+        raise index_error(exc) from None
 
 
 @router.post("/admin/resource-versions/{id}/ocr-jobs")

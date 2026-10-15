@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { getIndexResources, getIndexVersions, startIndex } from '../../services/indexingApi'
-import type { IndexRequestResult, ResourceOption, VersionOption } from '../../types/indexing'
+import { getChunks, getIndexResources, getIndexVersions, startIndex } from '../../services/indexingApi'
+import type { ChunksResult, IndexRequestResult, ResourceOption, VersionOption } from '../../types/indexing'
 import styles from './LibraryPages.module.css'
 
 export function LibraryIndexingPage() {
@@ -91,7 +91,7 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
             if (!current.signal.aborted) setError(err instanceof Error ? err.message : 'Không thể xếp hàng lập chỉ mục.')
         } finally { if (!current.signal.aborted) setBusy(false) }
     }
-    return <div className={styles.resultCard}>
+    return <><div className={styles.resultCard}>
         <h2>Xây dựng chỉ mục</h2>
         <p className={styles.resultValue}>{versionId}</p>
         {result && <p role="status">{result.index_status} · {result.index_run_id}</p>}
@@ -101,5 +101,48 @@ function IndexWorkspace({ versionId }: { versionId: string }) {
                 {busy ? 'Đang gửi yêu cầu...' : 'Xây dựng chỉ mục'}
             </button>
         </div>
-    </div>
+    </div><ChunkList key={result?.index_run_id ?? versionId} versionId={versionId} /></>
+}
+
+function ChunkList({ versionId }: { versionId: string }) {
+    const [offset, setOffset] = useState(0)
+    const [refresh, setRefresh] = useState(0)
+    const [loaded, setLoaded] = useState<{ offset: number; data: ChunksResult } | null>(null)
+    const [error, setError] = useState('')
+    const [loading, setLoading] = useState(true)
+    useEffect(() => {
+        const controller = new AbortController()
+        void getChunks(versionId, offset, controller.signal).then(data => {
+            if (!controller.signal.aborted) { setLoaded({ offset, data }); setError('') }
+        }).catch(err => {
+            if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'Không tải được Chunk.')
+        }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+        return () => controller.abort()
+    }, [versionId, offset, refresh])
+    const data = loaded?.offset === offset ? loaded.data : null
+    function page(next: number) { setLoading(true); setError(''); setOffset(next) }
+    return <section className={styles.resultCard}>
+        <h2>Danh sách Chunk{data ? ` (${data.total})` : ''}</h2>
+        {loading && <p role="status">Đang tải Chunk...</p>}
+        {error && <p className={styles.alert} role="alert">{error}</p>}
+        {!loading && !error && data?.total === 0 && <p>Chưa có chỉ mục được công bố cho nội dung hiện tại.</p>}
+        <div className={styles.contentList}>
+            {!error && data?.items.map(chunk => <article className={styles.contentItem} key={chunk.id}>
+                <h4>Chunk {chunk.chunk_sequence}</h4>
+                <div className={styles.contentMeta}><span>Trang: {chunk.page_from ?? '—'}{chunk.page_to && chunk.page_to !== chunk.page_from ? `–${chunk.page_to}` : ''}</span>
+                    <span>Vector: {chunk.vector_ready ? 'Sẵn sàng' : 'Chưa có'}</span></div>
+                <p>Content Unit: {chunk.content_unit_id}</p>
+                <p>Vị trí ký tự: {chunk.char_start}–{chunk.char_end}</p>
+                <details><summary>Xem nội dung Chunk</summary><p>{chunk.text}</p></details>
+                <p>BoW: {chunk.bow_top_terms.map(term => `${term.term} (${term.frequency})`).join(', ') || 'Không có token từ vựng'} · {chunk.bow_term_count} từ khác nhau</p>
+                <p>Model: {chunk.embedding_model} · {chunk.embedding_dimension} chiều</p>
+            </article>)}
+        </div>
+        <div className={styles.contentPagination}>
+            <button className={styles.primaryButton} disabled={loading || offset === 0} onClick={() => page(Math.max(0, offset - 10))}>Trước</button>
+            <span>Trang {Math.floor(offset / 10) + 1}/{Math.max(1, Math.ceil((data?.total ?? 0) / 10))}</span>
+            <button className={styles.primaryButton} disabled={loading || !data || offset + 10 >= data.total} onClick={() => page(offset + 10)}>Tiếp</button>
+            <button className={styles.primaryButton} disabled={loading} onClick={() => { setLoading(true); setRefresh(value => value + 1) }}>Tải lại Chunk</button>
+        </div>
+    </section>
 }

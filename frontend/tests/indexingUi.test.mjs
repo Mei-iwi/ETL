@@ -25,6 +25,14 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         if (path === '/health') return json({ status: 'ok', database: 'ok' })
         if (path === '/api/v1/resources') return json({ items: [{ id: 'resource-test', title: 'Học liệu kiểm thử' }], pagination: { total: 1 } })
         if (path === '/api/v1/resources/resource-test/versions') return json([{ id: 'version-test', resource_id: 'resource-test', version_number: 1 }])
+        if (path.endsWith('/chunks')) {
+            const offset = Number(new URL(req.url, 'http://localhost').searchParams.get('offset'))
+            return json({ resource_version_id: 'version-test', index_run_id: 'old-run', index_status: 'READY', total: 11, offset, limit: 10,
+                items: Array.from({ length: offset === 0 ? 10 : 1 }, (_, i) => ({ id: `chunk-${offset + i + 1}`, content_unit_id: 'unit-test',
+                    chunk_sequence: offset + i + 1, unit_chunk_sequence: 1, page_from: 2, page_to: 2,
+                    char_start: 0, char_end: 17, text: 'Văn bản tiếng Việt', bow_top_terms: [{ term: 'việt', frequency: 1 }],
+                    bow_term_count: 4, vector_ready: true, embedding_model: 'ui-test-only', embedding_dimension: 3 })) })
+        }
         if (path.endsWith('/index') && req.method === 'POST') {
             postCount++
             return blocked ? json({ detail: { code: 'BLOCKED_EMBEDDING_RUNTIME', message: 'Chưa có model local.' } }, 503)
@@ -82,6 +90,11 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         }
         await open()
         assert.equal(postCount, 0)
+        await waitFor(() => evaluate("document.body.textContent.includes('Danh sách Chunk (11)')"))
+        await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Tiếp').click()")
+        await waitFor(() => evaluate("document.body.textContent.includes('Chunk 11') && !document.body.textContent.includes('Chunk 10')"))
+        await evaluate("document.querySelector('details').open = true")
+        assert.equal(await evaluate("document.querySelector('details').textContent.includes('Văn bản tiếng Việt')"), true)
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')).click()")
         await waitFor(() => evaluate("document.body.textContent.includes('run-test')"))
         assert.equal(postCount, 1)

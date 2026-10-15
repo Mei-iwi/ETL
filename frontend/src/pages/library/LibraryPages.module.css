@@ -340,6 +340,16 @@
     font-size: 14px;
     line-height: 1.6;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.contentItem details {
+    margin: 10px 0;
+}
+
+.contentItem summary {
+    color: #2563eb;
+    cursor: pointer;
 }
 
 .contentMeta {

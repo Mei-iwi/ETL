@@ -1,4 +1,4 @@
-import type { IndexRequestResult, ResourceOption, VersionOption } from '../types/indexing'
+import type { ChunksResult, IndexRequestResult, ResourceOption, VersionOption } from '../types/indexing'
 
 export class IndexingApiError extends Error {
     status: number
@@ -37,4 +37,10 @@ export function getIndexResources(query: string, signal?: AbortSignal) {
 
 export function getIndexVersions(resourceId: string, signal?: AbortSignal) {
     return request<VersionOption[]>(`/api/v1/resources/${encodeURIComponent(resourceId)}/versions`, signal)
+}
+
+export function getChunks(versionId: string, offset = 0, signal?: AbortSignal, contentUnitId = '') {
+    const params = new URLSearchParams({ offset: String(offset), limit: '10' })
+    if (contentUnitId) params.set('content_unit_id', contentUnitId)
+    return request<ChunksResult>(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/chunks?${params}`, signal)
 }

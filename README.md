@@ -40,6 +40,11 @@ verify đủ Chunk/BoW/vector cùng fingerprint, rồi đánh dấu stage COMPLE
 Review/eligibility không được nâng quyền: có thể xem Chunk chưa duyệt trong workspace
 quản lý, không có nghĩa được công bố trong Search. Lỗi index không đổi kết quả OCR.
 
+`GET /api/v1/resource-versions/{id}/chunks?offset=0&limit=10` xem Chunk của run
+đã công bố, có thể lọc `content_unit_id`. Trang chỉ mục hiển thị phân trang, vị trí
+nguồn, văn bản mở rộng, top term BoW và model/số chiều; không trả mảng vector thô.
+Run ghi dở/FAILED hoặc fingerprint cũ không được công bố thành chỉ mục hiện hành.
+
 ## 1. Cài đặt
 
 Cần Python ≥ 3.12, Node.js 20.x (≥ 20.19) hoặc ≥ 22.12, Docker Desktop/Compose.
