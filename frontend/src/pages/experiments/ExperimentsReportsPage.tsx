@@ -1,9 +1,3 @@
-export function ExperimentsReportPage() {
-    return (
-        <section>
-            <h1>
-                Báo cáo
-            </h1>
-        </section>
-    )
-}
+import { EvaluationRunView } from './EvaluationRunView'
+
+export function ExperimentsReportPage() { return <EvaluationRunView report /> }

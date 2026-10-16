@@ -21,12 +21,14 @@ from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectR
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.source.mongo_metadata import MongoMetadataSourceReader
 from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
+from data_sync_etl.adapters.storage.evaluation_store import EvaluationFileStore
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.adapters.storage.source_local import SourceLocalFileReader
 from data_sync_etl.application.auto_sync import AutoSyncCoordinator
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
+from data_sync_etl.application.evaluation import EvaluationService
 from data_sync_etl.application.get_processing_job import GetProcessingJob
 from data_sync_etl.application.get_resource_detail import GetResourceDetail
 from data_sync_etl.application.indexing import IndexingService
@@ -252,6 +254,9 @@ class Container:
         )
         self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
         self.search = SearchService(self.indexing, self.settings, self.content_bags)
+        self.evaluations = EvaluationService(self.search, EvaluationFileStore(
+            self.settings.storage_root, max_files=self.settings.evaluation_max_stored_files,
+            max_bytes=self.settings.evaluation_max_file_bytes), self.settings)
 
         self.processing_finalizer = ProcessingFinalizer(
             self.uow,

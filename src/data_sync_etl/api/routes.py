@@ -16,6 +16,14 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import FileResponse, PlainTextResponse
 
+from data_sync_etl.api.evaluation_schemas import (
+    DatasetRequest,
+    DatasetResponse,
+    RunDetailResponse,
+    RunRequest,
+    RunResponse,
+    evaluation_error,
+)
 from data_sync_etl.api.indexing_schemas import (
     ERROR_RESPONSES,
     ChunksResponse,
@@ -156,6 +164,65 @@ def search_materials(body: SearchRequest, request: Request):
         raise
     except Exception as exc:
         raise search_error(exc) from None
+
+
+def evaluation_services(request):
+    access = search_access(request)
+    container = request.app.state.container
+    container.evaluations.authorized(access)
+    return container.evaluations, access
+
+
+@router.post('/api/v1/evaluations/datasets', tags=[TAG_EVALUATION], status_code=201, response_model=DatasetResponse)
+def create_evaluation_dataset(body: DatasetRequest, request: Request, response: Response):
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        service, access = evaluation_services(request)
+        return service.create_dataset(body.model_dump(), access)
+    except Exception as exc:
+        raise evaluation_error(exc) from None
+
+
+@router.post('/api/v1/evaluations/runs', tags=[TAG_EVALUATION], status_code=201, response_model=RunResponse)
+def run_evaluation(body: RunRequest, request: Request, response: Response):
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        service, access = evaluation_services(request)
+        run = service.run(body.model_dump(), access)
+        return {'run_id': run['id'], 'status': run['status'], 'dataset_id': run['dataset_id'],
+                'warnings': run['warnings'], 'finished_at': run['finished_at']}
+    except Exception as exc:
+        raise evaluation_error(exc) from None
+
+
+@router.get('/api/v1/evaluations/runs/{id}', tags=[TAG_EVALUATION], response_model=RunDetailResponse)
+def get_evaluation_run(id: str, request: Request, response: Response,
+                       offset: Annotated[int, Query(ge=0, le=300)] = 0,
+                       limit: Annotated[int, Query(ge=1, le=50)] = 20):
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        service, access = evaluation_services(request)
+        run = service.get_run(id, access)
+        rows = run['observations']
+        return {**run, 'observations': rows[offset:offset + limit],
+                'pagination': {'offset': offset, 'limit': limit, 'total': len(rows)}}
+    except Exception as exc:
+        raise evaluation_error(exc) from None
+
+
+@router.get('/api/v1/evaluations/runs/{id}/report', tags=[TAG_EVALUATION])
+def export_evaluation_report(id: str, request: Request, response: Response, format: Literal['csv', 'json'] = 'csv'):
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        service, access = evaluation_services(request)
+        report = service.report(id, access, format)
+        if format == 'json':
+            return report
+        return Response(report, media_type='text/csv; charset=utf-8', headers={
+            'Content-Disposition': f'attachment; filename="evaluation-{id}.csv"',
+            'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
+    except Exception as exc:
+        raise evaluation_error(exc) from None
 
 
 @router.get('/api/v1/chunks/{context_id}/context', tags=[TAG_SEARCH], response_model=ContextResponse,

@@ -371,3 +371,30 @@ Nếu đã cài model mục 4, có thể chạy thêm model thật với databas
 ```bash
 ETL_SEARCH_REAL_MODEL=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest tests/integration/test_search_integration.py -q
 ```
+
+## 10. Thực nghiệm và đánh giá
+
+Chỉ dùng Dev local với cấu hình LOCAL_DEMO ở mục 9. Giữ nguyên 4 trang **Thực nghiệm**: Dữ liệu đánh giá → Chạy thực nghiệm → Kết quả đánh giá → Báo cáo. Không có xác thực quản trị Production; API đánh giá từ chối truy cập ngoài phạm vi Dev loopback đã xác minh.
+
+1. Chọn học liệu READY và tự chấm nhãn theo **resource_id**, không dùng ContentBag/Chunk ID. Nhãn 0–3; từ 1 là liên quan. Nhập thủ công `resource_id:grade` (mỗi dòng một nhãn) hoặc import JSON; xác nhận nhãn do con người đánh giá trước khi tạo dataset. File chuẩn bị gán nhãn có `rows` gồm `query_id`, `query_text`, `resource_id`, `resource_title`, `candidate_description`, `relevance`; `null` không phải nhãn hợp lệ.
+2. Giữ Dataset ID, chạy cùng BoW/Vector/Hybrid với k và top-k giống nhau. Warmup mặc định 0; nếu bật, các lượt warmup không nằm trong thống kê. Không tự chạy khi mở trang. Khi corpus/model/policy khác thời điểm gán nhãn, tạo dataset mới sau khi kiểm tra lại nhãn.
+3. Run ID trong URL dùng để xem lại sau F5; CSV UTF-8 BOM/JSON được xuất từ kết quả đã lưu, không đo lại Search. Browser chỉ nhớ ID gần nhất, không lưu truy vấn/nhãn/credentials. Không có API liệt kê dataset/run ngoài bốn endpoint dưới đây.
+
+| API | Chức năng |
+| --- | --- |
+| `POST /api/v1/evaluations/datasets` | Lưu bộ truy vấn và nhãn đã xác nhận |
+| `POST /api/v1/evaluations/runs` | Chạy đồng bộ ba baseline, trả Run ID/trạng thái |
+| `GET /api/v1/evaluations/runs/{id}?offset=0&limit=20` | Đọc kết quả, phân trang chi tiết query/method |
+| `GET /api/v1/evaluations/runs/{id}/report?format=csv` | Xuất CSV hoặc `format=json`, chỉ run COMPLETED |
+
+Dữ liệu JSON riêng tại `STORAGE_ROOT/evaluations/{datasets,runs}`, có checksum, ghi atomic và khóa file đa process; không thêm bảng/collection. Mặc định tối đa 20 query/dataset, 100 nhãn/query, 20 kết quả, 100 phiên bản corpus, 200 file mỗi loại, 8 MB/file. Các giới hạn `EVALUATION_*` có trong `.env.example`; không sửa `.env` thật khi pull code. Run có ngân sách hợp tác 120 giây: kiểm tra trước/sau từng lượt Search (lượt đang chạy vẫn chịu giới hạn riêng của Search/model). Không có worker đánh giá. Khi hết quota, dừng tạo mới; không tự xóa lịch sử. Khóa còn lại sau crash cần người vận hành xác minh không còn process trước khi xử lý. Nhiều container không chia sẻ filesystem/Production cần thiết kế lưu trữ và xác thực riêng, chưa được hỗ trợ.
+
+Precision@k dùng mẫu số k kể cả thiếu kết quả; Recall@k, MRR@k, nDCG@k không xác định khi không có nhãn dương được loại khỏi macro-average tương ứng. nDCG dùng gain `2^grade-1`. Latency là toàn bộ lời gọi SearchService, không gồm kiểm tra corpus; p50/p95 nội suy tuyến tính. Corpus đổi giữa run → NOT_COMPARABLE, không xuất báo cáo hoàn tất. Lỗi runtime từng phương pháp không được thay bằng metric 0; không so score RRF trực tiếp với cosine. Chưa có Ground Truth được người nghiên cứu xác nhận thì đánh giá chất lượng Dev là **NOT_RUN**; fixture chỉ kiểm chứng phần mềm, không chứng minh Hybrid tốt hơn.
+
+```bash
+python -m pytest tests/unit/test_evaluation.py tests/unit/test_evaluation_metrics.py -q
+node --experimental-strip-types --test frontend/tests/evaluationApi.test.mjs
+npm.cmd --prefix frontend run build
+# Opt-in UI + Search/model thật trên SQLite/MemoryMongo fixture cô lập, không dùng DB Dev:
+ETL_EVALUATION_UI=1 ETL_EVALUATION_REAL_MODEL=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest tests/integration/test_evaluation_integration.py -q -s
+```
