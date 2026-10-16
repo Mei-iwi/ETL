@@ -100,3 +100,17 @@ def test_inactive_resource_has_no_detail_versions_content_or_new_ocr(container):
         container.ocr.create_job(version['id'])
     with container.uow() as repo:
         assert repo.count('ocr_jobs', {}) == 0 and repo.get('resource_versions', version['id']) == version
+
+
+def test_source_reconciliation_never_touches_local_resource(container):
+    _, service = owned_fixture(container)
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-3', {'source_origin': 'LOCAL', 'source_state_hash': None})
+        before = repo.get('master_learning_resources', 'resource-3')
+    preview = service.run('resources')
+    assert preview['streams']['resources']['local_excluded'] == 1
+    assert preview['streams']['resources']['missing_candidate_count'] == 0
+    result = service.run('resources', apply=True, fingerprint=preview['fingerprint'])
+    assert result['status'] == 'RECONCILIATION_APPLIED' and result['confirmed'] == 0
+    with container.uow() as repo:
+        assert repo.get('master_learning_resources', 'resource-3') == before

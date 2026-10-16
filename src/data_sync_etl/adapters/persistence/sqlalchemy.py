@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from threading import Lock
 
-from sqlalchemy import and_, delete, exists, func, or_, select, text, update
+from sqlalchemy import and_, delete, exists, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -100,19 +100,25 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             raise DomainError('BLOCKED_MONGO_ID_MAPPING')
         table = STREAMS[stream]
         model = MODELS[table]
-        row = self.session.execute(select(model.id, model.mongo_id).where(
+        row = self.session.execute(select(model).where(
             model.id == record_id,
-        ).with_for_update()).first()
+        ).with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
         if row is None or row.mongo_id not in (expected, target):
             raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+        if row.source_origin == 'POSTGRESQL' and (
+            not row.source_state_hash or row.source_state_hash != state_hash(self._dict(row))
+        ):
+            raise DomainError('BLOCKED_LOCAL_SOURCE_CHANGE')
         self._check_mongo_reference(model, record_id, target)
         if row.mongo_id is None:
             try:
-                changed = self.session.execute(update(model).where(
-                    model.id == record_id, model.mongo_id.is_(None),
-                ).values(mongo_id=target).execution_options(synchronize_session=False))
-                if changed.rowcount != 1:
-                    raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+                row.mongo_id = target
+                self.session.flush()
+                if row.source_origin == 'POSTGRESQL':
+                    # Preserve the existing hash algorithm; only accept this verified,
+                    # row-locked identity reservation, never bless pre-existing drift.
+                    row.source_state_hash = state_hash(self._dict(row))
+                    self.session.flush()
             except IntegrityError:
                 raise DomainError('BLOCKED_MONGO_ID_MAPPING') from None
         elif row.mongo_id != target:

@@ -98,7 +98,10 @@ from data_sync_etl.domain.core import (
 )
 from data_sync_etl.domain.format_validation import ProcessingFormatError
 from data_sync_etl.domain.resource import CreateResourceCommand
-from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
+from data_sync_etl.domain.resource_metadata import (
+    ResourceMetadataOwnershipError,
+    UpdateResourceMetadataCommand,
+)
 from data_sync_etl.domain.resource_version import CreateResourceVersionCommand
 
 #Swagger Tags
@@ -518,6 +521,8 @@ def update_resource_metadata(
         )
     except ResourceMetadataNotFound:
         raise HTTPException(404, "Resource not found") from None
+    except ResourceMetadataOwnershipError as exc:
+        raise HTTPException(409, detail={'code': exc.code, 'phase': 'metadata', 'message': str(exc)}) from None
     except InvalidResourceMetadata as exc:
         raise HTTPException(
             400,

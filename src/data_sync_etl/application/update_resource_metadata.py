@@ -1,5 +1,9 @@
 from data_sync_etl.domain.core import DomainError
-from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
+from data_sync_etl.domain.resource_metadata import (
+    ResourceMetadataOwnershipError,
+    UpdateResourceMetadataCommand,
+    assert_resource_metadata_editable,
+)
 
 
 class ResourceMetadataNotFound(DomainError):
@@ -39,6 +43,7 @@ class UpdateResourceMetadataUseCase:
                 resource = repo.get_resource_for_update(command.resource_id)
                 if resource is None:
                     raise ResourceMetadataNotFound("Resource not found")
+                assert_resource_metadata_editable(resource)
 
                 subject_id = values.get(
                     "subject_id", repo.get_resource_subject_id(command.resource_id)
@@ -69,7 +74,7 @@ class UpdateResourceMetadataUseCase:
                 updated["subject_id"] = repo.get_resource_subject_id(command.resource_id)
                 updated["grade_level_id"] = repo.get_resource_grade_level_id(command.resource_id)
                 return updated
-        except (ResourceMetadataNotFound, InvalidResourceMetadata):
+        except (ResourceMetadataNotFound, InvalidResourceMetadata, ResourceMetadataOwnershipError):
             raise
         except Exception as exc:
             raise ResourceMetadataPersistenceError("Database rejected resource metadata") from exc

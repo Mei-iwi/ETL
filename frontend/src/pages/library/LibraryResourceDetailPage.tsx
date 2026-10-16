@@ -17,6 +17,7 @@ type GradeLevel = {
 
 type ResourceDetail = {
     id: string
+    source_origin?: string | null
     title: string
     provider_id: string
     provider_name: string
@@ -130,6 +131,10 @@ export function LibraryResourceDetailPage() {
                 <h2>Thông tin chung</h2>
 
                 <dl className={styles.details}>
+                    <div>
+                        <dt>Nguồn quản lý</dt>
+                        <dd>{resource.source_origin === 'POSTGRESQL' ? 'SOURCE (chỉ đọc)' : resource.source_origin === 'LOCAL' ? 'LOCAL' : 'Chưa xác minh'}</dd>
+                    </div>
                     <div>
                         <dt>Đơn vị cung cấp</dt>
                         <dd>{resource.provider_name}</dd>

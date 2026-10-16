@@ -11,6 +11,7 @@ from data_sync_etl.db.models import (
     ResourceVersion,
     SourceFileImport,
 )
+from data_sync_etl.domain.resource_metadata import assert_resource_metadata_editable
 
 
 class ResourceMetadataRepositoryMixin:
@@ -49,6 +50,7 @@ class ResourceMetadataRepositoryMixin:
             select(MasterLearningResource)
             .where(MasterLearningResource.id == resource_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         ).scalar_one_or_none()
         return self._dict(row) if row else None
 
@@ -63,9 +65,7 @@ class ResourceMetadataRepositoryMixin:
             "publication_status": "publication_status",
             "uploaded_by": "created_by",
         }
-        row = self.session.get(MasterLearningResource, resource_id)
-        if row is None:
-            raise LookupError("Resource not found")
+        row = self._metadata_row_for_update(resource_id)
         for source, target in mapping.items():
             if source in values:
                 setattr(row, target, values[source])
@@ -74,12 +74,14 @@ class ResourceMetadataRepositoryMixin:
         return self._dict(row)
 
     def replace_subject_relation(self, resource_id, subject_id):
+        self._metadata_row_for_update(resource_id)
         self.session.execute(delete(ResourceSubject).where(ResourceSubject.resource_id == resource_id))
         if subject_id is not None:
             self.session.add(ResourceSubject(resource_id=resource_id, subject_id=subject_id, is_primary=True))
         self.session.flush()
 
     def replace_grade_relation(self, resource_id, grade_level_id):
+        self._metadata_row_for_update(resource_id)
         self.session.execute(delete(ResourceGradeLevel).where(ResourceGradeLevel.resource_id == resource_id))
         if grade_level_id is not None:
             self.session.add(ResourceGradeLevel(resource_id=resource_id, grade_level_id=grade_level_id))
@@ -89,6 +91,15 @@ class ResourceMetadataRepositoryMixin:
         return self.session.scalar(
             select(ResourceSubject.subject_id).where(ResourceSubject.resource_id == resource_id).limit(1)
         )
+
+    def _metadata_row_for_update(self, resource_id):
+        row = self.session.execute(select(MasterLearningResource).where(
+            MasterLearningResource.id == resource_id,
+        ).with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
+        if row is None:
+            raise LookupError('Resource not found')
+        assert_resource_metadata_editable(self._dict(row))
+        return row
 
     def get_resource_grade_level_id(self, resource_id):
         return self.session.scalar(

@@ -13,7 +13,7 @@ import {
     type SubjectOption,
 } from '../../services/libraryLookupApi'
 import { startProcessing } from '../../services/processingApi'
-import { createResourceVersion } from '../../services/resourceApi'
+import { createResourceVersion, metadataReadOnlyMessage } from '../../services/resourceApi'
 import type {
     PublicationStatus,
     UpdateResourceMetadataRequest,
@@ -21,6 +21,7 @@ import type {
 import styles from './LibraryPages.module.css'
 
 type ResourceDetailResponse = {
+    source_origin?: string | null
     title: string
     resource_type_code: string
     provider_id: string
@@ -45,6 +46,7 @@ export function LibraryUpdateVersion() {
     const [gradeLevels, setGradeLevels] = useState<GradeLevelOption[]>([])
     const [subjects, setSubjects] = useState<SubjectOption[]>([])
     const [loading, setLoading] = useState(true)
+    const [sourceOrigin, setSourceOrigin] = useState<string | null>(null)
     const [loadError, setLoadError] = useState('')
     const [updateStage, setUpdateStage] = useState<UpdateStage>('idle')
     const [versionError, setVersionError] = useState('')
@@ -95,6 +97,8 @@ export function LibraryUpdateVersion() {
                 }
 
                 const resource: ResourceDetailResponse = await resourceResponse.json()
+                if (controller.signal.aborted) return
+                setSourceOrigin(resource.source_origin ?? null)
                 setTitle(resource.title)
                 setResourceTypeCode(resource.resource_type_code)
                 setProviderId(resource.provider_id)
@@ -138,6 +142,8 @@ export function LibraryUpdateVersion() {
 
     async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault()
+        const readOnly = metadataReadOnlyMessage(sourceOrigin)
+        if (readOnly) { setVersionError(readOnly); return }
         if (submittingRef.current || !resourceId || !selectedResourceType || !selectedProvider) return
 
         const formData = new FormData(event.currentTarget)
@@ -219,7 +225,8 @@ export function LibraryUpdateVersion() {
         }
     }
 
-    const formDisabled = loading || isLoading || updateStage !== 'idle' || Boolean(loadError)
+    const ownershipMessage = metadataReadOnlyMessage(sourceOrigin)
+    const formDisabled = loading || isLoading || updateStage !== 'idle' || Boolean(loadError) || Boolean(ownershipMessage)
     const submitLabel = updateStage === 'metadata'
         ? 'Đang lưu thông tin...'
         : updateStage === 'uploading'
@@ -244,6 +251,7 @@ export function LibraryUpdateVersion() {
                 <p className={styles.alert} role="alert">{loadError}</p>
             ) : (
                 <form className={`${styles.card} ${styles.form}`} onSubmit={handleSubmit}>
+                    {ownershipMessage && <p className={styles.notice} role="status">{ownershipMessage}</p>}
                     <div className={styles.field}>
                         <label htmlFor="title">Tên học liệu</label>
                         <input
@@ -367,7 +375,7 @@ export function LibraryUpdateVersion() {
                         >
                             {submitLabel}
                         </button>
-                        <button className={styles.secondaryButton} type="button" onClick={() => navigate(detailPath)} disabled={formDisabled}>
+                        <button className={styles.secondaryButton} type="button" onClick={() => navigate(detailPath)} disabled={isLoading || updateStage !== 'idle'}>
                             Hủy
                         </button>
                     </div>

@@ -7,9 +7,17 @@ import type { CreateResourceVersionResponse } from '../types/resourceVersion'
 const STATUS_MESSAGES: Record<number, string> = {
     400: 'Thông tin metadata không hợp lệ.',
     404: 'Không tìm thấy học liệu cần cập nhật.',
+    409: 'Không thể sửa metadata tại Master. Kiểm tra nguồn quản lý học liệu.',
     422: 'Dữ liệu gửi lên không hợp lệ.',
     503: 'Cơ sở dữ liệu không khả dụng.',
     500: 'Đã xảy ra lỗi hệ thống.',
+}
+
+export function metadataReadOnlyMessage(sourceOrigin: string | null | undefined): string | null {
+    if (sourceOrigin === 'LOCAL') return null
+    return sourceOrigin === 'POSTGRESQL'
+        ? 'Học liệu được quản lý từ SOURCE. Vui lòng sửa tại nguồn và đồng bộ lại.'
+        : 'Chưa xác minh nguồn quản lý học liệu. Không thể cập nhật metadata tại Master.'
 }
 
 async function readErrorMessage(

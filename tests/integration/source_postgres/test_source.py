@@ -313,7 +313,7 @@ def test_null_source_preserved_and_visible(source, pg_container):
             client.patch(
                 "/api/v1/resources/resource-1/metadata", json={"publication_status": "DRAFT"}
             ).status_code
-            == 200
+            == 409
         )
 
 
