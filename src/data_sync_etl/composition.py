@@ -23,6 +23,8 @@ from data_sync_etl.adapters.source.mongo_metadata import MongoMetadataSourceRead
 from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
 from data_sync_etl.adapters.storage.evaluation_store import EvaluationFileStore
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
+from data_sync_etl.adapters.storage.source_dispatcher import SourceFileDispatcher
+from data_sync_etl.adapters.storage.source_google_drive import SourceGoogleDriveFileReader
 from data_sync_etl.adapters.storage.source_local import SourceLocalFileReader
 from data_sync_etl.application.auto_sync import AutoSyncCoordinator
 from data_sync_etl.application.capabilities import CapabilityService
@@ -275,6 +277,9 @@ class Container:
             max_manual_retries=self.settings.processing_manual_retry_limit,
         )
         self.source_files = SourceLocalFileReader(self.settings.source_file_storage_root, self.storage.root)
+        if self.settings.source_drive_enabled or self.settings.source_drive_buckets or self.settings.source_local_buckets:
+            self.source_files = SourceFileDispatcher(self.source_files, SourceGoogleDriveFileReader(self.settings),
+                                                     local_buckets=self.settings.source_local_buckets)
         self.source_file_import = SourceFileImportService(
             self.source, self.source_files, self.storage, self.uow,
             self.process_version, self.retry_processing_job, self.settings,

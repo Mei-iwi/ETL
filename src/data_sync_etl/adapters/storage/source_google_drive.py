@@ -1,0 +1,222 @@
+"""Read-only Drive blobs, bounded disk staging, explicit folder allowlist; no export."""
+
+import json
+import random
+import re
+import tempfile
+import time
+from contextlib import contextmanager
+
+from data_sync_etl.domain.core import SourceFileError
+from data_sync_etl.domain.format_validation import FormatValidatorRegistry
+
+API = 'https://www.googleapis.com/drive/v3/files/'
+SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
+FOLDER = 'application/vnd.google-apps.folder'
+ID = re.compile(r'[A-Za-z0-9_-]{1,200}')
+BUCKET = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,254}')
+CHUNK = 256 * 1024
+FIELDS = 'id,name,mimeType,size,parents,trashed,version,capabilities(canDownload)'
+
+
+class SourceGoogleDriveFileReader:
+    def __init__(self, settings, *, session_factory=None, clock=time.monotonic, sleep=time.sleep):
+        self.settings, self.roots = settings, dict(settings.source_drive_buckets)
+        self.session_factory, self.clock, self.sleep = session_factory, clock, sleep
+        self.formats = FormatValidatorRegistry()
+        if any(not BUCKET.fullmatch(k) or not ID.fullmatch(v) for k, v in self.roots.items()):
+            raise SourceFileError('INVALID_DRIVE_BUCKET_CONFIG')
+
+    def configuration_check(self):
+        if not self.settings.source_drive_enabled:
+            raise SourceFileError('DRIVE_DISABLED')
+        if not self.roots:
+            raise SourceFileError('DRIVE_BUCKETS_REQUIRED')
+        if self.session_factory is None and (
+                self.settings.source_drive_credentials_file is None
+                or not self.settings.source_drive_credentials_file.is_file()):
+            raise SourceFileError('DRIVE_CREDENTIALS_UNAVAILABLE')
+
+    @contextmanager
+    def _session(self):
+        self.configuration_check()
+        if self.session_factory is not None:
+            with self.session_factory() as session:
+                try:
+                    yield session
+                except OSError:
+                    raise SourceFileError('DRIVE_UNAVAILABLE', transient=True) from None
+            return
+        # Optional runtime: Local-only imports never load Google auth/requests.
+        try:
+            from google.auth.exceptions import RefreshError
+            from google.auth.transport.requests import AuthorizedSession
+            from google.oauth2.credentials import Credentials as UserCredentials
+            from google.oauth2.service_account import Credentials as ServiceCredentials
+            from requests.exceptions import RequestException
+        except ImportError:
+            raise SourceFileError('DRIVE_RUNTIME_UNAVAILABLE') from None
+        try:
+            with self.settings.source_drive_credentials_file.open(encoding='utf-8') as file:
+                config = json.load(file)
+            if (config.get('type') != self.settings.source_drive_auth_type
+                    or config.get('token_uri', 'https://oauth2.googleapis.com/token') != 'https://oauth2.googleapis.com/token'):
+                raise ValueError('Invalid credential type/endpoint')
+            credentials = (ServiceCredentials.from_service_account_info(config, scopes=[SCOPE])
+                           if config['type'] == 'service_account' else
+                           UserCredentials.from_authorized_user_info(config, scopes=[SCOPE]))
+        except Exception:
+            raise SourceFileError('DRIVE_CREDENTIALS_INVALID') from None
+        with AuthorizedSession(credentials, max_refresh_attempts=1,
+                               refresh_timeout=self.settings.source_drive_timeout_seconds) as session:
+            try:
+                yield session
+            except RefreshError:
+                raise SourceFileError('DRIVE_CREDENTIALS_EXPIRED') from None
+            except RequestException:
+                raise SourceFileError('DRIVE_UNAVAILABLE', transient=True) from None
+
+    def _deadline(self, deadline):
+        if self.clock() >= deadline:
+            raise SourceFileError('DRIVE_TIMEOUT', transient=True)
+
+    def _get(self, session, file_id, deadline, *, media=False):
+        params = {'supportsAllDrives': 'true', **({'alt': 'media'} if media else {'fields': FIELDS})}
+        attempts = self.settings.source_drive_max_attempts
+        for attempt in range(attempts):
+            self._deadline(deadline)
+            try:
+                response = session.get(API + file_id, params=params, stream=True, allow_redirects=False,
+                    timeout=min(self.settings.source_drive_timeout_seconds, max(.1, deadline - self.clock())))
+            except (TimeoutError, ConnectionError, OSError):
+                if attempt + 1 == attempts:
+                    raise SourceFileError('DRIVE_UNAVAILABLE', transient=True) from None
+            else:
+                if response.status_code == 200:
+                    return response
+                status = response.status_code
+                response.close()
+                if status not in (429, 500, 502, 503, 504):
+                    code = {401: 'DRIVE_CREDENTIALS_EXPIRED', 403: 'DRIVE_PERMISSION_DENIED',
+                            404: 'DRIVE_FILE_NOT_FOUND'}.get(status, 'DRIVE_REQUEST_REJECTED')
+                    raise SourceFileError(code)
+                if attempt + 1 == attempts:
+                    raise SourceFileError('DRIVE_RATE_LIMITED' if status == 429 else 'DRIVE_UNAVAILABLE', transient=True)
+            self.sleep(min(2 ** attempt + random.uniform(0, .25), max(0, deadline - self.clock())))
+        raise SourceFileError('DRIVE_UNAVAILABLE', transient=True)
+
+    def _metadata(self, session, file_id, deadline):
+        response = self._get(session, file_id, deadline)
+        try:
+            chunks, size = [], 0
+            for block in response.iter_content(CHUNK):
+                self._deadline(deadline)
+                size += len(block)
+                if size > 64 * 1024:
+                    raise SourceFileError('INVALID_DRIVE_METADATA')
+                chunks.append(block)
+            value = json.loads(b''.join(chunks))
+            if not isinstance(value, dict) or value.get('id') != file_id or value.get('trashed') is not False:
+                raise SourceFileError('INVALID_DRIVE_METADATA')
+            return value
+        except (ValueError, TypeError):
+            raise SourceFileError('INVALID_DRIVE_METADATA') from None
+        finally:
+            response.close()
+
+    def _inside_root(self, session, metadata, root, deadline):
+        seen, current = set(), metadata
+        for _ in range(32):
+            parents = current.get('parents')
+            if not isinstance(parents, list) or len(parents) != 1 or not isinstance(parents[0], str):
+                raise SourceFileError('DRIVE_OUTSIDE_ROOT')
+            parent = parents[0]
+            if not ID.fullmatch(parent) or parent in seen:
+                raise SourceFileError('DRIVE_OUTSIDE_ROOT')
+            seen.add(parent)
+            current = self._metadata(session, parent, deadline)
+            if current.get('mimeType') != FOLDER:
+                raise SourceFileError('DRIVE_OUTSIDE_ROOT')
+            if parent == root:
+                return
+        raise SourceFileError('DRIVE_OUTSIDE_ROOT')
+
+    @staticmethod
+    def _reference(key):
+        if not isinstance(key, str) or len(key) > 500:
+            raise SourceFileError('INVALID_DRIVE_REFERENCE')
+        parts = key.split('/')
+        if (len(parts) != 3 or parts[0] != 'files' or not ID.fullmatch(parts[1])
+                or not parts[2] or parts[2] in ('.', '..') or parts[2][-1:] in ('.', ' ')
+                or any(ord(c) < 32 or ord(c) == 127 or c in '\\:<>"|?*%' for c in parts[2])):
+            raise SourceFileError('INVALID_DRIVE_REFERENCE')
+        return parts[1], parts[2]
+
+    def _validate_blob(self, metadata, filename):
+        mime = metadata.get('mimeType', '')
+        if mime == 'application/vnd.google-apps.shortcut':
+            raise SourceFileError('DRIVE_SHORTCUT_FORBIDDEN')
+        if not isinstance(mime, str) or mime.startswith('application/vnd.google-apps.'):
+            raise SourceFileError('UNSUPPORTED_DRIVE_NATIVE')
+        if metadata.get('name') != filename:
+            raise SourceFileError('DRIVE_FILENAME_MISMATCH')
+        try:
+            validator = self.formats.find_validator(filename)
+        except Exception:
+            raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT') from None
+        if mime not in validator.mime_types or not validator.text_extraction_supported:
+            raise SourceFileError('DRIVE_MIME_MISMATCH')
+        size = metadata.get('size')
+        if not isinstance(size, str) or not size.isascii() or not size.isdecimal() or len(size) > 15:
+            raise SourceFileError('INVALID_DRIVE_METADATA')
+        size = int(size)
+        if not 0 < size <= validator.max_size_bytes:
+            raise SourceFileError('FILE_TOO_LARGE' if size else 'INVALID_SOURCE_FILE')
+        if not isinstance(metadata.get('version'), str) or not metadata['version']:
+            raise SourceFileError('INVALID_DRIVE_METADATA')
+        capabilities = metadata.get('capabilities')
+        if not isinstance(capabilities, dict) or capabilities.get('canDownload') is not True:
+            raise SourceFileError('DRIVE_PERMISSION_DENIED')
+        return size
+
+    def check(self):
+        deadline = self.clock() + self.settings.source_drive_total_seconds
+        with self._session() as session:
+            for root in set(self.roots.values()):
+                if self._metadata(session, root, deadline).get('mimeType') != FOLDER:
+                    raise SourceFileError('DRIVE_ROOT_INVALID')
+
+    def open_stream(self, bucket, object_key):
+        if bucket not in self.roots:
+            raise SourceFileError('DRIVE_BUCKET_NOT_ALLOWED')
+        file_id, filename = self._reference(object_key)
+        deadline = self.clock() + self.settings.source_drive_total_seconds
+        temporary = tempfile.TemporaryFile(mode='w+b')
+        try:
+            with self._session() as session:
+                before = self._metadata(session, file_id, deadline)
+                size = self._validate_blob(before, filename)
+                self._inside_root(session, before, self.roots[bucket], deadline)
+                response = self._get(session, file_id, deadline, media=True)
+                try:
+                    downloaded = 0
+                    for block in response.iter_content(CHUNK):
+                        self._deadline(deadline)
+                        downloaded += len(block)
+                        if downloaded > size:
+                            raise SourceFileError('DRIVE_SIZE_MISMATCH')
+                        temporary.write(block)
+                    if downloaded != size:
+                        raise SourceFileError('DRIVE_SIZE_MISMATCH', transient=True)
+                finally:
+                    response.close()
+                after = self._metadata(session, file_id, deadline)
+                if any(before.get(k) != after.get(k) for k in ('version', 'name', 'size', 'mimeType', 'parents')):
+                    raise SourceFileError('DRIVE_FILE_CHANGED')
+                self._validate_blob(after, filename)
+                self._inside_root(session, after, self.roots[bucket], deadline)
+            temporary.seek(0)
+            return temporary  # ImportService still verifies SOURCE SHA-256 before publication.
+        except BaseException:
+            temporary.close()
+            raise

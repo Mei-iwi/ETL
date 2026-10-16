@@ -8,7 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
-        extra="ignore"
+        extra="ignore",
+        hide_input_in_errors=True,
     )
     database_url: str = Field(
         default="postgresql+psycopg://localhost/etl",
@@ -25,6 +26,14 @@ class Settings(BaseSettings):
     reconcile_max_affected: int = Field(default=100, ge=1, le=1000)
     reconcile_max_ratio: float = Field(default=0.1, gt=0, le=1)
     source_file_storage_root: Path | None = Field(default=None, repr=False)
+    source_drive_enabled: bool = False
+    source_drive_buckets: dict[str, str] = Field(default_factory=dict, repr=False)
+    source_local_buckets: tuple[str, ...] = ()
+    source_drive_auth_type: Literal['service_account', 'authorized_user'] = 'service_account'
+    source_drive_credentials_file: Path | None = Field(default=None, repr=False)
+    source_drive_timeout_seconds: int = Field(default=15, ge=1, le=60)
+    source_drive_total_seconds: int = Field(default=90, ge=5, le=300)
+    source_drive_max_attempts: int = Field(default=3, ge=1, le=5)
     source_file_allowed_statuses: tuple[str, ...] = ("APPROVED",)
     source_file_import_max_attempts: int = Field(default=3, ge=1, le=10)
     source_file_import_retry_seconds: int = Field(default=30, ge=1, le=3600)
