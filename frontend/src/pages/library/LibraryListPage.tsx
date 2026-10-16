@@ -13,6 +13,14 @@ type Resource = {
     resource_type_name_vi: string
     publication_status: string
     updated_at: string
+    latest_version?: {
+        id: string
+        version_number: number
+        lifecycle_status: string
+        processing_status: string
+        created_at: string
+        source_version_id: string | null
+    } | null
 }
 
 type ResourceListResponse = {
@@ -36,6 +44,7 @@ export function LibraryListPage() {
     const [data, setData] = useState<ResourceListResponse | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
+    const [refresh, setRefresh] = useState(0)
 
     useEffect(() => {
         const controller = new AbortController()
@@ -91,6 +100,7 @@ export function LibraryListPage() {
                 }
 
                 const result: ResourceListResponse = await response.json()
+                if (controller.signal.aborted) return
                 setData(result)
             } catch (err) {
                 if (controller.signal.aborted) return
@@ -108,7 +118,7 @@ export function LibraryListPage() {
         void loadResources()
 
         return () => controller.abort()
-    }, [page, query, resourceTypeCode])
+    }, [page, query, resourceTypeCode, refresh])
 
     function handleSearch(event: FormEvent<HTMLFormElement>) {
         event.preventDefault()
@@ -148,6 +158,7 @@ export function LibraryListPage() {
                     ))}
                 </select>
                 <button type="submit">Tìm kiếm</button>
+                <button type="button" disabled={loading} onClick={() => setRefresh(value => value + 1)}>Tải lại</button>
             </form>
 
             {lookupError && <p className={styles.error} role="alert">{lookupError}</p>}
@@ -160,7 +171,8 @@ export function LibraryListPage() {
                             <th>Tên học liệu</th>
                             <th>Đơn vị cung cấp</th>
                             <th>Loại học liệu</th>
-                            <th>Trạng thái</th>
+                            <th>Phát hành</th>
+                            <th>Phiên bản / xử lý</th>
                             <th>Cập nhật</th>
                             <th></th>
                         </tr>
@@ -168,7 +180,7 @@ export function LibraryListPage() {
                     <tbody>
                         {loading ? (
                             <tr>
-                                <td colSpan={6} className={styles.message}>
+                                <td colSpan={7} className={styles.message}>
                                     Đang tải danh sách học liệu...
                                 </td>
                             </tr>
@@ -179,6 +191,23 @@ export function LibraryListPage() {
                                     <td>{resource.provider_name}</td>
                                     <td>{resource.resource_type_name_vi}</td>
                                     <td>{resource.publication_status}</td>
+                                    <td>
+                                        {resource.latest_version ? <div className={styles.versionSummary}>
+                                            <Link className={styles.link} to={`/library/${encodeURIComponent(resource.id)}/versions`}
+                                                title={resource.latest_version.source_version_id ? `Nguồn: ${resource.latest_version.source_version_id}` : undefined}>
+                                                Phiên bản {resource.latest_version.version_number}
+                                            </Link>
+                                            <span className={resource.latest_version.lifecycle_status === 'REJECTED' || resource.latest_version.processing_status.includes('FAILED') ? styles.failed
+                                                : resource.latest_version.processing_status === 'CONTENT_READY' ? styles.ready : styles.pending}>
+                                                {resource.latest_version.lifecycle_status === 'REJECTED' ? 'Bị từ chối' : ({
+                                                    NOT_STARTED: 'Chưa xử lý', OCR_PENDING: 'Đang trích xuất', OCR_FAILED: 'Lỗi trích xuất',
+                                                    FINALIZING: 'Đang hoàn thiện', FINALIZATION_PENDING: 'Chờ hoàn thiện',
+                                                    FINALIZATION_FAILED: 'Lỗi hoàn thiện', CONTENT_READY: 'Đã xử lý',
+                                                }[resource.latest_version.processing_status] || 'Chưa rõ trạng thái')}
+                                            </span>
+                                            <span className={styles.versionTime}>{resource.latest_version.source_version_id ? 'Tiếp nhận' : 'Tạo'}: {new Date(resource.latest_version.created_at).toLocaleString('vi-VN')}</span>
+                                        </div> : <span className={styles.versionTime}>Chưa có phiên bản</span>}
+                                    </td>
                                     <td>
                                         {new Date(resource.updated_at).toLocaleDateString('vi-VN')}
                                     </td>
@@ -208,7 +237,7 @@ export function LibraryListPage() {
                             ))
                         ) : (
                             <tr>
-                                <td colSpan={6} className={styles.message}>
+                                <td colSpan={7} className={styles.message}>
                                     Không tìm thấy học liệu.
                                 </td>
                             </tr>

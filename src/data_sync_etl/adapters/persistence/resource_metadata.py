@@ -1,11 +1,49 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
-from data_sync_etl.db.models import MasterLearningResource, ResourceGradeLevel, ResourceSubject
+from data_sync_etl.db.models import (
+    EtlStageRun,
+    MasterLearningResource,
+    OcrJob,
+    ResourceGradeLevel,
+    ResourceSubject,
+    ResourceVersion,
+    SourceFileImport,
+)
 
 
 class ResourceMetadataRepositoryMixin:
+    def resource_version_summaries(self, resource_ids):
+        if not resource_ids:
+            return {}
+
+        def latest(model, partition, condition, order):
+            ranked = select(*model.__table__.columns,
+                func.row_number().over(partition_by=partition, order_by=order).label('position')
+                ).where(condition).subquery()
+            return [dict(row) for row in self.session.execute(
+                select(ranked).where(ranked.c.position == 1).order_by(ranked.c.created_at.desc(), ranked.c.id.desc())
+            ).mappings()]
+
+        versions = latest(ResourceVersion, ResourceVersion.resource_id, ResourceVersion.resource_id.in_(resource_ids),
+                          (ResourceVersion.version_number.desc(), ResourceVersion.created_at.desc(), ResourceVersion.id.desc()))
+        ids = [version['id'] for version in versions]
+        if not ids:
+            return {}
+        jobs = {row['resource_version_id']: row for row in latest(OcrJob, OcrJob.resource_version_id,
+            OcrJob.resource_version_id.in_(ids), (OcrJob.created_at.desc(), OcrJob.id.desc()))}
+        stages = latest(EtlStageRun, (EtlStageRun.resource_version_id, EtlStageRun.stage),
+                        EtlStageRun.resource_version_id.in_(ids), (EtlStageRun.created_at.desc(), EtlStageRun.id.desc()))
+        imports = {row['target_version_id']: row for row in latest(SourceFileImport, SourceFileImport.target_version_id,
+            SourceFileImport.target_version_id.in_(ids), (SourceFileImport.created_at.desc(), SourceFileImport.id.desc()))}
+        return {version['resource_id']: {
+            'id': version['id'], 'version_number': version['version_number'], 'created_at': version['created_at'],
+            'lifecycle_status': version['lifecycle_status'], 'job': jobs.get(version['id']),
+            'stages': [row for row in stages if row['resource_version_id'] == version['id']],
+            'source_version_id': imports.get(version['id'], {}).get('source_version_id'),
+        } for version in versions}
+
     def get_resource_for_update(self, resource_id):
         row = self.session.execute(
             select(MasterLearningResource)

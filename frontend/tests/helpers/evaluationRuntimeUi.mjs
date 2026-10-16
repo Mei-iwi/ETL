@@ -161,6 +161,16 @@ try {
     assert.equal(saved.status, 'COMPLETED')
     assert.equal(saved.queries.length, 1)
     assert.equal(saved.summary.bow.metrics['5'].precision.value, .2)
+    await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
+    await call('Page.navigate', { url: origin + '/library/list' })
+    await waitFor(() => evaluate("document.body.textContent.includes('Phiên bản 1') && document.body.textContent.includes('Đã xử lý')"))
+    assert.ok(await evaluate("document.body.textContent.includes('Phiên bản / xử lý')"))
+    await click('Tải lại')
+    await waitFor(() => evaluate("document.body.textContent.includes('Phiên bản 1') && document.body.textContent.includes('Đã xử lý')"))
+    await capture('library-versions-desktop')
+    await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+    assert.equal(await evaluate("document.querySelector('main').scrollWidth <= document.querySelector('main').clientWidth"), true)
+    await capture('library-versions-mobile')
     console.log(JSON.stringify({ ui: 'PASS', backend: 'isolated-real-application', methods: 3, queries: 1,
         manual_fixture: true, refresh: 'PASS', csv_bom: 'PASS', routes: 4, production_data_used: false }))
 } finally {

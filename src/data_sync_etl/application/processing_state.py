@@ -6,17 +6,21 @@ def projection_fingerprint(job_id: str, postprocess: dict) -> str:
 
 
 def processing_state(repo, job: dict) -> str:
+    stages = repo.find(
+        "etl_stage_runs",
+        {"resource_version_id": job["resource_version_id"]},
+        order=("-created_at", "-id"),
+    ) if job['status'] == 'COMPLETED' else []
+    return processing_state_from_stages(job, stages)
+
+
+def processing_state_from_stages(job: dict, stages: list[dict]) -> str:
     if job["status"] in ("FAILED", "COMPLETED_WITH_ERRORS"):
         return "OCR_FAILED"
     if job["status"] != "COMPLETED":
         return "OCR_PENDING"
     if job["failed_pages"] or job["completed_pages"] != job["total_pages"]:
         return "OCR_FAILED"
-    stages = repo.find(
-        "etl_stage_runs",
-        {"resource_version_id": job["resource_version_id"]},
-        order=("-created_at", "-id"),
-    )
     post = next((s for s in stages if s["stage"] == "POSTPROCESS"), None)
     projection = next((s for s in stages if s["stage"] == "MONGO_PROJECTION"), None)
     retry = next((s for s in stages if s["stage"] == "FINALIZATION_RETRY"), None)
