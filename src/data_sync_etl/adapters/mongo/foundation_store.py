@@ -138,7 +138,7 @@ class MongoMetadataStore:
             old = checked(model, raw).bson()
             extension = set(model.model_fields) - {'id', 'created_at', 'updated_at'}
             # An identity-only legacy doc has no source-owned metadata yet.
-            if any(key in old for key in extension) and old['updated_at'] > incoming['updated_at']:
+            if old['updated_at'] > incoming['updated_at']:
                 return 'STALE'
             changes = {key: value for key, value in incoming.items()
                        if key in extension and (key not in old or old[key] != value)}
@@ -181,6 +181,12 @@ class MongoMetadataStore:
             if self._get(collection, model, data["_id"]) is None:
                 raise
             return False
+        except OperationFailure as exc:
+            if exc.code == 121:
+                raise DomainError('MONGO_METADATA_DOCUMENT_INVALID') from None
+            raise
+        if result.upserted_id is None and self._get(collection, model, data['_id']) is None:
+            raise DomainError('MONGO_METADATA_CONCURRENT_CHANGE')
         return result.upserted_id is not None
 
     def ensure_user_identity(self, document: UserProfileDocument) -> bool:

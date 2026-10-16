@@ -33,10 +33,16 @@ def parser():
     project = commands.add_parser('project-master-mongo')
     project.add_argument('--stream', choices=['all', 'users', 'resources'], default='all')
     project.add_argument('--full', action='store_true', required=True,
-                         help='Shared mode validates read-only; separate legacy mode requires explicit opt-in')
+                         help='Full scan; shared validates by default, identity projection needs explicit opt-in')
+    project_action = project.add_mutually_exclusive_group()
+    project_action.add_argument('--dry-run', action='store_true', help='Read-only preview (default)')
+    project_action.add_argument('--apply', action='store_true', help='Explicitly apply configured Dev projection')
     metadata = commands.add_parser('sync-mongo-metadata', help='Shared metadata read-only check; separate source copy only when explicitly configured')
     metadata.add_argument('--stream', choices=['all', 'users', 'resources'], default='all')
     metadata.add_argument('--full', action='store_true', required=True)
+    metadata_action = metadata.add_mutually_exclusive_group()
+    metadata_action.add_argument('--dry-run', action='store_true', help='Read-only preview (default)')
+    metadata_action.add_argument('--apply', action='store_true', help='Apply separate-source copy in Dev only')
     ingest = commands.add_parser("ingest-resource")
     ingest.add_argument("--resource-id", required=True)
     ingest.add_argument("--bucket", required=True)
@@ -90,15 +96,18 @@ def demo_run(container, resource_id):
 
 
 def dispatch(container, args):
+    if (args.command in ('project-master-mongo', 'sync-mongo-metadata') and args.apply
+            and container.settings.app_environment not in ('development', 'test')):
+        raise DomainError('MONGO_METADATA_APPLY_REQUIRES_DEV')
     match args.command:
         case "sync-master":
             return container.sync.run(args.stream, args.full)
         case 'reconcile-master':
             return container.reconcile_master.run(args.stream, apply=args.apply, fingerprint=args.fingerprint)
         case 'project-master-mongo':
-            return container.master_metadata_projection.run(args.stream)
+            return container.master_metadata_projection.run(args.stream, dry_run=not args.apply)
         case 'sync-mongo-metadata':
-            return container.mongo_metadata_sync.run(args.stream)
+            return container.mongo_metadata_sync.run(args.stream, dry_run=not args.apply)
         case "ingest-resource":
             return container.ingestion.run(
                 args.resource_id, args.bucket, args.object_key, args.uploaded_by
@@ -144,6 +153,8 @@ def main():
         code = str(exc).split(':', 1)[0] if isinstance(exc, DomainError) else None
         if code in {'SHARED_MONGO_CONFLICT_SOURCE_ENABLED', 'SHARED_MONGO_CONFLICT_IDENTITY_BOOTSTRAP'}:
             print(f'{code}: shared mode requires SOURCE_MONGO_ENABLED=false and MASTER_MONGO_IDENTITY_BOOTSTRAP=false.', file=sys.stderr)
+        elif code in {'MONGO_IDENTITY_PROJECTION_REQUIRES_SHARED_DEV_POSTGRES', 'MONGO_METADATA_APPLY_REQUIRES_DEV'}:
+            print(f'{code}: verify APP_ENVIRONMENT=development/test; identity projection requires shared mode and PostgreSQL SOURCE.', file=sys.stderr)
         else:
             print(
                 "ETL operation failed. Check configuration and stage status; sensitive details omitted.",

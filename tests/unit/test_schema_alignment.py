@@ -67,7 +67,8 @@ def test_metadata_keyset_exact_coverage_at_page_boundaries(container, count):
             rows = repo.master_metadata_page('resources', after, 100)
         if not rows:
             break
-        assert all(set(row) == {'id', 'mongo_id', 'created_at', 'updated_at'} for row in rows)
+        assert all(set(row) == {'id', 'mongo_id', 'created_at', 'updated_at', 'source_origin',
+                                'is_active', 'deleted_at', 'publication_status'} for row in rows)
         seen.extend(row['id'] for row in rows)
         after = rows[-1]['id']
     assert seen == ids and len(set(seen)) == count

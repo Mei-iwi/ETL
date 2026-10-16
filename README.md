@@ -308,8 +308,12 @@ Một số lệnh vận hành:
 etl --help
 etl sync-master --stream all --incremental
 etl reconcile-master --stream all --dry-run
+etl sync-mongo-metadata --stream all --full --dry-run
 python -m data_sync_etl.adapters.mongo.schema --inventory
 ```
+
+Metadata Master → MongoDB: xem [quyền sở hữu, chế độ opt-in và check/dry-run/apply](docs/master-mongo-metadata.md).
+Mặc định shared chỉ đối chiếu; identity projection cần bật riêng, không tự tạo description/tags/bio.
 
 ## 8. Lỗi thường gặp
 
