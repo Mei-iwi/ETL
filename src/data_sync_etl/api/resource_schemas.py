@@ -45,6 +45,7 @@ class GradeLevelBrief(BaseModel):
 
 class ResourceDetailResponse(BaseModel):
     id: str
+    source_origin: str | None = None
     title: str | None
     provider_id: str | None
     provider_name: str | None

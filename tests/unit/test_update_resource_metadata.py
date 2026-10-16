@@ -14,7 +14,7 @@ from data_sync_etl.main import create_app
 
 class Repo:
     def __init__(self):
-        self.row={"id":"r1","title":"Old","resource_type_code":"HANDOUT","resource_type_name_vi":"Tài liệu",
+        self.row={"id":"r1","source_origin":"LOCAL","title":"Old","resource_type_code":"HANDOUT","resource_type_name_vi":"Tài liệu",
         "provider_id":"p1","provider_name":"Demo","provider_type":"SCHOOL","publication_status":"DRAFT",
         "created_by":None,"updated_at":None}
         self.subject=None
@@ -60,6 +60,7 @@ def test_patch_metadata_route(container):
             "resource_type_code": "HANDOUT", "resource_type_name_vi": "Tai lieu",
             "resource_type_is_active": True, "created_by": None,
             "title": "Old title", "publication_status": "DRAFT", "is_active": True,
+            "source_origin": "LOCAL",
         })
         repo.insert("resource_subjects", {
             "resource_id": "resource-patch", "subject_id": "subject-1", "is_primary": True,

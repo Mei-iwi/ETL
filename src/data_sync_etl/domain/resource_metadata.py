@@ -3,6 +3,22 @@ from dataclasses import dataclass, field
 from data_sync_etl.domain.core import DomainError
 
 
+class ResourceMetadataOwnershipError(DomainError):
+    def __init__(self, source_origin):
+        if source_origin == 'POSTGRESQL':
+            self.code = 'RESOURCE_SOURCE_OWNED_READ_ONLY'
+            message = 'Học liệu được quản lý từ SOURCE. Vui lòng sửa tại nguồn và đồng bộ lại.'
+        else:
+            self.code = 'RESOURCE_OWNERSHIP_UNVERIFIED'
+            message = 'Chưa xác minh nguồn quản lý học liệu. Không thể cập nhật metadata tại Master.'
+        super().__init__(message)
+
+
+def assert_resource_metadata_editable(resource):
+    if resource.get('source_origin') != 'LOCAL':
+        raise ResourceMetadataOwnershipError(resource.get('source_origin'))
+
+
 @dataclass(frozen=True)
 class UpdateResourceMetadataCommand:
     resource_id: str
