@@ -3,6 +3,15 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class ResourceVersionSummary(BaseModel):
+    id: str
+    version_number: int
+    lifecycle_status: str
+    processing_status: str
+    created_at: datetime
+    source_version_id: str | None = None
+
+
 class ResourceListItem(BaseModel):
     id: str
     title: str | None
@@ -11,6 +20,7 @@ class ResourceListItem(BaseModel):
     resource_type_name_vi: str
     publication_status: str
     updated_at: datetime
+    latest_version: ResourceVersionSummary | None = None
 
 
 class ResourcePagination(BaseModel):

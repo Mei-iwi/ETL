@@ -1,3 +1,4 @@
+from data_sync_etl.application.processing_state import processing_state_from_stages
 from data_sync_etl.ports.repositories import UnitOfWork
 
 
@@ -27,6 +28,14 @@ class ListResources:
                 offset = offset,
                 limit = size,
             )
+            summaries = repo.resource_version_summaries([row['id'] for row in rows])
+
+        def latest_version(resource_id):
+            summary = summaries.get(resource_id)
+            if summary is None:
+                return None
+            return {key: summary[key] for key in ('id', 'version_number', 'created_at', 'lifecycle_status', 'source_version_id')} | {
+                'processing_status': processing_state_from_stages(summary['job'], summary['stages']) if summary['job'] else 'NOT_STARTED'}
 
         items = [
             {
@@ -37,6 +46,7 @@ class ListResources:
                 'resource_type_name_vi': row['resource_type_name_vi'],
                 'publication_status': row['publication_status'],
                 'updated_at': row['updated_at'],
+                'latest_version': latest_version(row['id']),
             }
             for row in rows
         ]

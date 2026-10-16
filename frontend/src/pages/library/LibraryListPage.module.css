@@ -158,6 +158,12 @@
     line-height: 1.5;
 }
 
+.versionSummary { display: grid; gap: 5px; min-width: 155px; }
+.versionTime { color: #64748b; font-size: 12px; line-height: 1.5; }
+.ready { color: #15803d; }
+.pending { color: #a16207; }
+.failed { color: #b91c1c; }
+
 .link {
     display: inline-flex;
     align-items: center;
