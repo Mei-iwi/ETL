@@ -21,6 +21,7 @@ from data_sync_etl.domain.format_validation import (
     FormatValidatorRegistry,
     ProcessingFormatError,
 )
+from data_sync_etl.logging import event
 from data_sync_etl.ports.repositories import UnitOfWork
 from data_sync_etl.ports.source_files import ReadOnlySourceFilePort, ReadOnlySourceVersionPort
 
@@ -42,18 +43,18 @@ class SourceFileImportService:
         self.validator = self.formats.find_validator('source.pdf')
 
     def availability(self):
-        error = None
-        if not hasattr(self.source, "version_page"):
-            error = "BLOCKED_SOURCE_DATABASE"
-        else:
-            try:
-                self.files.check()
-            except SourceFileError as exc:
-                error = exc.code
+        storage_error = None
+        try:
+            self.files.check()
+        except SourceFileError as exc:
+            storage_error = exc.code
+        error = storage_error if hasattr(self.source, 'version_page') else 'BLOCKED_SOURCE_DATABASE'
         with self.uow() as repo:
             worker = repo.get("sync_checkpoints", "source-file-worker")
         healthy = bool(worker and worker["last_id"] and worker["updated_at"] > now() - timedelta(seconds=30))
-        return {"file_sync_supported": error is None, "file_sync_error": error,
+        backends = self.files.readiness() if hasattr(self.files, 'readiness') else {
+            'local': {'status': 'LOCAL_READY' if storage_error is None else 'LOCAL_UNAVAILABLE', 'error_code': storage_error}}
+        return {"file_sync_supported": error is None, "file_sync_error": error, 'file_backends': backends,
                 "file_worker_healthy": healthy}
 
     def discover_once(self):
@@ -183,6 +184,7 @@ class SourceFileImportService:
                     "processing_retry_requested": False,
                     "claim_token": None, "lease_expires_at": None, "next_retry_at": None, "updated_at": now(),
                 })
+            self._report(claimed, 'PROCESSING')
         except SourceImportConflict:
             return
         except SourceFileError as exc:
@@ -279,6 +281,16 @@ class SourceFileImportService:
                 "next_retry_at": now() + timedelta(seconds=delay + random.uniform(0, delay / 4))
                 if transient and not exhausted else None, "updated_at": now(),
             })
+        self._report(claimed, 'FAILED', code)
+
+    def _report(self, row, action, code=None):
+        try:
+            provider = self.files.provider(row['storage_bucket']) if hasattr(self.files, 'provider') else 'local'
+        except SourceFileError:
+            provider = 'unmapped'
+        event(stage='source_import', action=action, coverage={
+            'provider': provider, 'error_code': code,
+            'reference': sha256(row['source_version_id'].encode()).hexdigest()[:12]})
 
     def _processing(self, repo, row):
         if not row["processing_job_id"]:
@@ -397,6 +409,8 @@ class SourceFileImportService:
 
     def precheck(self, mongo_client=None):
         result = dict.fromkeys(["DB_SOURCE", "FILE_ROOT", "FILE_READ", "HASH", "DEST_STORAGE", "OCR_WORKER", "MONGO"], "BLOCKED")
+        if hasattr(self.files, 'readiness'):
+            result['FILE_BACKENDS'] = self.files.readiness(probe=True)
         result["DEST_STORAGE"] = "PASS" if os.access(self.storage.root, os.W_OK) else "BLOCKED"
         try:
             self.files.check()

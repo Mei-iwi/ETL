@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SyncStream = Literal["all", "resources", "users", "grades", "subjects"]
 
@@ -37,10 +37,16 @@ class MasterSyncAutoStream(BaseModel):
     sync_mode: Literal["INCREMENTAL", "FULL"]
 
 
+class SourceBackendStatus(BaseModel):
+    status: str
+    error_code: str | None = None
+
+
 class MasterSyncStatusResponse(BaseModel):
     file_sync_supported: bool = False
     file_sync_error: str | None = "BLOCKED_SOURCE_STORAGE"
     file_worker_healthy: bool = False
+    file_backends: dict[str, SourceBackendStatus] = Field(default_factory=dict)
     auto_supported: bool
     auto_enabled: bool
     interval_seconds: int
@@ -93,6 +99,7 @@ class SourceSyncFilesResponse(BaseModel):
     file_sync_supported: bool = False
     file_sync_error: str | None = "BLOCKED_SOURCE_STORAGE"
     file_worker_healthy: bool = False
+    file_backends: dict[str, SourceBackendStatus] = Field(default_factory=dict)
 
 
 class SourceFileRetryResponse(BaseModel):

@@ -1,43 +1,39 @@
 # ETL — Đồng bộ và xử lý học liệu
 
-Đồng bộ PostgreSQL nguồn → PostgreSQL Master → nhập file → trích xuất/OCR → chuẩn hóa Content Units → ContentBag và vector embedding.
+Đồng bộ metadata PostgreSQL nguồn → PostgreSQL Master, nhập file Local/Google Drive → trích xuất/OCR → chuẩn hóa → phân đoạn, ContentBag và embedding → tìm kiếm BoW/Vector/Hybrid → thực nghiệm đánh giá.
 
-Hỗ trợ **PDF, DOCX, XLSX, TXT, CSV, PPTX, PNG, JPG, JPEG**. Không hỗ trợ MP3/MP4; chưa triển khai tìm kiếm hoặc đánh giá.
+Hỗ trợ **PDF, DOCX, XLSX, TXT, CSV, PPTX, PNG, JPG, JPEG**; không hỗ trợ MP3/MP4.
 
-Hướng dẫn dưới đây dành cho **Development trên Windows, dùng Git Bash**: database chạy Docker; Backend, Frontend và worker chạy trên máy. Thực hiện lần lượt mục 1–6 khi cài mới; những lần sau dùng mục 7.
+Hướng dẫn dành cho **Windows + Git Bash, môi trường Development**. Docker chạy database; API, giao diện và worker chạy trên máy. Cài mới theo mục 1–7; lần sau xem mục 9. Google Drive là tùy chọn, không cần nếu chỉ dùng Local.
 
-## 1. Chuẩn bị và cài dependencies
+## 1. Cài môi trường và dependencies
 
-Cần Git, Python 3.12 trở lên, Node.js 22.12 trở lên và Docker Desktop có Docker Compose. Mở Docker Desktop trước khi chạy database.
-
-Mở Git Bash tại thư mục gốc repository, nơi có `pyproject.toml` và `docker-compose.yml`:
+Cài Git, Python **3.12+**, Node.js **22.12+** và Docker Desktop. Mở Docker Desktop, sau đó mở Git Bash tại thư mục repository có `pyproject.toml`.
 
 ```bash
 python --version
 node --version
 docker compose version
 
+# Chỉ tạo môi trường ở lần cài đầu
 python -m venv .venv
 source .venv/Scripts/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev,embeddings]"
+python -X utf8 -m pip install --upgrade pip
+python -X utf8 -m pip install -e ".[dev,embeddings]"
 npm.cmd --prefix frontend ci
 
+# Không ghi đè cấu hình cá nhân đã có
 test -f .env || cp .env.example .env
 ```
 
-Nếu đã có `.venv`, chỉ kích hoạt và cập nhật dependencies; không cần tạo lại.
-Extra `embeddings` cài runtime Sentence Transformers/PyTorch, **không tự tải model**.
-Không ghi đè `.env` cũ hoặc commit mật khẩu/model vào Git.
-
-Nếu dùng PowerShell, kích hoạt bằng `.\.venv\Scripts\Activate.ps1`. Các lệnh nhiều dòng `python - <<'PY'` bên dưới phải chạy trong **Git Bash**, không phải PowerShell.
+PowerShell kích hoạt bằng `.\.venv\Scripts\Activate.ps1`; các đoạn `python - <<'PY'` bên dưới phải chạy bằng **Git Bash**. Extra `embeddings` cài runtime, chưa tải model.
 
 ## 2. Cấu hình `.env`
 
-Mở `.env`, giữ các nhóm có sẵn và cập nhật những giá trị dưới đây. Thay toàn bộ `your-…-password` bằng mật khẩu riêng; đây không phải mật khẩu có sẵn trong hệ thống.
+Sửa các giá trị sau trong `.env`; giữ các nhóm còn lại theo `.env.example`. Đường dẫn chỉ là ví dụ, thay theo máy của bạn.
 
 ```dotenv
-# API local; không thay thế cơ chế xác thực
+APP_ENVIRONMENT=development
 ADMIN_ENABLED=true
 
 # PostgreSQL Master
@@ -54,53 +50,90 @@ SOURCE_POSTGRES_PASSWORD=your-source-owner-password
 SOURCE_MIGRATION_DATABASE_URL=postgresql+psycopg://etl_source_admin:your-source-owner-password@127.0.0.1:5433/etl_source
 SOURCE_DATABASE_URL=postgresql+psycopg://etl_source_reader:your-source-reader-password@127.0.0.1:5433/etl_source
 
-# Kho file nguồn và kho ETL phải tách biệt
+# Kho file nguồn và kho ETL tách biệt
 SOURCE_FILE_STORAGE_ROOT=D:/SourceLearningFiles
 STORAGE_ROOT=D:/ETLStorage
 SOURCE_FILE_ALLOWED_STATUSES=["APPROVED"]
 
-# Một database MongoDB dùng chung
+# MongoDB dùng chung, đúng 5 collection
 MONGO_URI=mongodb://127.0.0.1:27018
 MONGO_DATABASE=etl_content
 MONGO_METADATA_MODE=shared
 SOURCE_MONGO_ENABLED=false
 MASTER_MONGO_IDENTITY_BOOTSTRAP=false
 
-# Chỉ bật auto sau khi kiểm tra schema và model thành công
+# Chỉ bật sau khi kiểm tra schema/model
 INDEX_AUTO_ENABLED=false
 INDEX_EMBEDDING_DIMENSION=384
-```
 
-Tạo hai thư mục file nếu chưa có:
+# Local không cần Drive
+SOURCE_DRIVE_ENABLED=false
+SOURCE_DRIVE_BUCKETS={}
+SEARCH_INTERNAL_DEV_ENABLED=false
+```
 
 ```bash
 mkdir -p /d/SourceLearningFiles /d/ETLStorage
 ```
 
-File nguồn được đọc tại `<SOURCE_FILE_STORAGE_ROOT>/<storage_bucket>/<storage_object_key>`.
-Hai kho không được trùng hoặc nằm bên trong nhau. Đổi đường dẫn mẫu nếu máy dùng ổ đĩa khác.
+- Thay cả ba mật khẩu mẫu; mật khẩu trong URL phải khớp role tương ứng. Dùng mật khẩu dài gồm chữ/số/gạch ngang để dễ cấu hình; ký tự đặc biệt trong URL cần percent-encode và lưu ý nội suy của Compose.
+- Database đã tồn tại: sửa `.env` **không đổi mật khẩu PostgreSQL**. Dùng thông tin thực tế, không xóa volume để đặt lại.
+- File Local được đọc từ `<SOURCE_FILE_STORAGE_ROOT>/<storage_bucket>/<storage_object_key>`. Hai kho nguồn/ETL không được trùng hoặc lồng nhau.
+- `ADMIN_ENABLED` không thay thế xác thực quản trị; chỉ bật trên máy Dev được kiểm soát. Không đưa `.env`, credential, token, model hoặc học liệu vào Git.
 
-Lưu ý mật khẩu:
+## 3. Khởi tạo database
 
-- `POSTGRES_PASSWORD` phải khớp mật khẩu trong `DATABASE_URL`; tương tự với tài khoản owner nguồn.
-- Với cài mới theo Compose, nên dùng mật khẩu dài gồm chữ, số và dấu gạch ngang để tránh ký tự cần mã hóa trong URL. Mật khẩu có ký tự đặc biệt cần xử lý URL phù hợp cả ở cấu hình Compose.
-- Database đã tồn tại: sửa `.env` **không đổi mật khẩu role PostgreSQL**. Dùng tài khoản/mật khẩu thực tế; không xóa volume để đặt lại.
+Chỉ chạy trên database Dev đã xác nhận. Với database có dữ liệu, sao lưu và duyệt migration trước khi cập nhật.
 
-## 3. Cài Tesseract OCR
+```bash
+docker compose up --build -d
+docker compose ps -a
+docker compose logs master-migrate source-migrate mongo-init
+python -m data_sync_etl.adapters.mongo.schema --check
+```
 
-Tesseract dùng cho ảnh và PDF scan. Đây là phần mềm cài riêng, không được cài bằng `pip`.
+| Database | Địa chỉ trên máy |
+| --- | --- |
+| PostgreSQL Master | `127.0.0.1:5432/etl` |
+| PostgreSQL nguồn | `127.0.0.1:5433/etl_source` |
+| MongoDB | `127.0.0.1:27018/etl_content` |
 
-1. Mở [hướng dẫn Tesseract chính thức](https://tesseract-ocr.github.io/tessdoc/Installation.html), chọn bản Windows từ liên kết UB Mannheim.
-2. Cài vào `C:\Program Files\Tesseract-OCR` hoặc ghi lại đường dẫn đã chọn.
-3. Cài dữ liệu ngôn ngữ **English** và **Vietnamese**. Nếu thiếu, tải `eng.traineddata`, `vie.traineddata` từ [tessdata_fast chính thức](https://github.com/tesseract-ocr/tessdata_fast), chép vào thư mục `tessdata` của bản cài. Ghi vào Program Files có thể cần quyền quản trị.
-4. Kiểm tra trong Git Bash:
+Ba tiến trình khởi tạo `master-migrate`, `source-migrate`, `mongo-init` cần kết thúc mã **0**. MongoDB cần `schema_ready=true`, đủ `users`, `learning_resources`, `ocr_pages`, `mongo_content_units`, `content_bags` và 6 index nghiệp vụ; embedding 384 chiều.
+
+Database mới trống được tạo schema tự động, **không tự có học liệu mẫu**. Database cũ sai schema sẽ bị chặn, không tự sửa. Không chạy `--apply` khi chưa backup/phê duyệt; không dùng `docker compose down -v` để chữa lỗi.
+
+### Tạo reader nguồn — một lần khi cài mới
+
+Sau khi `source-migrate` thành công, chạy với tên database/user như mục 2:
+
+```bash
+docker compose exec -T source-postgres psql -v ON_ERROR_STOP=1 -U etl_source_admin -d etl_source < scripts/sql/source_reader.sql
+docker compose exec source-postgres psql -U etl_source_admin -d etl_source
+```
+
+Trong `psql`, nhập:
+
+```text
+\password etl_source_reader
+\q
+```
+
+Nhập mật khẩu reader theo yêu cầu, khớp `SOURCE_DATABASE_URL`. Nếu đổi tên database, đối chiếu cả `GRANT CONNECT` trong script.
+
+## 4. Cài Tesseract OCR
+
+Cần cho ảnh và PDF scan; `pip install` không cài phần mềm này.
+
+1. Mở [hướng dẫn Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html), theo liên kết bản Windows của UB Mannheim và cài đặt.
+2. Chọn dữ liệu ngôn ngữ **English + Vietnamese**. Nếu thiếu, tải `eng.traineddata`, `vie.traineddata` từ [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast), chép vào thư mục `tessdata` của bản cài.
+3. Kiểm tra đường dẫn thực tế, ví dụ:
 
 ```bash
 "/c/Program Files/Tesseract-OCR/tesseract.exe" --version
 "/c/Program Files/Tesseract-OCR/tesseract.exe" --list-langs
 ```
 
-Danh sách phải có cả `eng` và `vie`. Thêm/cập nhật trong `.env`:
+Danh sách cần có `eng` và `vie`. Cấu hình `.env`:
 
 ```dotenv
 OCR_ENGINE=tesseract
@@ -109,32 +142,27 @@ TESSERACT_LANGUAGES=vie+eng
 OCR_TIMEOUT_SECONDS=60
 ```
 
-Kiểm tra đúng cấu hình mà Backend/worker sẽ dùng:
+Kiểm tra runtime theo cấu hình Backend:
 
 ```bash
 python - <<'PY'
 from data_sync_etl.config import Settings
 from data_sync_etl.adapters.ocr.engines import TesseractOCREngine
-
 s = Settings()
-TesseractOCREngine(
-    s.tesseract_path, s.tesseract_languages, s.ocr_timeout_seconds
-).check_runtime()
-print("PASS: Tesseract và dữ liệu ngôn ngữ đã sẵn sàng")
+TesseractOCREngine(s.tesseract_path, s.tesseract_languages, s.ocr_timeout_seconds).check_runtime()
+print("PASS: Tesseract va ngon ngu da san sang")
 PY
 ```
 
-Nếu chỉ dùng `OCR_ENGINE=native`, hệ thống đọc text có sẵn nhưng không đáp ứng OCR ảnh/PDF scan. Không dùng `fake` cho dữ liệu thật.
+`OCR_ENGINE=native` chỉ đọc text có sẵn, không OCR ảnh/PDF scan. Không dùng `fake` cho dữ liệu thật.
 
-## 4. Tải model embedding local
+## 5. Tải và cấu hình model embedding
 
-Model dùng: [sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2), vector **384 chiều**, chạy CPU trong adapter hiện tại. Model embedding phục vụ chỉ mục, không thay thế Tesseract OCR.
+Dùng [paraphrase-multilingual-MiniLM-L12-v2](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2), hỗ trợ đa ngôn ngữ, **384 chiều**, chạy CPU. Model dùng cho chỉ mục/tìm kiếm, không thay thế Tesseract.
 
-### 4.1. Tải model một lần
+### Tải một lần, lưu ngoài repository
 
-Cần Internet ở bước tải. Chọn thư mục ngoài repository, không dùng chung với một model khác. Nếu đã có đầy đủ đúng model/revision, bỏ qua bước tải.
-
-Chạy trong Git Bash đã kích hoạt `.venv`:
+Chạy trong Git Bash đã kích hoạt `.venv`, có Internet. Nếu đã có đúng model/revision thì bỏ qua bước tải.
 
 ```bash
 unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE
@@ -145,23 +173,19 @@ from huggingface_hub import snapshot_download
 model_id = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 revision = "e8f8c211226b894fcb81acc59f3b34ba3efd5f42"
 target = Path("D:/Models/paraphrase-multilingual-MiniLM-L12-v2")
-
 snapshot_download(
-    repo_id=model_id,
-    revision=revision,
-    local_dir=str(target),
+    repo_id=model_id, revision=revision, local_dir=str(target),
     allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model"],
     ignore_patterns=["onnx/*", "openvino/*"],
 )
 (target / "etl-model-revision.txt").write_text(revision + "\n", encoding="utf-8")
-print("Đã tải model:", target)
+print("Da tai model:", target)
 PY
 ```
 
-Giữ nguyên các file cấu hình/tokenizer, trọng số `.safetensors` và thư mục module như `1_Pooling`. Không chỉ tải riêng file trọng số.
-Nếu tải gián đoạn, chạy lại cùng lệnh để tiếp tục. Cách tải tham khảo: [Hugging Face Hub](https://huggingface.co/docs/huggingface_hub/guides/download).
+Giữ đủ tokenizer, trọng số và các module như `1_Pooling`. Tải gián đoạn có thể chạy lại cùng lệnh. Không dùng chung thư mục với model khác.
 
-### 4.2. Khai báo model trong `.env`
+### Khai báo trong `.env` và kiểm tra
 
 ```dotenv
 INDEX_EMBEDDING_MODEL_PATH=D:/Models/paraphrase-multilingual-MiniLM-L12-v2
@@ -170,127 +194,202 @@ INDEX_EMBEDDING_MODEL_VERSION=e8f8c211226b894fcb81acc59f3b34ba3efd5f42
 INDEX_EMBEDDING_DIMENSION=384
 ```
 
-`INDEX_EMBEDDING_MODEL_PATH` phải trỏ đến thư mục chứa `modules.json`.
-`INDEX_EMBEDDING_MODEL_VERSION` phải khớp nội dung `etl-model-revision.txt` do bước tải tạo ra.
-Không sửa số chiều hoặc chỉ ghi một revision tùy ý để bỏ qua kiểm tra.
-Biến legacy `VECTOR_DIMENSION` không quyết định số chiều ContentBag.
-
-### 4.3. Kiểm tra embedding tiếng Việt, không dùng mạng
+Đường dẫn phải chứa `modules.json`; version phải khớp manifest `etl-model-revision.txt`. Không tự đổi version/dimension để bỏ kiểm tra. Biến cũ `VECTOR_DIMENSION` không quyết định dimension ContentBag.
 
 ```bash
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python - <<'PY'
 import math
 from data_sync_etl.config import Settings
 from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
-
 s = Settings()
 model = LocalSentenceEmbedding(
-    s.index_embedding_model_path,
-    s.index_embedding_model_id,
-    s.index_embedding_model_version,
-    s.index_embedding_dimension,
+    s.index_embedding_model_path, s.index_embedding_model_id,
+    s.index_embedding_model_version, s.index_embedding_dimension,
 )
-vector = model.embed("Học liệu tiếng Việt về phân số và phép tính.")
+vector = model.embed("Học liệu tiếng Việt về phân số.")
 assert len(vector) == s.index_embedding_dimension == 384
-assert all(math.isfinite(value) for value in vector)
-assert any(value != 0 for value in vector)
-print("PASS: embedding tiếng Việt có 384 chiều")
+assert all(math.isfinite(value) for value in vector) and any(vector)
+print("PASS: embedding tieng Viet 384 chieu")
 PY
 ```
 
-Lần nạp đầu có thể lâu hơn. Backend không tự tải model; worker sử dụng model local. Không cần GPU theo cấu hình này.
+Backend/worker dùng model local, không tự tải model khi chạy. Lần nạp đầu có thể lâu hơn.
 
-## 5. Khởi tạo database
+## 6. Google Drive — dành cho người mới pull code
 
-Các lệnh mục này dành cho database **Dev đã xác nhận đúng đích**; Compose có chạy migration PostgreSQL. Với database đang có dữ liệu, sao lưu và duyệt thay đổi trước.
+**Pull code không mang theo quyền Drive, OAuth token hoặc cấu hình cá nhân.** Mỗi người tự đăng nhập bằng tài khoản có quyền đọc thư mục; không dùng token của người khác. Chỉ dùng Local thì bỏ qua mục này.
 
-```bash
-docker compose up --build -d
-docker compose ps -a
-docker compose logs master-migrate source-migrate mongo-init
-python -m data_sync_etl.adapters.mongo.schema --check
-```
+### 6.1. Chuẩn bị Google Cloud và thư mục Drive
 
-Kết quả cần có:
+1. Tạo/chọn project trong [Google Cloud Console](https://console.cloud.google.com/), bật **Google Drive API**.
+2. Cấu hình **Google Auth platform**: Branding, Audience và Data Access. Với tài khoản cá nhân, dùng External; khi ứng dụng ở Testing, thêm email đăng nhập vào **Test users**.
+3. Chỉ yêu cầu scope `https://www.googleapis.com/auth/drive.readonly`: đọc metadata và tải file, không sửa/xóa. Scope này có thể đọc các file tài khoản được phép truy cập; ETL giới hạn thêm bằng folder mapping, không phải quyền OAuth giới hạn riêng thư mục.
+4. Trong **Clients**, tạo OAuth client loại **Desktop app**, tải JSON và lưu ngoài Git, ví dụ `D:/ETL_Secrets/desktop-client.json`.
+5. Nhờ chủ thư mục Drive chia sẻ quyền **Reader** cho email của bạn. Nếu dùng OAuth project của nhóm, chủ project cũng cần thêm email vào Test users; chỉ chia sẻ client JSON qua kênh riêng được phép, không chia sẻ token.
 
-- PostgreSQL Master `127.0.0.1:5432/etl`, PostgreSQL nguồn `127.0.0.1:5433/etl_source`, MongoDB `127.0.0.1:27018/etl_content`.
-- `master-migrate`, `source-migrate`, `mongo-init` kết thúc với mã **0**.
-- Schema MongoDB `schema_ready=true`, đủ 5 collection và 6 index nghiệp vụ; ContentBag 384 chiều.
+Tham khảo [hướng dẫn OAuth Desktop của Google](https://developers.google.com/workspace/drive/api/quickstart/python). Không cần tạo API key hoặc bật chia sẻ công khai thư mục.
 
-Năm collection: `users`, `learning_resources`, `ocr_pages`, `mongo_content_units`, `content_bags`. Chunk preview không lưu thành collection riêng. Metadata `users`/`learning_resources` được đối chiếu tại chỗ, không tự sao chép toàn bộ bản ghi Master sang MongoDB.
+### 6.2. Cài extra và đăng nhập OAuth
 
-**Database MongoDB mới trống:** `mongo-init` tự tạo collection, validator và index.
-**Database cũ thiếu/sai schema:** initializer dừng, không tự sửa dữ liệu. Dùng `--inventory` và `--check` để chẩn đoán; cần backup, kiểm chứng restore và phê duyệt riêng trước khi dùng `--apply` hoặc migration tương ứng. Không dùng `docker compose down -v` để chữa lỗi schema.
-
-### Tạo tài khoản chỉ đọc nguồn — cài mới một lần
-
-Sau khi `source-migrate` thành công, với tên database/user mặc định ở mục 2:
+Dừng API/worker trước khi cập nhật dependencies. Chạy từ repository, đã kích hoạt `.venv`:
 
 ```bash
-docker compose exec -T source-postgres psql -v ON_ERROR_STOP=1 -U etl_source_admin -d etl_source < scripts/sql/source_reader.sql
-docker compose exec source-postgres psql -U etl_source_admin -d etl_source
+python -X utf8 -m pip install -e ".[dev,embeddings,google-drive]"
+mkdir -p /d/ETL_Secrets
+python scripts/authorize_drive_readonly.py \
+  --client-file "D:/ETL_Secrets/desktop-client.json" \
+  --token-file "D:/ETL_Secrets/drive-authorized-user.json"
 ```
 
-Trong màn hình `psql`, đặt mật khẩu reader rồi thoát:
+Tự đăng nhập và cấp quyền đọc trên trình duyệt. Chỉ tiếp tục khi terminal báo `OAUTH_SUCCESS`. Script tạo credential **authorized_user**, không in token và không ghi database. Đây là đăng nhập Google cho ETL, không phải đăng nhập WebApp.
 
-```text
-\password etl_source_reader
-\q
+Token đích phải là file **chưa tồn tại**, thư mục cha đã có và nằm ngoài repository. Nếu cần xác thực lại, chọn tên token mới rồi cập nhật đường dẫn; không ghi đè hoặc gửi nội dung JSON qua chat/Git/log.
+
+### 6.3. Khai báo folder và kiểm tra chỉ đọc
+
+Lấy `FOLDER_ID` từ link `https://drive.google.com/drive/folders/FOLDER_ID`, không lấy ID của một file. Sửa `.env`:
+
+```dotenv
+SOURCE_DRIVE_ENABLED=true
+SOURCE_DRIVE_AUTH_TYPE=authorized_user
+SOURCE_DRIVE_CREDENTIALS_FILE=D:/ETL_Secrets/drive-authorized-user.json
+SOURCE_DRIVE_BUCKETS={"COURSE_DRIVE":"YOUR_FOLDER_ID"}
 ```
 
-Nhập mật khẩu hai lần theo yêu cầu, dùng đúng giá trị đã khai báo trong `SOURCE_DATABASE_URL`.
-Nếu thay tên database, phải đối chiếu cả câu `GRANT CONNECT` trong script trước khi chạy.
-Database mới chưa có dữ liệu nghiệp vụ; bước khởi tạo không tự nạp học liệu mẫu.
+Ý nghĩa các biến Drive trong `.env`:
 
-## 6. Chạy Backend, Frontend và worker
+| Biến | Cách cấu hình |
+| --- | --- |
+| `SOURCE_DRIVE_ENABLED` | `true` để đọc Drive; `false` để tắt. |
+| `SOURCE_DRIVE_AUTH_TYPE` | `authorized_user` khi đăng nhập OAuth cá nhân theo mục 6.2. |
+| `SOURCE_DRIVE_CREDENTIALS_FILE` | Đường dẫn tuyệt đối tới token riêng trên máy, lưu ngoài repository. |
+| `SOURCE_DRIVE_BUCKETS` | JSON ánh xạ bucket nguồn sang folder ID, ví dụ `{"COURSE_DRIVE":"YOUR_FOLDER_ID"}`. |
 
-Mở **5 terminal riêng** tại thư mục gốc repository. Trong mỗi terminal Python, chạy `source .venv/Scripts/activate` trước. Giữ các terminal hoạt động trong lúc sử dụng.
+Drive hiện **chỉ là nguồn đọc**, chưa hỗ trợ lưu đầu ra lên Drive; file nhập vẫn lưu tại `STORAGE_ROOT`. Sau khi sửa `.env`, khởi động lại Backend và worker nhập file để nhận cấu hình mới.
 
-| Terminal | Lệnh | Vai trò |
-| --- | --- | --- |
-| Backend | `python -m uvicorn data_sync_etl.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers` | API |
-| Frontend | `npm.cmd --prefix frontend run dev -- --host 127.0.0.1 --strictPort` | Giao diện cổng 3000 |
-| Master Sync | `etl run-master-sync-worker --worker-id master-sync-1` | Đồng bộ metadata theo lịch/cấu hình bật tắt |
-| Nhập file | `etl run-source-file-worker --worker-id source-file-1` | Nhập file nguồn, đối soát và retry |
-| OCR/Index | `etl run-ocr-worker --worker-id ocr-1` | Trích xuất, chuẩn hóa và xử lý hàng đợi Index/Reindex |
+`SOURCE_DRIVE_CREDENTIALS_FILE` trỏ tới **token vừa tạo**, không phải Desktop client JSON. Giữ nguyên `SOURCE_FILE_STORAGE_ROOT` và `STORAGE_ROOT`; Local vẫn hoạt động song song.
 
-Docker Compose hiện **không chạy thay** 5 tiến trình trên và không cài Tesseract/model cho máy host.
+```bash
+python - <<'PY'
+from data_sync_etl.config import Settings
+from data_sync_etl.adapters.storage.source_google_drive import SourceGoogleDriveFileReader
+SourceGoogleDriveFileReader(Settings()).check()
+print("PASS: truy cap thu muc Drive chi doc")
+PY
+```
 
-Mở [giao diện](http://127.0.0.1:3000), [Swagger API](http://127.0.0.1:8000/docs), [Health](http://127.0.0.1:8000/health).
-Frontend đang proxy về cổng **8000**; không đổi riêng cổng Backend rồi tiếp tục dùng giao diện như cũ.
+Lệnh trên chỉ kiểm tra truy cập thư mục, chưa nhập file hoặc ghi PostgreSQL/MongoDB. API/worker cần chạy bằng tài khoản máy có quyền đọc token. Chỉ khởi động worker nhập file sau khi kiểm tra thành công.
 
-### Kiểm tra luồng sử dụng
+### 6.4. Điều kiện để đồng bộ file Drive
 
-1. Nếu dùng nguồn PostgreSQL, kiểm tra kho file và chạy Full lần đầu trong giao diện Đồng bộ dữ liệu nguồn hoặc terminal riêng:
-   ```bash
-   etl source-file-precheck
-   etl sync-master --stream all --full
-   ```
-2. Bật tự đồng bộ từng nhóm theo nhu cầu. Mặc định lịch đồng bộ là 300 giây, không phải realtime. File nguồn cần trạng thái được phép, mặc định `APPROVED`, cùng đường dẫn/hash hợp lệ.
-3. Thêm học liệu trên giao diện hoặc chờ worker nhập file nguồn. Đợi xử lý đạt `CONTENT_READY`.
-4. Trong **Phân đoạn và chỉ mục**, chọn phiên bản, xem phân đoạn và nhấn **Xây dựng chỉ mục**. Khi cần tính lại dùng **Tái lập chỉ mục**; không phải chạy lại OCR.
-5. Đợi `PENDING → RUNNING → READY`; kiểm tra ContentBag và vector sẵn sàng. Đồng bộ metadata thành công không đồng nghĩa OCR hay Index đã hoàn tất.
-6. Sau khi schema/model và luồng thủ công đã PASS, đổi `INDEX_AUTO_ENABLED=true`, khởi động lại Backend và OCR worker. Thử bằng học liệu mới; không tự backfill hàng loạt phiên bản cũ.
+Không tự quét folder rồi tạo học liệu. File phải có tham chiếu hợp lệ trong `resource_versions` của PostgreSQL nguồn:
 
-## 7. Các lần chạy sau và kiểm thử
+| Trường nguồn | Giá trị |
+| --- | --- |
+| `storage_bucket` | `COURSE_DRIVE` — khớp key trong mapping |
+| `storage_object_key` | `files/FILE_ID/ten-file-goc.pdf` — đúng tên và đuôi file |
+| `source_hash` | SHA-256 thực tế của nội dung file |
+| `lifecycle_status` | `APPROVED` theo cấu hình cho phép |
 
-Bật Docker Desktop, mở terminal tại repository rồi chạy:
+File phải nằm trong folder đã cấu hình và được phép tải. Dùng file PDF/Office/ảnh thực; Google Docs/Sheets/Slides native và shortcut chưa được hỗ trợ. ETL tải snapshot về `STORAGE_ROOT` rồi dùng pipeline hiện có.
+
+Tham chiếu file và hash cần được xác nhận tại PostgreSQL nguồn theo bảng trên. Không đổi hàng loạt đường dẫn nguồn chỉ để thử Drive. Khi tắt Drive, đặt `SOURCE_DRIVE_ENABLED=false` nhưng **giữ bucket mapping** để không định tuyến nhầm sang Local.
+
+Nếu dùng service account thay OAuth cá nhân: cấu hình `SOURCE_DRIVE_AUTH_TYPE=service_account`, trỏ tới credential service account ngoài Git và chia sẻ folder cho email service account với quyền Reader; không chạy script OAuth Desktop.
+
+## 7. Khởi động hệ thống
+
+### 7.1. Bật database trước
+
+Mở Docker Desktop, vào thư mục gốc repository và chạy:
 
 ```bash
 source .venv/Scripts/activate
 docker compose up --build -d
+docker compose ps -a
 python -m data_sync_etl.adapters.mongo.schema --check
 ```
 
-Sau khi kiểm tra PASS, mở lại 5 terminal theo mục 6. Khi cập nhật dependencies, chạy lại `pip install -e ".[dev,embeddings]"` và `npm.cmd --prefix frontend ci`. Không cần tải lại model nếu revision không đổi.
+Chỉ tiếp tục khi database sẵn sàng, các bước migration/init thành công và schema PASS. Lần cài mới cần hoàn thành tài khoản reader, Tesseract và model ở các mục trên.
 
-Dừng API/Frontend/worker bằng **Ctrl+C** trong từng terminal. Dừng database nhưng giữ dữ liệu:
+### 7.2. Nếu dùng Google Drive
+
+Hoàn thành OAuth và cấu hình `.env` tại mục 6 trước khi chạy worker. Token còn hợp lệ thì **không cần đăng nhập Google lại mỗi lần start**.
+
+Nếu chưa cài extra Drive, chạy một lần khi API/worker đang dừng:
 
 ```bash
-docker compose stop
+python -X utf8 -m pip install -e ".[dev,embeddings,google-drive]"
 ```
 
-Lệnh kiểm tra mã nguồn, chạy từ thư mục gốc:
+Kiểm tra folder Drive bằng cấu hình hiện tại, không ghi database:
+
+```bash
+python -c "from data_sync_etl.config import Settings; from data_sync_etl.adapters.storage.source_google_drive import SourceGoogleDriveFileReader; SourceGoogleDriveFileReader(Settings()).check(); print('PASS: Drive read-only')"
+```
+
+Nếu chỉ dùng Local, bỏ qua bước này. Drive dùng **chung worker nhập file nguồn**, không có lệnh start Drive riêng và không cần worker thứ sáu. Kiểm tra Drive thất bại thì sửa credential/quyền/folder trước khi nhập file Drive.
+
+### 7.3. Mở API, giao diện và các worker
+
+Mở **5 terminal riêng** tại repository. Mỗi terminal Python cần chạy `source .venv/Scripts/activate` trước.
+
+| Terminal | Lệnh |
+| --- | --- |
+| Backend | `python -m uvicorn data_sync_etl.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers` |
+| Frontend | `npm.cmd --prefix frontend run dev -- --host 127.0.0.1 --strictPort` |
+| Đồng bộ metadata | `etl run-master-sync-worker --worker-id master-sync-1` |
+| Nhập file nguồn Local + Drive (nếu bật) | `etl run-source-file-worker --worker-id source-file-1` |
+| OCR, chuẩn hóa, Index/Reindex | `etl run-ocr-worker --worker-id ocr-1` |
+
+Mở [giao diện](http://127.0.0.1:3000), [Swagger](http://127.0.0.1:8000/docs), [Health](http://127.0.0.1:8000/health). Frontend proxy tới Backend **8000**. Compose không chạy thay các terminal này, không cài model/Tesseract trên máy.
+
+Sau khi đổi `.env`, khởi động lại API và worker liên quan; không chỉ chờ `--reload`.
+
+## 8. Kiểm tra chức năng
+
+1. Nguồn PostgreSQL có dữ liệu: chạy `etl source-file-precheck` để kiểm tra cấu hình/nguồn (có thể tải file để xác minh, không phải lệnh đồng bộ). Sau đó chạy Full lần đầu từ giao diện hoặc `etl sync-master --stream all --full`.
+2. Bật tự đồng bộ các nhóm cần dùng. Mặc định lịch metadata/đối soát file là 300 giây, không phải realtime. Nguồn cần đúng trạng thái cho phép, tham chiếu và hash.
+3. Thêm học liệu trên giao diện hoặc chờ worker nhập file nguồn; đợi `CONTENT_READY`. Metadata đồng bộ thành công chưa có nghĩa OCR/Index đã hoàn tất.
+4. Mở **Phân đoạn và chỉ mục**, chọn phiên bản, nhấn **Xây dựng chỉ mục** hoặc **Tái lập chỉ mục**. Đợi `PENDING → RUNNING → READY`, xác nhận ContentBag/vector sẵn sàng.
+5. Sau khi schema, model và luồng thủ công PASS, có thể đặt `INDEX_AUTO_ENABLED=true`, khởi động lại API/OCR worker và thử học liệu mới. Không tự backfill toàn bộ dữ liệu cũ.
+
+### Tìm kiếm và thực nghiệm trên Dev
+
+Search công khai mặc định bị chặn khi chưa có bằng chứng quyền truy xuất; **PUBLISHED không đồng nghĩa được công khai toàn văn**. Chỉ khi đã xác nhận corpus thử nghiệm được phép sử dụng trên Dev local, bật:
+
+```dotenv
+APP_ENVIRONMENT=development
+ADMIN_ENABLED=true
+SEARCH_INTERNAL_DEV_ENABLED=true
+```
+
+Khởi động lại Backend trên loopback theo mục 7, không public proxy. Chế độ này không phải xác thực Production; vẫn chặn nội dung REJECTED/hạn chế và dữ liệu chưa đủ điều kiện READY.
+
+- **Truy vấn:** thử BoW, Vector, Hybrid; mở nguồn tham chiếu và nội dung liên quan.
+- **Thực nghiệm:** Dữ liệu đánh giá → Chạy thực nghiệm → Kết quả và báo cáo. Import JSON hoặc chấm nhãn `resource_id:grade` (0–3), không dùng điểm Search làm nhãn chuẩn.
+- Chạy cùng dataset/k cho ba phương pháp; xem tiến độ %, Precision/Recall/MRR/nDCG và xuất CSV/JSON. Chưa có Ground Truth được con người xác nhận thì chưa nghiệm thu chất lượng tìm kiếm.
+- Kết quả lưu dưới `STORAGE_ROOT/evaluations`. Giới hạn chạy `EVALUATION_RUN_TIMEOUT_SECONDS=300`; không tự tăng vượt giới hạn hoặc gửi lại POST khi chưa rõ trạng thái lần chạy cũ.
+
+## 9. Những lần pull/chạy sau
+
+Dừng API/worker trước khi cập nhật dependencies. Sau khi pull code vào worktree phù hợp:
+
+```bash
+source .venv/Scripts/activate
+python -X utf8 -m pip install -e ".[dev,embeddings]"
+# Nếu dùng Drive, dùng dòng này thay dòng pip ở trên:
+# python -X utf8 -m pip install -e ".[dev,embeddings,google-drive]"
+npm.cmd --prefix frontend ci
+docker compose up --build -d
+python -m data_sync_etl.adapters.mongo.schema --check
+```
+
+Đối chiếu biến mới trong `.env.example`, không chép đè `.env`. Giữ model/token hợp lệ; không cần tải/đăng nhập lại mỗi lần pull. Chạy lại 5 terminal theo mục 7.
+
+Dừng từng tiến trình bằng **Ctrl+C**; dừng database và giữ dữ liệu bằng `docker compose stop`.
+
+Kiểm tra mã nguồn:
 
 ```bash
 python -m pytest tests/unit -q
@@ -300,9 +399,9 @@ npm.cmd --prefix frontend run lint
 git diff --check
 ```
 
-Integration tests chỉ chạy khi đã cấu hình các biến `TEST_*` trỏ đến database kiểm thử cô lập theo fixture; không dùng database Dev/Production đang có học liệu.
+Integration tests cần fixture/database kiểm thử cô lập theo từng bài test và các biến `TEST_*` tương ứng; không trỏ chúng vào database Dev/Production chứa học liệu.
 
-Một số lệnh vận hành:
+Các lệnh kiểm tra/vận hành bổ sung:
 
 ```bash
 etl --help
@@ -312,95 +411,20 @@ etl sync-mongo-metadata --stream all --full --dry-run
 python -m data_sync_etl.adapters.mongo.schema --inventory
 ```
 
-Metadata Master → MongoDB: xem [quyền sở hữu, chế độ opt-in và check/dry-run/apply](docs/master-mongo-metadata.md).
-Mặc định shared chỉ đối chiếu; identity projection cần bật riêng, không tự tạo description/tags/bio.
+Metadata Master → MongoDB mặc định shared chỉ đối chiếu. `MASTER_MONGO_IDENTITY_PROJECTION=false` giữ nguyên chế độ này; identity projection cần bật riêng trên Development/Test với nguồn PostgreSQL, không tự tạo description/tags/bio. CLI mặc định dry-run; chỉ dùng `--apply` sau khi được phê duyệt ghi dữ liệu.
 
-## 8. Lỗi thường gặp
+## 10. Lỗi thường gặp
 
-| Hiện tượng | Cần kiểm tra |
+| Hiện tượng | Cách kiểm tra |
 | --- | --- |
-| `BLOCKED_INDEX_SCHEMA` / schema chưa hợp lệ | Chạy `schema --check`, xem `docker compose logs mongo-init`. Database cũ cần kế hoạch sửa schema được duyệt; không bỏ guard hoặc xóa dữ liệu. |
-| `BLOCKED_EMBEDDING_RUNTIME` / HTTP 503 khi Index | Đúng `.venv`, đã cài extra embeddings, đủ file model và manifest khớp revision; chạy lại kiểm tra mục 4.3. |
-| `INVALID_EMBEDDING` | Model, cấu hình và schema ContentBag phải cùng 384 chiều. |
-| Thiếu Tesseract / thiếu ngôn ngữ | Kiểm tra đường dẫn, `--list-langs` và mục 3; cài `pip` không cung cấp Tesseract binary. |
-| Không thấy tự đồng bộ | Worker đang chạy, nhóm đã bật, đến lịch chạy; có baseline Full nếu Incremental yêu cầu. |
-| Trạng thái nguồn chưa được phép nhập | Kiểm tra lifecycle của phiên bản nguồn và `SOURCE_FILE_ALLOWED_STATUSES`; retry không tự phê duyệt tài liệu Draft. |
-| Health 503 / không kết nối database | Kiểm tra Docker, cổng, tài khoản và mật khẩu thực tế; sửa `.env` không đổi mật khẩu trong volume cũ. |
-| API trả 400/422 | Xem response trong Network/Swagger và log Backend; không thể kết luận nguyên nhân chỉ từ dòng access log. |
-| Cổng 8000/3000 đang dùng | Dừng đúng Backend/Frontend Dev cũ bằng Ctrl+C, không kill tiến trình chưa xác định. |
-
-Sau khi sửa `.env`, khởi động lại Backend và các worker liên quan để nạp cấu hình mới.
-
-## 9. Tra cứu học liệu
-
-Mở **Tra cứu → Phương pháp truy vấn** (trang mặc định), chọn BoW/Vector/Hybrid, nhập truy vấn và bộ lọc. Khung tìm kiếm cố định; kết quả cuộn riêng, 5 học liệu mỗi trang. Danh sách hiển thị keyword, độ tương đồng Vector, vị trí Chunk và điểm/xếp hạng, không hiển thị văn bản trích xuất. Tiêu chí được giữ trong URL để quay lại kết quả.
-
-- `POST /api/v1/search`: JSON gồm `query`, `method`, `filters`, `page`, `size`. Xem hợp đồng đầy đủ tại Swagger.
-- `GET /api/v1/chunks/{context_id}/context?neighbors=1`: mở **Ngữ cảnh** ở trang chi tiết học liệu đi từ kết quả tìm kiếm; trả đoạn đã chọn và tối đa 2 đoạn liền kề mỗi bên trong cùng ContentUnit. Mã lấy từ Search API, không dùng ID hash của Chunk preview nhóm 3. Nội dung đổi trả `409 CONTEXT_STALE`; quyền truy xuất không còn hoặc token sai trả 404. Token là locator có fingerprint, không phải thông tin xác thực.
-- `GET /api/v1/resource-versions/{id}/file`: xem PDF/ảnh/văn bản; thêm `download=true` để tải tệp, hoặc `view=text` để xem văn bản trích xuất (tối đa 200.000 ký tự). API yêu cầu cùng policy LOCAL_DEMO, phiên bản CONTENT_READY + Index READY và toàn bộ ContentUnit được phép truy xuất. Tệp Office xem bản văn bản hoặc tải về để giữ định dạng; tệp trên 30 MB tải về thay vì xem trực tiếp trên giao diện.
-- BoW: cosine trên tập keyword nhị phân, không phải TF-IDF/BM25. Vector: cosine với vector ContentBag cùng model/revision. Hybrid: RRF với k=60.
-- Chỉ xếp hạng các Bag có overlap BoW > 0 hoặc cosine Vector > 0 trong nhánh tương ứng; nhánh không khớp không được cộng rank. Điểm là của Bag, không phải điểm vector riêng cho Chunk.
-- Mỗi kết quả là một học liệu, lấy Bag khớp tốt nhất. Mặc định dùng version_number lớn nhất trong các lifecycle `INGESTED`, `APPROVED`, `PUBLISHED`, sau đó bắt buộc CONTENT_READY + Index READY; không tự lùi về phiên bản cũ nếu bản mới chưa READY. Filter phiên bản cụ thể được kiểm tra riêng.
-- Public: chặn mặc định vì chưa có hợp đồng quyền công khai đáng tin cậy; PUBLISHED hay APPROVED không tự cấp quyền công khai toàn văn.
-- LOCAL_DEMO: dữ liệu thử nghiệm được phép dùng, PUBLISHED + active + CONTENT_READY + Index READY; chỉ nới mặc định UNREVIEWED + retrieval_eligible=false. Search và Context dùng cùng policy, chặn cả Bag nếu có thành viên bị từ chối; không sửa review flags hoặc lập lại chỉ mục.
-- `SEARCH_MAX_BAGS=2000`, `SEARCH_TIMEOUT_SECONDS=15` là mặc định. Vector/Hybrid có ngân sách nạp model riêng `SEARCH_MODEL_WARMUP_TIMEOUT_SECONDS=60`; Frontend đợi Search tối đa 90 giây, Context 20 giây. Vượt giới hạn phải thu hẹp bộ lọc; không lấy một phần kho rồi nhận là kết quả toàn kho. Không tự chuyển sang BoW khi model lỗi.
-
-### Tra cứu thử nghiệm nội bộ (LOCAL_DEMO)
-
-Tái sử dụng một cờ opt-in, mặc định tắt. Chỉ bật khi người vận hành đã xác nhận **toàn bộ kho thử nghiệm** được phép khai thác, trên máy Development cô lập (không Production, LAN hoặc proxy công khai):
-
-```dotenv
-APP_ENVIRONMENT=development
-ADMIN_ENABLED=true
-SEARCH_INTERNAL_DEV_ENABLED=true
-```
-
-Chạy `python -m uvicorn data_sync_etl.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers`, rồi mở giao diện local. API kiểm tra launch arguments, peer, server, Host/Origin và từ chối forwarded headers; launcher không xác minh được trả 403. Không bật demo trong container/proxy không kiểm soát. Không cần Basic credentials hoặc allowlist ID; các biến SEARCH_DEV_* và SEARCH_INTERNAL_DEV_RESOURCE_IDS cũ không còn cấp quyền. Không ghi credentials vào Frontend. Khi tắt cờ, Search trả rỗng với thông báo chưa đủ quyền công khai; Context trả 404. REJECTED, hạn chế, source-missing, inactive, chưa phát hành/chưa READY vẫn bị chặn.
-
-Sau này có thể nối Principal/role từ hệ thống đăng nhập hoặc Identity Provider vào policy `SearchAccess.allows` tại rìa API, giữ nguyên các endpoint hiện có. LOCAL_DEMO không phải đăng nhập; quyền công khai thật cần quyết định nghiệp vụ riêng, không suy ra từ PUBLISHED.
-
-Kiểm thử Search cô lập, không dùng database Dev:
-
-```bash
-python -m pytest tests/unit/test_search.py tests/unit/test_search_context.py tests/unit/test_search_access.py tests/unit/test_resource_file.py tests/integration/test_search_integration.py -q
-npm.cmd --prefix frontend run build
-node --experimental-strip-types --test frontend/tests/searchApi.test.mjs
-node --test frontend/tests/searchUi.test.mjs
-```
-
-Test browser dùng Edge headless và HTTP fixture cục bộ. Integration test dùng SQLAlchemy/SQLite cùng Mongo/model doubles đúng contract; không thay thế nghiệm thu model thật và database thực tế.
-
-Nếu đã cài model mục 4, có thể chạy thêm model thật với database SQLite tạm và Mongo double, không ghi vào Dev:
-
-```bash
-ETL_SEARCH_REAL_MODEL=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest tests/integration/test_search_integration.py -q
-```
-
-## 10. Thực nghiệm và đánh giá
-
-Chỉ dùng Dev local với cấu hình LOCAL_DEMO ở mục 9. Nhóm **Thực nghiệm** có 3 mục trên thanh submenu dưới Header: Dữ liệu đánh giá → Chạy thực nghiệm → Kết quả và báo cáo. Xuất CSV/JSON ngay tại kết quả; đường dẫn Báo cáo cũ tự chuyển về kết quả và giữ Run ID. Không có xác thực quản trị Production; API đánh giá từ chối truy cập ngoài phạm vi Dev loopback đã xác minh.
-
-1. Chọn học liệu READY và tự chấm nhãn theo **resource_id**, không dùng ContentBag/Chunk ID. Nhãn 0–3; từ 1 là liên quan. Nhập thủ công `resource_id:grade` (mỗi dòng một nhãn) hoặc import JSON, sau đó nhấn **Tạo dataset** để lưu trực tiếp, không checkbox/hộp thoại xác nhận. Bộ nhãn tạo trên giao diện giữ `ground_truth_confirmed=false`, có cảnh báo chưa xác nhận Ground Truth; không tự coi nhãn gợi ý là nhãn chuẩn. File chuẩn bị gán nhãn có `rows` gồm `query_id`, `query_text`, `resource_id`, `resource_title`, `candidate_description`, `relevance`. Sau import, ID/tên/mô tả được điền sẵn; chọn điểm 0–3 trên giao diện, không cần sửa JSON hay gõ lại ID. `null` hiển thị “Chưa chấm”, không tự quy thành 0; phải chấm đủ trước khi lưu. JSON theo contract API (`queries[].relevance` với `item_id`, `grade`) cũng được hỗ trợ.
-2. Giữ Dataset ID, chạy cùng BoW/Vector/Hybrid với k và top-k giống nhau. Thanh tiến độ tính số lượt đã xử lý/tổng lượt (kể cả warmup), giữ tối đa 99% đến khi lưu thành công. Warmup mặc định 0; nếu bật, các lượt warmup không nằm trong thống kê. Giao diện nhận NDJSON trực tiếp từ cùng `POST /evaluations/runs` bằng `Accept: application/x-ndjson`; client cũ không yêu cầu streaming vẫn nhận JSON như trước. Nếu qua reverse proxy, tắt buffering và cho phép kết nối trong suốt lượt chạy. Khi mất kết nối, không tự POST lại; kiểm tra Run ID trước. Không tự chạy khi mở trang. Khi corpus/model/policy khác thời điểm gán nhãn, tạo dataset mới sau khi kiểm tra lại nhãn.
-3. Run ID trong URL dùng để xem lại sau F5; CSV UTF-8 BOM/JSON được xuất từ kết quả đã lưu, không đo lại Search. Browser chỉ nhớ ID gần nhất, không lưu truy vấn/nhãn/credentials. Không có API liệt kê dataset/run ngoài bốn endpoint dưới đây.
-
-| API | Chức năng |
-| --- | --- |
-| `POST /api/v1/evaluations/datasets` | Lưu bộ truy vấn và nhãn đã xác nhận |
-| `POST /api/v1/evaluations/runs` | Chạy đồng bộ ba baseline, trả Run ID/trạng thái |
-| `GET /api/v1/evaluations/runs/{id}?offset=0&limit=20` | Đọc kết quả, phân trang chi tiết query/method |
-| `GET /api/v1/evaluations/runs/{id}/report?format=csv` | Xuất CSV hoặc `format=json`, chỉ run COMPLETED |
-
-Dữ liệu JSON riêng tại `STORAGE_ROOT/evaluations/{datasets,runs}`, có checksum, ghi atomic và khóa file đa process; không thêm bảng/collection. Mặc định tối đa 20 query/dataset, 100 nhãn/query, 20 kết quả, 100 phiên bản corpus, 200 file mỗi loại, 8 MB/file. Các giới hạn `EVALUATION_*` có trong `.env.example`; không sửa `.env` thật khi pull code. `EVALUATION_RUN_TIMEOUT_SECONDS` mặc định 300 giây, cho phép 10–300 giây; `.env` đã khai báo giá trị cũ vẫn được ưu tiên. Ngân sách hợp tác kiểm tra giữa các lượt, không ngắt cưỡng bức lời gọi Search/model đang chạy. Frontend chờ tối đa 660 giây, gồm dư địa cho kiểm tra đầu lần chạy và lời gọi đang xử lý, không tự gửi lại POST. Không có worker đánh giá. Khi hết quota, dừng tạo mới; không tự xóa lịch sử. Khóa còn lại sau crash cần người vận hành xác minh không còn process trước khi xử lý. Nhiều container không chia sẻ filesystem/Production cần thiết kế lưu trữ và xác thực riêng, chưa được hỗ trợ.
-
-Corpus được kiểm tra đầy đủ (PostgreSQL + MongoDB + fingerprint/model/quyền) ở đầu và cuối lần chạy. Trước/sau từng Search và warmup, marker PostgreSQL theo lô theo dõi metadata, phiên bản hiện hành, ContentUnit/review/quyền, trạng thái job, stage và số thế hệ projection; không đọc lại toàn văn/vector hay dựng lại toàn bộ Bag. Marker giới hạn tổng ContentUnit theo `INDEX_MAX_UNITS`. Search vẫn thực hiện mọi guard sẵn có, không cache nội dung/quyền qua các lượt. MongoDB được đối chiếu đầy đủ ở cuối; nếu dữ liệu/marker thay đổi, đánh dấu NOT_COMPARABLE, bỏ toàn bộ metrics và không xuất báo cáo. Latency từng phương pháp không bao gồm các lượt kiểm tra corpus.
-
-Precision@k dùng mẫu số k kể cả thiếu kết quả; Recall@k, MRR@k, nDCG@k không xác định khi không có nhãn dương được loại khỏi macro-average tương ứng. nDCG dùng gain `2^grade-1`. Latency là toàn bộ lời gọi SearchService, không gồm kiểm tra corpus; p50/p95 nội suy tuyến tính. Corpus đổi giữa run → NOT_COMPARABLE, không xuất báo cáo hoàn tất. Lỗi runtime từng phương pháp không được thay bằng metric 0; không so score RRF trực tiếp với cosine. Chưa có Ground Truth được người nghiên cứu xác nhận thì đánh giá chất lượng Dev là **NOT_RUN**; fixture chỉ kiểm chứng phần mềm, không chứng minh Hybrid tốt hơn.
-
-```bash
-python -m pytest tests/unit/test_evaluation.py tests/unit/test_evaluation_metrics.py -q
-node --experimental-strip-types --test frontend/tests/evaluationApi.test.mjs
-npm.cmd --prefix frontend run build
-# Opt-in UI + Search/model thật trên SQLite/MemoryMongo fixture cô lập, không dùng DB Dev:
-ETL_EVALUATION_UI=1 ETL_EVALUATION_REAL_MODEL=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest tests/integration/test_evaluation_integration.py -q -s
-```
+| HTTP 503 / `BLOCKED_INDEX_SCHEMA` | Chạy `python -m data_sync_etl.adapters.mongo.schema --check`, xem log `mongo-init`. Schema cũ cần backup và phê duyệt sửa, không xóa volume hoặc bỏ guard. |
+| Index/Vector báo thiếu runtime | Đúng `.venv`, extra embeddings, đường dẫn model, manifest/revision và 384 chiều; chạy kiểm tra mục 5. |
+| OCR ảnh lỗi | Kiểm tra đường dẫn Tesseract, `eng`/`vie` và mục 4; khởi động lại worker sau khi sửa. |
+| Worker không xử lý | Kiểm tra đúng worker đang chạy, cờ tự động, trạng thái nguồn và file/hash; xem log terminal. |
+| Drive OAuth bị chặn | Đúng Desktop client, Drive API đã bật, email thuộc Test users và có quyền folder. Không dùng token của người khác. |
+| Drive 403/404 hoặc token hết hiệu lực | Đúng tài khoản/folder mapping, file được phép tải; xác thực lại bằng script với tên token mới nếu token bị thu hồi/hết hiệu lực. |
+| Drive `TOKEN_TARGET_NOT_NEW` | Token đích đã tồn tại; dùng token hợp lệ đang có hoặc chọn tên mới để xác thực lại. |
+| Sai mật khẩu PostgreSQL | Đối chiếu role thực tế với URL; đổi `.env` không đổi mật khẩu role đã tồn tại. |
+| Search rỗng / Thực nghiệm 403 | Kiểm tra quyền, local Dev và cấu hình mục 8; không tự mở dữ liệu thật cho công khai. |
+| `etl.exe` bị khóa khi pip install | Ctrl+C API/worker đang dùng `.venv`, sau đó chạy lại pip; không cần xóa dữ liệu. |
+| Giao diện không gọi được API | Kiểm tra Backend cổng 8000, Frontend cổng 3000 và Health; tránh chạy nhầm API cũ. |
