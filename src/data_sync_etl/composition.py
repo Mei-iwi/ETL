@@ -100,6 +100,11 @@ class Container:
 
     def __init__(self, settings=None, engine=None, documents=None):
         self.settings = settings or Settings()
+        if self.settings.master_mongo_identity_projection and (
+                self.settings.app_environment not in ('development', 'test')
+                or self.settings.mongo_metadata_mode != 'shared'
+                or self.settings.source_adapter not in ('postgresql', 'production')):
+            raise DomainError('MONGO_IDENTITY_PROJECTION_REQUIRES_SHARED_DEV_POSTGRES')
         if self.settings.mongo_metadata_mode == 'shared':
             if self.settings.source_mongo_enabled:
                 raise DomainError('SHARED_MONGO_CONFLICT_SOURCE_ENABLED: set SOURCE_MONGO_ENABLED=false')
@@ -201,12 +206,14 @@ class Container:
         self.master_metadata_projection = MasterMetadataProjection(
             self.uow, self.metadata_documents,
             batch_size=min(1000, self.settings.sync_batch_size),
-            identity_bootstrap=self.settings.master_mongo_identity_bootstrap,
+            identity_bootstrap=(self.settings.master_mongo_identity_bootstrap
+                                or self.settings.master_mongo_identity_projection),
             identity_ids=self.settings.master_mongo_identity_ids,
             identity_scope=self.settings.master_mongo_identity_scope,
             identity_guard=(self.source.metadata_identity_references
                             if isinstance(self.source, PostgreSQLSourceAdapter) else None),
         )
+        identity_projection = self.master_metadata_projection
         source_metadata = None
         if self.settings.source_mongo_enabled:
             if self.mongo_client is None or not isinstance(self.source, PostgreSQLSourceAdapter):
@@ -233,13 +240,19 @@ class Container:
             shared=self.settings.mongo_metadata_mode == 'shared',
         )
         if self.settings.source_mongo_enabled or self.settings.mongo_metadata_mode == 'shared':
-            # Both shared CLIs use read-only validation; explicit separate-source
+            # By default both shared CLIs use read-only validation; separate-source
             # mode keeps its prior copy contract, never identity fallback.
             self.master_metadata_projection = self.mongo_metadata_sync
         # Normal Master Sync never invokes legacy identity bootstrap, even if an
         # old deployment still has MASTER_MONGO_IDENTITY_BOOTSTRAP=true.
         # Legacy projection remains available only through its explicit CLI.
         self.sync.metadata_projection = None if self.settings.mongo_metadata_mode == 'shared' else self.mongo_metadata_sync
+        if self.settings.master_mongo_identity_projection:
+            # Explicit shared Dev opt-in: identity-only, after PG COMMIT. Existing
+            # shared validation remains available separately and never receives a writer.
+            self.master_metadata_projection = identity_projection
+            self.sync.metadata_projection = identity_projection
+            self.sync.skip_shared_metadata_validation = False
 
         self.mongo_projector = MongoContentProjector(
             self.uow,

@@ -401,6 +401,18 @@ git diff --check
 
 Integration tests cần fixture/database kiểm thử cô lập theo từng bài test và các biến `TEST_*` tương ứng; không trỏ chúng vào database Dev/Production chứa học liệu.
 
+Các lệnh kiểm tra/vận hành bổ sung:
+
+```bash
+etl --help
+etl sync-master --stream all --incremental
+etl reconcile-master --stream all --dry-run
+etl sync-mongo-metadata --stream all --full --dry-run
+python -m data_sync_etl.adapters.mongo.schema --inventory
+```
+
+Metadata Master → MongoDB mặc định shared chỉ đối chiếu. `MASTER_MONGO_IDENTITY_PROJECTION=false` giữ nguyên chế độ này; identity projection cần bật riêng trên Development/Test với nguồn PostgreSQL, không tự tạo description/tags/bio. CLI mặc định dry-run; chỉ dùng `--apply` sau khi được phê duyệt ghi dữ liệu.
+
 ## 10. Lỗi thường gặp
 
 | Hiện tượng | Cách kiểm tra |
