@@ -191,11 +191,20 @@ class OpenXMLFormatValidator(_BaseFormatValidator):
                                 pass  # Verify CRC without loading embedded binary parts.
                     if 'vbaproject' in item.filename.lower():
                         raise InvalidFileContent("UNSUPPORTED_OPENXML_MACROS")
-                if content_types is None or not any(
-                    node.attrib.get('PartName') == '/' + self.main_part
-                    and node.attrib.get('ContentType') == self.content_type
-                    for node in content_types
-                ):
+                namespace = '{http://schemas.openxmlformats.org/package/2006/content-types}'
+                if content_types is None or content_types.tag != namespace + 'Types':
+                    raise InvalidFileContent("OPENXML_TYPE_MISMATCH")
+                # OPC permits a part type to come from either an explicit
+                # Override or its extension's Default. An Override takes
+                # precedence: never mask a wrong type with a valid Default.
+                overrides = [node.get('ContentType') for node in content_types
+                             if node.tag == namespace + 'Override'
+                             and node.get('PartName') == '/' + self.main_part]
+                defaults = [node.get('ContentType') for node in content_types
+                            if node.tag == namespace + 'Default'
+                            and node.get('Extension', '').lower() == Path(self.main_part).suffix[1:].lower()]
+                declared_types = overrides if overrides else defaults
+                if declared_types != [self.content_type]:
                     raise InvalidFileContent("OPENXML_TYPE_MISMATCH")
         except InvalidFileContent:
             raise

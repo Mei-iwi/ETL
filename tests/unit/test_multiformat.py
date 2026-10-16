@@ -1,6 +1,7 @@
 import io
 from datetime import date
 from hashlib import sha256
+from xml.etree import ElementTree
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
@@ -84,6 +85,65 @@ class ImageEngineDouble:
 
 
 FORMATS = ['.pdf', '.docx', '.xlsx', '.txt', '.csv', '.png', '.jpg', '.jpeg', '.pptx']
+
+
+def xlsx_with_default_content_type(*, override=None, default_type=None, duplicate_default=False,
+                                   missing_workbook=False):
+    """Valid XLSX variant exported by applications using OPC Default mappings."""
+    validator = FormatValidatorRegistry().find_validator('sample.xlsx')
+    namespace = '{http://schemas.openxmlformats.org/package/2006/content-types}'
+    output = io.BytesIO()
+    with ZipFile(io.BytesIO(sample('.xlsx'))) as original, ZipFile(output, 'w', ZIP_DEFLATED) as archive:
+        for item in original.infolist():
+            if missing_workbook and item.filename == validator.main_part:
+                continue
+            payload = original.read(item)
+            if item.filename == '[Content_Types].xml':
+                root = ElementTree.fromstring(payload)
+                for node in list(root):
+                    if node.get('PartName') == '/' + validator.main_part:
+                        root.remove(node)
+                    elif node.get('Extension') == 'xml':
+                        node.set('ContentType', default_type or validator.content_type)
+                if override is not None:
+                    ElementTree.SubElement(root, namespace + 'Override',
+                                           PartName='/' + validator.main_part, ContentType=override)
+                if duplicate_default:
+                    ElementTree.SubElement(root, namespace + 'Default', Extension='xml',
+                                           ContentType=validator.content_type)
+                payload = ElementTree.tostring(root, encoding='utf-8', xml_declaration=True)
+            archive.writestr(item, payload)
+    return output.getvalue()
+
+
+def test_xlsx_default_content_type_validates_and_extracts(tmp_path):
+    path = tmp_path / 'default.xlsx'
+    path.write_bytes(xlsx_with_default_content_type())
+    FormatValidatorRegistry().find_validator(path.name).validate_path(path)
+    result = NativeDocumentExtractor().extract(path)
+    assert 'Phân số' in result.text and result.metadata['source_type'] == 'xlsx'
+
+
+@pytest.mark.parametrize('options', [
+    {'default_type': 'application/xml'},
+    {'default_type': 'application/vnd.ms-excel.sheet.macroEnabled.main+xml'},
+    {'override': 'application/vnd.ms-excel.sheet.macroEnabled.main+xml'},
+    {'override': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'},
+    {'duplicate_default': True},
+    {'missing_workbook': True},
+])
+def test_xlsx_default_content_type_does_not_bypass_mismatch_checks(tmp_path, options):
+    path = tmp_path / 'invalid.xlsx'
+    path.write_bytes(xlsx_with_default_content_type(**options))
+    with pytest.raises(InvalidFileContent, match='OPENXML_TYPE_MISMATCH'):
+        FormatValidatorRegistry().find_validator(path.name).validate_path(path)
+
+
+def test_xlsx_override_takes_precedence_over_default(tmp_path):
+    path = tmp_path / 'override.xlsx'
+    validator = FormatValidatorRegistry().find_validator(path.name)
+    path.write_bytes(xlsx_with_default_content_type(override=validator.content_type, default_type='application/xml'))
+    validator.validate_path(path)
 
 
 @pytest.mark.parametrize('extension', FORMATS)
