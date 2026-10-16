@@ -41,16 +41,9 @@ class DatasetRequest(StrictDTO):
     name: str = Field(min_length=1, max_length=150)
     description: str = Field(default='', max_length=1000)
     relevance_unit: Literal['resource'] = 'resource'
-    ground_truth_confirmed: Literal[True]
+    ground_truth_confirmed: bool = False
     filters: SearchFilters = Field(default_factory=SearchFilters)
     queries: list[EvaluationQuery] = Field(min_length=1, max_length=100)
-
-    @field_validator('ground_truth_confirmed', mode='before')
-    @classmethod
-    def manual_confirmation(cls, value):
-        if value is not True:
-            raise ValueError('Human confirmation required')
-        return value
 
     @field_validator('name')
     @classmethod

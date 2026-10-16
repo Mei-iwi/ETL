@@ -1,3 +1,6 @@
-import { EvaluationRunView } from './EvaluationRunView'
+import { Navigate, useLocation } from 'react-router'
 
-export function ExperimentsReportPage() { return <EvaluationRunView report /> }
+export function ExperimentsReportPage() {
+    const { search } = useLocation()
+    return <Navigate to={`/experiments/results${search}`} replace />
+}

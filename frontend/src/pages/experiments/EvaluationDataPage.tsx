@@ -2,17 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router'
 import { createDataset, recentEvaluationId } from '../../services/evaluationApi'
-import type { DatasetCreated, DatasetInput } from '../../types/evaluation'
+import type { DatasetCreated } from '../../types/evaluation'
 import layout from '../library/LibraryPages.module.css'
 import styles from './ExperimentPages.module.css'
-import { blankQuery, datasetInput, importDraft, warning } from './evaluationHelpers'
+import { blankQuery, datasetInput, importDraft, setDraftGrade, warning } from './evaluationHelpers'
 
 export function EvaluationDataPage() {
     const [name, setName] = useState('')
     const [description, setDescription] = useState('')
     const [queries, setQueries] = useState([blankQuery(1)])
-    const [confirmed, setConfirmed] = useState(false)
-    const [pending, setPending] = useState<DatasetInput | null>(null)
     const [result, setResult] = useState<DatasetCreated | null>(null)
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
@@ -20,25 +18,21 @@ export function EvaluationDataPage() {
     const controller = useRef<AbortController | null>(null)
     const inFlight = useRef(false)
     useEffect(() => () => controller.current?.abort(), [])
-    function submit(event: FormEvent) {
+    async function submit(event: FormEvent) {
         event.preventDefault(); setError('')
-        try { setPending(datasetInput(name, description, queries, confirmed)) }
-        catch (reason) { setError(reason instanceof Error ? reason.message : 'Dữ liệu không hợp lệ.') }
-    }
-    async function save() {
-        if (!pending || inFlight.current) return
+        if (inFlight.current) return
         inFlight.current = true; setBusy(true)
         const current = new AbortController(); controller.current = current
         try {
-            const data = await createDataset(pending, current.signal)
+            const data = await createDataset(datasetInput(name, description, queries), current.signal)
             if (current.signal.aborted) return
-            setResult(data); recentEvaluationId('dataset', data.dataset_id); setPending(null)
+            setResult(data); recentEvaluationId('dataset', data.dataset_id)
         } catch (reason) { if (!current.signal.aborted) setError(reason instanceof Error ? reason.message : 'Không lưu được dataset.') }
         finally { inFlight.current = false; if (!current.signal.aborted) setBusy(false) }
     }
     async function loadFile(file?: File) {
         if (!file) return
-        setError(''); setResult(null); setConfirmed(false)
+        setError(''); setResult(null)
         try {
             if (file.size > 1024 * 1024) throw new Error('File JSON tối đa 1 MB.')
             const draft = importDraft(JSON.parse(await file.text()))
@@ -48,25 +42,37 @@ export function EvaluationDataPage() {
     return <section className={layout.page}>
         <header className={layout.pageHeader}><h1>Dữ liệu đánh giá</h1></header>
         <div className={styles.stack}>
-            <form onSubmit={submit} className={`${layout.card} ${layout.form}`}>
+            <form onSubmit={event => void submit(event)} className={`${layout.card} ${layout.form}`}>
                 <label className={layout.field}>Tên dataset<input value={name} maxLength={150} required onChange={e => setName(e.target.value)} /></label>
-                <label className={layout.field}>Mô tả<textarea className={styles.textarea} value={description} maxLength={1000} onChange={e => setDescription(e.target.value)} /></label>
-                <label className={layout.field}>Nhập JSON<input type="file" accept=".json,application/json" onChange={e => void loadFile(e.target.files?.[0])} /></label>
-                <p className={styles.muted}>Đánh giá theo resource_id (học liệu), không phải Chunk/ContentBag. Nhãn 0: không liên quan; 1: ít; 2: liên quan; 3: rất liên quan. Từ 1 là nhãn dương. Không dùng điểm Search làm nhãn.</p>
-                {queries.map((row, index) => <fieldset className={styles.query} key={index}>
-                    <legend>Truy vấn {index + 1}</legend>
-                    <label>Mã truy vấn<input aria-label={`Mã truy vấn ${index + 1}`} value={row.query_id} maxLength={50}
-                        onChange={e => setQueries(rows => rows.map((item, i) => i === index ? { ...item, query_id: e.target.value } : item))} /></label>
-                    <label>Nội dung<input aria-label={`Nội dung truy vấn ${index + 1}`} value={row.query} maxLength={300} required
-                        onChange={e => setQueries(rows => rows.map((item, i) => i === index ? { ...item, query: e.target.value } : item))} /></label>
-                    <label>Nhãn liên quan<textarea aria-label={`Nhãn truy vấn ${index + 1}`} className={styles.textarea} value={row.labels} placeholder="resource_id:grade — mỗi dòng một nhãn"
-                        onChange={e => setQueries(rows => rows.map((item, i) => i === index ? { ...item, labels: e.target.value } : item))} /></label>
-                    <button type="button" className={layout.secondaryButton} disabled={queries.length === 1} onClick={() => setQueries(rows => rows.filter((_, i) => i !== index))}>Xóa truy vấn</button>
-                </fieldset>)}
-                <button type="button" className={layout.secondaryButton} disabled={queries.length >= 20} onClick={() => setQueries(rows => [...rows, blankQuery(rows.length + 1)])}>Thêm truy vấn</button>
-                <label className={styles.check}><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />Tôi xác nhận toàn bộ nhãn đã được con người đánh giá, không suy ra từ thứ hạng Search.</label>
+                <details><summary>Mô tả (tùy chọn)</summary><label className={layout.field}>Mô tả<textarea className={styles.textarea} value={description} maxLength={1000} onChange={e => setDescription(e.target.value)} /></label></details>
+                <label className={layout.field}>Nhập JSON<input type="file" accept=".json,application/json" disabled={busy} onChange={e => { void loadFile(e.target.files?.[0]); e.target.value = '' }} /></label>
+                <p className={styles.compactNote}>{queries.length} truy vấn · Nhãn 0–3 · Từ 1 là liên quan</p>
+                {queries.map((row, index) => <details className={styles.query} key={index} open={index === 0}>
+                    <summary>{row.query_id || `Truy vấn ${index + 1}`} · {row.query || 'Truy vấn mới'}{row.candidates ? ` · ${row.candidates.filter(item => item.grade !== null).length}/${row.candidates.length} đã chấm` : ''}</summary>
+                    <div className={styles.stack}>
+                        <label>Mã truy vấn<input aria-label={`Mã truy vấn ${index + 1}`} value={row.query_id} maxLength={50}
+                            onChange={e => setQueries(rows => rows.map((item, i) => i === index ? { ...item, query_id: e.target.value } : item))} /></label>
+                        <label>Nội dung<input aria-label={`Nội dung truy vấn ${index + 1}`} value={row.query} maxLength={300} required
+                            onChange={e => setQueries(rows => rows.map((item, i) => i === index ? { ...item, query: e.target.value } : item))} /></label>
+                        {row.candidates ? <>
+                            <p className={styles.muted}>Đã chấm {row.candidates.filter(item => item.grade !== null).length}/{row.candidates.length} học liệu</p>
+                            {row.candidates.map(item => <div className={styles.query} key={item.id}>
+                                <label className={layout.field}>{item.title ? `${item.title} (${item.id})` : item.id}
+                                    <select aria-label={`Điểm ${row.query_id} ${item.id}`} value={item.grade ?? ''}
+                                        onChange={e => { const grade = e.target.value === '' ? null : Number(e.target.value); setQueries(rows => rows.map((entry, i) => i === index ? setDraftGrade(entry, item.id, grade) : entry)) }}>
+                                        <option value="">Chưa chấm</option><option value="0">0 — Không liên quan</option><option value="1">1 — Ít liên quan</option><option value="2">2 — Liên quan</option><option value="3">3 — Rất liên quan</option>
+                                    </select>
+                                </label>
+                                {item.description && <details><summary>Nội dung ứng viên</summary><p>{item.description}</p></details>}
+                            </div>)}
+                        </> : <label>Nhãn liên quan<textarea aria-label={`Nhãn truy vấn ${index + 1}`} className={styles.textarea} value={row.labels} placeholder="resource_id:grade — mỗi dòng một nhãn"
+                            onChange={e => setQueries(rows => rows.map((item, i) => i === index ? { ...item, labels: e.target.value } : item))} /></label>}
+                        <button type="button" className={layout.secondaryButton} disabled={queries.length === 1} onClick={() => setQueries(rows => rows.filter((_, i) => i !== index))}>Xóa truy vấn</button>
+                    </div>
+                </details>)}
+                <button type="button" className={layout.secondaryButton} disabled={queries.length >= 20} onClick={() => setQueries(rows => [...rows, blankQuery(rows.length + 1, rows)])}>Thêm truy vấn</button>
                 {error && <p role="alert" className={styles.error}>{error}</p>}
-                <button className={layout.primaryButton} disabled={busy}>Tạo dataset</button>
+                <button className={layout.primaryButton} disabled={busy}>{busy ? 'Đang lưu…' : 'Tạo dataset'}</button>
             </form>
             {result && <div className={layout.card}>
                 <p className={styles.success}>Đã lưu {result.number_of_queries} truy vấn · {result.relevant_items} nhãn dương.</p>
@@ -76,11 +82,5 @@ export function EvaluationDataPage() {
                 {result.validation.warnings.map(code => <p className={styles.muted} key={code}>{warning(code)}</p>)}
             </div>}
         </div>
-        {pending && <div className={styles.modal} role="presentation"><section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="dataset-confirm">
-            <h2 id="dataset-confirm">Lưu bộ nhãn đã xác nhận?</h2><p>{pending.queries.length} truy vấn · Đơn vị đánh giá: học liệu.</p>
-            {error && <p role="alert" className={styles.error}>{error}</p>}
-            <div className={styles.row}><button className={layout.primaryButton} disabled={busy} onClick={() => void save()}>{busy ? 'Đang lưu…' : 'Xác nhận'}</button>
-                <button className={layout.secondaryButton} disabled={busy} onClick={() => setPending(null)}>Hủy</button></div>
-        </section></div>}
     </section>
 }

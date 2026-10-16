@@ -2,6 +2,7 @@ from ipaddress import ip_address
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
+import anyio
 from fastapi import (
     APIRouter,
     File,
@@ -14,7 +15,8 @@ from fastapi import (
     UploadFile,
 )
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.responses import FileResponse, PlainTextResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.responses import FileResponse, PlainTextResponse, StreamingResponse
 
 from data_sync_etl.api.evaluation_schemas import (
     DatasetRequest,
@@ -188,6 +190,38 @@ def run_evaluation(body: RunRequest, request: Request, response: Response):
     response.headers['Cache-Control'] = 'private, no-store'
     try:
         service, access = evaluation_services(request)
+        if 'application/x-ndjson' in request.headers.get('accept', '').lower():
+            from data_sync_etl.domain.evaluation import canonical
+
+            events = service.run_events(body.model_dump(), access)
+            try:
+                first = next(events)  # Validate scope/dataset/corpus before sending HTTP headers.
+            except BaseException:
+                events.close()
+                raise
+
+            def frame(event):
+                if event['type'] == 'result':
+                    run = event['run']
+                    event = {key: value for key, value in event.items() if key != 'run'} | {
+                        'result': {'run_id': run['id'], 'status': run['status'], 'dataset_id': run['dataset_id'],
+                                   'warnings': run['warnings'], 'finished_at': run['finished_at']}}
+                return canonical(event) + '\n'
+
+            async def stream():
+                try:
+                    yield frame(first)
+                    while (event := await run_in_threadpool(next, events, None)) is not None:
+                        yield frame(event)
+                except Exception as exc:
+                    error = evaluation_error(exc)
+                    yield canonical({'type': 'error', 'status': error.status_code, 'detail': error.detail}) + '\n'
+                finally:
+                    with anyio.CancelScope(shield=True):
+                        await run_in_threadpool(events.close)
+
+            return StreamingResponse(stream(), status_code=201, media_type='application/x-ndjson',
+                                     headers={'Cache-Control': 'private, no-store', 'X-Accel-Buffering': 'no'})
         run = service.run(body.model_dump(), access)
         return {'run_id': run['id'], 'status': run['status'], 'dataset_id': run['dataset_id'],
                 'warnings': run['warnings'], 'finished_at': run['finished_at']}

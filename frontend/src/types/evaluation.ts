@@ -2,7 +2,7 @@ export type EvaluationMethod = 'bow' | 'vector' | 'hybrid'
 export type Label = { item_id: string; grade: number }
 export type EvaluationQuery = { query_id: string; query: string; relevance: Label[] }
 export type DatasetInput = {
-    name: string; description: string; relevance_unit: 'resource'; ground_truth_confirmed: true
+    name: string; description: string; relevance_unit: 'resource'; ground_truth_confirmed: boolean
     queries: EvaluationQuery[]
 }
 export type DatasetCreated = {
@@ -13,6 +13,7 @@ export type RunInput = {
     dataset_id: string; methods: EvaluationMethod[]; k_values: number[]; max_results: number; warmup_queries: number
 }
 export type RunCreated = { run_id: string; dataset_id: string; status: string; warnings: string[] }
+export type EvaluationProgress = { completed: number; total: number; percent: number; phase: string; run_id?: string }
 export type Metric = { value: number | null; valid_queries: number; excluded_queries: number }
 export type MethodSummary = {
     successful_queries: number; failed_queries: number

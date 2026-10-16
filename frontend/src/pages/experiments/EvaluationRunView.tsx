@@ -7,13 +7,13 @@ import layout from '../library/LibraryPages.module.css'
 import styles from './ExperimentPages.module.css'
 import { number, warning } from './evaluationHelpers'
 
-export function EvaluationRunView({ report = false }: { report?: boolean }) {
+export function EvaluationRunView() {
     const [params] = useSearchParams()
     const id = params.get('run_id') || ''
-    return <RunView key={`${id}:${report}`} id={id} report={report} />
+    return <RunView key={id} id={id} />
 }
 
-function RunView({ id, report }: { id: string; report: boolean }) {
+function RunView({ id }: { id: string }) {
     const [, setParams] = useSearchParams()
     const [input, setInput] = useState(id || recentEvaluationId('run'))
     const [data, setData] = useState<EvaluationRun | null>(null)
@@ -50,49 +50,49 @@ function RunView({ id, report }: { id: string; report: boolean }) {
         finally { downloadBusy.current = false; if (!controller.signal.aborted) setDownloading(false) }
     }
     return <section className={layout.page}>
-        <header className={layout.pageHeader}><h1>{report ? 'Báo cáo thực nghiệm' : 'Kết quả đánh giá'}</h1></header>
+        <header className={layout.pageHeader}><h1>Kết quả và báo cáo</h1></header>
         <div className={styles.stack}>
-            <form className={`${layout.card} ${layout.form}`} onSubmit={open}>
+            <form className={`${layout.card} ${styles.lookup}`} onSubmit={open}>
                 <label className={layout.field}>Run ID<input value={input} required onChange={e => setInput(e.target.value)} /></label>
                 <button className={layout.primaryButton}>Xem kết quả</button>
             </form>
-            {!id && <p className={styles.muted}>Nhập Run ID đã lưu để mở kết quả. Trình duyệt chỉ nhớ ID gần nhất.</p>}
+            {!id && <p className={styles.muted}>Nhập Run ID để xem kết quả.</p>}
             {error && <p role="alert" className={styles.error}>{error}</p>}
             {id && !error && !data && <p role="status" className={styles.pending}>Đang tải kết quả…</p>}
             {data && <>
                 <section className={layout.card}>
                     <h2>{data.dataset_name}</h2><p className={data.status === 'COMPLETED' ? styles.success : ['FAILED', 'NOT_COMPARABLE'].includes(data.status) ? styles.error : styles.pending}>Trạng thái: {data.status}</p>
                     <p>{data.queries.length} truy vấn · {data.queries.reduce((count, query) => count + query.relevance.filter(label => label.grade >= data.relevance_threshold).length, 0)} nhãn dương · Đơn vị: học liệu.</p>
-                    <p className={styles.identifier}>Run ID: {data.id}</p>
-                    <details><summary>Thông tin tái lập</summary>
+                    <details><summary>Thông tin lần chạy</summary>
+                        <p className={styles.identifier}>Run ID: {data.id}</p>
                         <p className={styles.identifier}>Dataset hash: {data.dataset_hash}</p>
                         <p className={styles.identifier}>Corpus: {data.corpus_fingerprint}</p>
                         <p className={styles.identifier}>Model: {data.snapshot.model.id} · {data.snapshot.model.version} · {data.snapshot.model.dimension} chiều</p>
                         <p className={styles.muted}>{new Date(data.created_at).toLocaleString('vi-VN')}</p>
                     </details>
-                    {data.warnings.map(code => <p className={styles.muted} key={code}>{warning(code)}</p>)}
+                    {data.warnings.length > 0 && <details><summary>Lưu ý ({data.warnings.length})</summary>
+                        {data.warnings.map(code => <p className={code.includes('CHANGED') || code.includes('TIMEOUT') ? styles.error : styles.pending} key={code}>{warning(code)}</p>)}
+                    </details>}
                     <div className={styles.row}>
-                        <Link className={layout.secondaryButton} to={`/experiments/${report ? 'results' : 'reports'}?run_id=${id}`}>{report ? 'Kết quả đánh giá' : 'Xuất báo cáo'}</Link>
                         <Link className={layout.secondaryButton} to={`/experiments/run?dataset_id=${data.dataset_id}`}>Chạy lại</Link>
                     </div>
                 </section>
-                {report ? <section className={layout.card}>
-                    <p className={styles.muted}>CSV UTF-8 BOM dùng cho Excel; JSON chứa kết quả chi tiết đã lưu. Chỉ xuất run COMPLETED.</p>
+                <section className={layout.card}>
+                    <h2>So sánh phương pháp</h2>
                     <div className={styles.row}><button className={layout.primaryButton} disabled={downloading || data.status !== 'COMPLETED'} onClick={() => void download('csv')}>Xuất báo cáo CSV</button>
                         <button className={layout.secondaryButton} disabled={downloading || data.status !== 'COMPLETED'} onClick={() => void download('json')}>Tải JSON</button></div>
+                    {data.status !== 'COMPLETED' && <p className={styles.pending}>Chỉ xuất báo cáo khi hoàn tất.</p>}
                     {downloadError && <p role="alert" className={styles.error}>{downloadError}</p>}
-                </section> : <>
-                    <section className={layout.card}>
-                        <h2>So sánh phương pháp</h2><div className={styles.tableWrap}><table className={styles.table}>
+                        <div className={styles.tableWrap}><table className={styles.table}>
                             <thead><tr><th>Phương pháp</th><th>k</th><th>Precision@k</th><th>Recall@k</th><th>MRR@k</th><th>nDCG@k</th><th>TB ms</th><th>P50 ms</th><th>P95 ms</th><th>Thành công/Lỗi</th><th>Recall hợp lệ/loại</th></tr></thead>
                             <tbody>{Object.entries(data.summary).flatMap(([method, summary]) => summary ? Object.entries(summary.metrics).map(([k, cells]) => <tr key={`${method}:${k}`}>
                                 <td>{method.toUpperCase()}</td><td>{k}</td><td>{number(cells.precision.value)}</td><td>{number(cells.recall.value)}</td>
                                 <td>{number(cells.mrr.value)}</td><td>{number(cells.ndcg.value)}</td><td>{number(summary.latency_ms.mean)}</td><td>{number(summary.latency_ms.p50)}</td><td>{number(summary.latency_ms.p95)}</td>
                                 <td>{summary.successful_queries}/{summary.failed_queries}</td><td>{cells.recall.valid_queries}/{cells.recall.excluded_queries}</td></tr>) : [])}</tbody>
                         </table></div>
-                        <p className={styles.muted}>Chất lượng càng cao càng tốt; latency càng thấp càng tốt. Precision chia k kể cả thiếu kết quả; grade ≥ 1 là liên quan. n/a: không xác định/không đo được, không phải 0. Macro-average; Recall/MRR/nDCG loại truy vấn không có nhãn dương. Điểm RRF khác thang cosine, không so trực tiếp.</p>
+                        <details><summary>Cách đọc chỉ số</summary><p className={styles.muted}>Chất lượng càng cao càng tốt; thời gian càng thấp càng tốt. Precision chia k kể cả thiếu kết quả; grade ≥ 1 là liên quan. n/a không phải 0. Recall/MRR/nDCG loại truy vấn không có nhãn dương khỏi trung bình. Điểm RRF không so trực tiếp với cosine.</p></details>
                     </section>
-                    <section className={layout.card}><h2>Chi tiết theo truy vấn</h2>
+                    <details className={layout.card}><summary>Chi tiết theo truy vấn</summary>
                         {data.observations.map(row => <details key={`${row.query_id}:${row.method}`} className={styles.query}>
                             <summary>{row.query_id} · {row.method.toUpperCase()} · {row.error_code || `${number(row.latency_ms)} ms`}</summary>
                             <p>{data.queries.find(query => query.query_id === row.query_id)?.query}</p>
@@ -102,8 +102,7 @@ function RunView({ id, report }: { id: string; report: boolean }) {
                         <div className={styles.row}><button className={layout.secondaryButton} disabled={offset === 0} onClick={() => setOffset(n => Math.max(0, n - 20))}>Trước</button>
                             <span>{Math.min(offset + 1, data.pagination.total)}–{Math.min(offset + 20, data.pagination.total)}/{data.pagination.total}</span>
                             <button className={layout.primaryButton} disabled={offset + 20 >= data.pagination.total} onClick={() => setOffset(n => n + 20)}>Tiếp</button></div>
-                    </section>
-                </>}
+                    </details>
             </>}
         </div>
     </section>

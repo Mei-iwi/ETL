@@ -3,6 +3,7 @@ import csv
 import inspect
 import io
 import platform
+from contextlib import closing
 from time import perf_counter
 
 from data_sync_etl.application.content_bags import bag_structure
@@ -92,12 +93,14 @@ class EvaluationService:
                 'number_of_queries': len(command['queries']), 'relevant_items': positives,
                 'relevance_unit': 'resource', 'relevance_threshold': 1,
                 'dataset_hash': dataset['dataset_hash'], 'created_at': dataset['created_at'],
-                'validation': {'ground_truth_confirmed': True,
+                'validation': {'ground_truth_confirmed': dataset.get('ground_truth_confirmed', False),
                                'warnings': self.warnings(dataset)}}
 
     @staticmethod
     def warnings(dataset):
         result = ['UNJUDGED_ITEMS_TREATED_AS_GRADE_0', 'LOCAL_DEMO_NOT_PRODUCTION_AUTH']
+        if not dataset.get('ground_truth_confirmed', False):
+            result.append('LABELS_NOT_HUMAN_CONFIRMED')
         if len(dataset['queries']) < 10:
             result.append('SMALL_DATASET_NO_GENERAL_CONCLUSION')
         if any(not any(label['grade'] >= 1 for label in query['relevance']) for query in dataset['queries']):
@@ -105,16 +108,24 @@ class EvaluationService:
         return result
 
     def run(self, command, access):
+        with closing(self.run_events(command, access)) as events:
+            for event in events:
+                if event['type'] == 'result':
+                    return event['run']
+
+    def run_events(self, command, access):
         self.authorized(access)
         with self.store.lock('run'):
             dataset = self.store.get('datasets', command['dataset_id'])
             if len(dataset['queries']) > self.settings.evaluation_max_queries:
                 raise EvaluationError('EVALUATION_SIZE_LIMIT')
+            marker = self.corpus_marker(dataset['filters'], access)
             snapshot, fingerprint = self.corpus(dataset['filters'], access)
             if dataset['scope'] != access.scope:
                 raise EvaluationError('EVALUATION_FORBIDDEN', 403)
             if fingerprint != dataset['corpus_fingerprint']:
                 raise EvaluationError('EVALUATION_DATASET_STALE', 409)
+            self.check_marker(dataset, access, marker)
             run = {'id': new_id(), 'dataset_id': dataset['id'], 'dataset_name': dataset['name'],
                    'dataset_hash': dataset['dataset_hash'], 'schema_version': 1, 'scope': access.scope,
                    'status': 'RUNNING', 'created_at': now().isoformat(), 'finished_at': None,
@@ -129,21 +140,34 @@ class EvaluationService:
                                    'precision_denominator': 'k, including missing results',
                                    'mrr_cutoff': 'k', 'ndcg_gain': '2^grade-1',
                                    'percentile': 'linear interpolation',
+                                   'corpus_validation': 'full before/after run; batched PG marker before/after each search; Search guards unchanged',
+                                   'timeout_seconds': self.settings.evaluation_run_timeout_seconds,
                                    'python': platform.python_version(), 'platform': platform.system()}}
             self.store.put('runs', run)
+            total = (len(dataset['queries']) + command['warmup_queries']) * len(METHODS)
+            completed = 0
+            def progress(phase):
+                return {'type': 'progress', 'run_id': run['id'], 'completed': completed, 'total': total,
+                        'percent': min(99, completed * 100 // total), 'phase': phase}
             started = perf_counter()
             try:
+                yield progress('preparing')
                 for index in range(command['warmup_queries']):
                     for method in METHODS:
                         self.deadline(started)
+                        self.check_marker(dataset, access, marker)
                         self.search.search(dataset['queries'][index % len(dataset['queries'])]['query'], method,
                                            filters=dataset['filters'], size=command['max_results'], access=access)
+                        self.check_marker(dataset, access, marker)
+                        self.deadline(started)
+                        completed += 1
+                        yield progress('warmup')
                 for qi, query in enumerate(dataset['queries']):
                     qrels = {label['item_id']: label['grade'] for label in query['relevance']}
                     order = METHODS[qi % 3:] + METHODS[:qi % 3]
                     for method in order:
                         self.deadline(started)
-                        self.check_corpus(dataset, access, fingerprint)
+                        self.check_marker(dataset, access, marker)
                         call_start = perf_counter()
                         row = {'query_id': query['query_id'], 'method': method, 'ranked': [],
                                'metrics': {}, 'latency_ms': None, 'error_code': None}
@@ -163,11 +187,22 @@ class EvaluationService:
                             row['latency_ms'] = (perf_counter() - call_start) * 1000
                             row['error_code'] = self.safe_dependency_code(exc)
                         run['observations'].append(row)
-                        self.check_corpus(dataset, access, fingerprint)
+                        self.check_marker(dataset, access, marker)
                         self.deadline(started)
+                        completed += 1
+                        yield progress('running')
                 self.check_corpus(dataset, access, fingerprint)
+                self.check_marker(dataset, access, marker)
+                self.deadline(started)
                 errors = sum(row['error_code'] is not None for row in run['observations'])
                 run['status'] = 'COMPLETED' if not errors else 'FAILED' if errors == len(run['observations']) else 'PARTIAL'
+            except GeneratorExit:
+                run['status'] = 'FAILED'
+                run['warnings'].append('EVALUATION_CANCELLED')
+                run['finished_at'] = now().isoformat()
+                run['duration_ms'] = (perf_counter() - started) * 1000
+                self.store.put('runs', run, replace=True)
+                raise
             except Exception as exc:
                 code = self.safe_dependency_code(exc)
                 run['status'] = 'NOT_COMPARABLE' if code in ('EVALUATION_CORPUS_CHANGED', 'EVALUATION_QRELS_DENIED') else 'FAILED'
@@ -178,7 +213,8 @@ class EvaluationService:
                     observation['metrics'] = {}
             run['finished_at'], run['duration_ms'] = now().isoformat(), (perf_counter() - started) * 1000
             self.store.put('runs', run, replace=True)
-            return run
+            yield {'type': 'result', 'run': run, 'completed': completed, 'total': total,
+                   'percent': 100 if run['status'] == 'COMPLETED' else min(99, completed * 100 // total)}
 
     @staticmethod
     def safe_dependency_code(exc):
@@ -192,6 +228,24 @@ class EvaluationService:
     def check_corpus(self, dataset, access, expected):
         try:
             _, actual = self.corpus(dataset['filters'], access)
+        except Exception:
+            raise EvaluationError('EVALUATION_CORPUS_CHANGED', 409) from None
+        if actual != expected:
+            raise EvaluationError('EVALUATION_CORPUS_CHANGED', 409)
+
+    def corpus_marker(self, filters, access):
+        self.authorized(access)
+        with self.search.indexing.uow() as repo:
+            marker = repo.evaluation_state(filters, limit=self.settings.evaluation_max_corpus_versions,
+                                           max_units=self.settings.index_max_units)
+        model = self.search.indexing.embedding
+        return checksum([marker, access.scope, model.model_id, model.version, model.dimension,
+                         self.settings.chunk_size_words, self.settings.chunk_overlap_words,
+                         self.settings.search_max_bags, self.settings.search_timeout_seconds])
+
+    def check_marker(self, dataset, access, expected):
+        try:
+            actual = self.corpus_marker(dataset['filters'], access)
         except Exception:
             raise EvaluationError('EVALUATION_CORPUS_CHANGED', 409) from None
         if actual != expected:

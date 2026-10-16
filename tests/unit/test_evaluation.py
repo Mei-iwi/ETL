@@ -67,8 +67,8 @@ def test_four_apis_persist_reload_and_report_without_recompute(evaluation):
         assert before == repo.find('etl_stage_runs', {})
 
 
-@pytest.mark.parametrize('change', ['duplicate_query', 'duplicate_label', 'unknown', 'bag_unit', 'unconfirmed', 'invalid_grade', 'empty'])
-def test_dataset_rejects_invalid_or_unconfirmed_labels(evaluation, change):
+@pytest.mark.parametrize('change', ['duplicate_query', 'duplicate_label', 'unknown', 'bag_unit', 'invalid_grade', 'empty'])
+def test_dataset_rejects_invalid_labels(evaluation, change):
     c, _, command = evaluation
     if change == 'duplicate_query':
         command['queries'].append(command['queries'][0])
@@ -78,8 +78,6 @@ def test_dataset_rejects_invalid_or_unconfirmed_labels(evaluation, change):
         command['queries'][0]['relevance'][0]['item_id'] = 'unknown'
     elif change == 'bag_unit':
         command['relevance_unit'] = 'content_bag'
-    elif change == 'unconfirmed':
-        command['ground_truth_confirmed'] = False
     elif change == 'empty':
         command['queries'] = []
     else:
@@ -209,6 +207,7 @@ def test_cooperative_timeout_never_exports_success(evaluation, monkeypatch):
     from importlib import import_module
 
     c, _, command = evaluation
+    c.settings.evaluation_run_timeout_seconds = 120
     clock = [0.]
     original = c.search.search
     def slow(*args, **kwargs):
@@ -222,3 +221,149 @@ def test_cooperative_timeout_never_exports_success(evaluation, monkeypatch):
         result = client.post('/api/v1/evaluations/runs', json={'dataset_id': dataset_id}).json()
         assert result['status'] == 'FAILED' and 'EVALUATION_TIMEOUT' in result['warnings']
         assert client.get(f'/api/v1/evaluations/runs/{result["run_id"]}/report').status_code == 409
+
+
+def test_stream_counts_real_work_including_warmup_and_only_finishes_after_save(evaluation):
+    c, _, command = evaluation
+    with api(c) as client:
+        dataset_id = client.post('/api/v1/evaluations/datasets', json=command).json()['dataset_id']
+        response = client.post('/api/v1/evaluations/runs', json={'dataset_id': dataset_id, 'warmup_queries': 1},
+                               headers={'Accept': 'application/x-ndjson'})
+        assert response.status_code == 201 and 'application/x-ndjson' in response.headers['content-type']
+        events = [json.loads(line) for line in response.text.splitlines()]
+        assert [event['completed'] for event in events[:-1]] == list(range(10))
+        assert all(event['total'] == 9 and event['percent'] < 100 for event in events[:-1])
+        assert sum(event.get('phase') == 'warmup' for event in events) == 3
+        final = events[-1]
+        assert final['percent'] == 100 and final['result']['status'] == 'COMPLETED'
+        assert 'run' not in final and 'queries' not in final
+        saved = c.evaluations.store.get('runs', final['result']['run_id'])
+        assert saved['status'] == 'COMPLETED' and len(saved['observations']) == 6
+        assert client.post('/api/v1/evaluations/runs', json={'dataset_id': new_id()},
+                           headers={'Accept': 'application/x-ndjson'}).status_code == 404
+
+
+def test_stream_storage_failure_cannot_report_100(evaluation):
+    c, _, command = evaluation
+    original = c.evaluations.store.put
+    def fail_save(kind, payload, *, replace=False):
+        if replace:
+            raise EvaluationError('EVALUATION_STORAGE_UNAVAILABLE', 503)
+        return original(kind, payload)
+    with api(c) as client:
+        dataset_id = client.post('/api/v1/evaluations/datasets', json=command).json()['dataset_id']
+        c.evaluations.store.put = fail_save
+        response = client.post('/api/v1/evaluations/runs', json={'dataset_id': dataset_id},
+                               headers={'Accept': 'application/x-ndjson'})
+        events = [json.loads(line) for line in response.text.splitlines()]
+        assert events[-1]['type'] == 'error' and events[-1]['status'] == 503
+        assert not any(event.get('percent') == 100 or event['type'] == 'result' for event in events)
+
+
+def test_disconnect_closes_run_and_releases_lock(evaluation):
+    from data_sync_etl.api.evaluation_schemas import DatasetRequest, RunRequest
+    from data_sync_etl.domain.search_access import SearchAccess
+
+    c, _, command = evaluation
+    access = SearchAccess(scope='local_demo')
+    dataset = c.evaluations.create_dataset(DatasetRequest(**command).model_dump(), access)
+    events = c.evaluations.run_events(RunRequest(dataset_id=dataset['dataset_id']).model_dump(), access)
+    first = next(events)
+    events.close()
+    saved = c.evaluations.store.get('runs', first['run_id'])
+    assert saved['status'] == 'FAILED' and 'EVALUATION_CANCELLED' in saved['warnings']
+    with c.evaluations.store.lock('run'):
+        pass
+
+
+def test_dataset_without_confirmation_is_saved_without_claiming_ground_truth(evaluation):
+    c, _, command = evaluation
+    command.pop('ground_truth_confirmed')
+    with api(c) as client:
+        response = client.post('/api/v1/evaluations/datasets', json=command)
+        assert response.status_code == 201
+        assert response.json()['validation']['ground_truth_confirmed'] is False
+        assert 'LABELS_NOT_HUMAN_CONFIRMED' in response.json()['validation']['warnings']
+
+
+def test_full_corpus_checked_only_at_run_boundaries(evaluation, monkeypatch):
+    c, _, command = evaluation
+    with api(c) as client:
+        dataset_id = client.post('/api/v1/evaluations/datasets', json=command).json()['dataset_id']
+        calls = []
+        original = c.evaluations.corpus
+        def counted(*args, **kwargs):
+            calls.append(1)
+            return original(*args, **kwargs)
+        monkeypatch.setattr(c.evaluations, 'corpus', counted)
+        result = client.post('/api/v1/evaluations/runs', json={'dataset_id': dataset_id}).json()
+        assert result['status'] == 'COMPLETED'
+        assert len(calls) == 2  # Not 2 * query_count * method_count + boundaries.
+
+
+@pytest.mark.parametrize('change', ['unit_access', 'index_run', 'source_hash', 'model'])
+def test_light_marker_detects_access_index_source_and_model_changes(evaluation, change):
+    c, version, command = evaluation
+    original = c.search.search
+    calls = []
+    def changed(*args, **kwargs):
+        result = original(*args, **kwargs)
+        calls.append(1)
+        with c.uow() as repo:
+            if change == 'unit_access':
+                unit = repo.find('content_units', {'resource_version_id': version['id']})[0]
+                repo.update('content_units', unit['id'], {'review_status': 'REJECTED'})
+            elif change == 'index_run':
+                run = c.indexing._runs(repo, version['id'])[0]
+                repo.update('etl_stage_runs', run['id'], {'status': 'FAILED'})
+            elif change == 'source_hash':
+                repo.update('resource_versions', version['id'], {'source_hash': 'f' * 64})
+            else:
+                c.indexing.embedding.version = 'changed-model'
+        return result
+    with api(c) as client:
+        dataset_id = client.post('/api/v1/evaluations/datasets', json=command).json()['dataset_id']
+        c.search.search = changed
+        result = client.post('/api/v1/evaluations/runs', json={'dataset_id': dataset_id}).json()
+        assert result['status'] == 'NOT_COMPARABLE' and 'EVALUATION_CORPUS_CHANGED' in result['warnings']
+        assert len(calls) == 1
+        stored = c.evaluations.store.get('runs', result['run_id'])
+        assert stored['summary'] == {} and all(not row['metrics'] for row in stored['observations'])
+
+
+def test_final_full_validation_detects_mongo_artifact_change(evaluation):
+    c, _, command = evaluation
+    original = c.search.search
+    calls = []
+    def changed(*args, **kwargs):
+        result = original(*args, **kwargs)
+        calls.append(1)
+        if len(calls) == 6:
+            # Valid dimension, different vector: PG markers intentionally do not read embeddings.
+            bag = next(iter(c.indexing.bags.rows.values()))
+            bag.embedding = [0.3, 0.2, 0.1]
+        return result
+    with api(c) as client:
+        dataset_id = client.post('/api/v1/evaluations/datasets', json=command).json()['dataset_id']
+        c.search.search = changed
+        result = client.post('/api/v1/evaluations/runs', json={'dataset_id': dataset_id}).json()
+        assert result['status'] == 'NOT_COMPARABLE'
+        assert c.evaluations.store.get('runs', result['run_id'])['summary'] == {}
+
+
+def test_marker_uses_batched_queries_without_text_or_mongo(evaluation):
+    from sqlalchemy import event
+
+    from data_sync_etl.domain.search_access import SearchAccess
+
+    c, _, _ = evaluation
+    statements = []
+    def recorded(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement.lower())
+    event.listen(c.engine, 'before_cursor_execute', recorded)
+    try:
+        marker = c.evaluations.corpus_marker({}, SearchAccess('local_demo'))
+    finally:
+        event.remove(c.engine, 'before_cursor_execute', recorded)
+    assert len(marker) == 64 and len(statements) == 6
+    assert all('content_unit_texts' not in statement for statement in statements)

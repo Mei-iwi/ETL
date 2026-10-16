@@ -99,12 +99,7 @@ export const navagationItems: NavigationGroup[] = [
             },
             {
                 to: '/experiments/results',
-                label: 'Kết quả đánh giá',
-                end: true,
-            },
-            {
-                to: '/experiments/reports',
-                label: 'Báo cáo',
+                label: 'Kết quả và báo cáo',
                 end: true,
             }
         ]
