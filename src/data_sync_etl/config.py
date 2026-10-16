@@ -98,6 +98,8 @@ class Settings(BaseSettings):
     source_mongo_uri: str | None = Field(default=None, repr=False)
     source_mongo_database: str = Field(default='source_metadata', pattern=r'^[A-Za-z0-9_-]{1,63}$')
     master_mongo_identity_bootstrap: bool = False
+    # Shared identity-only projection, independent of legacy separate bootstrap.
+    master_mongo_identity_projection: bool = False
     master_mongo_identity_scope: Literal['approved_ids', 'source_verified'] = 'approved_ids'
     # Approve Master IDs, not Mongo IDs. Existing mongo_id is always authoritative.
     master_mongo_identity_ids: dict[Literal['users', 'resources'], list[str]] = Field(

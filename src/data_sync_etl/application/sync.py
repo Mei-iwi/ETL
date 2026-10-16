@@ -18,6 +18,7 @@ class MasterSync:
                  skip_shared_metadata_validation=False):
         self.source, self.uow, self.batch_size = source, uow, batch_size
         self.metadata_projection = metadata_projection
+        self.last_metadata_report = {}
         self.skip_shared_metadata_validation = skip_shared_metadata_validation
 
     def run(self, stream="all", full=False):
@@ -38,8 +39,10 @@ class MasterSync:
             for name in result:
                 if name in ('users', 'resources') and self.metadata_projection is not None:
                     try:
-                        self.metadata_projection.run(name)
+                        self.last_metadata_report.update(self.metadata_projection.run(name) or {})
                     except Exception:
+                        self.last_metadata_report[name] = {'status': 'FAILED', 'reason': 'RECONCILE_REQUIRED',
+                                                           'master_state': 'COMMITTED'}
                         event(stage='master_metadata_projection', stream=name,
                               action='FAILED_RECONCILE_REQUIRED')
             return result

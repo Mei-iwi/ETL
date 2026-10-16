@@ -74,8 +74,10 @@ def test_qa26_full_field_mapping_and_verified_mongo_ids(source_database, pg_cont
 
 def test_real_master_ten_table_columns_match_orm_and_reference_constraints(pg_container):
     inspector = inspect(pg_container.engine)
-    counts = {'master_learning_resources': 26, 'master_users': 20, 'master_grade_levels': 21,
-              'subjects': 9, 'resource_subjects': 3, 'resource_grade_levels': 2,
+    # Revision 0015 added source_origin/source_state_hash/source_missing_at to
+    # the four SOURCE-backed Master tables; the business columns are unchanged.
+    counts = {'master_learning_resources': 29, 'master_users': 23, 'master_grade_levels': 24,
+              'subjects': 12, 'resource_subjects': 3, 'resource_grade_levels': 2,
               'resource_versions': 20, 'content_units': 13, 'ocr_jobs': 12, 'ocr_page_tasks': 14}
     for table, count in counts.items():
         actual = {c['name']: c for c in inspector.get_columns(table)}
@@ -161,6 +163,27 @@ def test_real_source_master_mongo_idempotent_preserve_extensions(source, pg_cont
     with pg_container.uow() as repo:
         assert repo.get('master_learning_resources', 'resource-1')['is_active'] is False
     assert all(db[name].count_documents({}) == 0 for name in ('ocr_pages', 'mongo_content_units', 'content_bags'))
+
+
+def test_real_identity_dry_run_then_apply_keeps_five_collections(pg_container, projection_runtime):
+    db, _, projection, sync = projection_runtime
+    sync.metadata_projection = None
+    sync.run(full=True)
+    with pg_container.uow() as repo:
+        before = repo.find('master_learning_resources', order=('id',))
+    preview = projection.run(dry_run=True)
+    assert preview['resources']['would_create'] == 3 and preview['users']['would_create'] > 0
+    assert db.users.count_documents({}) == db.learning_resources.count_documents({}) == 0
+    with pg_container.uow() as repo:
+        assert repo.find('master_learning_resources', order=('id',)) == before
+    report = projection.run()
+    assert report['resources']['created'] == 3 and report['resources']['identity_coverage_percent'] == 100
+    assert report['resources']['missing_extension'] == 3
+    assert set(db.list_collection_names()) == {
+        'users', 'learning_resources', 'ocr_pages', 'mongo_content_units', 'content_bags'}
+    dates = {d['_id']: d['created_at'] for d in db.learning_resources.find({})}
+    assert projection.run()['resources']['unchanged'] == 3
+    assert dates == {d['_id']: d['created_at'] for d in db.learning_resources.find({})}
 
 
 def test_real_declared_nonpk_reference_preserves_existing_document(source, projection_runtime):

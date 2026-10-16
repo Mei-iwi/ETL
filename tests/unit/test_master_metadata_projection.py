@@ -17,6 +17,16 @@ from data_sync_etl.main import create_app
 from data_sync_etl.workers.master_sync import MasterSyncWorker
 
 
+@pytest.fixture(autouse=True)
+def postgres_fixture_provenance(container):
+    # Fixture payload stands in for verified PostgreSQL, never a real SOURCE write.
+    container.source.source_origin = 'POSTGRESQL'
+
+
+def references(stream, ids):
+    return dict.fromkeys(ids)
+
+
 class MetadataMemory:
     """Flow double only; actual Mongo atomicity is covered in integration tests."""
 
@@ -73,7 +83,13 @@ def test_normal_master_sync_never_invokes_opted_in_legacy_bootstrap(container, m
         with runtime.uow() as repo:
             assert all(run['status'] == 'COMPLETED' for run in repo.find('sync_runs'))
         # Explicit legacy invocation plus existing opt-in retains compatibility.
-        dispatch(runtime, parser().parse_args(['project-master-mongo', '--full']))
+        assert all(r['created'] == 0 for r in dispatch(runtime, parser().parse_args(['project-master-mongo', '--full'])).values())
+        # Explicitly approved LOCAL mappings need no fabricated SOURCE verification.
+        with runtime.uow() as repo:
+            for table, key in [('master_users', 'user-1'), ('master_learning_resources', 'resource-1')]:
+                repo.update(table, key, {'source_origin': 'LOCAL', 'mongo_id': key})
+        runtime.settings.app_environment = 'test'
+        dispatch(runtime, parser().parse_args(['project-master-mongo', '--full', '--apply']))
         assert store.calls == 2 and store.users and store.resources
     finally:
         runtime.close()
@@ -107,6 +123,7 @@ def approved(container):
 
 
 def projector(container, store, **kwargs):
+    kwargs.setdefault('identity_guard', references)
     return MasterMetadataProjection(container.uow, store, batch_size=1,
                                     identity_bootstrap=True, identity_ids=approved(container), **kwargs)
 
@@ -149,7 +166,7 @@ def test_bootstrap_unapproved_ids_are_skipped_not_conflicts(container):
     container.sync.run(full=True)
     store = MetadataMemory()
     projection = MasterMetadataProjection(container.uow, store, identity_bootstrap=True,
-                                          identity_ids={'users': ['user-1']})
+                                          identity_ids={'users': ['user-1']}, identity_guard=references)
     report = projection.run('users')['users']
     assert report['skipped_unapproved'] == report['scanned'] - 1
     assert report['conflicts'] == 0
@@ -274,10 +291,15 @@ def test_keyset_multiple_pages_without_auth_or_source_reader(container):
         for key in ['A', 'Z', 'a', 'z', *[f'extra-{n:03d}' for n in range(17)]]:
             repo.insert('master_users', {**template, 'id': key, 'hashed_password': 'private-test-only'})
         expected = repo.count('master_users', {})
-        assert set(repo.master_metadata_page('users', None, 1)[0]) == {'id', 'mongo_id', 'created_at', 'updated_at'}
+        assert set(repo.master_metadata_page('users', None, 1)[0]) == {
+            'id', 'mongo_id', 'created_at', 'updated_at', 'source_origin', 'is_active', 'deleted_at'}
+        for row in repo.find('master_users'):
+            # Cloned fixture IDs have their own valid initial ownership hash.
+            from data_sync_etl.domain.source_ownership import state_hash
+            repo.update('master_users', row['id'], {'source_state_hash': state_hash(row)})
     store = MetadataMemory()
     projection = projector(container, store)
-    # Projection must still work if the source reader is entirely unavailable.
+    # Independent verifier is supplied; the sync payload reader is not used.
     container.source = None
     result = projection.run('users')['users']
     assert result['scanned'] == result['projected'] == len(store.users) == expected
@@ -287,7 +309,8 @@ def test_post_commit_failure_keeps_master_counters_checkpoints_and_retry_recover
     store = MetadataMemory()
     store.fail_on = 2
     projection = MasterMetadataProjection(container.uow, store, batch_size=1, identity_bootstrap=True,
-                                          identity_ids={'resources': ['resource-1', 'resource-2', 'resource-3']})
+                                          identity_ids={'resources': ['resource-1', 'resource-2', 'resource-3']},
+                                          identity_guard=references)
     container.sync.skip_shared_metadata_validation = False
     container.sync.metadata_projection = projection
     with caplog.at_level('INFO'):

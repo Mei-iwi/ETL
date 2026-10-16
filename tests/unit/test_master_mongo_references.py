@@ -90,9 +90,10 @@ def test_json_field_presence_and_explicit_null_preserve_mapping(container):
 
 
 def test_source_verified_nonpk_and_null_fallback_excludes_master_only(container):
+    container.source.source_origin = 'POSTGRESQL'
     container.sync.run(full=True)
     with container.uow() as repo:
-        repo.sync_upsert('master_learning_resources', {'id': 'resource-1', 'mongo_id': 'MDOC-123'})
+        repo.sync_upsert('master_learning_resources', {'id': 'resource-1', 'mongo_id': 'MDOC-123'}, source_origin='POSTGRESQL')
     store = MetadataMemory()
     projection = MasterMetadataProjection(container.uow, store, identity_bootstrap=True,
                                           identity_scope='source_verified', batch_size=2,
@@ -110,6 +111,7 @@ def test_source_verified_nonpk_and_null_fallback_excludes_master_only(container)
 
 
 def test_source_verified_without_guard_fail_closed_and_cas_conflict(container):
+    container.source.source_origin = 'POSTGRESQL'
     container.sync.run(full=True)
     store = MetadataMemory()
     report = MasterMetadataProjection(container.uow, store, identity_bootstrap=True,

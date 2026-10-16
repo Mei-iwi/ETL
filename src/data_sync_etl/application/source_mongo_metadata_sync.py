@@ -1,6 +1,7 @@
 """Bounded shared read-only validation, or explicitly configured separate-source copy."""
 
-from data_sync_etl.domain.core import DomainError
+from data_sync_etl.application.master_metadata_projection import useful_extension
+from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.logging import event
 
 MODELS = {'users': 'master_users', 'resources': 'master_learning_resources'}
@@ -18,22 +19,19 @@ class SourceMongoMetadataSync:
 
     @staticmethod
     def useful_extension(document):
-        for key in document.model_fields_set - {'id', 'created_at', 'updated_at'}:
-            value = getattr(document, key)
-            if isinstance(value, str) and value.strip() or isinstance(value, list) and value:
-                return True
-        return False
+        return useful_extension(document)
 
-    def run(self, stream='all'):
+    def run(self, stream='all', *, dry_run=False):
         if stream != 'all' and stream not in MODELS:
             raise DomainError('Unknown metadata stream')
-        return {name: self._stream(name) for name in (MODELS if stream == 'all' else [stream])}
+        return {name: self._stream(name, dry_run=dry_run) for name in (MODELS if stream == 'all' else [stream])}
 
-    def _stream(self, stream):
+    def _stream(self, stream, *, dry_run=False):
         report = dict(scanned=0, inserted=0, updated=0, unchanged=0, skipped_unmapped=0,
                       missing_extension=0, skipped_ineligible=0, skipped_stale=0, conflicts=0, failed=0,
                       mode='FULL_RECONCILE', incremental_available=False, checkpoint=None,
-                      checkpoint_persisted=False, error_code=None, master_state='COMMITTED')
+                      checkpoint_persisted=False, error_code=None, master_state='COMMITTED',
+                      eligible=0, would_sync=0, dry_run=dry_run, last_run=now().isoformat(), synced_fields=[])
         report['conflict_reasons'] = {}
         report['master_driven_scan'] = True
         if self.shared:
@@ -63,7 +61,17 @@ class SourceMongoMetadataSync:
                         raise DomainError('SOURCE_PG_VERIFIER_INVALID')
                     for row in rows:
                         report['scanned'] += 1
+                        if (row['source_origin'] != 'POSTGRESQL' or not row['is_active'] or row['deleted_at']
+                                or row.get('publication_status') == 'ARCHIVED'):
+                            report['skipped_ineligible'] += 1
+                            continue
+                        report['eligible'] += 1
                         reference = references.get(row['id'])
+                        # Verified SOURCE NULL + reserved Master PK is the existing,
+                        # opt-in identity fallback; never accept an unverified/non-PK fallback.
+                        if (self.shared and row['id'] in references and reference is None
+                                and row['mongo_id'] == row['id']):
+                            reference = row['id']
                         if reference is None:
                             report['skipped_unmapped'] += 1
                             if self.shared:
@@ -85,7 +93,7 @@ class SourceMongoMetadataSync:
                             if self.shared and document is None:
                                 report['missing_document'] += 1
                                 continue
-                            if document is None or not (document.model_fields_set - {'id', 'created_at', 'updated_at'}) or (self.shared and not self.useful_extension(document)):
+                            if document is None or not self.useful_extension(document):
                                 report['missing_extension'] += 1
                                 continue
                             if document.id != reference:
@@ -99,16 +107,23 @@ class SourceMongoMetadataSync:
                             # Recheck the mapping after network reads, with no PG transaction held for RPC.
                             with self.uow() as repo:
                                 current = repo.metadata_sync_state(stream, row['id'])
-                            if (current is None or current['mongo_id'] != reference or not current['is_active']
+                            if (current is None or current['source_origin'] != 'POSTGRESQL'
+                                    or current['mongo_id'] != reference or not current['is_active']
                                     or current['deleted_at'] or current.get('publication_status') == 'ARCHIVED'):
                                 raise DomainError('MONGO_METADATA_MAPPING_CHANGED')
                             if self.shared:
                                 report['matched'] += 1
                                 continue
+                            if dry_run:
+                                report['would_sync'] += 1
+                                continue
                             operation = 'TARGET_MONGO_WRITE_FAILED'
                             result = self.destination.sync_source_metadata(stream, document)
                             counter = {'INSERTED': 'inserted', 'UPDATED': 'updated', 'UNCHANGED': 'unchanged', 'STALE': 'skipped_stale'}[result]
                             report[counter] += 1
+                            if result in ('INSERTED', 'UPDATED'):
+                                report['synced_fields'] = sorted(set(report['synced_fields']) |
+                                    (document.model_fields_set - {'id', 'created_at', 'updated_at'}))
                         except DomainError as exc:
                             code = str(exc) if str(exc) in {
                                 'MONGO_METADATA_ID_MISMATCH', 'MONGO_METADATA_SUBJECT_MISMATCH',
@@ -134,6 +149,6 @@ class SourceMongoMetadataSync:
                 partial = any(report[key] for key in ('missing_extension', 'conflicts', 'skipped_unmapped', 'skipped_stale', 'skipped_ineligible'))
                 if self.shared:
                     partial = partial or bool(report['missing_document'] or report['invalid_document'])
-                report['status'] = 'PARTIAL' if partial else 'SHARED_MONGO_VALIDATED' if self.shared else 'COMPLETED'
+                report['status'] = 'PARTIAL' if partial else 'SHARED_MONGO_VALIDATED' if self.shared else 'DRY_RUN' if dry_run else 'COMPLETED'
         event(stage='mongo_metadata_validation' if self.shared else 'mongo_source_metadata_sync', stream=stream, action=report['status'], coverage=report)
         return report

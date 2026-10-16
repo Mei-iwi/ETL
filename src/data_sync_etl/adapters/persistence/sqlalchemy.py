@@ -59,7 +59,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             raise ValueError('Invalid source metadata page')
         model = MasterUser if stream == 'users' else MasterLearningResource
         key = model.id.collate('C') if self.session.bind.dialect.name == 'postgresql' else model.id
-        fields = [model.id, model.mongo_id, model.is_active, model.deleted_at]
+        fields = [model.id, model.mongo_id, model.is_active, model.deleted_at, model.source_origin]
         if stream == 'resources':
             fields.append(model.publication_status)
         stmt = select(*fields).order_by(key).limit(size)
@@ -77,7 +77,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         if stream not in ('users', 'resources'):
             raise ValueError('Invalid metadata stream')
         model = MasterUser if stream == 'users' else MasterLearningResource
-        fields = [model.id, model.mongo_id, model.is_active, model.deleted_at]
+        fields = [model.id, model.mongo_id, model.is_active, model.deleted_at, model.source_origin]
         if stream == 'resources':
             fields.append(model.publication_status)
         row = self.session.execute(select(*fields).where(model.id == record_id)).mappings().one_or_none()
@@ -89,13 +89,18 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         model = MasterUser if stream == 'users' else MasterLearningResource
         key = model.id.collate('C') if self.session.bind.dialect.name == 'postgresql' else model.id
         # Deliberately do not read passwords, emails, roles, titles or file paths.
-        stmt = select(model.id, model.mongo_id, model.created_at, model.updated_at).order_by(key).limit(size)
+        fields = [model.id, model.mongo_id, model.created_at, model.updated_at,
+                  model.source_origin, model.is_active, model.deleted_at]
+        if stream == 'resources':
+            fields.append(model.publication_status)
+        stmt = select(*fields).order_by(key).limit(size)
         if after is not None:
             stmt = stmt.where(key > after)
         return [{k: utc(v) for k, v in row.items()}
                 for row in self.session.execute(stmt).mappings()]
 
-    def reserve_master_mongo_identity(self, stream, record_id, expected, target):
+    def reserve_master_mongo_identity(self, stream, record_id, expected, target, *,
+                                      dry_run=False, eligible_only=False, expected_origin=None):
         if stream not in ('users', 'resources') or not isinstance(target, str) or not 1 <= len(target) <= 30 or target != target.strip():
             raise DomainError('BLOCKED_MONGO_ID_MAPPING')
         table = STREAMS[stream]
@@ -105,11 +110,17 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         ).with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
         if row is None or row.mongo_id not in (expected, target):
             raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+        if eligible_only and (row.source_origin not in ('POSTGRESQL', 'LOCAL')
+                or row.source_origin != expected_origin or not row.is_active or row.deleted_at is not None
+                or getattr(row, 'publication_status', None) == 'ARCHIVED'):
+            raise DomainError('MONGO_METADATA_MAPPING_CHANGED')
         if row.source_origin == 'POSTGRESQL' and (
             not row.source_state_hash or row.source_state_hash != state_hash(self._dict(row))
         ):
             raise DomainError('BLOCKED_LOCAL_SOURCE_CHANGE')
         self._check_mongo_reference(model, record_id, target)
+        if dry_run:
+            return
         if row.mongo_id is None:
             try:
                 row.mongo_id = target

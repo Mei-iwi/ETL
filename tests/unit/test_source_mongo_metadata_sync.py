@@ -42,9 +42,10 @@ def test_same_database_endpoint_aliases_fail_closed():
 
 
 def configured(container):
+    container.source.source_origin = 'POSTGRESQL'
     container.sync.run(full=True)
     with container.uow() as repo:
-        repo.sync_upsert('master_users', {'id': 'user-1', 'mongo_id': 'MUSER'})
+        repo.sync_upsert('master_users', {'id': 'user-1', 'mongo_id': 'MUSER'}, source_origin='POSTGRESQL')
         assert repo.source_metadata_page('users', None, 1)
     source, destination = MagicMock(spec=SourceMetadataPort), MagicMock(spec=MetadataDocumentPort)
     stamp = now() - timedelta(days=1)
