@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)
     app_environment: Literal['development', 'test', 'staging', 'production'] | None = None
     search_internal_dev_enabled: bool = False
+    evaluation_max_queries: int = Field(default=20, ge=1, le=100)
+    evaluation_max_corpus_versions: int = Field(default=100, ge=1, le=500)
+    evaluation_max_stored_files: int = Field(default=200, ge=1, le=1000)
+    evaluation_max_file_bytes: int = Field(default=8 * 1024 * 1024, ge=65536, le=16 * 1024 * 1024)
+    evaluation_run_timeout_seconds: int = Field(default=300, ge=10, le=300)
 
     @model_validator(mode='after')
     def validate_search_grants(self):

@@ -69,7 +69,7 @@ export default function App() {
             <Route path='result' element={<SearchAlias />} />
           </Route>
           <Route path='experiments'>
-            <Route index element={<Navigate to='evaluation-data' />} />
+            <Route index element={<Navigate to='evaluation-data' replace />} />
             <Route path='evaluation-data' element={<EvaluationDataPage />} />
             <Route path='run' element={<RunExperimentPage />} />
             <Route path='results' element={<EvaluationResultsPage />} />

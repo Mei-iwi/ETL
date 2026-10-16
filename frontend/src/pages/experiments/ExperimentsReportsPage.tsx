@@ -1,9 +1,6 @@
+import { Navigate, useLocation } from 'react-router'
+
 export function ExperimentsReportPage() {
-    return (
-        <section>
-            <h1>
-                Báo cáo
-            </h1>
-        </section>
-    )
+    const { search } = useLocation()
+    return <Navigate to={`/experiments/results${search}`} replace />
 }

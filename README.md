@@ -371,3 +371,32 @@ Nếu đã cài model mục 4, có thể chạy thêm model thật với databas
 ```bash
 ETL_SEARCH_REAL_MODEL=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest tests/integration/test_search_integration.py -q
 ```
+
+## 10. Thực nghiệm và đánh giá
+
+Chỉ dùng Dev local với cấu hình LOCAL_DEMO ở mục 9. Nhóm **Thực nghiệm** có 3 mục trên thanh submenu dưới Header: Dữ liệu đánh giá → Chạy thực nghiệm → Kết quả và báo cáo. Xuất CSV/JSON ngay tại kết quả; đường dẫn Báo cáo cũ tự chuyển về kết quả và giữ Run ID. Không có xác thực quản trị Production; API đánh giá từ chối truy cập ngoài phạm vi Dev loopback đã xác minh.
+
+1. Chọn học liệu READY và tự chấm nhãn theo **resource_id**, không dùng ContentBag/Chunk ID. Nhãn 0–3; từ 1 là liên quan. Nhập thủ công `resource_id:grade` (mỗi dòng một nhãn) hoặc import JSON, sau đó nhấn **Tạo dataset** để lưu trực tiếp, không checkbox/hộp thoại xác nhận. Bộ nhãn tạo trên giao diện giữ `ground_truth_confirmed=false`, có cảnh báo chưa xác nhận Ground Truth; không tự coi nhãn gợi ý là nhãn chuẩn. File chuẩn bị gán nhãn có `rows` gồm `query_id`, `query_text`, `resource_id`, `resource_title`, `candidate_description`, `relevance`. Sau import, ID/tên/mô tả được điền sẵn; chọn điểm 0–3 trên giao diện, không cần sửa JSON hay gõ lại ID. `null` hiển thị “Chưa chấm”, không tự quy thành 0; phải chấm đủ trước khi lưu. JSON theo contract API (`queries[].relevance` với `item_id`, `grade`) cũng được hỗ trợ.
+2. Giữ Dataset ID, chạy cùng BoW/Vector/Hybrid với k và top-k giống nhau. Thanh tiến độ tính số lượt đã xử lý/tổng lượt (kể cả warmup), giữ tối đa 99% đến khi lưu thành công. Warmup mặc định 0; nếu bật, các lượt warmup không nằm trong thống kê. Giao diện nhận NDJSON trực tiếp từ cùng `POST /evaluations/runs` bằng `Accept: application/x-ndjson`; client cũ không yêu cầu streaming vẫn nhận JSON như trước. Nếu qua reverse proxy, tắt buffering và cho phép kết nối trong suốt lượt chạy. Khi mất kết nối, không tự POST lại; kiểm tra Run ID trước. Không tự chạy khi mở trang. Khi corpus/model/policy khác thời điểm gán nhãn, tạo dataset mới sau khi kiểm tra lại nhãn.
+3. Run ID trong URL dùng để xem lại sau F5; CSV UTF-8 BOM/JSON được xuất từ kết quả đã lưu, không đo lại Search. Browser chỉ nhớ ID gần nhất, không lưu truy vấn/nhãn/credentials. Không có API liệt kê dataset/run ngoài bốn endpoint dưới đây.
+
+| API | Chức năng |
+| --- | --- |
+| `POST /api/v1/evaluations/datasets` | Lưu bộ truy vấn và nhãn đã xác nhận |
+| `POST /api/v1/evaluations/runs` | Chạy đồng bộ ba baseline, trả Run ID/trạng thái |
+| `GET /api/v1/evaluations/runs/{id}?offset=0&limit=20` | Đọc kết quả, phân trang chi tiết query/method |
+| `GET /api/v1/evaluations/runs/{id}/report?format=csv` | Xuất CSV hoặc `format=json`, chỉ run COMPLETED |
+
+Dữ liệu JSON riêng tại `STORAGE_ROOT/evaluations/{datasets,runs}`, có checksum, ghi atomic và khóa file đa process; không thêm bảng/collection. Mặc định tối đa 20 query/dataset, 100 nhãn/query, 20 kết quả, 100 phiên bản corpus, 200 file mỗi loại, 8 MB/file. Các giới hạn `EVALUATION_*` có trong `.env.example`; không sửa `.env` thật khi pull code. `EVALUATION_RUN_TIMEOUT_SECONDS` mặc định 300 giây, cho phép 10–300 giây; `.env` đã khai báo giá trị cũ vẫn được ưu tiên. Ngân sách hợp tác kiểm tra giữa các lượt, không ngắt cưỡng bức lời gọi Search/model đang chạy. Frontend chờ tối đa 660 giây, gồm dư địa cho kiểm tra đầu lần chạy và lời gọi đang xử lý, không tự gửi lại POST. Không có worker đánh giá. Khi hết quota, dừng tạo mới; không tự xóa lịch sử. Khóa còn lại sau crash cần người vận hành xác minh không còn process trước khi xử lý. Nhiều container không chia sẻ filesystem/Production cần thiết kế lưu trữ và xác thực riêng, chưa được hỗ trợ.
+
+Corpus được kiểm tra đầy đủ (PostgreSQL + MongoDB + fingerprint/model/quyền) ở đầu và cuối lần chạy. Trước/sau từng Search và warmup, marker PostgreSQL theo lô theo dõi metadata, phiên bản hiện hành, ContentUnit/review/quyền, trạng thái job, stage và số thế hệ projection; không đọc lại toàn văn/vector hay dựng lại toàn bộ Bag. Marker giới hạn tổng ContentUnit theo `INDEX_MAX_UNITS`. Search vẫn thực hiện mọi guard sẵn có, không cache nội dung/quyền qua các lượt. MongoDB được đối chiếu đầy đủ ở cuối; nếu dữ liệu/marker thay đổi, đánh dấu NOT_COMPARABLE, bỏ toàn bộ metrics và không xuất báo cáo. Latency từng phương pháp không bao gồm các lượt kiểm tra corpus.
+
+Precision@k dùng mẫu số k kể cả thiếu kết quả; Recall@k, MRR@k, nDCG@k không xác định khi không có nhãn dương được loại khỏi macro-average tương ứng. nDCG dùng gain `2^grade-1`. Latency là toàn bộ lời gọi SearchService, không gồm kiểm tra corpus; p50/p95 nội suy tuyến tính. Corpus đổi giữa run → NOT_COMPARABLE, không xuất báo cáo hoàn tất. Lỗi runtime từng phương pháp không được thay bằng metric 0; không so score RRF trực tiếp với cosine. Chưa có Ground Truth được người nghiên cứu xác nhận thì đánh giá chất lượng Dev là **NOT_RUN**; fixture chỉ kiểm chứng phần mềm, không chứng minh Hybrid tốt hơn.
+
+```bash
+python -m pytest tests/unit/test_evaluation.py tests/unit/test_evaluation_metrics.py -q
+node --experimental-strip-types --test frontend/tests/evaluationApi.test.mjs
+npm.cmd --prefix frontend run build
+# Opt-in UI + Search/model thật trên SQLite/MemoryMongo fixture cô lập, không dùng DB Dev:
+ETL_EVALUATION_UI=1 ETL_EVALUATION_REAL_MODEL=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest tests/integration/test_evaluation_integration.py -q -s
+```
