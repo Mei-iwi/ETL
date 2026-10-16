@@ -2,7 +2,7 @@ import json
 from hashlib import sha256
 
 import pytest
-from test_multiformat import FORMATS, ImageEngineDouble, sample
+from test_multiformat import FORMATS, ImageEngineDouble, sample, xlsx_with_default_content_type
 from test_source_file_import import importing as importing
 
 from data_sync_etl.adapters.storage.source_dispatcher import SourceFileDispatcher
@@ -327,8 +327,16 @@ def test_composition_local_available_without_optional_auth_runtime(importing, mo
 @pytest.mark.parametrize('extension', FORMATS)
 @pytest.mark.parametrize('provider', ['local', 'google_drive'])
 def test_all_supported_formats_share_source_import_pipeline(importing, extension, provider):
+    assert_source_format_pipeline(importing, extension, provider, sample(extension))
+
+
+@pytest.mark.parametrize('provider', ['local', 'google_drive'])
+def test_xlsx_default_content_type_import_reaches_content_ready(importing, provider):
+    assert_source_format_pipeline(importing, '.xlsx', provider, xlsx_with_default_content_type())
+
+
+def assert_source_format_pipeline(importing, extension, provider, payload):
     c, rows, original = importing
-    payload = sample(extension)
     path = original.with_name('sample' + extension)
     path.write_bytes(payload)
     rows[0].update(storage_object_key=path.name, source_hash=sha256(payload).hexdigest())
