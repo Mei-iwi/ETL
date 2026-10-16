@@ -162,6 +162,12 @@ class ContentBagBuilder:
                                for u in nodes])
         if not roots:
             return BagBuildResult("DEFERRED", "No eligible content leaves", [])
+        if any(leaf_by_id[key].keywords is None for membership in roots.values() for key in membership):
+            return BagBuildResult('DEFERRED', 'Leaf keywords not supplied', [])
+        roots = {root: membership for root, membership in roots.items()
+                 if any(leaf_by_id[key].keywords for key in membership)}
+        if not roots:
+            return BagBuildResult('DEFERRED', 'No keyword-bearing content roots', [])
         model = self.embedding
         if model is None:
             return BagBuildResult("BLOCKED", "Real embedding runtime not configured", [])
@@ -177,7 +183,7 @@ class ContentBagBuilder:
             collected = []
             for key in membership:
                 leaf = leaf_by_id.get(key)
-                if leaf is None or not leaf.keywords:
+                if leaf is None or leaf.keywords is None:
                     return BagBuildResult("DEFERRED", "Leaf keywords not supplied", [])
                 collected.extend(leaf.keywords)
             keywords = normalize_keywords(collected)

@@ -26,7 +26,7 @@ function statusNotice(status: IndexStatusResult) {
         if (status.error_code === 'INVALID_EMBEDDING') return 'Vector hoặc số chiều không hợp lệ.'
         return 'Model chưa sẵn sàng. Kiểm tra runtime.'
     }
-    if (status.error_code === 'LEAF_KEYWORDS_UNAVAILABLE') return 'Chưa có từ khóa hợp lệ.'
+    if (status.error_code === 'LEAF_KEYWORDS_UNAVAILABLE' && status.representation_mode === 'unavailable') return 'Chưa có từ khóa hợp lệ.'
     return {
         CONTENT_NOT_READY: 'Đang chờ nội dung.', NOT_STARTED: 'Chưa lập chỉ mục.',
         PENDING: 'Đang chờ xử lý.', RUNNING: 'Đang tạo chỉ mục.', READY: 'Chỉ mục sẵn sàng.',
@@ -202,7 +202,7 @@ function IndexWorkspace({ versionId, view }: { versionId: string; view: IndexVie
     const running = status?.index_status === 'PENDING' || status?.index_status === 'RUNNING'
     const canBuild = status?.processing_status === 'CONTENT_READY' && status.index_status !== 'BLOCKED_RUNTIME'
         && status.index_status !== 'BLOCKED_STRUCTURE'
-        && status.error_code !== 'LEAF_KEYWORDS_UNAVAILABLE'
+        && !(status.error_code === 'LEAF_KEYWORDS_UNAVAILABLE' && status.representation_mode === 'unavailable')
         && !running && !statusError && !busy
     return <>
         <div className={styles.indexPanel} data-index-panel="index" hidden={view !== 'index'}>

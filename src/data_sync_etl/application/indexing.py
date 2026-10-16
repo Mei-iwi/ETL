@@ -99,7 +99,11 @@ class IndexingService:
             raise IndexingError('BAG_STRUCTURE_INVALID') from None
         if not roots:
             raise IndexingError('BAG_STRUCTURE_UNAVAILABLE')
-        if any(not snapshot[5][leaf] for leaves in roots.values() for leaf in leaves):
+        # Numeric-only leaves remain available in Chunk preview. A root needs
+        # real keywords, but one keywordless row must not block the whole file.
+        roots = {root: leaves for root, leaves in roots.items()
+                 if any(snapshot[5][leaf] for leaf in leaves)}
+        if not roots:
             raise IndexingError('LEAF_KEYWORDS_UNAVAILABLE')
         return roots
 

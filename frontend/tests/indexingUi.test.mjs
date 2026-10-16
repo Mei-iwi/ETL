@@ -245,6 +245,10 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         assert.equal(await evaluate("document.body.textContent.includes('Schema MongoDB chưa hợp lệ')"), false, 'historical schema failure is not a current runtime blocker')
         assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').disabled"), false)
         assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Xây dựng chỉ mục').disabled"), true)
+        blockCode = 'LEAF_KEYWORDS_UNAVAILABLE'
+        await open()
+        await waitFor(() => evaluate("document.body.textContent.includes('FAILED')"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').disabled"), false, 'historical keyword failure must not block a recovered root')
         forcedState = 'STALE'
         autoEnabled = true
         await open()
