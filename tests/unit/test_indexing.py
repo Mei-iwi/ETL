@@ -222,6 +222,41 @@ def test_keywords_deterministic_unigram_normalization():
     assert extractor.extract("và là của 123") == []
 
 
+@pytest.mark.parametrize('structured', [False, True])
+@pytest.mark.parametrize('automatic', [False, True])
+def test_numeric_leaf_preserved_without_blocking_index(container, structured, automatic):
+    index = setup_index(container)
+    if structured:
+        structured_projection(container)
+    container.settings.index_auto_enabled = automatic
+    version, _ = completed(container, texts=['A1: Resource | B1: Total', 'A2: 120 | B2: 450'])
+    if not automatic:
+        assert index.status(version['id'])['index_status'] == 'NOT_STARTED'
+        index.enqueue(version['id'])
+        assert index.once()
+    status = index.status(version['id'])
+    assert status['index_status'] == 'READY' and status['bag_count'] == 1
+    assert index.chunks(version['id'])['total'] >= 2
+    numeric = next(doc for doc in container.documents.units.values() if '120' in doc['text'])
+    assert numeric.get('keywords') in (None, [])
+    assert numeric['is_current']
+    assert all(bag.keywords and bag.embedding_text for bag in index.bags.rows.values())
+    index.enqueue(version['id'], force=True)
+    assert index.once()
+    assert index.status(version['id'])['index_status'] == 'READY'
+    assert len(index.bags.rows) == 1
+
+
+def test_only_numeric_content_does_not_create_fake_bag(container):
+    index = setup_index(container)
+    version, _ = completed(container, texts=['A2: 120 | B2: 450'])
+    with pytest.raises(IndexingError, match='LEAF_KEYWORDS_UNAVAILABLE'):
+        index.enqueue(version['id'])
+    assert index.status(version['id'])['processing_status'] == 'CONTENT_READY'
+    assert index.chunks(version['id'])['total'] == 1
+    assert not index.bags.rows
+
+
 def test_source_race_and_timeout_do_not_publish(container):
     index, version, _ = ready(container)
     index.enqueue(version['id'])

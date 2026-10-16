@@ -337,6 +337,8 @@ def test_xlsx_default_content_type_import_reaches_content_ready(importing, provi
 
 def assert_source_format_pipeline(importing, extension, provider, payload):
     c, rows, original = importing
+    from tests.indexing_support import setup_index
+    index = setup_index(c)
     path = original.with_name('sample' + extension)
     path.write_bytes(payload)
     rows[0].update(storage_object_key=path.name, source_hash=sha256(payload).hexdigest())
@@ -359,3 +361,8 @@ def assert_source_format_pipeline(importing, extension, provider, payload):
         assert c.orchestrator.status(version['id'])['processing_status'] == 'CONTENT_READY'
     assert c.storage.get_local_path(version['storage_bucket'], version['storage_object_key']).read_bytes() == payload
     assert path.read_bytes() == payload
+    assert index.chunks(version['id'])['total'] > 0
+    index.enqueue(version['id'])
+    assert index.once()
+    assert index.status(version['id'])['index_status'] == 'READY'
+    assert index.bags.rows
