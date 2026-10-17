@@ -25,29 +25,32 @@
 
 .query {
     border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 14px;
+    border-radius: 10px;
+    padding: 16px;
     display: grid;
-    gap: 10px;
+    gap: 12px;
 }
 
 .textarea {
     width: 100%;
-    min-height: 85px;
-    padding: 10px;
+    min-height: 90px;
+    padding: 10px 14px;
     border: 1px solid #cbd5e1;
-    border-radius: 8px;
+    border-radius: 9px;
     font: inherit;
+    font-size: 14.5px;
     resize: vertical;
 }
 
 .query input,
 .row input {
     width: 100%;
-    padding: 9px 12px;
+    min-height: 44px;
+    padding: 10px 14px;
     border: 1px solid #cbd5e1;
-    border-radius: 8px;
+    border-radius: 9px;
     font: inherit;
+    font-size: 14.5px;
 }
 
 .muted {
@@ -73,6 +76,7 @@
     overflow-x: auto;
     min-width: 0;
     max-width: 100%;
+    margin-top: 12px;
 }
 
 .table {
@@ -84,14 +88,16 @@
 .table th,
 .table td {
     text-align: left;
-    padding: 11px;
+    padding: 12px 16px;
     border-bottom: 1px solid #e2e8f0;
     white-space: nowrap;
 }
 
 .table th {
     background: #f8fafc;
-    color: #334155;
+    color: #475569;
+    font-size: 13.5px;
+    font-weight: 600;
 }
 
 .identifier {
@@ -116,7 +122,7 @@
 
 .methods span {
     background: #eff6ff;
-    color: #1d4ed8;
+    color: #1e3a8a;
     border-radius: 6px;
     padding: 6px 12px;
     font-size: 13px;
@@ -135,7 +141,7 @@
     border: 0;
     border-radius: 0;
     background: #e2e8f0;
-    accent-color: #2563eb;
+    accent-color: #1e3a8a;
     overflow: hidden;
 }
 
@@ -145,17 +151,17 @@
 }
 
 .progress::-webkit-progress-value {
-    background: #2563eb;
+    background: #1e3a8a;
     border-radius: 0;
 }
 
 .progress::-moz-progress-bar {
-    background: #2563eb;
+    background: #1e3a8a;
     border-radius: 0;
 }
 
 .progressArea label {
-    color: #2563eb;
+    color: #1e3a8a;
 }
 
 .lookup {
