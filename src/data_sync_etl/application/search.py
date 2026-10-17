@@ -5,7 +5,7 @@ from time import monotonic
 from data_sync_etl.application.content_bags import bag_structure, representation_mode
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
 from data_sync_etl.domain.search import SearchError, binary_score, cosine, normalize_query, rrf
-from data_sync_etl.domain.search_access import SearchAccess
+from data_sync_etl.domain.search_access import SearchAccess, denied
 from data_sync_etl.domain.search_context import decode_context, encode_context
 from data_sync_etl.ports.search import SearchBagReader
 
@@ -192,13 +192,25 @@ class SearchService:
         """A whole file requires permission for every unit, including parents."""
         access = access or SearchAccess()
         if access.scope != 'local_demo':
-            raise SearchError('CONTEXT_NOT_FOUND', 404)
+            raise SearchError('FILE_NOT_FOUND', 404)
         with self.indexing.uow() as repo:
             snapshot = self._ready_snapshot(repo, version_id)
             if snapshot is None or not snapshot[2]:
-                raise SearchError('CONTEXT_NOT_FOUND', 404)
+                # Diagnose readiness only; this path never grants file/text access.
+                version = repo.get('resource_versions', version_id)
+                resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+                unit_limit = min(self.settings.index_max_units, 10000)
+                units = repo.find('content_units', {'resource_version_id': version_id},
+                                  limit=unit_limit + 1) if version else []
+                if (resource and resource['publication_status'] == 'PUBLISHED'
+                        and resource['is_active'] is True and not denied(resource)
+                        and version['lifecycle_status'] in ('INGESTED', 'APPROVED', 'PUBLISHED')
+                        and not denied(version) and len(units) <= unit_limit
+                        and all(access.allows(resource, version, unit) for unit in units)):
+                    raise SearchError('FILE_NOT_READY', 409)
+                raise SearchError('FILE_NOT_FOUND', 404)
             if not {unit['id'] for unit in snapshot[2]} <= self._allowed_units(repo, snapshot, access):
-                raise SearchError('CONTEXT_NOT_FOUND', 404)
+                raise SearchError('FILE_NOT_FOUND', 404)
             result = dict(snapshot[0])  # Storage coordinates never become a JSON response.
             if include_text:
                 content = '\n\n'.join(unit['text'] for unit in snapshot[2] if unit['text'])

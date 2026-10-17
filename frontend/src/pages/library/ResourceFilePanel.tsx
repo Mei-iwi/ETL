@@ -4,8 +4,8 @@ import { SearchContext } from '../search/SearchContext'
 
 type Version = { id: string; version_number: number; created_at: string }
 
-export function ResourceFilePanel({ resourceId, versionId, contextId }: {
-    resourceId: string; versionId: string | null; contextId: string | null
+export function ResourceFilePanel({ resourceId, versionId, contextId, sourceOwned = false }: {
+    resourceId: string; versionId: string | null; contextId: string | null; sourceOwned?: boolean
 }) {
     const [versions, setVersions] = useState<Version[]>([])
     const [selected, setSelected] = useState(versionId || '')
@@ -33,7 +33,9 @@ export function ResourceFilePanel({ resourceId, versionId, contextId }: {
         <h2>Tệp học liệu</h2>
         {error && <p role="alert" className={styles.error}>{error}</p>}
         {loading ? <p className={styles.message}>Đang tải danh sách tệp…</p> :
-            !error && !versions.length && <p className={styles.message}>Chưa có tệp học liệu.</p>}
+            !error && !versions.length && <p className={styles.message}>{sourceOwned
+                ? 'Chưa nhập tệp từ nguồn. Kiểm tra Đồng bộ dữ liệu nguồn.'
+                : 'Chưa có tệp học liệu.'}</p>}
         <div className={styles.fileToolbar}>
             <label>Phiên bản <select aria-label="Phiên bản tệp" value={selected}
                 onChange={event => { setSelected(event.target.value); setOpen(false) }}>
@@ -56,6 +58,7 @@ function FilePreview({ url }: { url: string }) {
         let objectUrl = ''
         void fetch(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]) })
             .then(async response => {
+                if (response.status === 409) throw new Error('Tệp chưa sẵn sàng. Kiểm tra xử lý và chỉ mục.')
                 if (!response.ok) throw new Error(response.status === 404 || response.status === 403
                     ? 'Tệp chưa sẵn sàng hoặc bạn chưa có quyền xem.' : 'Không tải được tệp.')
                 if (Number(response.headers.get('Content-Length')) > 30 * 1024 * 1024) {

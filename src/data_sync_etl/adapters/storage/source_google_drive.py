@@ -199,6 +199,11 @@ class SourceGoogleDriveFileReader:
                 self._inside_root(session, before, self.roots[bucket], deadline)
                 response = self._get(session, file_id, deadline, media=True)
                 try:
+                    headers = getattr(response, 'headers', {}) or {}
+                    media_type = headers.get('Content-Type', headers.get('content-type', ''))
+                    if (not isinstance(media_type, str)
+                            or media_type.split(';', 1)[0].strip().lower() in ('text/html', 'application/xhtml+xml')):
+                        raise SourceFileError('INVALID_DRIVE_RESPONSE')
                     downloaded = 0
                     for block in response.iter_content(CHUNK):
                         self._deadline(deadline)

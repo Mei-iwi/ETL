@@ -161,6 +161,10 @@ class SourceFileImportService:
             raise SourceFileError("WAITING_FOR_MASTER", transient=True)
         return resource
 
+    def _source_allowed(self, row):
+        return (row["source_resource_active"]
+                and row["source_lifecycle_status"] in self.settings.source_file_allowed_statuses)
+
     def execute(self, claimed):
         try:
             if claimed["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
@@ -171,6 +175,9 @@ class SourceFileImportService:
                 self._import(claimed)
             with self.uow() as repo:
                 row = self._owned(repo, claimed)
+                self._master(repo, row["resource_id"])
+                if not self._source_allowed(row):
+                    raise SourceFileError("BLOCKED_SOURCE_POLICY")
             if row["processing_job_id"]:
                 if row["processing_retry_requested"]:
                     self.retry_processing.run(row["processing_job_id"])
@@ -204,7 +211,7 @@ class SourceFileImportService:
         with self.uow() as repo:
             row = self._owned(repo, claimed)
             self._master(repo, row["resource_id"])
-        if not row["source_resource_active"] or row["source_lifecycle_status"] not in self.settings.source_file_allowed_statuses:
+        if not self._source_allowed(row):
             raise SourceFileError("BLOCKED_SOURCE_POLICY")
         if not re.fullmatch(r"[0-9a-f]{64}", row["source_hash"]):
             raise SourceFileError("INVALID_SOURCE_HASH")
@@ -247,6 +254,8 @@ class SourceFileImportService:
         with self.uow() as repo:
             row = self._owned(repo, claimed)
             self._master(repo, row["resource_id"])
+            if not self._source_allowed(row):
+                raise SourceFileError("BLOCKED_SOURCE_POLICY")
             if row["target_version_id"]:
                 return
             collision = repo.find("resource_versions", {
@@ -315,6 +324,8 @@ class SourceFileImportService:
         return state, exhausted and count < self.settings.processing_manual_retry_limit
 
     def _eligible(self, repo, row):
+        if not self._source_allowed(row):
+            return False
         resource = repo.get('master_learning_resources', row['resource_id'])
         if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
             return False

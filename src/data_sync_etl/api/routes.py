@@ -275,6 +275,7 @@ def chunk_context(context_id: Annotated[str, Path(min_length=1, max_length=256)]
         raise search_error(exc) from None
 
 @router.get('/api/v1/resource-versions/{id}/file', tags=[TAG_MASTER],
+            responses=SEARCH_ERROR_RESPONSES,
             summary='Xem hoặc tải tệp học liệu được phép truy xuất')
 def resource_file(id: ResourceId, request: Request, download: bool = False, view: Literal['file', 'text'] = 'file'):
     container = request.app.state.container
@@ -287,7 +288,7 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
                                  headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
     suffix = PurePosixPath(version['storage_object_key']).suffix.lower()
     media_types = {'.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-                   '.txt': 'text/plain', '.csv': 'text/plain',
+                   '.txt': 'text/plain', '.csv': 'text/csv',
                    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'}

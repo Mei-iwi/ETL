@@ -350,6 +350,11 @@ def assert_source_format_pipeline(importing, extension, provider, payload):
         c.source_file_import.files = SourceFileDispatcher(c.source_files, reader(http))
         rows[0].update(storage_bucket='DRIVE', storage_object_key=f'files/blob/{path.name}')
     assert c.source_file_worker.once('formats-both-sources')
+    with c.uow() as repo:
+        imported = repo.find('source_file_imports')[0]
+        assert imported['target_version_id'] and imported['status'] == 'PROCESSING'
+        assert not repo.find('content_units', {'resource_version_id': imported['target_version_id']})
+        assert not repo.find('etl_stage_runs', {'resource_version_id': imported['target_version_id'], 'stage': 'INDEX_BUILD'})
     for _ in range(20):
         if not c.worker.once('source-format-ocr'):
             break

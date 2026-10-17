@@ -125,7 +125,8 @@ export function LibraryResourceDetailPage() {
             </header>
 
             <ResourceFilePanel key={`${resource.id}:${params.get('versionId')}`} resourceId={resource.id}
-                versionId={params.get('versionId')} contextId={params.get('contextId')} />
+                versionId={params.get('versionId')} contextId={params.get('contextId')}
+                sourceOwned={resource.source_origin === 'POSTGRESQL'} />
 
             <section className={styles.panel}>
                 <h2>Thông tin chung</h2>
