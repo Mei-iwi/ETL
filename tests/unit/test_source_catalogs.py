@@ -140,6 +140,23 @@ def test_source_error_classification_is_sanitized(state, exception, status):
     assert "PRIVATE" not in str(caught.value)
 
 
+def test_catalog_support_preserves_shared_source_engine_pool_configuration(monkeypatch):
+    from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
+
+    calls = []
+    engine = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+    def create(url, **kwargs):
+        calls.append(kwargs)
+        return engine
+
+    monkeypatch.setattr("data_sync_etl.adapters.source.postgresql.create_engine", create)
+    PostgreSQLSourceAdapter("postgresql+psycopg://127.0.0.1/etl_test_b04_b09")
+    assert len(calls) == 1
+    assert calls[0]["connect_args"] == {"connect_timeout": 5}
+    assert "pool_timeout" not in calls[0]
+
+
 def test_catalog_change_between_requests_is_eventually_consistent(catalog):
     rows = source_rows(8)
     catalog.resource_lookups.source = SimpleNamespace(catalog_rows=lambda kind: list(rows))

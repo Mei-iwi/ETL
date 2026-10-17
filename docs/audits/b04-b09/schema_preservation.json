@@ -23,6 +23,10 @@
       "s0003"
     ]
   },
-  "governance": "BLOCKED_MISSING_EXTERNAL_REFERENCES",
+  "governance": "PASS",
+  "verification_base_head": "831401ed9934c168dac31a382c69554f4e9d03cf",
+  "verification_scope": "STATIC_GOVERNANCE_AND_ISOLATED_TESTS",
+  "frozen_baseline": "docs/audits/erd-contract/contract_snapshot.json@1135ccd",
+  "governance_live_applied": false,
   "live_dev": "NOT_VERIFIED"
 }

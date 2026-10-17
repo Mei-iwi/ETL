@@ -68,6 +68,49 @@ def test_source_permission_error_is_not_fallback(source):
     assert error.value.status == "SOURCE_ERROR"
 
 
+def test_catalog_over_twenty_thousand_rows_is_503_not_partial_or_empty(source, pg_container):
+    from fastapi.testclient import TestClient
+
+    from data_sync_etl.main import create_app
+
+    with source.engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO providers(id,name,provider_type,is_active,created_at,updated_at) "
+            "SELECT 'budget-'||n,'Catalog budget '||n,'PUBLISHER',true,now(),now() "
+            "FROM generate_series(1,20001) n"
+        ))
+    with pytest.raises(SourceCatalogError) as error:
+        source.adapter.catalog_rows("providers")
+    assert error.value.status == "SOURCE_LIMIT_EXCEEDED"
+    pg_container.resource_lookups.source = source.adapter
+    with TestClient(create_app(pg_container)) as api:
+        response = api.get("/api/v1/providers")
+    assert response.status_code == 503
+    assert "items" not in response.json()
+    assert "postgresql://" not in response.text and "postgresql+psycopg://" not in response.text
+
+
+def test_catalog_timeout_is_transaction_local_not_shared_with_other_reads(source):
+    with source.reader_engine.connect() as connection:
+        before = connection.scalar(text("SHOW statement_timeout"))
+    statements = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(source.reader_engine, "before_cursor_execute", capture)
+    try:
+        source.adapter.catalog_rows("providers")
+        assert any("set_config('statement_timeout','3000',true)" in sql for sql in statements)
+        statements.clear()
+        source.adapter.get_provider("provider-1")
+        assert not any("statement_timeout" in sql for sql in statements)
+        with source.reader_engine.connect() as connection:
+            assert connection.scalar(text("SHOW statement_timeout")) == before
+    finally:
+        event.remove(source.reader_engine, "before_cursor_execute", capture)
+
+
 
 def test_unused_grades_and_subjects_already_sync_as_full_catalogs(source, pg_container):
     from data_sync_etl.application.sync import MasterSync

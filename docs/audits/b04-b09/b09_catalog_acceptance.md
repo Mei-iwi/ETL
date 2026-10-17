@@ -1,5 +1,19 @@
 # B09 — Full SOURCE catalog và offline fallback
 
+## Nghiệm thu bổ sung trên checkout hiện tại — 2026-10-17
+
+Implementation Full SOURCE + LOCAL đã có ở `9695cbf` / PR #64. Giữ nguyên URL, JSON legacy, metadata catalog bổ sung, UI và chính sách SOURCE/LOCAL/UNKNOWN; không triển khai lại. Governance với bộ gốc hiện đã PASS, không sửa frozen contracts hoặc schema 15/18/5.
+
+Regression constructor tái hiện việc B09 đặt pool_timeout=5 lên engine SOURCE dùng chung, khác baseline trước B09. Đã bỏ duy nhất override đó; không tạo engine/pool/cache mới. Network connect_timeout=5 đã có từ trước B09 được giữ nguyên. Thời gian đợi pool giữ cấu hình SQLAlchemy trước đó (mặc định 30 giây), không quảng cáo là deadline 5 giây cho toàn request. Statement timeout 3000ms chỉ đặt transaction-local cho catalog, không tác động lần đọc SOURCE khác.
+
+Đã thêm nghiệm thu PostgreSQL cho timeout không rò sang giao dịch sau và >20.000 catalog rows trả SOURCE_LIMIT_EXCEEDED / HTTP 503 sanitized, không che thành empty hoặc fallback. Giữ active-unused, precedence theo identity, LOCAL hợp lệ, Unicode/count/page, SOURCE_EMPTY, DISABLED/UNAVAILABLE fallback và lỗi permission/schema 503.
+
+Số liệu gate cuối và checksum nằm trong phần nghiệm thu mới của final_report.md. Chỉ tạo một commit sửa lỗi độc lập sau khi PASS. Mô tả pool_timeout=5 và trạng thái thiếu tài liệu ở hồ sơ cũ bên dưới đã được thay thế bởi nghiệm thu này.
+
+**Kết quả cuối lượt này: PASS trong phạm vi cô lập; unit 1053 PASS, integration 238 PASS / 1 historical XFAIL / 4 deselected; focused PG 40 PASS. Live Dev: NOT_RUN.**
+
+### Hồ sơ checkpoint cũ (giữ nguyên để đối chiếu)
+
 Phê duyệt người dùng: 2026-10-17; chỉ code/hợp đồng đọc/kiểm thử, không phê duyệt schema hoặc ghi Dev. Hồ sơ này bổ sung quyết định mới cho B09; decisions.json và contract_snapshot.json lịch sử được giữ nguyên.
 
 ## Hiện trạng và ma trận nghiệm thu

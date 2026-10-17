@@ -1,5 +1,21 @@
 # B04 — Bảo toàn cây phiên bản SOURCE
 
+## Nghiệm thu bổ sung trên checkout hiện tại — 2026-10-17
+
+Tiếp tục theo phê duyệt mới: checkout `D:/StudyMaterials/HK7/Final_Project/ETL`, nhánh `fix/etl/source-lineage-full-catalog`, baseline `831401e`. Implementation `9695cbf` đã tích hợp qua PR #64; không tạo lại worktree hay commit implementation. Hai stash gốc được giữ nguyên.
+
+Governance đã PASS với cả 8 SHA-256 khớp frozen baseline; không sửa checker, ERD, schema hoặc register. SOURCE 15 / Master 18 / Mongo 5, heads s0003 / 0015. B04/B09 được phê duyệt trong decisions_overlay.json; B03/B07/B08 vẫn chưa được duyệt.
+
+Phát hiện bằng hai regression mới: base retry 3000/3600 giây cộng jitter tối đa tạo delay 3750/4500 giây, vượt cap một giờ. Sửa duy nhất biểu thức tính next_retry_at để cap SAU jitter. Giữ nguyên số lần thử, trạng thái, mặc định AUTO 3, base 30 giây và manual 3 chu kỳ; không tự hồi sinh mapping đã exhausted hoặc sửa cây lịch sử.
+
+Hai ca từng FAIL nay PASS; cùng assertion được chạy lại trên PostgreSQL cô lập. Toàn bộ gate cuối và checksum được ghi trong phần nghiệm thu mới của final_report.md. Chỉ tạo một commit sửa lỗi độc lập khi các gate cuối PASS, không tạo lại commit B04 cũ.
+
+**Kết quả cuối lượt này: PASS trong phạm vi cô lập; unit 1053 PASS, integration 238 PASS / 1 historical XFAIL / 4 deselected; focused PG 40 PASS. Live Dev: NOT_RUN.**
+
+### Hồ sơ checkpoint cũ (giữ nguyên để đối chiếu)
+
+Các mục PARTIAL/BLOCKED/NOT_COMMITTED bên dưới mô tả checkpoint trước khi tài liệu gốc hiện diện, không phải trạng thái nghiệm thu mới.
+
 Phê duyệt mới của người dùng ngày 2026-10-17 thay thế HOLD_CURRENT_BEHAVIOR cho B04; chỉ code/hợp đồng đọc/kiểm thử, không phê duyệt schema hoặc sửa lịch sử. decisions.json và contract_snapshot.json giữ nguyên.
 
 ## Preflight
