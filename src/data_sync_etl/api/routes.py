@@ -296,8 +296,18 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
         if not container.storage.exists(bucket, key):
             raise DomainError('File unavailable')
         path = container.storage.get_local_path(bucket, key)
+        validator = container.format_registry.find_validator("file" + suffix)
+        size = path.stat().st_size
+        if size > validator.max_size_bytes:
+            raise HTTPException(413, "Tệp vượt giới hạn định dạng.")
+        with path.open("rb") as stream:
+            validator.validate(suffix, media_types[suffix], stream.read(16), size)
+    except HTTPException:
+        raise
     except (DomainError, OSError):
         raise HTTPException(404, 'Tệp chưa sẵn sàng hoặc không còn tồn tại.') from None
+    except Exception:
+        raise HTTPException(502, "Dịch vụ tệp đang gián đoạn.") from None
     return FileResponse(path, media_type=media_types[suffix], filename=f'hoc-lieu-{id}{suffix}',
                         content_disposition_type='attachment' if download else 'inline',
                         headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
