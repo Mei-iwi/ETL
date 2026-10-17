@@ -1,9 +1,9 @@
 import type { SearchMethod, SearchRequest } from '../../types/search'
 
-export const methods: { value: SearchMethod; label: string; description: string }[] = [
-    { value: 'bow', label: 'BoW', description: 'So khớp tập từ khóa nhị phân của ContentBag.' },
-    { value: 'vector', label: 'Vector', description: 'Độ tương đồng cosine giữa truy vấn và vector ContentBag.' },
-    { value: 'hybrid', label: 'Hybrid', description: 'Kết hợp thứ hạng BoW và Vector bằng RRF (k = 60).' },
+export const methods: { value: SearchMethod; label: string; }[] = [
+    { value: 'hybrid', label: 'Tìm kết hợp'},
+    { value: 'bow', label: 'Theo từ khóa'},
+    { value: 'vector', label: 'Theo ý nghĩa' },
 ]
 
 export function readSearch(params: URLSearchParams): SearchRequest {
