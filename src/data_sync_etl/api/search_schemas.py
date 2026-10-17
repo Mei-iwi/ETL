@@ -142,6 +142,8 @@ MESSAGES = {
     'SEARCH_SCHEMA_UNAVAILABLE': 'Chưa kết nối được dữ liệu chỉ mục.',
     'CONTEXT_NOT_FOUND': 'Không tìm thấy ngữ cảnh.',
     'CONTEXT_STALE': 'Nội dung đã thay đổi. Vui lòng tìm lại.',
+    'FILE_NOT_FOUND': 'Không tìm thấy tệp hoặc chưa có quyền truy cập.',
+    'FILE_NOT_READY': 'Tệp chưa sẵn sàng. Kiểm tra xử lý và chỉ mục.',
 }
 
 

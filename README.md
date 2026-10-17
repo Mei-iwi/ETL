@@ -297,6 +297,18 @@ Tham chiếu file và hash cần được xác nhận tại PostgreSQL nguồn t
 
 Nếu dùng service account thay OAuth cá nhân: cấu hình `SOURCE_DRIVE_AUTH_TYPE=service_account`, trỏ tới credential service account ngoài Git và chia sẻ folder cho email service account với quyền Reader; không chạy script OAuth Desktop.
 
+### 6.5. Đường dẫn Windows và Docker
+
+Khi API/worker chạy trên Windows, dùng đường dẫn tuyệt đối: `SOURCE_FILE_STORAGE_ROOT=D:/SourceLearningFiles`, `STORAGE_ROOT=D:/ETLStorage`, token tại `D:/ETL_Secrets/drive-authorized-user.json`. Thư mục nguồn và đích phải riêng biệt; bucket Drive không thay đổi thư mục Local.
+
+Compose hiện tại chỉ chạy database và migration, **không chạy API/worker hoặc tự mount thư mục nguồn/token**. Nếu tự đóng gói worker vào container, cần mount nguồn và token **read-only**, mount kho đích riêng có quyền ghi, rồi cấu hình đường dẫn bên trong container. Kết nối database trong mạng Compose dùng `postgres:5432`, `source-postgres:5432`, `mongo:27017`; `127.0.0.1` trong container không phải máy Windows. Không đưa token vào image hoặc Git.
+
+### 6.6. Phân biệt trạng thái đồng bộ và xem tệp
+
+Metadata đồng bộ thành công không có nghĩa file đã được nhập. Worker nhập file đọc Local/Drive, kiểm tra định dạng và SHA-256, lưu vào `STORAGE_ROOT`, rồi mới gửi yêu cầu xử lý. `CONTENT_READY` là đã chuẩn hóa; `INDEX READY` là đã có chỉ mục, không phải cùng một trạng thái.
+
+Xem/tải tệp chỉ đọc bản đã nhập trong kho đích, không mở trực tiếp Local/Drive. Giao diện vẫn giữ kiểm tra quyền và chỉ mục hiện có: HTTP 409 nghĩa tệp chưa sẵn sàng, cần kiểm tra xử lý/chỉ mục; HTTP 404 nghĩa không tìm thấy tệp hoặc không có quyền. Học liệu nguồn chưa có phiên bản nhập sẽ hiển thị “Chưa nhập tệp từ nguồn”.
+
 ## 7. Khởi động hệ thống
 
 ### 7.1. Bật database trước
