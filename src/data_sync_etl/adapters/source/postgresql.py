@@ -2,14 +2,18 @@
 
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError
 
 from data_sync_etl.adapters.source.aggregate import build_aggregate
 from data_sync_etl.adapters.source.json_fixture import MODELS
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.ports.source import ResourceGradeLevelRelation, ResourceSubjectRelation
+from data_sync_etl.ports.source_catalogs import SourceCatalogError
+from data_sync_etl.ports.source_files import SourceVersionMetadata, SourceVersionPage
 
 TABLES = {
     "providers": "providers",
@@ -122,14 +126,14 @@ class PostgreSQLSourceAdapter:
         if engine is None:
             if not url or make_url(url).get_backend_name() != "postgresql":
                 raise DomainError("BLOCKED_SOURCE_MAPPING: PostgreSQL SOURCE_DATABASE_URL required")
-            engine = create_engine(url, hide_parameters=True, connect_args={"connect_timeout": 5})
+            engine = create_engine(url, hide_parameters=True, pool_timeout=5, connect_args={"connect_timeout": 5})
         if engine.dialect.name != "postgresql" or replay_seconds < 0:
             raise DomainError("BLOCKED_SOURCE_MAPPING: invalid PostgreSQL source configuration")
         self.engine = engine
         self.replay_seconds = replay_seconds
 
     @contextmanager
-    def snapshot(self):
+    def snapshot(self, *, catalog=False):
         try:
             with (
                 self.engine.connect().execution_options(
@@ -137,6 +141,8 @@ class PostgreSQLSourceAdapter:
                 ) as connection,
                 connection.begin(),
             ):
+                if catalog:
+                    connection.execute(text("SELECT set_config('statement_timeout','3000',true)"))
                 role = connection.execute(
                     text(
                     "SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls AS privileged "
@@ -156,9 +162,20 @@ class PostgreSQLSourceAdapter:
                             "BLOCKED_SOURCE_MAPPING: source account has write privileges"
                         )
                 yield SnapshotReader(connection)
-        except DomainError:
+        except SourceCatalogError:
             raise
-        except Exception:
+        except DomainError:
+            if catalog:
+                raise SourceCatalogError("SOURCE_ERROR") from None
+            raise
+        except Exception as exc:
+            if catalog:
+                state = getattr(getattr(exc, "orig", None), "sqlstate", None)
+                unavailable = isinstance(exc, TimeoutError) or (
+                    isinstance(exc, (DBAPIError, OperationalError)) and (
+                        (state is not None and (state.startswith("08") or state in {"57014", "57P01", "57P02", "57P03"}))
+                        or (state is None and isinstance(exc, OperationalError))))
+                raise SourceCatalogError("SOURCE_UNAVAILABLE" if unavailable else "SOURCE_ERROR") from None
             raise DomainError(
                 "BLOCKED_SOURCE_MAPPING: source snapshot unavailable or invalid"
             ) from None
@@ -263,7 +280,7 @@ class PostgreSQLSourceAdapter:
         return {"items": [{k: v for k, v in row.items() if k in public} for row in page["items"]],
                 "next_cursor": page["next_cursor"]}
 
-    def version_page(self, after=None, size=20):
+    def version_page(self, after: str | None = None, size: int = 20) -> SourceVersionPage:
         """Private worker metadata. Storage references must never be serialized to HTTP."""
         if not 1 <= size <= 100:
             raise DomainError("Invalid source version page size")
@@ -280,15 +297,49 @@ class PostgreSQLSourceAdapter:
                 "SELECT v.id AS source_version_id, v.resource_id, v.version_number AS "
                 "source_version_number, v.lifecycle_status::text AS source_lifecycle_status, "
                 "v.updated_at, r.title AS resource_title, v.storage_bucket, v.storage_object_key, "
-                "v.source_hash, r.is_active AS resource_active, r.deleted_at AS resource_deleted_at "
+                "v.source_hash, v.parent_version_id, r.is_active AS resource_active, r.deleted_at AS resource_deleted_at "
                 "FROM resource_versions v JOIN learning_resources r ON r.id=v.resource_id "
                 "WHERE (CAST(:after AS varchar) IS NULL OR v.id COLLATE \"C\" > :after) "
                 "ORDER BY v.id COLLATE \"C\" LIMIT :limit"
             ), {"after": after, "limit": size + 1}).mappings().all()
             return {
-                "items": [dict(row) for row in rows[:size]],
+                "items": [cast(SourceVersionMetadata, dict(row)) for row in rows[:size]],
                 "next_cursor": rows[size - 1]["source_version_id"] if len(rows) > size else None,
             }
+
+    def catalog_rows(self, kind):
+        # Read selective catalog columns, never scan resource rows or write SOURCE.
+        # Bound transfer and fail explicitly beyond the supported catalog budget.
+        queries = {
+            "providers": "SELECT id,name,provider_type::text AS provider_type,is_active,deleted_at FROM providers",
+            "types": "SELECT id,code,name_vi AS name,is_active,deleted_at FROM resource_types",
+        }
+        if kind not in queries:
+            raise ValueError("Unknown source catalog")
+        with self.snapshot(catalog=True) as reader:
+            rows = reader.connection.execute(text(queries[kind] + " ORDER BY id LIMIT 20001")).mappings().all()
+            if len(rows) > 20000:
+                raise SourceCatalogError("SOURCE_LIMIT_EXCEEDED")
+            return [{**dict(row), "available": row["is_active"] and row["deleted_at"] is None}
+                    for row in rows]
+
+    def get_version(self, source_version_id: str) -> SourceVersionMetadata | None:
+        """Exact private identity lookup; includes roots, no inferred parent."""
+        with self.snapshot() as reader:
+            connection = reader.connection
+            if not connection.scalar(text(
+                "SELECT has_table_privilege(current_user, 'resource_versions', 'SELECT')"
+            )) or connection.scalar(text(
+                "SELECT has_table_privilege(current_user, 'resource_versions', 'INSERT,UPDATE,DELETE,TRUNCATE')"
+            )):
+                raise DomainError("BLOCKED_SOURCE_VERSION_ACCESS")
+            row = connection.execute(text(
+                "SELECT v.id AS source_version_id,v.resource_id,v.version_number AS source_version_number, "
+                "v.parent_version_id,v.source_hash,v.lifecycle_status::text AS source_lifecycle_status, "
+                "r.is_active AS resource_active,r.deleted_at AS resource_deleted_at "
+                "FROM resource_versions v JOIN learning_resources r ON r.id=v.resource_id WHERE v.id=:id"
+            ), {"id": source_version_id}).mappings().one_or_none()
+            return cast(SourceVersionMetadata, dict(row)) if row else None
 
     def close(self):
         self.engine.dispose()

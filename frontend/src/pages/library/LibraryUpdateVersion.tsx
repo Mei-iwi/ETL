@@ -1,3 +1,4 @@
+import { CatalogNotice } from '../../components/CatalogNotice'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 
@@ -251,6 +252,7 @@ export function LibraryUpdateVersion() {
                 <p className={styles.alert} role="alert">{loadError}</p>
             ) : (
                 <form className={`${styles.card} ${styles.form}`} onSubmit={handleSubmit}>
+                <CatalogNotice providers={providers} types={resourceTypes} />
                     {ownershipMessage && <p className={styles.notice} role="status">{ownershipMessage}</p>}
                     <div className={styles.field}>
                         <label htmlFor="title">Tên học liệu</label>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getCatalogPage } from '../../services/libraryLookupApi'
+import { catalogMessage, getCatalogPage } from '../../services/libraryLookupApi'
 import layout from '../library/LibraryPages.module.css'
 import styles from './SystemMasterSyncPage.module.css'
 
@@ -10,7 +10,7 @@ const catalogs = {
     subjects: { label: 'Môn học', path: '/api/v1/subjects' },
 }
 type Kind = keyof typeof catalogs
-type Result = { key: string; rows: string[][]; total: number; pages: number }
+type Result = { key: string; rows: string[][]; total: number; pages: number; notice: string }
 
 export function MasterDataPage() {
     const [kind, setKind] = useState<Kind>('providers')
@@ -30,7 +30,7 @@ export function MasterDataPage() {
             const rows = response.items.map(row => kind === 'providers' ? [row.id, row.name, row.provider_type] :
                 kind === 'types' ? [row.code, row.name, '—'] : kind === 'grades' ? [row.id, row.grade_name_vi, row.grade_code] :
                     [row.id, row.name, row.grade_level_id]).map(row => row.map(value => value || '—'))
-            setData({ key, rows, pages, total: response.pagination.total }); setError(null)
+            setData({ key, rows, pages, total: response.pagination.total, notice: kind === 'subjects' ? 'Danh mục active được quản lý trong Master.' : catalogMessage(response.catalog) }); setError(null)
         }).catch(reason => {
             if (!controller.signal.aborted) setError({ key, message: reason instanceof Error ? reason.message : 'Không tải được danh mục.' })
         })
@@ -51,13 +51,13 @@ export function MasterDataPage() {
                 <button className={layout.primaryButton}>Lọc</button>
                 <button type="button" className={layout.primaryButton} onClick={() => setAttempt(n => n + 1)}>Tải lại</button>
             </form>
-            {['providers', 'types'].includes(kind) && <p className={styles.notice}>Danh mục đã dùng trong Master, chưa phải toàn bộ SOURCE.</p>}
+            {result && <p role="status" className={styles.notice}>{result.notice} Tổng: {result.total}</p>}
             {error?.key === key ? <p role="alert" className={layout.alert}>{error.message}</p> :
                 !result ? <p role="status">Đang tải danh mục…</p> :
                     <><div className={styles.tableWrap}><table className={styles.fileTable}>
                         <thead><tr><th>Mã</th><th>Tên</th><th>{kind === 'subjects' ? 'Khối lớp (ID)' : kind === 'providers' ? 'Loại' : kind === 'grades' ? 'Mã khối' : 'Thông tin'}</th></tr></thead>
                         <tbody>{result.rows.map(row => <tr key={row[0]}>{row.map((cell, i) => <td key={i}>{cell}</td>)}</tr>)}</tbody>
-                    </table></div>{result.total === 0 && <p>Không có danh mục phù hợp.</p>}
+                    </table></div>{result.total === 0 && <p>Không có danh mục phù hợp trong kết quả hiện có.</p>}
                         <div className={styles.pagination}>
                             <button className={styles.button} disabled={page === 1} onClick={() => setPage(page - 1)}>Trước</button>
                             <span>Trang {page}/{result.pages}</span>

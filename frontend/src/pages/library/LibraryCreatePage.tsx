@@ -1,3 +1,4 @@
+import { CatalogNotice } from "../../components/CatalogNotice"
 import React, { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 import {
@@ -9,76 +10,101 @@ import {
     type ProviderOption,
     type ResourceTypeOption,
     type SubjectOption,
-} from '../../services/libraryLookupApi'
-import { startProcessing } from '../../services/processingApi'
-import styles from './LibraryPages.module.css'
+} from "../../services/libraryLookupApi"
+import { startProcessing } from "../../services/processingApi"
+import styles from "./LibraryCreatePages.module.css"
 
-type CreateResourceRespones = {
+type CreateResourceResponse = {
     id: string
     title: string
-    resource_type_code: string
-    media_category: string
-    mime_type: string
-    file_name: string
-    file_size: number
-    source_hash: string
     initial_version_id: string
-    version_number: number
-    lifecycle_status: string,
-    created_at: string
 }
 
-type SubmitStage = 'idle' | 'creating' | 'processing'
+type SubmitStage = "idle" | "creating" | "processing"
+
+const ALLOWED_EXTENSIONS = [
+    ".pdf", ".docx", ".xlsx", ".txt", ".csv",
+    ".png", ".jpg", ".jpeg", ".pptx",
+]
+
+function formatFileSize(size: number): string {
+    if (size < 1024) return `${size} B`
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+    return `${(size / (1024 * 1024)).toFixed(2)} MB`
+}
 
 export function LibraryCreatePage() {
     const navigate = useNavigate()
     const submittingRef = useRef(false)
+    const fileInputRef = useRef<HTMLInputElement>(null)
 
-    const [submitStage, setSubmitStage] = useState<SubmitStage>('idle')
-    const [error, setError] = useState('')
+    const [submitStage, setSubmitStage] = useState<SubmitStage>("idle")
+    const [error, setError] = useState("")
+
     const [resourceTypes, setResourceTypes] = useState<ResourceTypeOption[]>([])
     const [providers, setProviders] = useState<ProviderOption[]>([])
-    const [resourceTypeCode, setResourceTypeCode] = useState('')
-    const [providerId, setProviderId] = useState('')
-    const [catalogLoading, setCatalogLoading] = useState(true)
-    const [catalogError, setCatalogError] = useState('')
     const [gradeLevels, setGradeLevels] = useState<GradeLevelOption[]>([])
     const [subjects, setSubjects] = useState<SubjectOption[]>([])
-    const [gradeLevelId, setGradeLevelId] = useState('')
-    const [subjectId, setSubjectId] = useState('')
+
+    const [resourceTypeCode, setResourceTypeCode] = useState("")
+    const [providerId, setProviderId] = useState("")
+    const [gradeLevelId, setGradeLevelId] = useState("")
+    const [subjectId, setSubjectId] = useState("")
+
+    const [catalogLoading, setCatalogLoading] = useState(true)
+    const [catalogError, setCatalogError] = useState("")
     const [metadataLoading, setMetadataLoading] = useState(true)
-    const [metadataError, setMetadataError] = useState('')
+    const [metadataError, setMetadataError] = useState("")
     const [catalogRequest, setCatalogRequest] = useState(0)
 
-    const selectedProvider = providers.find((provider) => provider.id === providerId)
+    const [selectedFile, setSelectedFile] = useState<File | null>(null)
+    const [isDragging, setIsDragging] = useState(false)
+
+    const selectedProvider = providers.find(
+        (provider) => provider.id === providerId,
+    )
+
     const availableSubjects = subjects.filter(
-        (subject) => !gradeLevelId ||
-            subject.grade_level_id === null ||
+        (subject) =>
+            !gradeLevelId ||
+            subject.grade_level_id == null ||
             subject.grade_level_id === gradeLevelId,
     )
+
+    const isSubmitting = submitStage !== "idle"
 
     useEffect(() => {
         const controller = new AbortController()
 
         async function loadCatalogs() {
+            setCatalogLoading(true)
+            setCatalogError("")
+
             try {
-                const [resourceTypeItems, providerItems] = await Promise.all([
+                const [types, providerItems] = await Promise.all([
                     getResourceTypes(controller.signal),
                     getProviders(controller.signal),
                 ])
+
                 if (controller.signal.aborted) return
 
-                setResourceTypes(resourceTypeItems)
+                setResourceTypes(types)
                 setProviders(providerItems)
-                if (resourceTypeItems.length === 0 || providerItems.length === 0) {
-                    setCatalogError('Danh mục loại học liệu hoặc nhà cung cấp đang trống.')
+
+                if (!types.length || !providerItems.length) {
+                    setCatalogError(
+                        "Danh mục loại học liệu hoặc nhà cung cấp đang trống.",
+                    )
                 }
             } catch (e) {
                 if (controller.signal.aborted) return
+
                 setResourceTypes([])
                 setProviders([])
                 setCatalogError(
-                    e instanceof Error ? e.message : 'Không thể tải danh mục học liệu',
+                    e instanceof Error
+                        ? e.message
+                        : "Không thể tải danh mục học liệu.",
                 )
             } finally {
                 if (!controller.signal.aborted) setCatalogLoading(false)
@@ -92,41 +118,94 @@ export function LibraryCreatePage() {
     useEffect(() => {
         const controller = new AbortController()
 
-        async function loadMetadataCatalogs() {
+        async function loadMetadata() {
+            setMetadataLoading(true)
+            setMetadataError("")
+
             try {
-                const [gradeLevelItems, subjectItems] = await Promise.all([
+                const [grades, subjectItems] = await Promise.all([
                     getGradeLevels(controller.signal),
                     getSubjects(controller.signal),
                 ])
+
                 if (controller.signal.aborted) return
-                setGradeLevels(gradeLevelItems)
+
+                setGradeLevels(grades)
                 setSubjects(subjectItems)
             } catch (e) {
                 if (controller.signal.aborted) return
+
                 setGradeLevels([])
                 setSubjects([])
                 setMetadataError(
-                    e instanceof Error ? e.message : 'Không thể tải danh mục môn học và khối lớp',
+                    e instanceof Error
+                        ? e.message
+                        : "Không thể tải danh mục môn học và khối lớp.",
                 )
             } finally {
                 if (!controller.signal.aborted) setMetadataLoading(false)
             }
         }
 
-        void loadMetadataCatalogs()
+        void loadMetadata()
         return () => controller.abort()
     }, [catalogRequest])
 
     function handleReloadCatalogs() {
-        setResourceTypeCode('')
-        setProviderId('')
-        setGradeLevelId('')
-        setSubjectId('')
-        setCatalogError('')
-        setMetadataError('')
-        setCatalogLoading(true)
-        setMetadataLoading(true)
+        setResourceTypeCode("")
+        setProviderId("")
+        setGradeLevelId("")
+        setSubjectId("")
         setCatalogRequest((current) => current + 1)
+    }
+
+    function applySelectedFile(file?: File) {
+        if (!file) return
+
+        const valid = ALLOWED_EXTENSIONS.some((extension) =>
+            file.name.toLowerCase().endsWith(extension),
+        )
+
+        if (!valid) {
+            setError(
+                "Định dạng tệp không được hỗ trợ. Hãy chọn PDF, DOCX, XLSX, TXT, CSV, PNG, JPG hoặc PPTX.",
+            )
+            return
+        }
+
+        // Đồng bộ file được chọn vào input để FormData gửi đúng tệp.
+        const input = fileInputRef.current
+        if (input) {
+            const transfer = new DataTransfer()
+            transfer.items.add(file)
+            input.files = transfer.files
+        }
+
+        setSelectedFile(file)
+        setError("")
+    }
+
+    function handleFileDrop(
+        event: React.DragEvent<HTMLLabelElement>,
+    ) {
+        event.preventDefault()
+        setIsDragging(false)
+        applySelectedFile(event.dataTransfer.files?.[0])
+    }
+
+    function handleFileInputChange(
+        event: React.ChangeEvent<HTMLInputElement>,
+    ) {
+        applySelectedFile(event.target.files?.[0])
+    }
+
+    function handleRemoveFile() {
+        if (fileInputRef.current) {
+            fileInputRef.current.value = ""
+        }
+
+        setSelectedFile(null)
+        setError("")
     }
 
     async function handleSubmit(
@@ -136,205 +215,444 @@ export function LibraryCreatePage() {
 
         if (submittingRef.current) return
 
-        if (!resourceTypeCode || !selectedProvider || catalogLoading || catalogError) {
-            setError('Vui lòng chọn loại học liệu và nhà cung cấp hợp lệ.')
+        if (catalogLoading || catalogError || !resourceTypeCode || !selectedProvider) {
+            setError("Vui lòng kiểm tra loại học liệu và nhà cung cấp.")
+            return
+        }
+
+        if (metadataLoading || metadataError) {
+            setError("Danh mục môn học hoặc khối lớp chưa sẵn sàng.")
+            return
+        }
+
+        if (!fileInputRef.current?.files?.length) {
+            setError("Vui lòng chọn tệp học liệu trước khi tiếp tục.")
             return
         }
 
         submittingRef.current = true
-        setSubmitStage('creating')
-        setError('')
+        setSubmitStage("creating")
+        setError("")
 
-        const form = event.currentTarget
-        const formData = new FormData(form)
+        const formData = new FormData(event.currentTarget)
 
         try {
-            const response = await fetch('/api/v1/resources', {
-                method: 'POST',
-                body: formData
+            const response = await fetch("/api/v1/resources", {
+                method: "POST",
+                body: formData,
             })
 
             if (!response.ok) {
                 const body = await response.json().catch(() => null)
+                const detail = body?.detail
+                const message =
+                    typeof detail === "string"
+                        ? detail
+                        : detail?.message ?? `HTTP ${response.status}`
 
-                throw new Error(
-                    body?.detail?.message ?? body?.detail ?? `HTTP ${response.status}`
-                )
+                throw new Error(message)
             }
-            const createdResource: CreateResourceRespones = await response.json()
-            const versionId = createdResource.initial_version_id
-            if (typeof versionId !== 'string' || !versionId.trim()) {
-                throw new Error('Phản hồi tạo học liệu thiếu mã phiên bản')
+
+            const created: CreateResourceResponse = await response.json()
+            const versionId = created.initial_version_id
+
+            if (!versionId) {
+                throw new Error("Phản hồi tạo học liệu thiếu mã phiên bản.")
             }
+
+            setSubmitStage("processing")
 
             try {
-                setSubmitStage('processing')
-                const processResult = await startProcessing(versionId)
-                if (typeof processResult.job_id !== 'string' || !processResult.job_id.trim()) {
-                    throw new Error('Phản hồi xử lý thiếu mã job')
+                const result = await startProcessing(versionId)
+
+                if (!result.job_id) {
+                    throw new Error("Phản hồi xử lý thiếu mã job.")
                 }
+
                 navigate(
-                    `/library/processing?versionId=${encodeURIComponent(versionId)}&jobId=${encodeURIComponent(processResult.job_id)}`,
+                    `/library/processing?versionId=${encodeURIComponent(versionId)}&jobId=${encodeURIComponent(result.job_id)}`,
                     { replace: true },
                 )
-            } catch (processError) {
-                const detail = processError instanceof Error ? `: ${processError.message}` : ''
+            } catch (processingError) {
+                const message =
+                    processingError instanceof Error
+                        ? processingError.message
+                        : "Không xác nhận được yêu cầu xử lý."
+
                 navigate(
                     `/library/processing?versionId=${encodeURIComponent(versionId)}`,
                     {
                         replace: true,
                         state: {
-                            processingNotice: `Đã tạo học liệu, chưa xác nhận được yêu cầu xử lý${detail}`,
+                            processingNotice:
+                                `Đã tạo học liệu nhưng chưa xác nhận được yêu cầu xử lý: ${message}`,
                         },
                     },
                 )
             }
-        }
-        catch (e) {
+        } catch (e) {
             setError(
-                e instanceof Error ? e.message : 'Không thể tạo học liệu',
+                e instanceof Error
+                    ? e.message
+                    : "Không thể tạo học liệu.",
             )
         } finally {
             submittingRef.current = false
-            setSubmitStage('idle')
+            setSubmitStage("idle")
         }
     }
 
     return (
         <section className={styles.page}>
             <header className={styles.pageHeader}>
-                <h1>Thêm học liệu</h1>
-            </header>
-            <form className={`${styles.card} ${styles.form}`} onSubmit={handleSubmit}>
+                <div className={styles.breadcrumb}>
+                    <span>Thư viện số</span>
+                    <span className={styles.breadcrumbDivider}>/</span>
+                    <span className={styles.breadcrumbCurrent}>
+                        Thêm học liệu
+                    </span>
+                </div>
 
-                <div className={styles.field}>
-                    <label htmlFor="title">Tên học liệu</label>
-                    <input type="text" id="title" name="title" required />
+                <h1>Thêm học liệu số</h1>
+                <p className={styles.pageDescription}>
+                    Bổ sung tệp học liệu và thông tin để đưa vào thư viện số.
+                </p>
+            </header>
+
+            <CatalogNotice providers={providers} types={resourceTypes} />
+            <form
+                className={styles.form}
+                onSubmit={handleSubmit}
+                encType="multipart/form-data"
+            >
+                <div className={styles.formMain}>
+                    {/* Thông tin học liệu */}
+                    <section className={styles.card}>
+                        <div className={styles.sectionHeader}>
+                            <h2>Thông tin học liệu</h2>
+                        </div>
+
+                        <div className={styles.field}>
+                            <label htmlFor="title">
+                                Tên học liệu <span className={styles.required}>*</span>
+                            </label>
+                            <input
+                                id="title"
+                                name="title"
+                                type="text"
+                                placeholder="Ví dụ: Bài giảng Toán lớp 10 — Hàm số"
+                                maxLength={300}
+                                required
+                            />
+                        </div>
+
+                        <div className={styles.fieldGrid}>
+                            <div className={styles.field}>
+                                <label htmlFor="resourceType">
+                                    Loại học liệu <span className={styles.required}>*</span>
+                                </label>
+                                <select
+                                    id="resourceType"
+                                    name="resource_type_code"
+                                    value={resourceTypeCode}
+                                    onChange={(event) =>
+                                        setResourceTypeCode(event.target.value)
+                                    }
+                                    disabled={catalogLoading || Boolean(catalogError)}
+                                    required
+                                >
+                                    <option value="">Chọn loại học liệu</option>
+                                    {resourceTypes.map((item) => (
+                                        <option key={item.code} value={item.code}>
+                                            {item.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className={styles.field}>
+                                <label htmlFor="providerId">
+                                    Nhà cung cấp <span className={styles.required}>*</span>
+                                </label>
+                                <select
+                                    id="providerId"
+                                    name="provider_id"
+                                    value={providerId}
+                                    onChange={(event) =>
+                                        setProviderId(event.target.value)
+                                    }
+                                    disabled={catalogLoading || Boolean(catalogError)}
+                                    required
+                                >
+                                    <option value="">Chọn nhà cung cấp</option>
+                                    {providers.map((item) => (
+                                        <option key={item.id} value={item.id}>
+                                            {item.name}
+                                        </option>
+                                    ))}
+                                </select>
+
+                                <input
+                                    type="hidden"
+                                    name="provider_name"
+                                    value={selectedProvider?.name ?? ""}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="provider_type"
+                                    value={selectedProvider?.provider_type ?? ""}
+                                />
+                            </div>
+                        </div>
+                    </section>
+
+
+                    {/* Tệp học liệu */}
+                    <section className={styles.card}>
+                        <div className={styles.sectionHeader}>
+                            <h2>Tệp học liệu</h2>
+                        </div>
+
+                        {!selectedFile ? (
+                            <label
+                                className={`${styles.uploadArea} ${isDragging ? styles.uploadAreaDragging : ""
+                                    }`}
+                                htmlFor="file"
+                                onDragEnter={(event) => {
+                                    event.preventDefault()
+                                    setIsDragging(true)
+                                }}
+                                onDragOver={(event) => {
+                                    event.preventDefault()
+                                    setIsDragging(true)
+                                }}
+                                onDragLeave={(event) => {
+                                    event.preventDefault()
+
+                                    const next = event.relatedTarget
+
+                                    if (
+                                        !(next instanceof Node) ||
+                                        !event.currentTarget.contains(next)
+                                    ) {
+                                        setIsDragging(false)
+                                    }
+                                }}
+                                onDrop={handleFileDrop}
+                            >
+                                <span className={styles.uploadIcon} aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none">
+                                        <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" />
+                                        <path d="M5 14.5v4A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-4" />
+                                    </svg>
+                                </span>
+
+                                <strong>
+                                    {isDragging
+                                        ? "Thả tệp vào đây"
+                                        : "Chọn tệp học liệu"}
+                                </strong>
+
+                                <span className={styles.uploadHint}>
+                                    Bổ sung tệp - Học liệu
+                                </span>
+
+                                <span className={styles.fileTypes}>
+                                    PDF · DOCX · XLSX · TXT · CSV · PNG · JPG · PPTX
+                                </span>
+
+                                <input
+                                    ref={fileInputRef}
+                                    className={styles.fileInput}
+                                    id="file"
+                                    type="file"
+                                    name="file"
+                                    accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx"
+                                    onChange={handleFileInputChange}
+                                    required
+                                />
+                            </label>
+                        ) : (
+                            <div className={styles.selectedFile}>
+                                <span
+                                    className={styles.selectedFileIcon}
+                                    aria-hidden="true"
+                                >
+                                    <svg viewBox="0 0 24 24" fill="none">
+                                        <path d="M7 3.75h7l5 5v11.5H7a2 2 0 0 1-2-2v-12a2.5 2.5 0 0 1 2-2.5Z" />
+                                        <path d="M14 3.75v5h5M8.5 13h6M8.5 16.5h6" />
+                                    </svg>
+                                </span>
+
+                                <span className={styles.selectedFileInfo}>
+                                    <strong title={selectedFile.name}>
+                                        {selectedFile.name}
+                                    </strong>
+                                    <span>{formatFileSize(selectedFile.size)}</span>
+                                </span>
+
+                                <button
+                                    type="button"
+                                    className={styles.removeFileButton}
+                                    aria-label="Bỏ tệp đã chọn"
+                                    onClick={handleRemoveFile}
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        )}
+                    </section>
+
+
+                    {/* Metadata */}
+                    <section className={styles.card}>
+                        <div className={styles.sectionHeader}>
+                            <h2>Metadata phục vụ truy vấn</h2>
+                        </div>
+
+                        <div className={styles.fieldGrid}>
+                            <div className={styles.field}>
+                                <label htmlFor="gradeLevel">Khối lớp</label>
+                                <select
+                                    id="gradeLevel"
+                                    name="grade_level_id"
+                                    value={gradeLevelId}
+                                    onChange={(event) => {
+                                        const nextGradeId = event.target.value
+                                        setGradeLevelId(nextGradeId)
+
+                                        const currentSubject = subjects.find(
+                                            (subject) => subject.id === subjectId,
+                                        )
+
+                                        if (
+                                            currentSubject?.grade_level_id &&
+                                            currentSubject.grade_level_id !== nextGradeId
+                                        ) {
+                                            setSubjectId("")
+                                        }
+                                    }}
+                                    disabled={metadataLoading || Boolean(metadataError)}
+                                >
+                                    <option value="">Không chọn khối lớp</option>
+                                    {gradeLevels.map((item) => (
+                                        <option key={item.id} value={item.id}>
+                                            {item.grade_name_vi}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className={styles.field}>
+                                <label htmlFor="subject">Môn học</label>
+                                <select
+                                    id="subject"
+                                    name="subject_id"
+                                    value={subjectId}
+                                    onChange={(event) =>
+                                        setSubjectId(event.target.value)
+                                    }
+                                    disabled={metadataLoading || Boolean(metadataError)}
+                                >
+                                    <option value="">Không chọn môn học</option>
+                                    {availableSubjects.map((item) => (
+                                        <option key={item.id} value={item.id}>
+                                            {item.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className={styles.field}>
+                            <label htmlFor="publicationStatus">
+                                Trạng thái xuất bản
+                            </label>
+                            <select
+                                id="publicationStatus"
+                                name="publication_status"
+                                defaultValue="PUBLISHED"
+                            >
+                                <option value="PUBLISHED">Đã xuất bản</option>
+                                <option value="DRAFT">Bản nháp</option>
+                                <option value="UNPUBLISHED">Chưa xuất bản</option>
+                            </select>
+                        </div>
+                    </section>
+
+                    {/* Trạng thái danh mục */}
+                    <section className={styles.statusCard}>
+
+                        <div className={styles.statusContent}>
+                            <h2>Trạng thái danh mục</h2>
+
+                            {catalogLoading || metadataLoading ? (
+                                <p className={styles.statusDescription}>
+                                    Đang kiểm tra các danh mục...
+                                </p>
+                            ) : catalogError || metadataError ? (
+                                <>
+                                    <p className={styles.statusError}>
+                                        {catalogError || metadataError}
+                                    </p>
+                                    <button
+                                        type="button"
+                                        className={styles.inlineRetryButton}
+                                        onClick={handleReloadCatalogs}
+                                        disabled={isSubmitting}
+                                    >
+                                        Tải lại danh mục
+                                    </button>
+                                </>
+                            ) : (
+                                <p className={styles.statusDescription}>
+                                    Các danh mục đã sẵn sàng để tạo học liệu.
+                                </p>
+                            )}
+                        </div>
+                    </section>
                 </div>
-                <div className={styles.field}>
-                    <label htmlFor="resourceType">Loại học liệu</label>
-                    <select
-                        id="resourceType"
-                        name="resource_type_code"
-                        value={resourceTypeCode}
-                        onChange={(event) => setResourceTypeCode(event.target.value)}
-                        disabled={catalogLoading || Boolean(catalogError)}
-                        required
-                    >
-                        <option value="">Chọn loại học liệu</option>
-                        {resourceTypes.map((resourceType) => (
-                            <option key={resourceType.code} value={resourceType.code}>
-                                {resourceType.name}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className={styles.field}>
-                    <label htmlFor="providerId">Nhà cung cấp</label>
-                    <select
-                        id="providerId"
-                        name="provider_id"
-                        value={providerId}
-                        onChange={(event) => setProviderId(event.target.value)}
-                        disabled={catalogLoading || Boolean(catalogError)}
-                        required
-                    >
-                        <option value="">Chọn nhà cung cấp</option>
-                        {providers.map((provider) => (
-                            <option key={provider.id} value={provider.id}>
-                                {provider.name}
-                            </option>
-                        ))}
-                    </select>
-                    <input type="hidden" name="provider_name" value={selectedProvider?.name ?? ''} />
-                    <input type="hidden" name="provider_type" value={selectedProvider?.provider_type ?? ''} />
-                </div>
-                <div className={styles.field}>
-                    <label htmlFor="file">Tải lên tệp học liệu</label>
-                    <input id='file' type="file" name="file" accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx" required />
-                </div>
-                <div className={styles.field}>
-                    <label htmlFor="gradeLevel">Khối lớp</label>
-                    <select
-                        id="gradeLevel"
-                        name="grade_level_id"
-                        value={gradeLevelId}
-                        onChange={(event) => {
-                            const nextGradeLevelId = event.target.value
-                            setGradeLevelId(nextGradeLevelId)
-                            const selectedSubject = subjects.find((subject) => subject.id === subjectId)
-                            if (
-                                selectedSubject?.grade_level_id &&
-                                selectedSubject.grade_level_id !== nextGradeLevelId
-                            ) {
-                                setSubjectId('')
-                            }
-                        }}
-                        disabled={metadataLoading || Boolean(metadataError)}
-                    >
-                        <option value="">Không chọn khối lớp</option>
-                        {gradeLevels.map((gradeLevel) => (
-                            <option key={gradeLevel.id} value={gradeLevel.id}>
-                                {gradeLevel.grade_name_vi}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className={styles.field}>
-                    <label htmlFor="subject">Môn học</label>
-                    <select
-                        id="subject"
-                        name="subject_id"
-                        value={subjectId}
-                        onChange={(event) => setSubjectId(event.target.value)}
-                        disabled={metadataLoading || Boolean(metadataError)}
-                    >
-                        <option value="">Không chọn môn học</option>
-                        {availableSubjects.map((subject) => (
-                            <option key={subject.id} value={subject.id}>
-                                {subject.name}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className={styles.field}>
-                    <label htmlFor="publicationStatus">Trạng thái xuất bản</label>
-                    <select id="publicationStatus" name="publication_status" defaultValue="PUBLISHED">
-                        <option value="PUBLISHED">Đã xuất bản</option>
-                        <option value="DRAFT">Bản nháp</option>
-                        <option value="UNPUBLISHED">Chưa xuất bản</option>
-                    </select>
-                </div>
-                {(catalogLoading || metadataLoading) && <p role="status">Đang tải danh mục...</p>}
-                {catalogError && (
-                    <p className={styles.alert} role="alert">{catalogError}</p>
-                )}
-                {metadataError && (
-                    <p className={styles.alert} role="alert">{metadataError}</p>
-                )}
-                {(catalogError || metadataError) && (
-                    <div className={styles.actions}>
-                        <button className={styles.primaryButton} type="button" onClick={handleReloadCatalogs}>
-                            Tải lại danh mục
-                        </button>
+
+                {error && (
+                    <div className={styles.formError} role="alert">
+                        <span className={styles.errorMark}>!</span>
+                        <p>{error}</p>
                     </div>
                 )}
-                {error && (
-                    <p className={styles.alert} role="alert">{error}</p>
-                )}
-                <div className={styles.actions}>
+
+                <footer className={styles.formFooter}>
+                    <button
+                        className={styles.secondaryButton}
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => navigate(-1)}
+                    >
+                        Quay lại
+                    </button>
+
                     <button
                         className={styles.primaryButton}
                         type="submit"
-                        disabled={submitStage !== 'idle' || catalogLoading || Boolean(catalogError) || !resourceTypeCode || !selectedProvider}
+                        disabled={
+                            isSubmitting ||
+                            catalogLoading ||
+                            metadataLoading ||
+                            Boolean(catalogError) ||
+                            Boolean(metadataError) ||
+                            !resourceTypeCode ||
+                            !selectedProvider
+                        }
                     >
-                        {submitStage === 'creating'
-                            ? 'Đang tạo học liệu...'
-                            : submitStage === 'processing'
-                                ? 'Đang khởi chạy xử lý...'
-                                : 'Tạo và xử lý học liệu'}
+                        {isSubmitting && (
+                            <span className={styles.buttonSpinner} />
+                        )}
+                        {submitStage === "creating"
+                            ? "Đang tạo học liệu..."
+                            : submitStage === "processing"
+                                ? "Đang khởi chạy xử lý..."
+                                : "Tạo và xử lý học liệu"}
                     </button>
-                </div>
+                </footer>
             </form>
         </section>
     )

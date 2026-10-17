@@ -24,8 +24,8 @@ ResourceNotFound = ResourceMetadataNotFound
 
 
 class UpdateResourceMetadataUseCase:
-    def __init__(self, uow):
-        self.uow = uow
+    def __init__(self, uow, catalogs=None):
+        self.uow, self.catalogs = uow, catalogs
 
     def execute(self, command: UpdateResourceMetadataCommand) -> dict:
         try:
@@ -65,6 +65,23 @@ class UpdateResourceMetadataUseCase:
                     if subject is not None and subject.get("grade_id") not in {None, grade_level_id}:
                         raise InvalidResourceMetadata("Subject does not belong to grade_level_id")
 
+                if self.catalogs is not None:
+                    try:
+                        if "provider_id" in values:
+                            provider = self.catalogs.source_selection("providers", values["provider_id"])
+                            if provider is not None:
+                                if any(name in values and values[name] != provider[key] for name, key in (
+                                        ("provider_name", "name"), ("provider_type", "provider_type"))):
+                                    raise InvalidResourceMetadata("Provider metadata conflicts with SOURCE catalog")
+                                values.update(provider_name=provider["name"], provider_type=provider["provider_type"])
+                        if "resource_type_code" in values:
+                            resource_type = self.catalogs.source_selection("types", values["resource_type_code"])
+                            if resource_type is not None:
+                                if "resource_type_name_vi" in values and values["resource_type_name_vi"] != resource_type["name"]:
+                                    raise InvalidResourceMetadata("Resource type metadata conflicts with SOURCE catalog")
+                                values.update(resource_type_name_vi=resource_type["name"], resource_type_id=resource_type["id"])
+                    except DomainError as exc:
+                        raise InvalidResourceMetadata(str(exc)) from None
                 updated = repo.update_resource_metadata(command.resource_id, values)
                 if "subject_id" in values:
                     repo.replace_subject_relation(command.resource_id, values["subject_id"])

@@ -25,7 +25,7 @@ def importing(container, tmp_path, monkeypatch):
     container.source_files.root = root
     rows = [{
         "source_version_id": "source-version-1", "resource_id": "resource-1",
-        "resource_title": "Source PDF", "source_version_number": 1,
+        "resource_title": "Source PDF", "source_version_number": 1, "parent_version_id": None,
         "source_lifecycle_status": "APPROVED", "updated_at": now(),
         "source_hash": sha256(path.read_bytes()).hexdigest(),
         "storage_bucket": "books", "storage_object_key": "test.pdf",
@@ -38,6 +38,8 @@ def importing(container, tmp_path, monkeypatch):
                 if len(ordered) > size else None}
 
     monkeypatch.setattr(container.source, "version_page", page, raising=False)
+    monkeypatch.setattr(container.source, "get_version", lambda id: next(
+        (dict(r) for r in rows if r["source_version_id"] == id), None), raising=False)
     yield container, rows, path
 
 
@@ -145,7 +147,8 @@ def test_permanent_fault_does_not_register_or_hot_retry(importing, fault, expect
 def test_multiple_versions_same_bytes_keep_identity(importing):
     c, rows, _ = importing
     first = discover_and_import(c)
-    rows.append({**rows[0], "source_version_id": "source-version-2", "source_version_number": 2})
+    rows.append({**rows[0], "source_version_id": "source-version-2", "source_version_number": 2,
+                             "parent_version_id": rows[0]["source_version_id"]})
     c.sync.run(full=False)
     second = discover_and_import(c)
     assert first["target_version_id"] != second["target_version_id"]

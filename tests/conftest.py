@@ -119,6 +119,7 @@ def pg_container(tmp_path):
                 ocr_engine="fake",
                 source_adapter="json",
                 admin_enabled=False,
+                app_environment="development",
                 sync_batch_size=2,
             ),
             engine,

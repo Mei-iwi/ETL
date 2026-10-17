@@ -120,17 +120,17 @@ class Container:
             GradeBasedSubjectRecommendationPolicy(),
         )
         self.resource_listing = ListResources(self.uow)
-        self.resource_lookups = ListResourceLookups(self.uow)
+        self.resource_lookups = ListResourceLookups(self.uow, self.source if isinstance(self.source, PostgreSQLSourceAdapter) else None)
         self.resource_detail = GetResourceDetail(self.uow)
         self.resource_versions = ListResourceVersions(self.uow)
         self.processing_job_detail = GetProcessingJob(self.uow)
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
         self.format_registry = FormatValidatorRegistry()
-        self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry)
+        self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry, self.resource_lookups)
         self.resource_version_create = CreateResourceVersionUseCase(
             self.uow, self.storage, self.format_registry
         )
-        self.update_resource_metadata = UpdateResourceMetadataUseCase(self.uow)
+        self.update_resource_metadata = UpdateResourceMetadataUseCase(self.uow, self.resource_lookups)
         self.capabilities = CapabilityService(
             chunk_size_words = self.settings.chunk_size_words,
             chunk_overlap_words=self.settings.chunk_overlap_words,

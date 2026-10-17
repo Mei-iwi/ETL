@@ -217,11 +217,13 @@ def test_source_import_preserves_original_bytes_and_projection(container, tmp_pa
     if extension == '.png':
         container.ocr.engine = ImageEngineDouble()
     rows = [{'source_version_id': 'source-format', 'resource_id': 'resource-1',
-             'resource_title': 'Format import', 'source_version_number': 1,
+             'resource_title': 'Format import', 'source_version_number': 1, 'parent_version_id': None,
              'source_lifecycle_status': 'APPROVED', 'updated_at': now(),
              'source_hash': sha256(payload).hexdigest(), 'storage_bucket': 'books',
              'storage_object_key': path.name}]
     monkeypatch.setattr(container.source, 'version_page', lambda **_: {'items': rows, 'next_cursor': None}, raising=False)
+    monkeypatch.setattr(container.source, 'get_version', lambda id: next(
+        (dict(r) for r in rows if r['source_version_id'] == id), None), raising=False)
     assert container.source_file_worker.once('source-format')
     for _ in range(20):
         if not container.worker.once('format-test'):
@@ -446,11 +448,13 @@ def test_source_invalid_formats_fail_without_target_version(container, tmp_path,
     path.write_bytes(payload)
     container.source_files.root = root
     rows = [{'source_version_id': 'bad-format', 'resource_id': 'resource-1',
-             'resource_title': 'Bad import', 'source_version_number': 1,
+             'resource_title': 'Bad import', 'source_version_number': 1, 'parent_version_id': None,
              'source_lifecycle_status': 'APPROVED', 'updated_at': now(),
              'source_hash': sha256(payload).hexdigest(), 'storage_bucket': 'books',
              'storage_object_key': path.name}]
     monkeypatch.setattr(container.source, 'version_page', lambda **_: {'items': rows, 'next_cursor': None}, raising=False)
+    monkeypatch.setattr(container.source, 'get_version', lambda id: next(
+        (dict(r) for r in rows if r['source_version_id'] == id), None), raising=False)
     assert container.source_file_worker.once('bad-format')
     listed = container.source_file_import.list_files()['items'][0]
     assert listed['import_status'] == 'FAILED' and listed['last_error_code'] == expected

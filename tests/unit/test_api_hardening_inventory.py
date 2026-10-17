@@ -1,3 +1,4 @@
+import copy
 import json
 
 from fastapi import FastAPI
@@ -52,7 +53,17 @@ def test_openapi_keep_routes_and_models_match_g0_baseline():
             old_operations[method]["operationId"] = current["paths"][new_path][method]["operationId"]
             before["paths"][new_path] = old_operations
     assert current["paths"] == before["paths"]
-    assert current["components"] == before["components"]
+    # B09 user-approved additive metadata only. All legacy model contracts and
+    # required fields remain exact; keep the historical G0 snapshot frozen.
+    compatible = copy.deepcopy(current["components"])
+    additions = compatible["schemas"].pop("CatalogMetadata")
+    assert set(additions["properties"]) == {"identity_overlaps", "source_status", "completeness"}
+    for name in ("ProviderListResponse", "ResourceTypeListResponse", "GradeLevelListResponse"):
+        model = compatible["schemas"][name]
+        assert "catalog" not in model.get("required", [])
+        assert "catalog" in model["properties"]
+        model["properties"].pop("catalog")
+    assert compatible == before["components"]
 
 
 def test_all_documented_business_operations_have_explicit_non_default_tags():

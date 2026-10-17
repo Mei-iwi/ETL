@@ -14,14 +14,14 @@ from data_sync_etl.ports.repositories import UnitOfWork
 
 class CreateResourceUseCase:
     def __init__(
-        self, uow: UnitOfWork, storage: StoragePort, format_registry: FormatValidatorRegistry
+        self, uow: UnitOfWork, storage: StoragePort, format_registry: FormatValidatorRegistry, catalogs=None
     ):
+        self.catalogs = catalogs
         self.uow = uow
         self.storage = storage
         self.format_registry = format_registry
 
-    @staticmethod
-    def _validate_metadata(repo, command: CreateResourceCommand) -> tuple[str, str]:
+    def _validate_metadata(self, repo, command: CreateResourceCommand) -> tuple[str, str]:
         if command.subject_id:
             subject = repo.get("subjects", command.subject_id)
             if not subject or not subject["is_active"] or subject["deleted_at"] is not None:
@@ -36,7 +36,11 @@ class CreateResourceUseCase:
         provider_id = command.provider_id.strip()
         provider_name = command.provider_name.strip()
         provider_type = command.provider_type.strip()
-        for known in repo.find("master_learning_resources", {"provider_id": provider_id}):
+        source_provider = self.catalogs.source_selection("providers", provider_id) if self.catalogs else None
+        if source_provider is not None and (provider_name, provider_type) != (
+                source_provider["name"], source_provider["provider_type"]):
+            raise DomainError("Provider metadata conflicts with SOURCE catalog")
+        for known in ([] if source_provider is not None else repo.find("master_learning_resources", {"provider_id": provider_id})):
             if (
                 known["provider_name"] != provider_name
                 or known["provider_type"] != provider_type
@@ -46,6 +50,11 @@ class CreateResourceUseCase:
                 raise DomainError("Provider metadata conflicts with known master data")
 
         type_code = command.resource_type_code.strip()
+        source_type = self.catalogs.source_selection("types", type_code) if self.catalogs else None
+        if source_type is not None:
+            if command.resource_type_name_vi is not None and command.resource_type_name_vi.strip() != source_type["name"]:
+                raise DomainError("Resource type metadata conflicts with SOURCE catalog")
+            return source_type["id"], source_type["name"]
         known_types = repo.find("master_learning_resources", {"resource_type_code": type_code})
         if known_types:
             canonical = known_types[0]

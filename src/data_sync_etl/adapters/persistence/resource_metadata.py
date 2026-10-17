@@ -58,6 +58,7 @@ class ResourceMetadataRepositoryMixin:
         mapping = {
             "title": "title",
             "resource_type_code": "resource_type_code",
+            "resource_type_id": "resource_type_id",  # Internal SOURCE resolution only; not an HTTP input.
             "resource_type_name_vi": "resource_type_name_vi",
             "provider_id": "provider_id",
             "provider_name": "provider_name",
