@@ -83,7 +83,7 @@ export function LibraryIndexingPage() {
 
     const currentVersions = versions?.resourceId === resourceId ? versions.items : []
     const selected = currentVersions.some(version => version.id === versionId && version.resource_id === resourceId)
-    return <section className={styles.page}>
+    return <section className={`${styles.page} ${styles.indexingPage}`}>
         <header className={styles.pageHeader}><h1>Phân đoạn và chỉ mục</h1></header>
         <nav className={styles.indexTabs} aria-label="Phân đoạn và chỉ mục">
             {views.map(item => {
@@ -115,11 +115,10 @@ export function LibraryIndexingPage() {
             {error && <p className={styles.indexMessage} data-tone="error" role="alert">{error}</p>}
             <div className={`${styles.actions} ${styles.indexFilterActions}`}>
                 <button className={styles.primaryButton} onClick={() => setRefresh(value => value + 1)}>Tải lại</button>
-                {resourceId && <Link className={styles.backLink} to={`/library/${encodeURIComponent(resourceId)}`}>← Chi tiết học liệu</Link>}
+                {resourceId && <Link className={styles.backLink} to={`/library/${encodeURIComponent(resourceId)}`}>Chi tiết học liệu</Link>}
             </div>
         </div>
         {selected && <IndexWorkspace key={versionId} versionId={versionId} view={view} />}
-        {!selected && <p className={styles.indexMessage} data-tone="neutral">Chọn học liệu và phiên bản.</p>}
     </section>
 }
 
@@ -208,20 +207,37 @@ function IndexWorkspace({ versionId, view }: { versionId: string; view: IndexVie
         <div className={styles.indexPanel} data-index-panel="index" hidden={view !== 'index'}>
             <section className={`${styles.resultCard} ${styles.indexOverview}`}>
                 <h2>Trạng thái chỉ mục</h2>
-                {!status && !statusError && <p className={styles.indexMessage} data-tone="warning" role="status">Đang tải trạng thái...</p>}
+                {!status && !statusError && <p className={styles.statusNote} role="status">Đang tải trạng thái...</p>}
                 {status && <>
-                    <p className={styles.indexMessage} data-tone={statusTone(status.index_status)} role="status">{statusNotice(status)}</p>
-                    <div className={styles.resultGrid}>
-                        <p className={styles.resultItem}><span className={styles.resultLabel}>Nội dung</span>
-                            <span className={styles.indexMessage} data-tone={status.processing_status === 'CONTENT_READY' ? 'success' : status.processing_status.endsWith('FAILED') ? 'error' : 'warning'}>{status.processing_status === 'CONTENT_READY' ? 'Sẵn sàng' : status.processing_status.endsWith('FAILED') ? 'Thất bại' : 'Đang xử lý'}</span></p>
-                        <p className={styles.resultItem}><span className={styles.resultLabel}>Chỉ mục</span><span className={styles.indexMessage} data-tone={statusTone(status.index_status)}>{stateLabels[status.index_status]}</span></p>
-                        <p className={styles.resultItem}><span className={styles.resultLabel}>Phương thức</span><span className={styles.resultValue}>{{ structured: 'Có cấu trúc', fallback: 'Không cấu trúc (Fallback)', mixed: 'Hỗn hợp', unavailable: 'Chưa xác định' }[status.representation_mode]}</span></p>
-                        <p className={styles.resultItem}><span className={styles.resultLabel}>Tự động</span><span className={styles.indexMessage} data-tone={status.auto_enabled ? 'success' : 'neutral'}>{status.auto_enabled ? 'Bật' : 'Tắt'}</span></p>
-                        <p className={styles.resultItem}><span className={styles.resultLabel}>Phân đoạn</span><span className={styles.resultValue}>{status.chunk_count}</span></p>
-                        <p className={styles.resultItem}><span className={styles.resultLabel}>ContentBag</span><span className={styles.resultValue}>{status.bag_count}</span></p>
-                        <p className={styles.resultItem}><span className={styles.resultLabel}>Vector</span><span className={styles.indexMessage} data-tone={status.vector_ready ? 'success' : running ? 'warning' : 'neutral'}>{status.vector_ready ? 'Vector sẵn sàng' : 'Chưa có vector'}</span></p>
-                        <p className={styles.resultItem}><span className={styles.resultLabel}>Số chiều</span><span className={styles.resultValue}>{status.embedding_dimension ?? '—'}</span></p>
-                    </div>
+                    {statusNotice(status) && <p className={styles.statusNote}>{statusNotice(status)}</p>}
+                    <table className={styles.statusTable}>
+                        <tbody>
+                            <tr>
+                                <th>Nội dung</th>
+                                <td>{status.processing_status === 'CONTENT_READY' ? 'Sẵn sàng' : status.processing_status.endsWith('FAILED') ? 'Thất bại' : 'Đang xử lý'}</td>
+                                <th>Phân đoạn (Chunk)</th>
+                                <td>{status.chunk_count}</td>
+                            </tr>
+                            <tr>
+                                <th>Trạng thái chỉ mục</th>
+                                <td>{stateLabels[status.index_status]}</td>
+                                <th>ContentBag</th>
+                                <td>{status.bag_count}</td>
+                            </tr>
+                            <tr>
+                                <th>Phương thức biểu diễn</th>
+                                <td>{{ structured: 'Có cấu trúc', fallback: 'Không cấu trúc (Fallback)', mixed: 'Hỗn hợp', unavailable: 'Chưa xác định' }[status.representation_mode]}</td>
+                                <th>Trạng thái Vector</th>
+                                <td>{status.vector_ready ? 'Sẵn sàng' : 'Chưa có vector'}</td>
+                            </tr>
+                            <tr>
+                                <th>Tự động lập chỉ mục</th>
+                                <td>{status.auto_enabled ? 'Bật' : 'Tắt'}</td>
+                                <th>Số chiều Vector</th>
+                                <td>{status.embedding_dimension ?? '—'}</td>
+                            </tr>
+                        </tbody>
+                    </table>
                     <details className={styles.indexDetails}><summary>Thông tin kỹ thuật</summary>
                         <dl><dt>Phiên bản</dt><dd>{versionId}</dd>
                             <dt>Model</dt><dd>{status.embedding_model ?? 'Chưa cấu hình'}</dd>
@@ -231,9 +247,9 @@ function IndexWorkspace({ versionId, view }: { versionId: string; view: IndexVie
                         </dl>
                     </details>
                 </>}
-                {result && result.index_run_id !== status?.latest_run_id && <p className={styles.indexMessage} data-tone={result.index_status === 'READY' ? 'success' : 'warning'} role="status">{result.index_status === 'READY' ? 'Chỉ mục sẵn sàng.' : 'Đã gửi yêu cầu.'}</p>}
-                {statusError && <p className={styles.indexMessage} data-tone="error" role="alert">{statusError}</p>}
-                {error && <p className={styles.indexMessage} data-tone="error" role="alert">{error}</p>}
+                {result && result.index_run_id !== status?.latest_run_id && <p className={styles.statusNote} role="status">{result.index_status === 'READY' ? 'Chỉ mục sẵn sàng.' : 'Đã gửi yêu cầu.'}</p>}
+                {statusError && <p className={styles.statusNote} role="alert">{statusError}</p>}
+                {error && <p className={styles.statusNote} role="alert">{error}</p>}
                 <div className={styles.actions}>
                     <button className={styles.primaryButton} disabled={!canBuild || status?.index_status === 'FAILED' || status?.index_status === 'READY'} onClick={() => void build()}>
                         {busy ? 'Đang gửi...' : 'Xây dựng chỉ mục'}
@@ -256,22 +272,40 @@ function IndexWorkspace({ versionId, view }: { versionId: string; view: IndexVie
 function BagList({ status, loading, error }: { status: IndexStatusResult | null; loading: boolean; error: string }) {
     const [offset, setOffset] = useState(0)
     const bags = status?.bags ?? []
-    const pageSize = 6
+    const pageSize = 10
     const currentOffset = offset < bags.length ? offset : 0
     return <section className={styles.resultCard}>
         <h2>ContentBag ({status?.bag_count ?? 0})</h2>
-        {loading && <p className={styles.indexMessage} data-tone="warning" role="status">Đang tải ContentBag...</p>}
-        {error && <p className={styles.indexMessage} data-tone="error" role="alert">{error}</p>}
-        {!loading && !error && bags.length === 0 && <p className={styles.indexMessage} data-tone={status ? statusTone(status.index_status) : 'neutral'}>Chưa có ContentBag.</p>}
-        <div className={styles.indexContentGrid}>
-            {!error && bags.slice(currentOffset, currentOffset + pageSize).map((bag, index) => <article className={styles.contentItem} key={bag.id}>
-                <h4>{bag.title ?? `ContentBag ${currentOffset + index + 1}`}</h4>
-                <div className={styles.contentMeta}><span>{bag.unit_type}</span><span>{bag.embedding_dimension} chiều</span></div>
-                <p>Từ khóa: {bag.keywords.join(', ')}</p>
-                <p className={styles.indexMessage} data-tone={bag.vector_ready ? 'success' : 'warning'}>{bag.vector_ready ? 'Vector sẵn sàng' : 'Chưa có vector'}</p>
-                <details><summary>Chi tiết</summary><p>ID: {bag.id}</p><p>Model: {bag.embedding_model}</p><p>{bag.embedding_text}</p></details>
-            </article>)}
-        </div>
+        {loading && <p className={styles.statusNote} role="status">Đang tải ContentBag...</p>}
+        {error && <p className={styles.statusNote} role="alert">{error}</p>}
+        {!loading && !error && bags.length === 0 && <p className={styles.statusNote}>Chưa có ContentBag.</p>}
+        {!error && bags.length > 0 && <div className={styles.tableWrapper}>
+            <table className={styles.simpleTable}>
+                <thead>
+                    <tr>
+                        <th style={{ width: '60px' }}>STT</th>
+                        <th>Tiêu đề / Loại</th>
+                        <th>Từ khóa</th>
+                        <th style={{ width: '130px' }}>Vector</th>
+                        <th style={{ width: '90px' }}>Số chiều</th>
+                        <th>Model</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {bags.slice(currentOffset, currentOffset + pageSize).map((bag, index) => <tr key={bag.id}>
+                        <td>{currentOffset + index + 1}</td>
+                        <td>
+                            <strong>{bag.title ?? `ContentBag ${currentOffset + index + 1}`}</strong>
+                            <div style={{ color: '#64748b', fontSize: '12px' }}>{bag.unit_type}</div>
+                        </td>
+                        <td>{bag.keywords.join(', ') || '—'}</td>
+                        <td>{bag.vector_ready ? 'Sẵn sàng' : 'Chưa có'}</td>
+                        <td>{bag.embedding_dimension ?? '—'}</td>
+                        <td>{bag.embedding_model ?? '—'}</td>
+                    </tr>)}
+                </tbody>
+            </table>
+        </div>}
         {bags.length > pageSize && <div className={styles.contentPagination} aria-label="Phân trang ContentBag">
             <button className={styles.primaryButton} disabled={currentOffset === 0} onClick={() => setOffset(Math.max(0, currentOffset - pageSize))}>Trước</button>
             <span>Trang {Math.floor(currentOffset / pageSize) + 1}/{Math.ceil(bags.length / pageSize)}</span>
@@ -317,19 +351,31 @@ function ChunkList({ versionId }: { versionId: string }) {
     function page(next: number) { setLoading(true); setError(''); setOffset(next) }
     return <section className={styles.resultCard}>
         <h2>Danh sách Chunk{data ? ` (${data.total})` : ''}</h2>
-        {loading && <p className={styles.indexMessage} data-tone="warning" role="status">Đang tải phân đoạn...</p>}
-        {error && <p className={styles.indexMessage} data-tone="error" role="alert">{error}</p>}
-        {!loading && !error && data?.total === 0 && <p className={styles.indexMessage} data-tone="neutral">Chưa có phân đoạn.</p>}
-        <div className={styles.indexContentGrid}>
-            {!error && data?.items.map(chunk => <article className={styles.contentItem} key={chunk.id}>
-                <h4>Chunk {chunk.chunk_sequence}</h4>
-                <div className={styles.contentMeta}><span>Trang: {chunk.page_from ?? '—'}{chunk.page_to && chunk.page_to !== chunk.page_from ? `–${chunk.page_to}` : ''}</span></div>
-                <p>Từ khóa: {chunk.leaf_keywords.join(', ') || 'Chưa có'}</p>
-                <details><summary>Xem nội dung</summary><p>{chunk.text}</p>
-                    <p>ContentUnit: {chunk.content_unit_id}</p><p>Ký tự: {chunk.char_start}–{chunk.char_end}</p>
-                </details>
-            </article>)}
-        </div>
+        {loading && <p className={styles.statusNote} role="status">Đang tải phân đoạn...</p>}
+        {error && <p className={styles.statusNote} role="alert">{error}</p>}
+        {!loading && !error && data?.total === 0 && <p className={styles.statusNote}>Chưa có phân đoạn.</p>}
+        {!error && (data?.items?.length ?? 0) > 0 && <div className={styles.tableWrapper}>
+            <table className={styles.simpleTable}>
+                <thead>
+                    <tr>
+                        <th style={{ width: '80px' }}>Chunk</th>
+                        <th style={{ width: '90px' }}>Trang</th>
+                        <th style={{ width: '180px' }}>Từ khóa</th>
+                        <th>Nội dung trích đoạn</th>
+                        <th style={{ width: '130px' }}>ContentUnit</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {data?.items.map(chunk => <tr key={chunk.id}>
+                        <td>#{chunk.chunk_sequence}</td>
+                        <td>{chunk.page_from ?? '—'}{chunk.page_to && chunk.page_to !== chunk.page_from ? `–${chunk.page_to}` : ''}</td>
+                        <td>{chunk.leaf_keywords.join(', ') || '—'}</td>
+                        <td className={styles.chunkTextCell}>{chunk.text}</td>
+                        <td style={{ fontSize: '12px', color: '#64748b' }}>{chunk.content_unit_id}</td>
+                    </tr>)}
+                </tbody>
+            </table>
+        </div>}
         <div className={styles.contentPagination}>
             <button className={styles.primaryButton} disabled={loading || offset === 0} onClick={() => page(Math.max(0, offset - 10))}>Trước</button>
             <span>Trang {Math.floor(offset / 10) + 1}/{Math.max(1, Math.ceil((data?.total ?? 0) / 10))}</span>
