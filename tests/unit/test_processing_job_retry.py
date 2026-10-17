@@ -57,7 +57,7 @@ def test_retry_only_failed_ocr_pages_and_worker_finishes(container, failed_pages
         "job_status": "PENDING",
         "processing_status": "OCR_PENDING",
         "action": "OCR_REQUEUED",
-        "status_url": f"/admin/resource-versions/{version['id']}/etl-status",
+        "status_url": f"/api/v1/resource-versions/{version['id']}/etl-status",
     }
     with container.uow() as repo:
         tasks = repo.find("ocr_page_tasks", {"job_id": job["id"]}, order=("page_num",))

@@ -366,6 +366,11 @@ Không truyền `uploaded_by`/`triggered_by` để tự nhận danh tính; học
 
 ## 8. Kiểm tra chức năng
 
+API nghiệp vụ dùng tiền tố `/api/v1`. Ingest nằm tại `/api/v1/resources/{id}/versions/ingest`;
+OCR jobs, postprocess, etl-status và content-units nằm dưới `/api/v1/resource-versions/{id}/`.
+Các URL `/admin/...` cũ chỉ giữ làm alias tương thích, không hiển thị trong Swagger;
+đổi tiền tố không bỏ kiểm tra quyền Dev local. `status_url` trả về dùng URL `/api/v1`.
+
 1. Nguồn PostgreSQL có dữ liệu: chạy `etl source-file-precheck` để kiểm tra cấu hình/nguồn (có thể tải file để xác minh, không phải lệnh đồng bộ). Sau đó chạy Full lần đầu từ giao diện hoặc `etl sync-master --stream all --full`.
 2. Bật tự đồng bộ các nhóm cần dùng. Mặc định lịch metadata/đối soát file là 300 giây, không phải realtime. Nguồn cần đúng trạng thái cho phép, tham chiếu và hash.
 3. Thêm học liệu trên giao diện hoặc chờ worker nhập file nguồn; đợi `CONTENT_READY`. Metadata đồng bộ thành công chưa có nghĩa OCR/Index đã hoàn tất.

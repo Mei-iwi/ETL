@@ -835,7 +835,8 @@ def index_version(id: ResourceId, request: Request, response: Response):
         raise index_error(exc) from None
 
 
-@router.post("/admin/resources/{id}/versions/ingest")
+@router.post("/admin/resources/{id}/versions/ingest", include_in_schema=False)
+@router.post("/api/v1/resources/{id}/versions/ingest", tags=[TAG_MASTER])
 def ingest(id: ResourceId, body: IngestInput, request: Request):
     container = services(request)
     if body.uploaded_by is not None:
@@ -866,7 +867,8 @@ def chunk_preview(id: ResourceId, request: Request,
         raise index_error(exc) from None
 
 
-@router.post("/admin/resource-versions/{id}/ocr-jobs")
+@router.post("/admin/resource-versions/{id}/ocr-jobs", include_in_schema=False)
+@router.post("/api/v1/resource-versions/{id}/ocr-jobs", tags=[TAG_PROCESSING])
 def create_job(id: ResourceId, request: Request, body: JobInput | None = None):
     services(request)
     if body and body.triggered_by is not None:
@@ -884,7 +886,8 @@ def index_status(id: ResourceId, request: Request):
         raise index_error(exc) from None
 
 
-@router.post("/admin/resource-versions/{id}/postprocess")
+@router.post("/admin/resource-versions/{id}/postprocess", include_in_schema=False)
+@router.post("/api/v1/resource-versions/{id}/postprocess", tags=[TAG_PROCESSING])
 def postprocess(id: ResourceId, request: Request):
     return services(request).postprocess.run(id)
 
@@ -900,7 +903,8 @@ def reindex_version(id: ResourceId, request: Request, body: ReindexRequest | Non
         raise index_error(exc) from None
 
 
-@router.get("/admin/resource-versions/{id}/etl-status")
+@router.get("/admin/resource-versions/{id}/etl-status", include_in_schema=False)
+@router.get("/api/v1/resource-versions/{id}/etl-status", tags=[TAG_PROCESSING])
 def status(id: ResourceId, request: Request):
     return services(request).orchestrator.status(id)
 
@@ -929,7 +933,7 @@ def list_public_content_units(
         raise HTTPException(status_code=404, detail="Resource version not found") from None
 
 
-@router.get("/admin/resource-versions/{id}/content-units")
+@router.get("/admin/resource-versions/{id}/content-units", include_in_schema=False)
 def content_units(
     id: ResourceId,
     request: Request,

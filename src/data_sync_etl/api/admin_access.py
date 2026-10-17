@@ -52,7 +52,7 @@ def protected(path, method):
         or path == "/api/v1/resources"
         or path.startswith("/api/v1/resources/")
         or path.startswith("/api/v1/processing-jobs/")
-        or path.endswith("/index-status")
+        or path.endswith(("/index-status", "/etl-status"))
         or path.endswith(("/chunks", "/content-units"))
     )
 
