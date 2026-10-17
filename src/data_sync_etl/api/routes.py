@@ -161,7 +161,10 @@ def health(request: Request):
              summary='Tra cứu học liệu theo BoW, Vector hoặc Hybrid')
 def search_materials(body: SearchRequest, request: Request):
     try:
-        return request.app.state.container.search.search(**body.model_dump(), access=search_access(request))
+        access = search_access(request)  # Never acquire runtime capacity before authorization.
+        service = request.app.state.container.search
+        with service.runtime_admission(body.method, access=access):
+            return service.search(**body.model_dump(), access=access)
     except HTTPException:
         raise
     except Exception as exc:

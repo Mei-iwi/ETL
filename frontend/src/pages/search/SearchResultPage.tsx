@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { searchMaterials } from '../../services/searchApi'
+import { searchMaterials, SearchApiError } from '../../services/searchApi'
 import type { SearchResponse } from '../../types/search'
 import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
@@ -25,7 +25,7 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
             return searchMaterials(request, controller.signal)
         })
             .then(data => { if (data && !controller.signal.aborted) { setResult(data); setError('') } })
-            .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Tìm kiếm thất bại.') })
+            .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof SearchApiError ? reason.message : 'Tìm kiếm thất bại. Vui lòng thử lại.') })
             .finally(() => { if (!controller.signal.aborted) { retrying.current = false; onBusyChange?.(false) } })
         return () => controller.abort()
     }, [encoded, attempt, onBusyChange])

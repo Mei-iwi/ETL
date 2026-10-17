@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { SearchApiError, getChunkContext, searchMaterials } from '../src/services/searchApi.ts'
 import { readSearch, writeSearch } from '../src/pages/search/searchParams.ts'
+import { searchResponse, contextResponse } from './helpers/searchResponses.mjs'
 
 test('search sends exactly one POST with JSON criteria and encoded URL state', async () => {
     const request = { query: 'định luật', method: 'hybrid', filters: { subject_id: 's/1' }, page: 2, size: 10 }
@@ -14,7 +15,7 @@ test('search sends exactly one POST with JSON criteria and encoded URL state', a
             assert.equal(init.method, 'POST')
             assert.equal(init.headers['Content-Type'], 'application/json')
             assert.deepEqual(JSON.parse(init.body), request)
-            return Response.json({ total: 1, items: [] })
+            return Response.json({ ...searchResponse(request), items: [] })
         }
         assert.equal((await searchMaterials(request)).total, 1)
         assert.equal(calls, 1)
@@ -78,7 +79,7 @@ test('context uses the search locator, encoded GET and bounded neighbors', async
             assert.equal(path, '/api/v1/chunks/a%2Fb/context?neighbors=2')
             assert.equal(init.method, 'GET')
             assert.equal(init.body, undefined)
-            return Response.json({ chunks: [{ text: 'Nguồn thật' }] })
+            return Response.json({ ...contextResponse(), context_id: 'a/b', neighbors: 2 })
         }
         assert.equal((await getChunkContext('a/b', undefined, 2)).chunks[0].text, 'Nguồn thật')
     } finally { globalThis.fetch = old }

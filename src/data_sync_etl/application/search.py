@@ -1,5 +1,7 @@
 """Search reads verified Index snapshots; it never queues processing or writes data."""
 
+from contextlib import contextmanager
+from threading import BoundedSemaphore
 from time import monotonic
 
 from data_sync_etl.application.content_bags import bag_structure, representation_mode
@@ -43,6 +45,26 @@ class QueryEmbeddingContext:
 class SearchService:
     def __init__(self, indexing, settings, bags: SearchBagReader | None):
         self.indexing, self.settings, self.bags = indexing, settings, bags
+        self._http_model_slot = BoundedSemaphore(1)
+
+    @contextmanager
+    def runtime_admission(self, method, *, access):
+        """Bound HTTP Vector/Hybrid work per process, without queued model waiters.
+
+        Only the Search route uses this guard. Direct consumers and shared model
+        lifecycle are unchanged. A hung inference cannot be safely interrupted;
+        retain its slot until it actually returns, rejecting new heavy requests.
+        BoW and fail-closed public responses never acquire the model slot.
+        """
+        if method == 'bow' or access.scope != 'local_demo':
+            yield
+            return
+        if not self._http_model_slot.acquire(blocking=False):
+            raise SearchError('SEARCH_RUNTIME_BUSY', 503)
+        try:
+            yield
+        finally:
+            self._http_model_slot.release()
 
     def _deadline(self, started):
         if monotonic() - started > self.settings.search_timeout_seconds:
@@ -118,7 +140,8 @@ class SearchService:
         if method in ('vector', 'hybrid'):
             # Loading a local model is distinct from executing a bounded query.
             # Preserve the query deadline (including prior schema work), but do not
-            # spend it on first-use imports/weights. Both phases remain bounded.
+            # spend it on first-use imports/weights. These checks are cooperative,
+            # not preemption of a blocking model call; HTTP admission is bounded.
             warmup_started = monotonic()
             embedding = self.indexing.embedding
             prepare_query = getattr(embedding, 'prepare_query', None)
