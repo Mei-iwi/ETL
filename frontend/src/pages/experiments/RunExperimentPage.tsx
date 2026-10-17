@@ -52,7 +52,8 @@ export function RunExperimentPage() {
             {error && <p role="alert" className={styles.error}>{error}</p>}
             {busy && <div role="status" aria-live="polite" className={styles.progressArea}>
                 <label htmlFor="evaluation-progress" className={styles.pending}>{progress ? `${progress.percent}% · ${progress.completed}/${progress.total} lượt${progress.phase === 'warmup' ? ' · Làm nóng' : progress.completed === progress.total && progress.percent < 100 ? ' · Đang lưu kết quả' : ''}` : 'Đang kiểm tra dữ liệu…'}</label>
-                <progress id="evaluation-progress" className={styles.progress} max={100} value={progress?.percent ?? 0} aria-label="Tiến trình thực nghiệm" />
+                <progress id="evaluation-progress" className={styles.progress} max={100} value={progress?.percent} aria-label="Tiến trình thực nghiệm" />
+                <p>Rời trang sẽ ngừng chờ; máy chủ có thể vẫn đang xử lý.</p>
             </div>}
             {!busy && error && progress?.run_id && <Link className={layout.secondaryButton} to={`/experiments/results?run_id=${progress.run_id}`}>Kiểm tra kết quả lần chạy</Link>}
             <div className={styles.row}><button className={layout.primaryButton} disabled={busy}>{busy ? 'Đang thực nghiệm…' : 'Chạy thực nghiệm'}</button>

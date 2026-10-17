@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { searchMaterials } from '../../services/searchApi'
 import type { SearchResponse } from '../../types/search'
@@ -6,12 +6,13 @@ import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
 import { readSearch, writeSearch } from './searchParams'
 
-export function SearchResults({ params }: { params: URLSearchParams }) {
+export function SearchResults({ params, onBusyChange }: { params: URLSearchParams; onBusyChange?: (busy: boolean) => void }) {
     const criteria = readSearch(params)
     const [, setParams] = useSearchParams()
     const [result, setResult] = useState<SearchResponse | null>(null)
     const [error, setError] = useState('')
     const [attempt, setAttempt] = useState(0)
+    const retrying = useRef(false)
     const encoded = params.toString()
     useEffect(() => {
         const request = readSearch(new URLSearchParams(encoded))
@@ -20,18 +21,20 @@ export function SearchResults({ params }: { params: URLSearchParams }) {
         // StrictMode cleans up its probe effect before this microtask starts a POST.
         void Promise.resolve().then(() => {
             if (controller.signal.aborted) return
+            onBusyChange?.(true)
             return searchMaterials(request, controller.signal)
         })
             .then(data => { if (data && !controller.signal.aborted) { setResult(data); setError('') } })
             .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Tìm kiếm thất bại.') })
+            .finally(() => { if (!controller.signal.aborted) { retrying.current = false; onBusyChange?.(false) } })
         return () => controller.abort()
-    }, [encoded, attempt])
-    return <section className={styles.results} aria-label="Kết quả tìm kiếm" tabIndex={0}>
+    }, [encoded, attempt, onBusyChange])
+    return <section className={styles.results} aria-label="Kết quả tìm kiếm" aria-busy={Boolean(criteria.query && !error && !result)} tabIndex={0}>
         <div className={styles.stack}>
             {!criteria.query ? <p role="status">Nhập truy vấn để tìm kiếm.</p> : error ?
                 <div className={layout.card}><p role="alert" className={styles.error}>{error}</p>
-                    <button className={layout.primaryButton} onClick={() => { setError(''); setResult(null); setAttempt(value => value + 1) }}>Thử lại</button></div> :
-                !result ? <p role="status" className={styles.pending}>Đang tìm kiếm…</p> : <>
+                    <button className={layout.primaryButton} onClick={() => { if (retrying.current) return; retrying.current = true; setError(''); setResult(null); setAttempt(value => value + 1) }}>Thử lại</button></div> :
+                !result ? <div role="status" className={styles.pending}><p>Đang tìm kiếm…</p><p>Rời trang sẽ ngừng chờ; máy chủ có thể vẫn đang xử lý.</p></div> : <>
                     <div className={styles.resultSummary}>
                         <p role="status" className={styles.success}>{result.total} kết quả</p>
                         {result.access_scope === 'local_demo' && <p role="status" className={styles.metadata}>Tra cứu thử nghiệm nội bộ</p>}

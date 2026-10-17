@@ -1,0 +1,378 @@
+{
+  "schema_version": 1,
+  "label": "baseline",
+  "environment": {
+    "python": "3.13.0",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "cpu_count": 16,
+    "device": "cpu",
+    "processes": 1,
+    "omp_threads": "2",
+    "packages": {
+      "SQLAlchemy": "2.0.54",
+      "torch": "2.14.1",
+      "sentence-transformers": "5.7.0"
+    }
+  },
+  "model": {
+    "mode": "real_local",
+    "id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "dimension": 384
+  },
+  "fixture": {
+    "versions": 6,
+    "candidate_bags": 13,
+    "queries": 18,
+    "query_dataset_hash": "6ac35db0484054a54009cc4f20358c202bca912cc3a30696d842328880daa2d7",
+    "query_hashes": [
+      "0d7e0231c3ff94d50c8f474ba808387f338d3bf8696345aa9f92d74003a99fee",
+      "2fd062aa1375fef330d2d56011b34e4081d6c9d405efa24616acf3b139246e92",
+      "0ebf576a56bf838991753811450f8d00177e5c5686e092590367afbfc6bb3795",
+      "5e99a64d2bfbb52a0bd9c0282a0ed243cb75dc4b22a7511445d381a61f9c2227",
+      "22c0003182bf3749c3d2b0847ba8d0d1cf073f566f5beaa90b5cdaddf1d9ff7f",
+      "c49f94157b5796ab3c352d758f4f25400de9ba598eb64e5b34656743c7fad856",
+      "e45fbbb2b490363a597899f287f9dbb0e13864f40a1c18de7efb3d311fa31af0",
+      "4a30e02854c1ea2939e503c73a95e6c8056e53bd5b6f6268661073649a420089",
+      "b17d3b9435da422b0f62df9cc4bdf008748a273df67c0e5639e7a949cb550aca",
+      "c7d604d3688f0a252b5024e85b330f14f3019b0f0f52ad528b7d3d9bdde18031",
+      "805f64907de3ad511675f6369d1dbc32b2edc46aaf70697dd3847e32651c4cb8",
+      "efd03f7d18b3a55be22db95ac2d0d0cfadd19ef2afe13fc42525fec630087a48",
+      "a711160fcfda9bf4b1e0722cedf2818ec1d6e9994988a2a434b953424467025a",
+      "3bf75246ca9a65f014ce9645b205a683638997410617b5a3603e0d8b0b14b692",
+      "0d7e0231c3ff94d50c8f474ba808387f338d3bf8696345aa9f92d74003a99fee",
+      "2fd062aa1375fef330d2d56011b34e4081d6c9d405efa24616acf3b139246e92",
+      "0ebf576a56bf838991753811450f8d00177e5c5686e092590367afbfc6bb3795",
+      "c49f94157b5796ab3c352d758f4f25400de9ba598eb64e5b34656743c7fad856"
+    ],
+    "ranked_result_hash": "58259f4b58877adb7f8ea48b117fcbfe206340ec9d8860ca519c3797d88d7bcc",
+    "corpus_snapshot_hash": "c4ac510f3cdbafe554d93797b582555324f2ca8beb7abf0288085d687dd9dcbb"
+  },
+  "source_sha256": {
+    "src/data_sync_etl/adapters/embeddings.py": "7bd3545c401327f2dd0b5a4ddca01cb6fd3eaaebfea715e6d898c41a34b71c2e",
+    "src/data_sync_etl/application/search.py": "8b30eb9365f99525483132e07716a20d3403d5250504000122662ee120906802",
+    "src/data_sync_etl/application/evaluation.py": "c34a87689fa148529b795b76a6192b20ad73910bb7fc2bbe5e3efc554b5416a0"
+  },
+  "cold_model_prepare": {
+    "status": "MEASURED",
+    "ms": 10966.509800004133,
+    "scope": "first prepare in this process, imports + weights + probe; OS file cache uncontrolled"
+  },
+  "warmup_stages": {
+    "pg.eligibility": {
+      "n": 6,
+      "min_ms": 0.964300001214724,
+      "median_ms": 1.295800000661984,
+      "p95_ms": 3.332000003865687,
+      "max_ms": 3.976400003011804,
+      "total_ms": 9.999700007028878
+    },
+    "mongo.candidates_double": {
+      "n": 3,
+      "min_ms": 0.989699998172,
+      "median_ms": 0.993200002994854,
+      "p95_ms": 0.9967099969799165,
+      "max_ms": 0.9970999963115901,
+      "total_ms": 2.979999997478444
+    },
+    "mongo.get_bag_double": {
+      "n": 117,
+      "min_ms": 0.06929999653948471,
+      "median_ms": 0.0897999998414889,
+      "p95_ms": 0.12363999994704498,
+      "max_ms": 0.17029999435180798,
+      "total_ms": 10.692700001527555
+    },
+    "pg.snapshot_guard": {
+      "n": 36,
+      "min_ms": 2.515600004699081,
+      "median_ms": 2.930000002379529,
+      "p95_ms": 3.7292999968485674,
+      "max_ms": 4.0166999970097095,
+      "total_ms": 109.49470000196015
+    },
+    "rank.snippets": {
+      "n": 18,
+      "min_ms": 0.06929999653948471,
+      "median_ms": 0.07960000220919028,
+      "p95_ms": 0.11816000478574998,
+      "max_ms": 0.1660999987507239,
+      "total_ms": 1.5406000093207695
+    },
+    "model.readiness": {
+      "n": 4,
+      "min_ms": 0.43089999962830916,
+      "median_ms": 0.6520499991893303,
+      "p95_ms": 0.7860700035962509,
+      "max_ms": 0.7888000036473386,
+      "total_ms": 2.5238000016543083
+    },
+    "model.prepare": {
+      "n": 4,
+      "min_ms": 0.43339999683666974,
+      "median_ms": 0.6551000005856622,
+      "p95_ms": 0.7897549963672645,
+      "max_ms": 0.792499995441176,
+      "total_ms": 2.53609999344917
+    },
+    "model.tokenize_encode": {
+      "n": 2,
+      "min_ms": 10.71040000533685,
+      "median_ms": 11.713250005414011,
+      "p95_ms": 12.615815005483455,
+      "max_ms": 12.716100005491171,
+      "total_ms": 23.426500010828022
+    },
+    "model.embed": {
+      "n": 2,
+      "min_ms": 11.147299999720417,
+      "median_ms": 12.201900000945898,
+      "p95_ms": 13.15104000204883,
+      "max_ms": 13.256500002171379,
+      "total_ms": 24.403800001891796
+    }
+  },
+  "search_warm": {
+    "bow": {
+      "n": 36,
+      "min_ms": 23.019899999781046,
+      "median_ms": 41.76414999892586,
+      "p95_ms": 83.05389999623003,
+      "max_ms": 84.197199998016
+    },
+    "vector": {
+      "n": 36,
+      "min_ms": 58.32199999713339,
+      "median_ms": 69.65259999924456,
+      "p95_ms": 115.99799999930838,
+      "max_ms": 125.64320000092266
+    },
+    "hybrid": {
+      "n": 36,
+      "min_ms": 57.403200000408106,
+      "median_ms": 71.53239999752259,
+      "p95_ms": 111.52222499913478,
+      "max_ms": 130.9994999974151
+    }
+  },
+  "search_stages_including_prefix_checks": {
+    "pg.eligibility": {
+      "n": 588,
+      "min_ms": 0.8060999971348792,
+      "median_ms": 1.248949996806914,
+      "p95_ms": 2.09106000365864,
+      "max_ms": 2.8292999995755963,
+      "total_ms": 785.5602999770781
+    },
+    "mongo.candidates_double": {
+      "n": 324,
+      "min_ms": 0.912600000447128,
+      "median_ms": 1.1259499988227617,
+      "p95_ms": 2.2988499997154577,
+      "max_ms": 3.1279999966500327,
+      "total_ms": 456.14309999655234
+    },
+    "mongo.get_bag_double": {
+      "n": 11766,
+      "min_ms": 0.06800000119255856,
+      "median_ms": 0.10199999815085903,
+      "p95_ms": 0.20309999672463164,
+      "max_ms": 2.6995000007445924,
+      "total_ms": 1439.538900354819
+    },
+    "pg.snapshot_guard": {
+      "n": 3498,
+      "min_ms": 2.437799994368106,
+      "median_ms": 3.3746999979484826,
+      "p95_ms": 6.574500002534476,
+      "max_ms": 11.28469999821391,
+      "total_ms": 13986.371400074859
+    },
+    "rank.snippets": {
+      "n": 1944,
+      "min_ms": 0.06710000161547214,
+      "median_ms": 0.09370000043418258,
+      "p95_ms": 0.1884650017018429,
+      "max_ms": 0.37929999962216243,
+      "total_ms": 217.5540999887744
+    },
+    "model.readiness": {
+      "n": 432,
+      "min_ms": 0.39850000030128285,
+      "median_ms": 0.6990500005485956,
+      "p95_ms": 1.5346550015237879,
+      "max_ms": 2.3204000026453286,
+      "total_ms": 346.3224998995429
+    },
+    "model.prepare": {
+      "n": 432,
+      "min_ms": 0.4006000017398037,
+      "median_ms": 0.7025500017334707,
+      "p95_ms": 1.540124999519321,
+      "max_ms": 2.329399998416193,
+      "total_ms": 347.9161999275675
+    },
+    "model.tokenize_encode": {
+      "n": 216,
+      "min_ms": 9.507499999017455,
+      "median_ms": 12.002100000245264,
+      "p95_ms": 21.152374998564483,
+      "max_ms": 38.161500000569504,
+      "total_ms": 3036.749300044903
+    },
+    "model.embed": {
+      "n": 216,
+      "min_ms": 9.992199993575923,
+      "median_ms": 12.588350000442006,
+      "p95_ms": 22.255799998674775,
+      "max_ms": 38.78940000140574,
+      "total_ms": 3181.589499967231
+    }
+  },
+  "evaluation": {
+    "total_ms": 4951.48579999659,
+    "per_method": {
+      "bow": {
+        "n": 18,
+        "min_ms": 28.349300002446398,
+        "median_ms": 47.36380000031204,
+        "p95_ms": 68.66044999987933,
+        "max_ms": 74.30870000098366
+      },
+      "vector": {
+        "n": 18,
+        "min_ms": 70.38390000525396,
+        "median_ms": 90.90759999889997,
+        "p95_ms": 116.80140500175185,
+        "max_ms": 119.41490000026533
+      },
+      "hybrid": {
+        "n": 18,
+        "min_ms": 67.94310000259429,
+        "median_ms": 86.80689999528113,
+        "p95_ms": 111.729330000162,
+        "max_ms": 123.21299999894109
+      }
+    },
+    "stages": {
+      "pg.corpus_marker": {
+        "n": 111,
+        "min_ms": 4.279799999494571,
+        "median_ms": 6.438399999751709,
+        "p95_ms": 9.140900001511909,
+        "max_ms": 13.688600003661122,
+        "total_ms": 727.9037999396678
+      },
+      "pg.eligibility": {
+        "n": 100,
+        "min_ms": 0.7690000056754798,
+        "median_ms": 1.3296500001160894,
+        "p95_ms": 2.404815000409144,
+        "max_ms": 2.8286000015214086,
+        "total_ms": 142.57680001173867
+      },
+      "mongo.get_bag_double": {
+        "n": 2013,
+        "min_ms": 0.06800000119255856,
+        "median_ms": 0.1247000036528334,
+        "p95_ms": 0.22514000011142343,
+        "max_ms": 0.41870000131893903,
+        "total_ms": 280.7643001942779
+      },
+      "pg.snapshot_guard": {
+        "n": 595,
+        "min_ms": 2.7102000021841377,
+        "median_ms": 4.0092999988701195,
+        "p95_ms": 6.662440002401125,
+        "max_ms": 8.560500005842187,
+        "total_ms": 2652.1765999059426
+      },
+      "evaluation.corpus_guard": {
+        "n": 2,
+        "min_ms": 43.362800002796575,
+        "median_ms": 51.118549999955576,
+        "p95_ms": 58.098724997398676,
+        "max_ms": 58.874299997114576,
+        "total_ms": 102.23709999991115
+      },
+      "mongo.candidates_double": {
+        "n": 54,
+        "min_ms": 0.949500004935544,
+        "median_ms": 1.2104000015824568,
+        "p95_ms": 2.4181799995858455,
+        "max_ms": 2.773600004729815,
+        "total_ms": 83.14999999856809
+      },
+      "rank.snippets": {
+        "n": 324,
+        "min_ms": 0.07110000296961516,
+        "median_ms": 0.10379999730503187,
+        "p95_ms": 0.22034499925211998,
+        "max_ms": 0.4678999976022169,
+        "total_ms": 40.7413999637356
+      },
+      "model.readiness": {
+        "n": 72,
+        "min_ms": 0.42210000538034365,
+        "median_ms": 0.9952000000339467,
+        "p95_ms": 1.7905100012285402,
+        "max_ms": 2.1456999966176227,
+        "total_ms": 73.08780000312254
+      },
+      "model.prepare": {
+        "n": 72,
+        "min_ms": 0.42409999878145754,
+        "median_ms": 0.9989000027417205,
+        "p95_ms": 1.7968600001040613,
+        "max_ms": 2.1531000020331703,
+        "total_ms": 73.39389999106061
+      },
+      "model.tokenize_encode": {
+        "n": 36,
+        "min_ms": 10.545499993895646,
+        "median_ms": 16.420749998360407,
+        "p95_ms": 21.691100004318287,
+        "max_ms": 23.528999998234212,
+        "total_ms": 599.5892999926582
+      },
+      "model.embed": {
+        "n": 36,
+        "min_ms": 11.06469999649562,
+        "median_ms": 17.118050000135554,
+        "p95_ms": 23.154249998697196,
+        "max_ms": 24.592200003098696,
+        "total_ms": 631.6307000161032
+      }
+    },
+    "observations": 54,
+    "k_values": [
+      1,
+      3,
+      5
+    ],
+    "quality": "NOT_RUN_UNCONFIRMED_GROUND_TRUTH"
+  },
+  "api_warm": {
+    "n": 5,
+    "min_ms": 68.63239999802317,
+    "median_ms": 82.41560000169557,
+    "p95_ms": 128.35354000271764,
+    "max_ms": 136.74880000326084
+  },
+  "client_json_serialization": {
+    "n": 5,
+    "min_ms": 0.10109999857377261,
+    "median_ms": 0.11100000119768083,
+    "p95_ms": 0.18897999689215794,
+    "max_ms": 0.2049999966402538
+  },
+  "not_measured": [
+    "GPU",
+    "multi_worker_RAM",
+    "RAM_peak",
+    "real_PG_Mongo_latency",
+    "API_cold_total",
+    "tokenize_separate_from_encode"
+  ],
+  "timing_note": "inclusive nested stage timings; do not sum; prefix checks excluded from search_warm latency samples"
+}

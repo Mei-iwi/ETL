@@ -228,7 +228,7 @@ def test_auto_real_model_source_to_index_no_backfill(real_context):
 
 
 @pytest.mark.skipif(os.environ.get("ETL_TEST_REAL_UI") != "1", reason="Real browser acceptance is opt-in")
-def test_react_ui_against_real_model_and_isolated_backend(real_context):
+def test_react_ui_against_real_model_and_isolated_backend(real_context, monkeypatch):
     import socket
     import subprocess
     from pathlib import Path
@@ -255,9 +255,14 @@ def test_react_ui_against_real_model_and_isolated_backend(real_context):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(128)
+    # Programmatic test server: attest the actual numeric loopback binding and
+    # disable proxy rewriting just as the existing local-admin test client does.
+    # Production policy and its negative tests remain unchanged.
+    assert listener.getsockname()[0] == "127.0.0.1"
+    monkeypatch.setattr("sys.argv", ["uvicorn/__main__.py", "app", "--host", "127.0.0.1", "--no-proxy-headers"])
     port = listener.getsockname()[1]
     server = uvicorn.Server(uvicorn.Config(create_app(c), host="127.0.0.1", port=port,
-                                          log_level="error", access_log=False))
+                                          proxy_headers=False, log_level="error", access_log=False))
     api_thread = Thread(target=lambda: server.run(sockets=[listener]), daemon=True)
     worker_thread = Thread(target=worker_loop, daemon=True)
     api_thread.start()

@@ -17,6 +17,7 @@ class LocalSentenceEmbedding:
         self._model = None
         self._lock = Lock()
         self._checked = False
+        self._loaded_contract = None
 
     def available(self):
         if not (self.path and self.model_id.strip() and self.version.strip()
@@ -36,6 +37,9 @@ class LocalSentenceEmbedding:
         if not self.available():
             raise IndexingError("BLOCKED_EMBEDDING_RUNTIME", 503)
         with self._lock:
+            contract = (str(Path(self.path).resolve()), self.model_id, self.version, self.dimension)
+            if self._loaded_contract is not None and contract != self._loaded_contract:
+                raise IndexingError("BLOCKED_EMBEDDING_RUNTIME", 503)
             if self._model is None:
                 try:
                     from sentence_transformers import SentenceTransformer
@@ -49,6 +53,7 @@ class LocalSentenceEmbedding:
                     if not manifest.is_file() or manifest.read_text(encoding="utf-8").strip() != self.version:
                         raise ValueError("Model revision unavailable")
                     self._model = model
+                    self._loaded_contract = contract
                 except IndexingError:
                     raise
                 except Exception:
@@ -59,7 +64,8 @@ class LocalSentenceEmbedding:
 
     def ready(self):
         # Model workload is loaded/probed by the worker, never by HTTP/startup.
-        return self._checked and self.available()
+        return (self._checked and self.available()
+                and self._loaded_contract == (str(Path(self.path).resolve()), self.model_id, self.version, self.dimension))
 
     def identity(self):
         # No local path in public contracts, fingerprints or logs.
@@ -68,6 +74,16 @@ class LocalSentenceEmbedding:
     def embed(self, text):
         self.prepare()
         return self._encode(text)
+
+    def prepare_query(self):
+        """Validate/load once, then return the encoder for the immediate query.
+
+        Search times preparation separately from bounded query execution. The
+        returned callable is request-local; direct embed() still prepares itself.
+        No cross-request vector or readiness cache is retained here.
+        """
+        self.prepare()
+        return self._encode
 
     def _encode(self, text):
         try:

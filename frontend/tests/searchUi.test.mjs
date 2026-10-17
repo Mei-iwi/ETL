@@ -17,6 +17,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     skip: !existsSync(executable) || !existsSync(join(root, 'dist/index.html')), timeout: 60000,
 }, async () => {
     let postCount = 0, contextCount = 0, mode = 'results', fileKind = 'image'
+    let releaseSearch
     const bodies = []
     const server = createServer(async (req, res) => {
         const url = new URL(req.url, 'http://localhost')
@@ -33,6 +34,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             for await (const part of req) raw += part
             const body = JSON.parse(raw)
             bodies.push(body)
+            if (mode === 'slow') await new Promise(resolve => { releaseSearch = resolve })
             if (mode === 'error') return json({ detail: { code: 'BLOCKED_EMBEDDING_RUNTIME', message: 'Model chưa sẵn sàng.' } }, 503)
             if (mode === 'denied') return json({ detail: { code: 'SEARCH_ACCESS_RESTRICTED', message: 'Truy cập tìm kiếm nội bộ bị hạn chế.' } }, 403)
             if (mode === 'empty') return json({ ...body, items: [], total: 0, total_pages: 0, message: 'NO_READY_INDEX', ranking_algorithm: 'rrf-v1' })
@@ -206,7 +208,30 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await assertFixedSearch()
         assert.equal(contextCount, 0)
         await capture('search-context-mobile')
+        // Hold a real HTTP response: no invented model phase or repeated POST.
+        mode = 'slow'
+        const beforeSlow = postCount
+        await open('/search/result?q=slow&method=vector')
+        await waitFor(() => postCount === beforeSlow + 1 && !!releaseSearch)
+        assert.equal(await evaluate("document.querySelector('button[type=submit]').disabled"), true)
+        assert.equal(await evaluate("document.querySelector('section[aria-busy=true]')?.textContent.includes('Đang tìm kiếm')"), true)
+        assert.equal(await evaluate("document.body.textContent.includes('Đang khởi tạo mô hình')"), false)
+        await evaluate("for(let i=0;i<10;i++) document.querySelector('form').requestSubmit()")
+        await delay(200)
+        assert.equal(postCount, beforeSlow + 1, 'rapid keyboard/submission stays single flight')
+        // Navigate while the old server request is still computing. Its late
+        // response must not replace the new route or report server cancellation.
+        mode = 'empty'
+        await evaluate("history.pushState({}, '', '/search/result?q=new&method=bow'); window.dispatchEvent(new PopStateEvent('popstate'))")
+        await waitFor(() => evaluate("document.body.textContent.includes('Chưa có học liệu lập chỉ mục sẵn sàng')"))
+        releaseSearch()
+        await delay(250)
+        assert.equal(await evaluate("document.querySelectorAll('article').length"), 0)
+        assert.equal(await evaluate("document.querySelector('#search-query').value"), 'new')
+        assert.equal(await evaluate("document.querySelector('button[type=submit]').disabled"), false)
+
     } finally {
+        releaseSearch?.()
         if (ws) ws.close()
         browser.kill()
         await new Promise(resolve => server.close(resolve))

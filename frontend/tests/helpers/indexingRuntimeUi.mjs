@@ -52,7 +52,12 @@ async function evaluate(expression) {
     assert.equal(result.exceptionDetails, undefined)
     return result.result.value
 }
-async function status() { return (await fetch(`${backend}/api/v1/resource-versions/${versionId}/index-status`)).json() }
+async function status() {
+    const response = await fetch(`${backend}/api/v1/resource-versions/${versionId}/index-status`)
+    const body = await response.json()
+    assert.ok(response.ok, JSON.stringify({ http_status: response.status, code: body.code || body.detail?.code }))
+    return body
+}
 try {
     const initial = await status()
     assert.equal(initial.index_status, 'READY')
@@ -68,15 +73,14 @@ try {
     await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }))
     await call('Page.enable')
     await call('Page.navigate', { url: `${origin}/library/indexing?${new URLSearchParams({ resourceId, versionId })}` })
-    await waitFor(() => evaluate("document.body.textContent.includes('Vector sẵn sàng') && document.body.textContent.includes('384') && document.body.textContent.includes('READY')"))
+    await waitFor(() => evaluate("Array.from(document.querySelectorAll('[data-index-panel=index] th')).find(th => th.textContent === 'Trạng thái Vector')?.nextElementSibling?.textContent === 'Sẵn sàng' && document.body.textContent.includes('384') && document.body.textContent.includes('READY')"))
     assert.equal((await status()).latest_run_id, initial.latest_run_id, 'mount never POSTs')
     await evaluate("Array.from(document.querySelectorAll('nav[aria-label=\"Phân đoạn và chỉ mục\"] a')).find(a => a.textContent === 'Phân đoạn').click()")
     await waitFor(() => evaluate("document.querySelector('[data-index-panel=chunks]')?.hidden === false"))
-    await waitFor(() => evaluate("Array.from(document.querySelectorAll('article h4')).filter(h => h.textContent.startsWith('Chunk ')).length === 10"))
+    await waitFor(() => evaluate("document.querySelectorAll('[data-index-panel=chunks] tbody tr').length === 10"))
     await evaluate("Array.from(document.querySelectorAll('[data-index-panel=chunks] button')).find(b => b.textContent === 'Tiếp').click()")
-    await waitFor(() => evaluate("document.body.textContent.includes('Chunk 11')"))
-    await evaluate("document.querySelector('[data-index-panel=chunks] details').open = true")
-    assert.ok(await evaluate("document.querySelector('[data-index-panel=chunks] details p').textContent.length > 0"))
+    await waitFor(() => evaluate("document.querySelector('[data-index-panel=chunks] tbody tr td')?.textContent === '#11'"))
+    assert.ok(await evaluate("document.querySelector('[data-index-panel=chunks] tbody tr td:nth-child(4)').textContent.length > 0"))
     await evaluate("Array.from(document.querySelectorAll('nav[aria-label=\"Phân đoạn và chỉ mục\"] a')).find(a => a.textContent === 'Chỉ mục').click()")
     await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').click()")
     await waitFor(() => evaluate("document.querySelector('dialog')?.open"))

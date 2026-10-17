@@ -1,0 +1,329 @@
+{
+  "schema_version": 1,
+  "label": "baseline",
+  "environment": {
+    "python": "3.13.0",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "cpu_count": 16,
+    "device": "cpu",
+    "processes": 1,
+    "omp_threads": null,
+    "packages": {
+      "SQLAlchemy": "2.0.54",
+      "torch": "2.14.1",
+      "sentence-transformers": "5.7.0"
+    }
+  },
+  "model": {
+    "mode": "ORCHESTRATION_DOUBLE_ONLY",
+    "id": "test-double-only",
+    "revision": "v1",
+    "dimension": 3
+  },
+  "fixture": {
+    "versions": 6,
+    "candidate_bags": 13,
+    "queries": 18,
+    "query_dataset_hash": "6ac35db0484054a54009cc4f20358c202bca912cc3a30696d842328880daa2d7",
+    "query_hashes": [
+      "0d7e0231c3ff94d50c8f474ba808387f338d3bf8696345aa9f92d74003a99fee",
+      "2fd062aa1375fef330d2d56011b34e4081d6c9d405efa24616acf3b139246e92",
+      "0ebf576a56bf838991753811450f8d00177e5c5686e092590367afbfc6bb3795",
+      "5e99a64d2bfbb52a0bd9c0282a0ed243cb75dc4b22a7511445d381a61f9c2227",
+      "22c0003182bf3749c3d2b0847ba8d0d1cf073f566f5beaa90b5cdaddf1d9ff7f",
+      "c49f94157b5796ab3c352d758f4f25400de9ba598eb64e5b34656743c7fad856",
+      "e45fbbb2b490363a597899f287f9dbb0e13864f40a1c18de7efb3d311fa31af0",
+      "4a30e02854c1ea2939e503c73a95e6c8056e53bd5b6f6268661073649a420089",
+      "b17d3b9435da422b0f62df9cc4bdf008748a273df67c0e5639e7a949cb550aca",
+      "c7d604d3688f0a252b5024e85b330f14f3019b0f0f52ad528b7d3d9bdde18031",
+      "805f64907de3ad511675f6369d1dbc32b2edc46aaf70697dd3847e32651c4cb8",
+      "efd03f7d18b3a55be22db95ac2d0d0cfadd19ef2afe13fc42525fec630087a48",
+      "a711160fcfda9bf4b1e0722cedf2818ec1d6e9994988a2a434b953424467025a",
+      "3bf75246ca9a65f014ce9645b205a683638997410617b5a3603e0d8b0b14b692",
+      "0d7e0231c3ff94d50c8f474ba808387f338d3bf8696345aa9f92d74003a99fee",
+      "2fd062aa1375fef330d2d56011b34e4081d6c9d405efa24616acf3b139246e92",
+      "0ebf576a56bf838991753811450f8d00177e5c5686e092590367afbfc6bb3795",
+      "c49f94157b5796ab3c352d758f4f25400de9ba598eb64e5b34656743c7fad856"
+    ],
+    "ranked_result_hash": "6e8b3b812d7dd779ed9f67baaf4c9dbb1a2391545e3ac5715ac3151a0f0a937f",
+    "corpus_snapshot_hash": "eb2443eb0d7473241a133a9c6e23447abb0ca00a83c55579c608ac7cea542bd4"
+  },
+  "source_sha256": {
+    "src/data_sync_etl/adapters/embeddings.py": "7bd3545c401327f2dd0b5a4ddca01cb6fd3eaaebfea715e6d898c41a34b71c2e",
+    "src/data_sync_etl/application/search.py": "8b30eb9365f99525483132e07716a20d3403d5250504000122662ee120906802",
+    "src/data_sync_etl/application/evaluation.py": "c34a87689fa148529b795b76a6192b20ad73910bb7fc2bbe5e3efc554b5416a0"
+  },
+  "cold_model_prepare": {
+    "status": "NOT_MEASURED",
+    "reason": "orchestration test double; not a model cold-load measurement"
+  },
+  "warmup_stages": {
+    "pg.eligibility": {
+      "n": 6,
+      "min_ms": 0.847399998747278,
+      "median_ms": 0.9052000023075379,
+      "p95_ms": 3.0452999963017646,
+      "max_ms": 3.645899996627122,
+      "total_ms": 8.426499996858183
+    },
+    "mongo.candidates_double": {
+      "n": 3,
+      "min_ms": 0.21579999884124845,
+      "median_ms": 0.21909999486524612,
+      "p95_ms": 0.2957800024887547,
+      "max_ms": 0.3043000033358112,
+      "total_ms": 0.7391999970423058
+    },
+    "mongo.get_bag_double": {
+      "n": 117,
+      "min_ms": 0.016199999663513154,
+      "median_ms": 0.023200002033263445,
+      "p95_ms": 0.04220000409986821,
+      "max_ms": 0.10540000221226364,
+      "total_ms": 3.3348000652040355
+    },
+    "pg.snapshot_guard": {
+      "n": 36,
+      "min_ms": 2.1590000033029355,
+      "median_ms": 2.5057999991986435,
+      "p95_ms": 3.4628250014065998,
+      "max_ms": 4.8899000030360185,
+      "total_ms": 97.19060000497848
+    },
+    "rank.snippets": {
+      "n": 18,
+      "min_ms": 0.06750000466126949,
+      "median_ms": 0.07344999903580174,
+      "p95_ms": 0.09644499950809393,
+      "max_ms": 0.1612999985809438,
+      "total_ms": 1.4209000073606148
+    },
+    "model.prepare": {
+      "n": 2,
+      "min_ms": 0.0006999980541877449,
+      "median_ms": 0.0011499978427309543,
+      "p95_ms": 0.0015549976524198428,
+      "max_ms": 0.0015999976312741637,
+      "total_ms": 0.0022999956854619086
+    },
+    "model.embed": {
+      "n": 2,
+      "min_ms": 0.0006999980541877449,
+      "median_ms": 0.000800002453615889,
+      "p95_ms": 0.0008900064131012186,
+      "max_ms": 0.000900006853044033,
+      "total_ms": 0.001600004907231778
+    }
+  },
+  "search_warm": {
+    "bow": {
+      "n": 36,
+      "min_ms": 18.95360000344226,
+      "median_ms": 24.922749998950167,
+      "p95_ms": 48.392574997706106,
+      "max_ms": 51.23640000238083
+    },
+    "vector": {
+      "n": 36,
+      "min_ms": 37.447000002430286,
+      "median_ms": 39.88469999967492,
+      "p95_ms": 46.12222500145435,
+      "max_ms": 46.66700000234414
+    },
+    "hybrid": {
+      "n": 36,
+      "min_ms": 36.760100003448315,
+      "median_ms": 39.83334999793442,
+      "p95_ms": 54.45700000018405,
+      "max_ms": 65.29359999694861
+    }
+  },
+  "search_stages_including_prefix_checks": {
+    "pg.eligibility": {
+      "n": 588,
+      "min_ms": 0.7591000030515715,
+      "median_ms": 0.884000000951346,
+      "p95_ms": 1.2893150003947083,
+      "max_ms": 2.3684999978286214,
+      "total_ms": 558.0161998514086
+    },
+    "mongo.candidates_double": {
+      "n": 324,
+      "min_ms": 0.20869999571004882,
+      "median_ms": 0.23459999647457153,
+      "p95_ms": 0.3885899997840169,
+      "max_ms": 0.7336000053328462,
+      "total_ms": 81.71079997555353
+    },
+    "mongo.get_bag_double": {
+      "n": 11766,
+      "min_ms": 0.01479999627918005,
+      "median_ms": 0.02755000241450034,
+      "p95_ms": 0.048499998229090124,
+      "max_ms": 0.44630000047618523,
+      "total_ms": 362.0749005640391
+    },
+    "pg.snapshot_guard": {
+      "n": 3498,
+      "min_ms": 2.1773999978904612,
+      "median_ms": 2.681900001334725,
+      "p95_ms": 3.68633999787562,
+      "max_ms": 9.53750000189757,
+      "total_ms": 9808.11270014965
+    },
+    "rank.snippets": {
+      "n": 1944,
+      "min_ms": 0.06539999594679102,
+      "median_ms": 0.07960000220919028,
+      "p95_ms": 0.12018499837722628,
+      "max_ms": 0.4655999946407974,
+      "total_ms": 167.7300001392723
+    },
+    "model.prepare": {
+      "n": 216,
+      "min_ms": 0.0005999972927384079,
+      "median_ms": 0.0007999988156370819,
+      "p95_ms": 0.0012000018614344299,
+      "max_ms": 0.0020000006770715117,
+      "total_ms": 0.18650000856723636
+    },
+    "model.embed": {
+      "n": 216,
+      "min_ms": 0.0006999980541877449,
+      "median_ms": 0.0008999995770864189,
+      "p95_ms": 0.0014999968698248267,
+      "max_ms": 0.0020000006770715117,
+      "total_ms": 0.21239999477984384
+    }
+  },
+  "evaluation": {
+    "total_ms": 2661.7830000031972,
+    "per_method": {
+      "bow": {
+        "n": 18,
+        "min_ms": 19.62679999996908,
+        "median_ms": 24.88555000309134,
+        "p95_ms": 46.20536499933223,
+        "max_ms": 46.59730000275886
+      },
+      "vector": {
+        "n": 18,
+        "min_ms": 37.34999999869615,
+        "median_ms": 42.0833499993023,
+        "p95_ms": 48.25017999901319,
+        "max_ms": 51.53390000486979
+      },
+      "hybrid": {
+        "n": 18,
+        "min_ms": 37.635600005160086,
+        "median_ms": 41.623999997682404,
+        "p95_ms": 50.74460499745328,
+        "max_ms": 51.39459999918472
+      }
+    },
+    "stages": {
+      "pg.corpus_marker": {
+        "n": 111,
+        "min_ms": 3.7556999959633686,
+        "median_ms": 4.419500000949483,
+        "p95_ms": 6.116050000855466,
+        "max_ms": 9.560400001646485,
+        "total_ms": 512.388400042255
+      },
+      "pg.eligibility": {
+        "n": 100,
+        "min_ms": 0.6995000003371388,
+        "median_ms": 0.872600001457613,
+        "p95_ms": 1.4265250025346177,
+        "max_ms": 1.7981999990297481,
+        "total_ms": 91.2458000384504
+      },
+      "mongo.get_bag_double": {
+        "n": 2013,
+        "min_ms": 0.015300000086426735,
+        "median_ms": 0.029300004825927317,
+        "p95_ms": 0.049700000090524554,
+        "max_ms": 0.15889999485807493,
+        "total_ms": 63.462299964157864
+      },
+      "pg.snapshot_guard": {
+        "n": 595,
+        "min_ms": 2.267399999254849,
+        "median_ms": 2.7504000026965514,
+        "p95_ms": 3.7809199995535887,
+        "max_ms": 6.21540000429377,
+        "total_ms": 1708.4871999104507
+      },
+      "evaluation.corpus_guard": {
+        "n": 2,
+        "min_ms": 23.96030000090832,
+        "median_ms": 24.87335000114399,
+        "p95_ms": 25.695095001356094,
+        "max_ms": 25.78640000137966,
+        "total_ms": 49.74670000228798
+      },
+      "mongo.candidates_double": {
+        "n": 54,
+        "min_ms": 0.22330000501824543,
+        "median_ms": 0.24884999584173784,
+        "p95_ms": 0.3621100011514496,
+        "max_ms": 0.6347000016830862,
+        "total_ms": 14.170200003718492
+      },
+      "rank.snippets": {
+        "n": 324,
+        "min_ms": 0.06650000432273373,
+        "median_ms": 0.08224999692174606,
+        "p95_ms": 0.12155500153312458,
+        "max_ms": 0.31230000604409724,
+        "total_ms": 28.322799982561264
+      },
+      "model.prepare": {
+        "n": 36,
+        "min_ms": 0.000500003807246685,
+        "median_ms": 0.0007999988156370819,
+        "p95_ms": 0.0027250007406109944,
+        "max_ms": 0.07270000060088933,
+        "total_ms": 0.10719997953856364
+      },
+      "model.embed": {
+        "n": 36,
+        "min_ms": 0.0007999988156370819,
+        "median_ms": 0.0011999982234556228,
+        "p95_ms": 0.0016500034689670429,
+        "max_ms": 0.0023999964469112456,
+        "total_ms": 0.04469999112188816
+      }
+    },
+    "observations": 54,
+    "k_values": [
+      1,
+      3,
+      5
+    ],
+    "quality": "NOT_RUN_UNCONFIRMED_GROUND_TRUTH"
+  },
+  "api_warm": {
+    "n": 5,
+    "min_ms": 41.216600002371706,
+    "median_ms": 42.06230000272626,
+    "p95_ms": 72.64046000200324,
+    "max_ms": 79.98960000259103
+  },
+  "client_json_serialization": {
+    "n": 5,
+    "min_ms": 0.0737999944249168,
+    "median_ms": 0.07760000153211877,
+    "p95_ms": 0.09019999852171168,
+    "max_ms": 0.09139999747276306
+  },
+  "not_measured": [
+    "GPU",
+    "multi_worker_RAM",
+    "RAM_peak",
+    "real_PG_Mongo_latency",
+    "API_cold_total",
+    "tokenize_separate_from_encode"
+  ],
+  "timing_note": "inclusive nested stage timings; do not sum; prefix checks excluded from search_warm latency samples"
+}

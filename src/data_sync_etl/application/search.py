@@ -10,6 +10,36 @@ from data_sync_etl.domain.search_context import decode_context, encode_context
 from data_sync_etl.ports.search import SearchBagReader
 
 
+class QueryEmbeddingContext:
+    """One vector for one evaluation query; never cache retrieval or permissions.
+
+    Owned by the sequential evaluation loop, not shared across threads/requests.
+    Only a digest is retained as the key. prepare() still runs on every method,
+    including hits, so a missing/invalid model cannot be hidden by vector reuse.
+    """
+
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self._owner = self._key = self._vector = None
+
+    def encode(self, embedding, encoder, query, dimension):
+        key = digest([query, embedding.model_id, embedding.version, embedding.dimension, dimension])
+        if self._owner is embedding and self._key == key:
+            return validate_vector(list(self._vector), dimension)
+        self.clear()
+        vector = validate_vector(encoder(query), dimension)
+        self._owner, self._key, self._vector = embedding, key, tuple(vector)
+        return list(vector)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.clear()
+
+
 class SearchService:
     def __init__(self, indexing, settings, bags: SearchBagReader | None):
         self.indexing, self.settings, self.bags = indexing, settings, bags
@@ -68,7 +98,8 @@ class SearchService:
                 best[root] = (score, chunk)
         return roots, best
 
-    def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None):
+    def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
+               _query_context=None):
         access = access or SearchAccess()
         started, filters = monotonic(), filters or {}
         query = normalize_query(query)
@@ -89,12 +120,20 @@ class SearchService:
             # Preserve the query deadline (including prior schema work), but do not
             # spend it on first-use imports/weights. Both phases remain bounded.
             warmup_started = monotonic()
-            self.indexing.embedding.prepare()
+            embedding = self.indexing.embedding
+            prepare_query = getattr(embedding, 'prepare_query', None)
+            if prepare_query is None:
+                embedding.prepare()
+                encoder = embedding.embed
+            else:
+                encoder = prepare_query()
             warmup_seconds = monotonic() - warmup_started
             if warmup_seconds > self.settings.search_model_warmup_timeout_seconds:
                 raise SearchError('SEARCH_MODEL_WARMUP_TIMEOUT')
             started += warmup_seconds
-            vector = validate_vector(self.indexing.embedding.embed(query), self.settings.index_embedding_dimension)
+            dimension = self.settings.index_embedding_dimension
+            vector = (_query_context.encode(embedding, encoder, query, dimension) if _query_context is not None
+                      else validate_vector(encoder(query), dimension))
             self._deadline(started)
         with self.indexing.uow() as repo:
             metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)

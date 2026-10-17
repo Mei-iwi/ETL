@@ -7,6 +7,7 @@ from contextlib import closing
 from time import perf_counter
 
 from data_sync_etl.application.content_bags import bag_structure
+from data_sync_etl.application.search import QueryEmbeddingContext
 from data_sync_etl.domain.core import new_id, now
 from data_sync_etl.domain.evaluation import (
     METHODS,
@@ -165,32 +166,35 @@ class EvaluationService:
                 for qi, query in enumerate(dataset['queries']):
                     qrels = {label['item_id']: label['grade'] for label in query['relevance']}
                     order = METHODS[qi % 3:] + METHODS[:qi % 3]
-                    for method in order:
-                        self.deadline(started)
-                        self.check_marker(dataset, access, marker)
-                        call_start = perf_counter()
-                        row = {'query_id': query['query_id'], 'method': method, 'ranked': [],
-                               'metrics': {}, 'latency_ms': None, 'error_code': None}
-                        try:
-                            response = self.search.search(query['query'], method, filters=dataset['filters'],
-                                                          size=command['max_results'], access=access)
-                            row['latency_ms'] = (perf_counter() - call_start) * 1000
-                            seen = set()
-                            for item in response['items']:
-                                if item['resource_id'] not in seen:
-                                    seen.add(item['resource_id'])
-                                    row['ranked'].append({key: item[key] for key in (
-                                        'resource_id', 'resource_version_id', 'bag_id', 'score', 'score_components')})
-                            row['metrics'] = {str(k): metrics([item['resource_id'] for item in row['ranked']], qrels, k)
-                                              for k in command['k_values']}
-                        except Exception as exc:
-                            row['latency_ms'] = (perf_counter() - call_start) * 1000
-                            row['error_code'] = self.safe_dependency_code(exc)
-                        run['observations'].append(row)
-                        self.check_marker(dataset, access, marker)
-                        self.deadline(started)
-                        completed += 1
-                        yield progress('running')
+                    with QueryEmbeddingContext() as query_context:
+                        for method in order:
+                            self.deadline(started)
+                            self.check_marker(dataset, access, marker)
+                            call_start = perf_counter()
+                            row = {'query_id': query['query_id'], 'method': method, 'ranked': [],
+                                   'metrics': {}, 'latency_ms': None, 'error_code': None}
+                            try:
+                                response = self.search.search(query['query'], method, filters=dataset['filters'],
+                                                              size=command['max_results'], access=access,
+                                                              _query_context=query_context)
+                                row['latency_ms'] = (perf_counter() - call_start) * 1000
+                                seen = set()
+                                for item in response['items']:
+                                    if item['resource_id'] not in seen:
+                                        seen.add(item['resource_id'])
+                                        row['ranked'].append({key: item[key] for key in (
+                                            'resource_id', 'resource_version_id', 'bag_id', 'score', 'score_components')})
+                                row['metrics'] = {str(k): metrics([item['resource_id'] for item in row['ranked']], qrels, k)
+                                                  for k in command['k_values']}
+                            except Exception as exc:
+                                query_context.clear()
+                                row['latency_ms'] = (perf_counter() - call_start) * 1000
+                                row['error_code'] = self.safe_dependency_code(exc)
+                            run['observations'].append(row)
+                            self.check_marker(dataset, access, marker)
+                            self.deadline(started)
+                            completed += 1
+                            yield progress('running')
                 self.check_corpus(dataset, access, fingerprint)
                 self.check_marker(dataset, access, marker)
                 self.deadline(started)

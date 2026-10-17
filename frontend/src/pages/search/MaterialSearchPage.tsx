@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { getGradeLevels, getResourceTypes, getSubjects } from '../../services/libraryLookupApi'
@@ -24,6 +24,8 @@ function SearchForm({ params }: { params: URLSearchParams }) {
     const [catalog, setCatalog] = useState<{ subjects: SubjectOption[]; grades: GradeLevelOption[]; types: ResourceTypeOption[] } | null>(null)
     const [catalogError, setCatalogError] = useState('')
     const [error, setError] = useState('')
+    const [busy, setBusy] = useState(Boolean(initial.query))
+    const submitting = useRef(false)
     useEffect(() => {
         const controller = new AbortController()
         void Promise.all([getSubjects(controller.signal), getGradeLevels(controller.signal), getResourceTypes(controller.signal)])
@@ -33,9 +35,13 @@ function SearchForm({ params }: { params: URLSearchParams }) {
     }, [])
     function submit(event: FormEvent) {
         event.preventDefault()
+        if (busy || submitting.current) return
         const normalized = query.normalize('NFC').trim()
         if (!normalized || normalized.length > 300) { setError('Nhập truy vấn từ 1 đến 300 ký tự.'); return }
-        navigate(`/search/query-methods?${writeSearch({ query: normalized, method, filters, page: 1, size: 5 })}`)
+        const next = writeSearch({ query: normalized, method, filters, page: 1, size: 5 }).toString()
+        if (next === params.toString()) return
+        submitting.current = true
+        navigate(`/search/query-methods?${next}`)
     }
     return <section className={`${layout.page} ${styles.searchPage}`}>
         <header className={`${layout.pageHeader} ${styles.pageHeader}`}><h1>Tra cứu học liệu</h1></header>
@@ -47,7 +53,7 @@ function SearchForm({ params }: { params: URLSearchParams }) {
             </fieldset>
             <div className={styles.searchBar}><div className={layout.field}><label htmlFor="search-query" className={styles.visuallyHidden}>Tìm kiếm học liệu</label>
                 <input id="search-query" value={query} onChange={event => setQuery(event.target.value)} maxLength={300} placeholder="Nhập nội dung cần tìm…" required /></div>
-                <button type="submit" className={layout.primaryButton}>Tìm kiếm</button></div>
+                <button type="submit" className={layout.primaryButton} disabled={busy}>Tìm kiếm</button></div>
             <details className={styles.filterPanel}><summary>Bộ lọc{Object.values(filters).filter(Boolean).length > 0 && ` (${Object.values(filters).filter(Boolean).length})`}</summary><div className={styles.filterBody}><div className={styles.filters}>
                 <div className={layout.field}><label htmlFor="search-grade">Khối lớp</label>
                     <select id="search-grade" disabled={!catalog} value={filters.grade_level_id || ''}
@@ -73,6 +79,6 @@ function SearchForm({ params }: { params: URLSearchParams }) {
             {catalogError && <p role="status" className={styles.pending}>{catalogError}</p>}
             {error && <p role="alert" className={styles.error}>{error}</p>}
         </form>
-        {initial.query && <SearchResults key={params.toString()} params={params} />}
+        {initial.query && <SearchResults key={params.toString()} params={params} onBusyChange={setBusy} />}
     </section>
 }

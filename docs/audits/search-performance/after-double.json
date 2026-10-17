@@ -1,0 +1,331 @@
+{
+  "schema_version": 1,
+  "label": "after",
+  "environment": {
+    "python": "3.13.0",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "cpu_count": 16,
+    "device": "cpu",
+    "processes": 1,
+    "omp_threads": null,
+    "packages": {
+      "SQLAlchemy": "2.0.54",
+      "torch": "2.14.1",
+      "sentence-transformers": "5.7.0"
+    }
+  },
+  "model": {
+    "mode": "ORCHESTRATION_DOUBLE_ONLY",
+    "id": "test-double-only",
+    "revision": "v1",
+    "dimension": 3
+  },
+  "fixture": {
+    "versions": 6,
+    "candidate_bags": 13,
+    "queries": 18,
+    "query_dataset_hash": "6ac35db0484054a54009cc4f20358c202bca912cc3a30696d842328880daa2d7",
+    "query_hashes": [
+      "0d7e0231c3ff94d50c8f474ba808387f338d3bf8696345aa9f92d74003a99fee",
+      "2fd062aa1375fef330d2d56011b34e4081d6c9d405efa24616acf3b139246e92",
+      "0ebf576a56bf838991753811450f8d00177e5c5686e092590367afbfc6bb3795",
+      "5e99a64d2bfbb52a0bd9c0282a0ed243cb75dc4b22a7511445d381a61f9c2227",
+      "22c0003182bf3749c3d2b0847ba8d0d1cf073f566f5beaa90b5cdaddf1d9ff7f",
+      "c49f94157b5796ab3c352d758f4f25400de9ba598eb64e5b34656743c7fad856",
+      "e45fbbb2b490363a597899f287f9dbb0e13864f40a1c18de7efb3d311fa31af0",
+      "4a30e02854c1ea2939e503c73a95e6c8056e53bd5b6f6268661073649a420089",
+      "b17d3b9435da422b0f62df9cc4bdf008748a273df67c0e5639e7a949cb550aca",
+      "c7d604d3688f0a252b5024e85b330f14f3019b0f0f52ad528b7d3d9bdde18031",
+      "805f64907de3ad511675f6369d1dbc32b2edc46aaf70697dd3847e32651c4cb8",
+      "efd03f7d18b3a55be22db95ac2d0d0cfadd19ef2afe13fc42525fec630087a48",
+      "a711160fcfda9bf4b1e0722cedf2818ec1d6e9994988a2a434b953424467025a",
+      "3bf75246ca9a65f014ce9645b205a683638997410617b5a3603e0d8b0b14b692",
+      "0d7e0231c3ff94d50c8f474ba808387f338d3bf8696345aa9f92d74003a99fee",
+      "2fd062aa1375fef330d2d56011b34e4081d6c9d405efa24616acf3b139246e92",
+      "0ebf576a56bf838991753811450f8d00177e5c5686e092590367afbfc6bb3795",
+      "c49f94157b5796ab3c352d758f4f25400de9ba598eb64e5b34656743c7fad856"
+    ],
+    "ranked_result_hash": "2a223e88446c227ea6f3c4ec7a1c11f2376938f9dfc2d557a2e225ddcfa17f33",
+    "corpus_snapshot_hash": "614529e2f9b6e8e3a2b3f0273f19aa1395c3a89dc69170a9aa97b37add9fd43f"
+  },
+  "source_sha256": {
+    "src/data_sync_etl/adapters/embeddings.py": "b3eb28187686efa234aaa9162c8eea73a042bf7e418c88921676d28c0422dd30",
+    "src/data_sync_etl/application/search.py": "a5ffe40d8f187aa7f7edb52948c9c967ad333c353707f3e44ea4bfd29e00cccf",
+    "src/data_sync_etl/application/evaluation.py": "a7d15034adc889b809f5e7dc41a917ac1b98cdb57e8e14946d07d9ecf834b613"
+  },
+  "cold_model_prepare": {
+    "status": "NOT_MEASURED",
+    "reason": "orchestration test double; not a model cold-load measurement"
+  },
+  "warmup_stages": {
+    "pg.eligibility": {
+      "n": 6,
+      "min_ms": 0.8659000013722107,
+      "median_ms": 0.9161500020127278,
+      "p95_ms": 2.6893000012933044,
+      "max_ms": 3.26620000123512,
+      "total_ms": 7.815000011760276
+    },
+    "mongo.candidates_double": {
+      "n": 3,
+      "min_ms": 0.222100003156811,
+      "median_ms": 0.23700000019744039,
+      "p95_ms": 0.2559000000474043,
+      "max_ms": 0.25800000003073364,
+      "total_ms": 0.717100003384985
+    },
+    "mongo.get_bag_double": {
+      "n": 117,
+      "min_ms": 0.017400001524947584,
+      "median_ms": 0.025699999241624027,
+      "p95_ms": 0.04410000110510737,
+      "max_ms": 0.08879999950295314,
+      "total_ms": 3.5193999501643702
+    },
+    "pg.snapshot_guard": {
+      "n": 36,
+      "min_ms": 2.2759999992558733,
+      "median_ms": 2.7903500013053417,
+      "p95_ms": 3.299499996501254,
+      "max_ms": 3.5770999966189265,
+      "total_ms": 99.73979997448623
+    },
+    "rank.snippets": {
+      "n": 18,
+      "min_ms": 0.07220000406960025,
+      "median_ms": 0.08139999772538431,
+      "p95_ms": 0.11814499848696855,
+      "max_ms": 0.19829999655485153,
+      "total_ms": 1.5914000032353215
+    },
+    "model.prepare": {
+      "n": 2,
+      "min_ms": 0.001400003384333104,
+      "median_ms": 0.0015500045265071094,
+      "p95_ms": 0.0016850055544637144,
+      "max_ms": 0.001700005668681115,
+      "total_ms": 0.003100009053014219
+    },
+    "model.embed": {
+      "n": 2,
+      "min_ms": 0.000600004568696022,
+      "median_ms": 0.0006500013114418834,
+      "p95_ms": 0.0006949983799131587,
+      "max_ms": 0.0006999980541877449,
+      "total_ms": 0.0013000026228837669
+    }
+  },
+  "paired": null,
+  "search_warm": {
+    "bow": {
+      "n": 36,
+      "min_ms": 18.763799998851027,
+      "median_ms": 22.353249998559477,
+      "p95_ms": 41.70625000188011,
+      "max_ms": 42.07060000044294
+    },
+    "vector": {
+      "n": 36,
+      "min_ms": 36.87039999931585,
+      "median_ms": 39.09165000368375,
+      "p95_ms": 43.42310000174621,
+      "max_ms": 45.61660000035772
+    },
+    "hybrid": {
+      "n": 36,
+      "min_ms": 36.677800002507865,
+      "median_ms": 38.80280000157654,
+      "p95_ms": 47.27245000503899,
+      "max_ms": 52.64149999857182
+    }
+  },
+  "search_stages_including_prefix_checks": {
+    "pg.eligibility": {
+      "n": 588,
+      "min_ms": 0.774600004660897,
+      "median_ms": 0.8858500004862435,
+      "p95_ms": 1.2024399962683672,
+      "max_ms": 3.161000000545755,
+      "total_ms": 546.337999869138
+    },
+    "mongo.candidates_double": {
+      "n": 324,
+      "min_ms": 0.20989999757148325,
+      "median_ms": 0.23630000214325264,
+      "p95_ms": 0.35812499845633283,
+      "max_ms": 0.7819999955245294,
+      "total_ms": 81.61319992359495
+    },
+    "mongo.get_bag_double": {
+      "n": 11766,
+      "min_ms": 0.015400000847876072,
+      "median_ms": 0.02644999767653644,
+      "p95_ms": 0.046399996790569276,
+      "max_ms": 0.3349999969941564,
+      "total_ms": 354.0759000752587
+    },
+    "pg.snapshot_guard": {
+      "n": 3498,
+      "min_ms": 2.156899994588457,
+      "median_ms": 2.594199999293778,
+      "p95_ms": 3.366384995752013,
+      "max_ms": 7.917000002635177,
+      "total_ms": 9392.659400029515
+    },
+    "rank.snippets": {
+      "n": 1944,
+      "min_ms": 0.06579999899258837,
+      "median_ms": 0.0774000000092201,
+      "p95_ms": 0.10620000102790073,
+      "max_ms": 0.45849999878555536,
+      "total_ms": 160.08590003184509
+    },
+    "model.prepare": {
+      "n": 216,
+      "min_ms": 0.0005999972927384079,
+      "median_ms": 0.0007999988156370819,
+      "p95_ms": 0.0012999971659155563,
+      "max_ms": 0.02660000609466806,
+      "total_ms": 0.21519995789276436
+    },
+    "model.embed": {
+      "n": 216,
+      "min_ms": 0.00039999576983973384,
+      "median_ms": 0.0005999972927384079,
+      "p95_ms": 0.0008999995770864189,
+      "max_ms": 0.0013000026228837669,
+      "total_ms": 0.13189998571760952
+    }
+  },
+  "evaluation": {
+    "total_ms": 2487.3153000007733,
+    "per_method": {
+      "bow": {
+        "n": 18,
+        "min_ms": 19.34890000120504,
+        "median_ms": 26.62430000054883,
+        "p95_ms": 39.01244500120811,
+        "max_ms": 39.762400003382936
+      },
+      "vector": {
+        "n": 18,
+        "min_ms": 36.08710000116844,
+        "median_ms": 38.99280000041472,
+        "p95_ms": 42.99576499688555,
+        "max_ms": 46.276000000943895
+      },
+      "hybrid": {
+        "n": 18,
+        "min_ms": 36.924899999576155,
+        "median_ms": 39.42109999843524,
+        "p95_ms": 42.16069000285643,
+        "max_ms": 42.5113999954192
+      }
+    },
+    "stages": {
+      "pg.corpus_marker": {
+        "n": 111,
+        "min_ms": 3.584000005503185,
+        "median_ms": 4.161800003203098,
+        "p95_ms": 5.048400002124254,
+        "max_ms": 9.290100002544932,
+        "total_ms": 479.14420007145964
+      },
+      "pg.eligibility": {
+        "n": 100,
+        "min_ms": 0.6894999969517812,
+        "median_ms": 0.847249997605104,
+        "p95_ms": 1.3088999956380576,
+        "max_ms": 1.4962999994168058,
+        "total_ms": 90.11799995641923
+      },
+      "mongo.get_bag_double": {
+        "n": 2013,
+        "min_ms": 0.01580000389367342,
+        "median_ms": 0.025399996957276016,
+        "p95_ms": 0.04669999907491729,
+        "max_ms": 0.29999999969732016,
+        "total_ms": 60.135299936519004
+      },
+      "pg.snapshot_guard": {
+        "n": 595,
+        "min_ms": 2.2134999962872826,
+        "median_ms": 2.5840000016614795,
+        "p95_ms": 3.333099999872502,
+        "max_ms": 6.81310000072699,
+        "total_ms": 1588.9744000305654
+      },
+      "evaluation.corpus_guard": {
+        "n": 2,
+        "min_ms": 23.90469999954803,
+        "median_ms": 24.140000001352746,
+        "p95_ms": 24.35177000297699,
+        "max_ms": 24.375300003157463,
+        "total_ms": 48.28000000270549
+      },
+      "mongo.candidates_double": {
+        "n": 54,
+        "min_ms": 0.21809999452671036,
+        "median_ms": 0.23955000142450444,
+        "p95_ms": 0.38644499691145023,
+        "max_ms": 0.4673999937949702,
+        "total_ms": 13.852600008249283
+      },
+      "rank.snippets": {
+        "n": 324,
+        "min_ms": 0.06610000127693638,
+        "median_ms": 0.07715000174357556,
+        "p95_ms": 0.11670000094454736,
+        "max_ms": 0.25159999495372176,
+        "total_ms": 27.16440007498022
+      },
+      "model.prepare": {
+        "n": 36,
+        "min_ms": 0.000500003807246685,
+        "median_ms": 0.0006999980541877449,
+        "p95_ms": 0.0011250012903474271,
+        "max_ms": 0.001400003384333104,
+        "total_ms": 0.02660000609466806
+      },
+      "model.embed": {
+        "n": 18,
+        "min_ms": 0.0006999980541877449,
+        "median_ms": 0.0007999988156370819,
+        "p95_ms": 0.0032200030545936715,
+        "max_ms": 0.01410000550094992,
+        "total_ms": 0.028099995688535273
+      }
+    },
+    "observations": 54,
+    "k_values": [
+      1,
+      3,
+      5
+    ],
+    "quality": "NOT_RUN_UNCONFIRMED_GROUND_TRUTH"
+  },
+  "api_warm": {
+    "n": 5,
+    "min_ms": 43.1414999984554,
+    "median_ms": 46.85590000008233,
+    "p95_ms": 78.9022600001772,
+    "max_ms": 85.43890000146348
+  },
+  "client_json_serialization": {
+    "n": 5,
+    "min_ms": 0.08069999603321776,
+    "median_ms": 0.0824999951873906,
+    "p95_ms": 0.11786000395659357,
+    "max_ms": 0.12110000534448773
+  },
+  "not_measured": [
+    "GPU",
+    "multi_worker_RAM",
+    "RAM_peak",
+    "real_PG_Mongo_latency",
+    "API_cold_total",
+    "ranking_total",
+    "tokenize_separate_from_encode"
+  ],
+  "timing_note": "inclusive nested stage timings; do not sum; prefix checks excluded from search_warm latency samples"
+}
