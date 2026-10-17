@@ -24,10 +24,21 @@ const server = createServer(async (request, response) => {
                 ...(request.method === 'POST' ? { body: Buffer.concat(chunks) } : {}) })
             response.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json' })
             if (upstream.headers.get('content-type')?.includes('application/x-ndjson')) {
+                const decoder = new TextDecoder()
+                let buffer = ''
                 for await (const chunk of upstream.body) {
-                    response.write(chunk)
-                    await new Promise(resolve => setTimeout(resolve, 100))
+                    buffer += decoder.decode(chunk, { stream: true })
+                    let end
+                    while ((end = buffer.indexOf('\n')) >= 0) {
+                        response.write(buffer.slice(0, end + 1))
+                        buffer = buffer.slice(end + 1)
+                        // Fixture delay is per event, independent of OS/TCP
+                        // coalescing; this is never a production progress signal.
+                        await new Promise(resolve => setTimeout(resolve, 150))
+                    }
                 }
+                buffer += decoder.decode()
+                if (buffer) response.write(buffer)
                 return response.end()
             }
             return response.end(Buffer.from(await upstream.arrayBuffer()))
@@ -124,7 +135,9 @@ try {
     assert.equal(posts.filter(path => path.endsWith('/runs')).length, 0)
     await click('Chạy thực nghiệm')
     await waitFor(() => evaluate("!!document.querySelector('progress')"))
-    assert.equal(await evaluate("document.querySelector('progress').hasAttribute('value')"), true)
+    assert.equal(await evaluate("document.querySelector('progress').hasAttribute('value')"), false,
+        'no invented percentage before a backend progress event')
+    await evaluate("for(let i=0;i<10;i++) document.querySelector('form').requestSubmit()")
     await waitFor(() => evaluate("document.querySelector('progress')?.value > 0"))
     assert.equal(await evaluate("document.querySelector('progress').max"), 100)
     assert.equal(await evaluate("getComputedStyle(document.querySelector('progress')).height"), '20px')
@@ -161,6 +174,27 @@ try {
     assert.equal(saved.status, 'COMPLETED')
     assert.equal(saved.queries.length, 1)
     assert.equal(saved.summary.bow.metrics['5'].precision.value, .2)
+    // A separate, explicitly synthetic 18-query dataset exercises 54 streamed
+    // operations in the built UI; these labels never assert human quality.
+    const batchResponse = await fetch(`${backend}/api/v1/evaluations/datasets`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Synthetic 18-query UI regression', ground_truth_confirmed: false,
+            queries: Array.from({ length: 18 }, (_, i) => ({ query_id: `q${i + 1}`, query: `page ${i + 1}`,
+                relevance: [{ item_id: resource, grade: 1 }] })) }),
+    })
+    assert.equal(batchResponse.status, 201)
+    const batchDataset = await batchResponse.json()
+    await call('Page.navigate', { url: origin + `/experiments/run?dataset_id=${batchDataset.dataset_id}` })
+    await waitFor(() => evaluate("document.querySelector('input')?.value.length === 26"))
+    await click('Chạy thực nghiệm')
+    await waitFor(() => evaluate("document.querySelector('progress')?.value > 0"))
+    assert.ok(await evaluate("document.querySelector('label[for=evaluation-progress]').textContent.includes('/54 lượt')"))
+    await waitFor(() => evaluate("document.body.textContent.includes('Trạng thái: COMPLETED')"))
+    assert.equal(posts.filter(path => path.endsWith('/runs')).length, 2)
+    const batchRunId = await evaluate("new URLSearchParams(location.search).get('run_id')")
+    const batchRun = await (await fetch(`${backend}/api/v1/evaluations/runs/${batchRunId}?limit=50`)).json()
+    assert.equal(batchRun.pagination.total, 54)
+    assert.ok(batchRun.warnings.includes('LABELS_NOT_HUMAN_CONFIRMED'))
     await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
     await call('Page.navigate', { url: origin + '/library/list' })
     await waitFor(() => evaluate("document.body.textContent.includes('Phiên bản 1') && document.body.textContent.includes('Đã xử lý')"))
@@ -171,7 +205,7 @@ try {
     await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
     assert.equal(await evaluate("document.querySelector('main').scrollWidth <= document.querySelector('main').clientWidth"), true)
     await capture('library-versions-mobile')
-    console.log(JSON.stringify({ ui: 'PASS', backend: 'isolated-real-application', methods: 3, queries: 1,
+    console.log(JSON.stringify({ ui: 'PASS', backend: 'isolated-real-application', methods: 3, queries: 18,
         manual_fixture: true, refresh: 'PASS', csv_bom: 'PASS', routes: 4, production_data_used: false }))
 } finally {
     if (ws?.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ id: ++sequence, method: 'Browser.close' })); ws.close() }
