@@ -3,7 +3,6 @@ from uuid import uuid4
 
 import pytest
 from conftest import ingest
-from fastapi.testclient import TestClient
 from pymongo import MongoClient
 
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
@@ -11,6 +10,7 @@ from data_sync_etl.adapters.mongo.schema import initialize
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.main import create_app
 from data_sync_etl.ports.processing import OCRResult
+from tests.local_admin_client import TestClient
 
 
 def test_real_mongo_projection_upserts_and_reconciliation(container):
@@ -22,7 +22,7 @@ def test_real_mongo_projection_upserts_and_reconciliation(container):
     try:
         client.admin.command("ping")
         db = client[name]
-        initialize(db, apply=True)
+        initialize(db, apply=True, dimension=container.settings.index_embedding_dimension)
         container.mongo_projector.documents = MongoContentStore(db)
         version = ingest(container)
         job = container.ocr.create_job(version["id"])
@@ -52,7 +52,7 @@ def test_process_api_worker_postgres_and_mongo(pg_container, mongo_test_database
     c = pg_container
     client = MongoClient(mongo_test_database[0], serverSelectionTimeoutMS=3000)
     database = client[mongo_test_database[1]]
-    initialize(database, apply=True)
+    initialize(database, apply=True, dimension=c.settings.index_embedding_dimension)
     c.mongo_projector.documents = MongoContentStore(database)
     c.settings.admin_enabled = True
     try:
@@ -117,7 +117,7 @@ def test_mongo_rejects_stale_projection_generation(mongo_test_database):
     database = client[mongo_test_database[1]]
     store = MongoContentStore(database)
     try:
-        initialize(database, apply=True)
+        initialize(database, apply=True, dimension=384)
         document = {
             "_id": "unit-1",
             "resource_version_id": "version-1",

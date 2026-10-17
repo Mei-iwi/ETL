@@ -1,7 +1,13 @@
+import pytest
 from conftest import ingest, make_pdf
-from fastapi.testclient import TestClient
 
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
+
+
+@pytest.fixture(autouse=True)
+def privileged_local_read(container):
+    container.settings.admin_enabled = True
 
 
 def test_resource_version_history_returns_newest_first(container):

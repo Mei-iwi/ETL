@@ -4,12 +4,22 @@ import io
 from hashlib import sha256
 
 import pytest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.application.source_file_import import SourceImportConflict
 from data_sync_etl.domain.core import now
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.main import create_app
+from tests.indexing_support import setup_index
+from tests.local_admin_client import TestClient
+
+
+@pytest.fixture(autouse=True)
+def local_owned_media_fixture(container):
+    # This module tests format scope, not SOURCE ownership; use a real LOCAL target.
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        repo.update("master_learning_resources", "resource-1", {"source_origin": "LOCAL"})
+    setup_index(container)
 
 MEDIA = [('.mp3', b'ID3old-media', 'audio/mpeg'),
          ('.mp4', b'\x00\x00\x00\x18ftypold-media', 'video/mp4')]

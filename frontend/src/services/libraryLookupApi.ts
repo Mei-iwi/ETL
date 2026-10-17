@@ -22,7 +22,7 @@ export type SubjectOption = {
     grade_level_id: string | null
 }
 
-type CatalogResponse<T> = {
+export type CatalogResponse<T> = {
     items: T[]
     pagination: {
         page: number
@@ -46,14 +46,16 @@ async function getErrorMessage(response: Response) {
     return `Không tải được danh mục (HTTP ${response.status})`
 }
 
-async function getCatalogPage<T>(
+export async function getCatalogPage<T>(
     path: string,
     page: number,
     signal?: AbortSignal,
+    options: { size?: number; query?: string } = {},
 ): Promise<CatalogResponse<T>> {
     const params = new URLSearchParams({
         page: String(page),
-        size: '100',
+        size: String(options.size ?? 100),
+        ...(options.query?.trim() ? { q: options.query.trim() } : {}),
     })
     const response = await fetch(`${path}?${params.toString()}`, {
         signal,
@@ -65,6 +67,9 @@ async function getCatalogPage<T>(
 
 async function getAllCatalogItems<T>(path: string, signal?: AbortSignal) {
     const firstPage = await getCatalogPage<T>(path, 1, signal)
+    if (!Number.isInteger(firstPage.pagination.total_pages) || firstPage.pagination.total_pages < 0 || firstPage.pagination.total_pages > 1000) {
+        throw new Error('Danh mục vượt giới hạn tải. Hãy dùng phân trang.')
+    }
     const items = [...firstPage.items]
 
     for (let page = 2; page <= firstPage.pagination.total_pages; page += 1) {

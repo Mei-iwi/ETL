@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from data_sync_etl.api.admin_access import LocalAdminBoundary
 from data_sync_etl.api.routes import router
 from data_sync_etl.composition import Container
 from data_sync_etl.config import Settings
@@ -23,7 +24,8 @@ class UploadBodyLimitMiddleware:
         if (
             scope["type"] != "http"
             or scope["method"] != "POST"
-            or scope["path"] != "/api/v1/resources"
+            or not (scope["path"] == "/api/v1/resources"
+                    or (scope["path"].startswith("/api/v1/resource/") and scope["path"].endswith("/versions")))
         ):
             await self.app(scope, receive, send)
             return
@@ -119,6 +121,8 @@ def create_app(container=None):
                     content={"detail": "Operation failed; inspect stage status"},
                 )
             response.headers["X-Correlation-ID"] = correlation_id
+            if request.url.path.startswith(("/api/", "/admin/")):
+                response.headers["Cache-Control"] = "private, no-store"
             return response
 
     @app.exception_handler(DomainError)
@@ -174,6 +178,7 @@ def create_app(container=None):
         max_bytes=configured.upload_request_max_bytes,
         local_admin_settings=configured,
     )
+    app.add_middleware(LocalAdminBoundary, settings=configured)
     return app
 
 

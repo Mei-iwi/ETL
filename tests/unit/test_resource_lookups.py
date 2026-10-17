@@ -2,9 +2,9 @@ import io
 from datetime import UTC, datetime
 
 import pymupdf
-from fastapi.testclient import TestClient
 
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 
 def pdf_bytes() -> bytes:

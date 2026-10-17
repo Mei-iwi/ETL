@@ -1,0 +1,5250 @@
+{
+  "baseline_head": "18bad825993e01a552fb5db0a1aa1246cce74c7a",
+  "chains": {
+    "MASTER": {
+      "heads": [
+        "0015"
+      ],
+      "revisions": {
+        "0001": null,
+        "0002": "0001",
+        "0003": "0002",
+        "0004": "0003",
+        "0005": "0004",
+        "0006": "0005",
+        "0007": "0006",
+        "0008": "0007",
+        "0009": "0008",
+        "0010": "0009",
+        "0011": "0010",
+        "0012": "0011",
+        "0013": "0012",
+        "0014": "0013",
+        "0015": "0014"
+      },
+      "single_chain": true
+    },
+    "SOURCE": {
+      "heads": [
+        "s0003"
+      ],
+      "revisions": {
+        "s0001": null,
+        "s0002": "s0001",
+        "s0003": "s0002"
+      },
+      "single_chain": true
+    }
+  },
+  "counts": {
+    "master_business": 10,
+    "master_fields": 233,
+    "master_runtime": 8,
+    "master_tables": 18,
+    "mongo_business_indexes": 6,
+    "mongo_collections": 5,
+    "source_columns": 145,
+    "source_enums": 7,
+    "source_excel_fields": 145,
+    "source_fks": 22,
+    "source_tables": 15
+  },
+  "endpoints": [
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:153",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "health",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:165",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "search_materials",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/search"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:182",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "create_evaluation_dataset",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/evaluations/datasets"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:192",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "run_evaluation",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/evaluations/runs"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:236",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "get_evaluation_run",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/evaluations/runs/{id}"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:251",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "export_evaluation_report",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/evaluations/runs/{id}/report"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:268",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "chunk_context",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/chunks/{context_id}/context"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:279",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "resource_file",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/resource-versions/{id}/file"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:313",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "system_capabilities",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/system/capabilities"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:324",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "list_subjects",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/subjects"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:349",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "recommended_subjects",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/subjects/recommended"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:372",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "list_resource_types",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/resource-types"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:392",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "list_providers",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/providers"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:412",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "list_grade_levels",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/grade-levels"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:432",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "list_resources",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/resources"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:466",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "get_resource",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/resources/{id}"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:479",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "list_resource_versions",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/resources/{id}/versions"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:492",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "get_processing_job",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/processing-jobs/{job_id}"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:508",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "update_resource_metadata",
+      "live": "NOT_RUN",
+      "method": "PATCH",
+      "path": "/api/v1/resources/{id}/metadata"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:554",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "create_resource",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/resources"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:617",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "create_resource_version",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/resource/{id}/versions"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:672",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "process_resource_version",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/resource-versions/{id}/process"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:704",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "retry_processing_job",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/processing-jobs/{job_id}/retry"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:726",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "sync_master_data",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/master-data/sync"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:739",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "master_sync_status",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/master-data/sync/status"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:750",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "configure_master_sync_auto",
+      "live": "NOT_RUN",
+      "method": "PATCH",
+      "path": "/api/v1/master-data/sync/auto"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:765",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "source_sync_files",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/master-data/sync/files"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:784",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "retry_failed_source_files",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/master-data/sync/files/retry-failed"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:795",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "retry_source_file",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/master-data/sync/files/{file_id}/retry"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:806",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "sync",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/admin/sync/master"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:813",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "index_version",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/resource-versions/{id}/index"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:825",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "ingest",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/admin/resources/{id}/versions/ingest"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:832",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "chunk_preview",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/resource-versions/{id}/chunks"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:844",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "create_job",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/admin/resource-versions/{id}/ocr-jobs"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:851",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "index_status",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/resource-versions/{id}/index-status"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:859",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "postprocess",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/admin/resource-versions/{id}/postprocess"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:866",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "reindex_version",
+      "live": "NOT_RUN",
+      "method": "POST",
+      "path": "/api/v1/resource-versions/{id}/reindex"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:875",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "status",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/admin/resource-versions/{id}/etl-status"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:884",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "list_public_content_units",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/api/v1/resource-versions/{id}/content-units"
+    },
+    {
+      "evidence": "src/data_sync_etl/api/routes.py:900",
+      "flow": "See endpoint_flow_matrix.md",
+      "handler": "content_units",
+      "live": "NOT_RUN",
+      "method": "GET",
+      "path": "/admin/resource-versions/{id}/content-units"
+    }
+  ],
+  "implementation_sha256": {
+    "alembic/schema_v1.py": "0b36f4977b51b3c3c4659f0ebf20d472c5fef4eb55520106df31b970a39a182d",
+    "alembic/versions/0001_schema.py": "121e5ec5705f67d7daabe4c2d40b790f60e135413fa7636d6e9bf01ecb0c45c7",
+    "alembic/versions/0002_schema.py": "c0f6b4051490b68fff9f65ec50d77b8f33cb56e902b8b2bbfc8dabb1876c80cf",
+    "alembic/versions/0003_schema.py": "5b4f47e9cc122004e5ee27dcecdad409ba30b60d36deb14c34725623c70bac3b",
+    "alembic/versions/0004_schema.py": "80718a03199732b18237a67d4ecc3e69afaab8ef6c6c99813e11c3a2a206d098",
+    "alembic/versions/0005_subject_query_indexes.py": "9e06e00b100b8794675545cc3b5dd4da58ac9086c949519ce17e314d23be4ede",
+    "alembic/versions/0006_source_compatibility.py": "853875ca48d71058e044db0aa4ca55155ac96d61f296906d53f941b8f8db234c",
+    "alembic/versions/0007_timestamp_integrity.py": "97664d09bfd0e9a41970fd6833ccb2f63caedf5e3f1b926e64052cf4e67842da",
+    "alembic/versions/0008_sync_run_mode.py": "b2e597dea4bb6b1faafcaf6ffd2a37fb1a36b31fb37e23f58c4974146fe66bce",
+    "alembic/versions/0009_auto_sync_config.py": "7a51bf61327728a3d67381676ee7743ee518784f9fa0e68c5ee23b24f4419a8d",
+    "alembic/versions/0010_auto_sync_streams.py": "ccc61a6563a8479d115b9844ec777a02859b29719329d1c0d5986592ed67e98e",
+    "alembic/versions/0011_source_file_imports.py": "117391fcebf67c258dccb76e838221cbd1c16255d4e20779496dbed88c25b868",
+    "alembic/versions/0012_auto_sync_stream_mode.py": "0ef3bde5e273d1c36224977490136a244b91ecfcce51577ef8a24abca9a5fbb5",
+    "alembic/versions/0013_master_mongo_references.py": "f9ccb7fa57eda1c86fdb775a5452eb9573b86ce117c364b519ced8c14e394cfc",
+    "alembic/versions/0014_master_diagram_references.py": "a3816ca364c292eb676cbe66667afc0c89928866bf2d8b999c042b583ae4604c",
+    "alembic/versions/0015_source_ownership.py": "6d0c6fc361fc3849bc65ade383a1c466715adbceeb51b1145a046a349066d915",
+    "alembic_source/schema_v1.sql": "e53491fa8805d5a5948930d58648cc74228bc45961f916cf8fff4996b12e4eaa",
+    "alembic_source/timestamps_v2.sql": "11f6c1a3eb90321872b49579d78175befbab3f88bb2d3c755fccd11b83937d79",
+    "alembic_source/triggers_v1.sql": "33b86b027efeaa1bc22633352823a919b7776167c48e565652e2e88b5638ec2d",
+    "alembic_source/versions/s0001_schema.py": "e30c8353914595363d0bceee4aa156accfc14b5d994a7f218aefe7cd88db05c0",
+    "alembic_source/versions/s0002_triggers.py": "53a0bc7f3ad8df56264911e7f842201e52930f7fb141926f23224d86d4491e9e",
+    "alembic_source/versions/s0003_integrity.py": "5c637d9660971bcf6ed4085b1a0b3bde0d0ddf2bcca069b23ff13c04c9fa3b81",
+    "src/data_sync_etl/adapters/mongo/schema.py": "43132bde64a7736067cf7f9d590ba976ad09ba27d519f3b84fa5f090ffb1f89b",
+    "src/data_sync_etl/db/models.py": "5ce7a5a5e3b3795d48ae87a2dff0f4bcf1b65216a07d8537b7a8766781502675"
+  },
+  "live": {
+    "MASTER": "NOT_VERIFIED",
+    "MONGO": "NOT_VERIFIED",
+    "SOURCE": "NOT_VERIFIED",
+    "reason": "No explicitly configured independent test/live read-only target used; .env not loaded."
+  },
+  "master": {
+    "content_unit_texts": {
+      "columns": {
+        "content_unit_id": {
+          "evidence": "src/data_sync_etl/db/models.py:382",
+          "fk": [
+            "content_units.id"
+          ],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "page_result_id": {
+          "evidence": "src/data_sync_etl/db/models.py:385",
+          "fk": [
+            "ocr_page_results.id"
+          ],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "text": {
+          "evidence": "src/data_sync_etl/db/models.py:388",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TEXT"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "content_unit_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "page_result_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "content_unit_id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": []
+    },
+    "content_units": {
+      "columns": {
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:223",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:221",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "mongo_id": {
+          "evidence": "src/data_sync_etl/db/models.py:222",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "page_from": {
+          "evidence": "src/data_sync_etl/db/models.py:234",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "page_to": {
+          "evidence": "src/data_sync_etl/db/models.py:235",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "parent_unit_id": {
+          "evidence": "src/data_sync_etl/db/models.py:228",
+          "fk": [
+            "content_units.id",
+            "content_units.id"
+          ],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "resource_version_id": {
+          "evidence": "src/data_sync_etl/db/models.py:225",
+          "fk": [
+            "content_units.resource_version_id",
+            "resource_versions.id"
+          ],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "retrieval_eligible": {
+          "evidence": "src/data_sync_etl/db/models.py:237",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "review_status": {
+          "evidence": "src/data_sync_etl/db/models.py:236",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "sequence_no": {
+          "evidence": "src/data_sync_etl/db/models.py:233",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "title": {
+          "evidence": "src/data_sync_etl/db/models.py:232",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(500)"
+        },
+        "unit_type": {
+          "evidence": "src/data_sync_etl/db/models.py:231",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:224",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [],
+          "expression": "page_from > 0 AND page_to >= page_from",
+          "kind": "CheckConstraint",
+          "name": null
+        },
+        {
+          "columns": [],
+          "expression": "sequence_no > 0",
+          "kind": "CheckConstraint",
+          "name": null
+        },
+        {
+          "columns": [],
+          "expression": "parent_unit_id <> id",
+          "kind": "CheckConstraint",
+          "name": "ck_content_parent_not_self"
+        },
+        {
+          "columns": [
+            "parent_unit_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_version_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_version_id",
+            "parent_unit_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": "fk_content_parent_same_version"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_version_id",
+            "sequence_no"
+          ],
+          "expression": "",
+          "kind": "UniqueConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_version_id",
+            "id"
+          ],
+          "expression": "",
+          "kind": "UniqueConstraint",
+          "name": "uq_content_unit_version_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "mongo_id"
+          ],
+          "name": "uq_content_units_mongo_id",
+          "unique": true
+        }
+      ]
+    },
+    "etl_stage_runs": {
+      "columns": {
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:377",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "error_message": {
+          "evidence": "src/data_sync_etl/db/models.py:376",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TEXT"
+        },
+        "finished_at": {
+          "evidence": "src/data_sync_etl/db/models.py:374",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:367",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "input_fingerprint": {
+          "evidence": "src/data_sync_etl/db/models.py:375",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(64)"
+        },
+        "resource_version_id": {
+          "evidence": "src/data_sync_etl/db/models.py:368",
+          "fk": [
+            "resource_versions.id"
+          ],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "stage": {
+          "evidence": "src/data_sync_etl/db/models.py:371",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "started_at": {
+          "evidence": "src/data_sync_etl/db/models.py:373",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "status": {
+          "evidence": "src/data_sync_etl/db/models.py:372",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "resource_version_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "resource_version_id",
+            "stage",
+            "created_at"
+          ],
+          "name": "ix_stage_version",
+          "unique": false
+        }
+      ]
+    },
+    "master_grade_levels": {
+      "columns": {
+        "education_code": {
+          "evidence": "src/data_sync_etl/db/models.py:111",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "education_created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:117",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "education_deleted_at": {
+          "evidence": "src/data_sync_etl/db/models.py:115",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "education_deleted_by": {
+          "evidence": "src/data_sync_etl/db/models.py:116",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "education_is_active": {
+          "evidence": "src/data_sync_etl/db/models.py:114",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "education_level_id": {
+          "evidence": "src/data_sync_etl/db/models.py:100",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "education_name_vi": {
+          "evidence": "src/data_sync_etl/db/models.py:112",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(100)"
+        },
+        "education_ordinal": {
+          "evidence": "src/data_sync_etl/db/models.py:113",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "SMALLINT"
+        },
+        "education_updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:118",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "grade_code": {
+          "evidence": "src/data_sync_etl/db/models.py:101",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(50)"
+        },
+        "grade_created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:109",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "grade_created_by": {
+          "evidence": "src/data_sync_etl/db/models.py:104",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "grade_deleted_at": {
+          "evidence": "src/data_sync_etl/db/models.py:107",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "grade_deleted_by": {
+          "evidence": "src/data_sync_etl/db/models.py:108",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "grade_is_active": {
+          "evidence": "src/data_sync_etl/db/models.py:106",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "grade_mongo_id": {
+          "evidence": "src/data_sync_etl/db/models.py:98",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(24)"
+        },
+        "grade_name_vi": {
+          "evidence": "src/data_sync_etl/db/models.py:102",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(100)"
+        },
+        "grade_ordinal": {
+          "evidence": "src/data_sync_etl/db/models.py:103",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "SMALLINT"
+        },
+        "grade_updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:110",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "grade_updated_by": {
+          "evidence": "src/data_sync_etl/db/models.py:105",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:99",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "source_missing_at": {
+          "evidence": "src/data_sync_etl/db/models.py:96",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "source_origin": {
+          "evidence": "src/data_sync_etl/db/models.py:94",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "source_state_hash": {
+          "evidence": "src/data_sync_etl/db/models.py:95",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(64)"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": []
+    },
+    "master_learning_resources": {
+      "columns": {
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:39",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "created_by": {
+          "evidence": "src/data_sync_etl/db/models.py:57",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "deleted_at": {
+          "evidence": "src/data_sync_etl/db/models.py:61",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "deleted_by": {
+          "evidence": "src/data_sync_etl/db/models.py:62",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:38",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "is_active": {
+          "evidence": "src/data_sync_etl/db/models.py:60",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "mongo_id": {
+          "evidence": "src/data_sync_etl/db/models.py:37",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "provider_created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:47",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "provider_deleted_at": {
+          "evidence": "src/data_sync_etl/db/models.py:45",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "provider_deleted_by": {
+          "evidence": "src/data_sync_etl/db/models.py:46",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "provider_id": {
+          "evidence": "src/data_sync_etl/db/models.py:41",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "provider_is_active": {
+          "evidence": "src/data_sync_etl/db/models.py:44",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "provider_name": {
+          "evidence": "src/data_sync_etl/db/models.py:42",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "provider_type": {
+          "evidence": "src/data_sync_etl/db/models.py:43",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "provider_updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:48",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "publication_status": {
+          "evidence": "src/data_sync_etl/db/models.py:59",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "resource_type_code": {
+          "evidence": "src/data_sync_etl/db/models.py:50",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(50)"
+        },
+        "resource_type_created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:55",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "resource_type_deleted_at": {
+          "evidence": "src/data_sync_etl/db/models.py:53",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "resource_type_deleted_by": {
+          "evidence": "src/data_sync_etl/db/models.py:54",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "resource_type_id": {
+          "evidence": "src/data_sync_etl/db/models.py:49",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "resource_type_is_active": {
+          "evidence": "src/data_sync_etl/db/models.py:52",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "resource_type_name_vi": {
+          "evidence": "src/data_sync_etl/db/models.py:51",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(150)"
+        },
+        "resource_type_updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:56",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "source_missing_at": {
+          "evidence": "src/data_sync_etl/db/models.py:34",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "source_origin": {
+          "evidence": "src/data_sync_etl/db/models.py:32",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "source_state_hash": {
+          "evidence": "src/data_sync_etl/db/models.py:33",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(64)"
+        },
+        "title": {
+          "evidence": "src/data_sync_etl/db/models.py:58",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(500)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:40",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "mongo_id"
+          ],
+          "name": "uq_master_learning_resources_mongo_id",
+          "unique": true
+        }
+      ]
+    },
+    "master_users": {
+      "columns": {
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:73",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "deleted_at": {
+          "evidence": "src/data_sync_etl/db/models.py:89",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "deleted_by": {
+          "evidence": "src/data_sync_etl/db/models.py:90",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "email": {
+          "evidence": "src/data_sync_etl/db/models.py:75",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "email_verified_at": {
+          "evidence": "src/data_sync_etl/db/models.py:88",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "full_name": {
+          "evidence": "src/data_sync_etl/db/models.py:77",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "hashed_password": {
+          "evidence": "src/data_sync_etl/db/models.py:76",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:72",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "is_active": {
+          "evidence": "src/data_sync_etl/db/models.py:87",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "mongo_id": {
+          "evidence": "src/data_sync_etl/db/models.py:71",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "role_code": {
+          "evidence": "src/data_sync_etl/db/models.py:79",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(50)"
+        },
+        "role_created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:85",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "role_deleted_at": {
+          "evidence": "src/data_sync_etl/db/models.py:83",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "role_deleted_by": {
+          "evidence": "src/data_sync_etl/db/models.py:84",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "role_description": {
+          "evidence": "src/data_sync_etl/db/models.py:81",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "role_id": {
+          "evidence": "src/data_sync_etl/db/models.py:78",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "role_is_active": {
+          "evidence": "src/data_sync_etl/db/models.py:82",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "role_name": {
+          "evidence": "src/data_sync_etl/db/models.py:80",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "role_updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:86",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "source_missing_at": {
+          "evidence": "src/data_sync_etl/db/models.py:68",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "source_origin": {
+          "evidence": "src/data_sync_etl/db/models.py:66",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "source_state_hash": {
+          "evidence": "src/data_sync_etl/db/models.py:67",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(64)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:74",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "mongo_id"
+          ],
+          "name": "uq_master_users_mongo_id",
+          "unique": true
+        }
+      ]
+    },
+    "ocr_jobs": {
+      "columns": {
+        "completed_at": {
+          "evidence": "src/data_sync_etl/db/models.py:266",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "completed_pages": {
+          "evidence": "src/data_sync_etl/db/models.py:263",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:255",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "failed_pages": {
+          "evidence": "src/data_sync_etl/db/models.py:264",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:254",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "postprocess_enqueued_at": {
+          "evidence": "src/data_sync_etl/db/models.py:267",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "resource_version_id": {
+          "evidence": "src/data_sync_etl/db/models.py:257",
+          "fk": [
+            "resource_versions.id"
+          ],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "started_at": {
+          "evidence": "src/data_sync_etl/db/models.py:265",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "status": {
+          "evidence": "src/data_sync_etl/db/models.py:261",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "total_pages": {
+          "evidence": "src/data_sync_etl/db/models.py:262",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "triggered_by": {
+          "evidence": "src/data_sync_etl/db/models.py:260",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:256",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [],
+          "expression": "total_pages >= 0 AND completed_pages >= 0 AND failed_pages >= 0 AND completed_pages + failed_pages <= total_pages",
+          "kind": "CheckConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_version_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "resource_version_id"
+          ],
+          "name": "uq_active_ocr_version",
+          "unique": true
+        }
+      ]
+    },
+    "ocr_page_results": {
+      "columns": {
+        "confidence": {
+          "evidence": "src/data_sync_etl/db/models.py:358",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "NUMERIC"
+        },
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:351",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "engine_name": {
+          "evidence": "src/data_sync_etl/db/models.py:359",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(100)"
+        },
+        "engine_version": {
+          "evidence": "src/data_sync_etl/db/models.py:360",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(100)"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:350",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "normalized_text": {
+          "evidence": "src/data_sync_etl/db/models.py:357",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TEXT"
+        },
+        "page_task_id": {
+          "evidence": "src/data_sync_etl/db/models.py:353",
+          "fk": [
+            "ocr_page_tasks.id"
+          ],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "raw_text": {
+          "evidence": "src/data_sync_etl/db/models.py:356",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TEXT"
+        },
+        "result_metadata": {
+          "evidence": "src/data_sync_etl/db/models.py:361",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "JSONB"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:352",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "page_task_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "page_task_id"
+          ],
+          "expression": "",
+          "kind": "UniqueConstraint",
+          "name": null
+        }
+      ],
+      "indexes": []
+    },
+    "ocr_page_tasks": {
+      "columns": {
+        "claim_token": {
+          "evidence": "src/data_sync_etl/db/models.py:291",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "completed_at": {
+          "evidence": "src/data_sync_etl/db/models.py:290",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:279",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "error_message": {
+          "evidence": "src/data_sync_etl/db/models.py:287",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TEXT"
+        },
+        "heartbeat_at": {
+          "evidence": "src/data_sync_etl/db/models.py:288",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:278",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "job_id": {
+          "evidence": "src/data_sync_etl/db/models.py:281",
+          "fk": [
+            "ocr_jobs.id"
+          ],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "local_image_path": {
+          "evidence": "src/data_sync_etl/db/models.py:283",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(500)"
+        },
+        "page_num": {
+          "evidence": "src/data_sync_etl/db/models.py:282",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "retry_count": {
+          "evidence": "src/data_sync_etl/db/models.py:286",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "started_at": {
+          "evidence": "src/data_sync_etl/db/models.py:289",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "status": {
+          "evidence": "src/data_sync_etl/db/models.py:284",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:280",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "worker_id": {
+          "evidence": "src/data_sync_etl/db/models.py:285",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(100)"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [],
+          "expression": "page_num > 0 AND retry_count >= 0",
+          "kind": "CheckConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "job_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "job_id",
+            "page_num"
+          ],
+          "expression": "",
+          "kind": "UniqueConstraint",
+          "name": null
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "status",
+            "created_at"
+          ],
+          "name": "ix_tasks_claim",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status",
+            "heartbeat_at"
+          ],
+          "name": "ix_tasks_heartbeat",
+          "unique": false
+        }
+      ]
+    },
+    "resource_grade_levels": {
+      "columns": {
+        "grade_level_id": {
+          "evidence": "src/data_sync_etl/db/models.py:165",
+          "fk": [
+            "master_grade_levels.id"
+          ],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "resource_id": {
+          "evidence": "src/data_sync_etl/db/models.py:160",
+          "fk": [
+            "master_learning_resources.id"
+          ],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "grade_level_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_id",
+            "grade_level_id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": []
+    },
+    "resource_subjects": {
+      "columns": {
+        "is_primary": {
+          "evidence": "src/data_sync_etl/db/models.py:155",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "resource_id": {
+          "evidence": "src/data_sync_etl/db/models.py:147",
+          "fk": [
+            "master_learning_resources.id"
+          ],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "subject_id": {
+          "evidence": "src/data_sync_etl/db/models.py:152",
+          "fk": [
+            "subjects.id"
+          ],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "resource_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "subject_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_id",
+            "subject_id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "subject_id"
+          ],
+          "name": "ix_resource_subjects_subject",
+          "unique": false
+        }
+      ]
+    },
+    "resource_versions": {
+      "columns": {
+        "assigned_at": {
+          "evidence": "src/data_sync_etl/db/models.py:197",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "assigned_by": {
+          "evidence": "src/data_sync_etl/db/models.py:195",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "assigned_reviewer_id": {
+          "evidence": "src/data_sync_etl/db/models.py:196",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:181",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "final_approved_at": {
+          "evidence": "src/data_sync_etl/db/models.py:201",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "final_approved_by": {
+          "evidence": "src/data_sync_etl/db/models.py:200",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:179",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "lifecycle_status": {
+          "evidence": "src/data_sync_etl/db/models.py:190",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "mongo_id": {
+          "evidence": "src/data_sync_etl/db/models.py:180",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "parent_version_id": {
+          "evidence": "src/data_sync_etl/db/models.py:186",
+          "fk": [
+            "resource_versions.id"
+          ],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "pre_ocr_approved_at": {
+          "evidence": "src/data_sync_etl/db/models.py:199",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "pre_ocr_approved_by": {
+          "evidence": "src/data_sync_etl/db/models.py:198",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "rejection_reason": {
+          "evidence": "src/data_sync_etl/db/models.py:202",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TEXT"
+        },
+        "resource_id": {
+          "evidence": "src/data_sync_etl/db/models.py:183",
+          "fk": [
+            "master_learning_resources.id"
+          ],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "source_hash": {
+          "evidence": "src/data_sync_etl/db/models.py:193",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(64)"
+        },
+        "storage_bucket": {
+          "evidence": "src/data_sync_etl/db/models.py:191",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "storage_object_key": {
+          "evidence": "src/data_sync_etl/db/models.py:192",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(500)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:182",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "uploaded_by": {
+          "evidence": "src/data_sync_etl/db/models.py:194",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "version_number": {
+          "evidence": "src/data_sync_etl/db/models.py:189",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [],
+          "expression": "version_number > 0",
+          "kind": "CheckConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "parent_version_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "resource_id",
+            "version_number"
+          ],
+          "expression": "",
+          "kind": "UniqueConstraint",
+          "name": null
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "source_hash"
+          ],
+          "name": "ix_versions_hash",
+          "unique": false
+        },
+        {
+          "columns": [
+            "resource_id",
+            "created_at"
+          ],
+          "name": "ix_versions_resource_created",
+          "unique": false
+        },
+        {
+          "columns": [
+            "mongo_id"
+          ],
+          "name": "uq_resource_versions_mongo_id",
+          "unique": true
+        }
+      ]
+    },
+    "source_file_imports": {
+      "columns": {
+        "attempts": {
+          "evidence": "src/data_sync_etl/db/models.py:411",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "claim_token": {
+          "evidence": "src/data_sync_etl/db/models.py:416",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:420",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:398",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "last_error_code": {
+          "evidence": "src/data_sync_etl/db/models.py:415",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(50)"
+        },
+        "lease_expires_at": {
+          "evidence": "src/data_sync_etl/db/models.py:417",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "manual_retries": {
+          "evidence": "src/data_sync_etl/db/models.py:412",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "next_retry_at": {
+          "evidence": "src/data_sync_etl/db/models.py:414",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "processing_job_id": {
+          "evidence": "src/data_sync_etl/db/models.py:419",
+          "fk": [
+            "ocr_jobs.id"
+          ],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "processing_retry_requested": {
+          "evidence": "src/data_sync_etl/db/models.py:413",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "resource_id": {
+          "evidence": "src/data_sync_etl/db/models.py:401",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "resource_title": {
+          "evidence": "src/data_sync_etl/db/models.py:402",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(500)"
+        },
+        "source_hash": {
+          "evidence": "src/data_sync_etl/db/models.py:409",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(64)"
+        },
+        "source_lifecycle_status": {
+          "evidence": "src/data_sync_etl/db/models.py:404",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "source_resource_active": {
+          "evidence": "src/data_sync_etl/db/models.py:405",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "source_system": {
+          "evidence": "src/data_sync_etl/db/models.py:399",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "source_updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:406",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "source_version_id": {
+          "evidence": "src/data_sync_etl/db/models.py:400",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "source_version_number": {
+          "evidence": "src/data_sync_etl/db/models.py:403",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "status": {
+          "evidence": "src/data_sync_etl/db/models.py:410",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "storage_bucket": {
+          "evidence": "src/data_sync_etl/db/models.py:407",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "storage_object_key": {
+          "evidence": "src/data_sync_etl/db/models.py:408",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(500)"
+        },
+        "target_version_id": {
+          "evidence": "src/data_sync_etl/db/models.py:418",
+          "fk": [
+            "resource_versions.id"
+          ],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:421",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "processing_job_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "target_version_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "source_system",
+            "source_version_id"
+          ],
+          "expression": "",
+          "kind": "UniqueConstraint",
+          "name": "uq_source_file_identity"
+        },
+        {
+          "columns": [
+            "target_version_id"
+          ],
+          "expression": "",
+          "kind": "UniqueConstraint",
+          "name": "uq_source_file_target"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "status",
+            "next_retry_at",
+            "lease_expires_at"
+          ],
+          "name": "ix_source_file_queue",
+          "unique": false
+        }
+      ]
+    },
+    "subjects": {
+      "columns": {
+        "created_at": {
+          "evidence": "src/data_sync_etl/db/models.py:132",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "deleted_at": {
+          "evidence": "src/data_sync_etl/db/models.py:140",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "deleted_by": {
+          "evidence": "src/data_sync_etl/db/models.py:141",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "grade_id": {
+          "evidence": "src/data_sync_etl/db/models.py:134",
+          "fk": [
+            "master_grade_levels.id"
+          ],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:131",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "is_active": {
+          "evidence": "src/data_sync_etl/db/models.py:139",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "source_missing_at": {
+          "evidence": "src/data_sync_etl/db/models.py:124",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "source_origin": {
+          "evidence": "src/data_sync_etl/db/models.py:122",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "source_state_hash": {
+          "evidence": "src/data_sync_etl/db/models.py:123",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(64)"
+        },
+        "subject_name": {
+          "evidence": "src/data_sync_etl/db/models.py:137",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "subject_slug": {
+          "evidence": "src/data_sync_etl/db/models.py:138",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:133",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "grade_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "grade_id",
+            "is_active",
+            "deleted_at"
+          ],
+          "name": "ix_subject_grade_active_deleted",
+          "unique": false
+        },
+        {
+          "columns": [
+            "subject_name"
+          ],
+          "name": "ix_subjects_name",
+          "unique": false
+        },
+        {
+          "columns": [
+            "subject_slug"
+          ],
+          "name": "ix_subjects_slug",
+          "unique": false
+        }
+      ]
+    },
+    "sync_auto_config": {
+      "columns": {
+        "enabled": {
+          "evidence": "src/data_sync_etl/db/models.py:323",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "heartbeat_at": {
+          "evidence": "src/data_sync_etl/db/models.py:327",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:322",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "interval_seconds": {
+          "evidence": "src/data_sync_etl/db/models.py:324",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "last_auto_run_at": {
+          "evidence": "src/data_sync_etl/db/models.py:331",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "last_error_code": {
+          "evidence": "src/data_sync_etl/db/models.py:332",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(50)"
+        },
+        "lease_expires_at": {
+          "evidence": "src/data_sync_etl/db/models.py:330",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "lease_owner": {
+          "evidence": "src/data_sync_etl/db/models.py:329",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(100)"
+        },
+        "next_run_at": {
+          "evidence": "src/data_sync_etl/db/models.py:325",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "source_ready": {
+          "evidence": "src/data_sync_etl/db/models.py:328",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:333",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "worker_id": {
+          "evidence": "src/data_sync_etl/db/models.py:326",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(100)"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": []
+    },
+    "sync_auto_streams": {
+      "columns": {
+        "config_id": {
+          "evidence": "src/data_sync_etl/db/models.py:339",
+          "fk": [
+            "sync_auto_config.id"
+          ],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "enabled": {
+          "evidence": "src/data_sync_etl/db/models.py:342",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN"
+        },
+        "stream_name": {
+          "evidence": "src/data_sync_etl/db/models.py:338",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "sync_mode": {
+          "evidence": "src/data_sync_etl/db/models.py:343",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(20)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:344",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "config_id"
+          ],
+          "expression": "",
+          "kind": "ForeignKeyConstraint",
+          "name": null
+        },
+        {
+          "columns": [
+            "stream_name"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": []
+    },
+    "sync_checkpoints": {
+      "columns": {
+        "last_id": {
+          "evidence": "src/data_sync_etl/db/models.py:298",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "last_updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:297",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "stream_name": {
+          "evidence": "src/data_sync_etl/db/models.py:296",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "updated_at": {
+          "evidence": "src/data_sync_etl/db/models.py:299",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "stream_name"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": []
+    },
+    "sync_runs": {
+      "columns": {
+        "checkpoint_after": {
+          "evidence": "src/data_sync_etl/db/models.py:316",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "JSONB"
+        },
+        "checkpoint_before": {
+          "evidence": "src/data_sync_etl/db/models.py:315",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "JSONB"
+        },
+        "error_message": {
+          "evidence": "src/data_sync_etl/db/models.py:317",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TEXT"
+        },
+        "failed": {
+          "evidence": "src/data_sync_etl/db/models.py:314",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "finished_at": {
+          "evidence": "src/data_sync_etl/db/models.py:308",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "id": {
+          "evidence": "src/data_sync_etl/db/models.py:304",
+          "fk": [],
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)"
+        },
+        "inserted": {
+          "evidence": "src/data_sync_etl/db/models.py:311",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "records_read": {
+          "evidence": "src/data_sync_etl/db/models.py:310",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "skipped": {
+          "evidence": "src/data_sync_etl/db/models.py:313",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        },
+        "started_at": {
+          "evidence": "src/data_sync_etl/db/models.py:307",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMP WITH TIME ZONE"
+        },
+        "status": {
+          "evidence": "src/data_sync_etl/db/models.py:309",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "stream_name": {
+          "evidence": "src/data_sync_etl/db/models.py:305",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)"
+        },
+        "sync_mode": {
+          "evidence": "src/data_sync_etl/db/models.py:306",
+          "fk": [],
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(20)"
+        },
+        "updated": {
+          "evidence": "src/data_sync_etl/db/models.py:312",
+          "fk": [],
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER"
+        }
+      },
+      "constraints": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expression": "",
+          "kind": "PrimaryKeyConstraint",
+          "name": null
+        }
+      ],
+      "indexes": []
+    }
+  },
+  "mongo": {
+    "dimension": 384,
+    "indexes": {
+      "content_bags": [
+        {
+          "keys": [
+            [
+              "resource_version_id",
+              1
+            ],
+            [
+              "unit_type",
+              1
+            ]
+          ],
+          "name": "bags_version_type",
+          "unique": false
+        },
+        {
+          "keys": [
+            [
+              "keywords",
+              1
+            ]
+          ],
+          "name": "bags_keywords",
+          "unique": false
+        }
+      ],
+      "learning_resources": [],
+      "mongo_content_units": [
+        {
+          "keys": [
+            [
+              "resource_version_id",
+              1
+            ],
+            [
+              "is_current",
+              1
+            ],
+            [
+              "page_from",
+              1
+            ]
+          ],
+          "name": "units_version_current_page",
+          "unique": false
+        },
+        {
+          "keys": [
+            [
+              "keywords",
+              1
+            ]
+          ],
+          "name": "units_keywords",
+          "unique": false
+        }
+      ],
+      "ocr_pages": [
+        {
+          "keys": [
+            [
+              "job_id",
+              1
+            ],
+            [
+              "page_num",
+              1
+            ]
+          ],
+          "name": "ocr_job_page",
+          "unique": true
+        },
+        {
+          "keys": [
+            [
+              "resource_version_id",
+              1
+            ],
+            [
+              "page_num",
+              1
+            ]
+          ],
+          "name": "ocr_version_page",
+          "unique": false
+        }
+      ],
+      "users": []
+    },
+    "schema_version": "etl-mongo-foundation-v1",
+    "validators": {
+      "content_bags": {
+        "$expr": {
+          "$cond": [
+            {
+              "$and": [
+                {
+                  "$isArray": "$embedding"
+                },
+                {
+                  "$isArray": "$keywords"
+                }
+              ]
+            },
+            {
+              "$and": [
+                {
+                  "$anyElementTrue": [
+                    {
+                      "$map": {
+                        "as": "v",
+                        "in": {
+                          "$ne": [
+                            "$$v",
+                            0
+                          ]
+                        },
+                        "input": "$embedding"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$allElementsTrue": [
+                    {
+                      "$map": {
+                        "as": "v",
+                        "in": {
+                          "$and": [
+                            {
+                              "$isNumber": "$$v"
+                            },
+                            {
+                              "$gte": [
+                                "$$v",
+                                -1.7976931348623157e+308
+                              ]
+                            },
+                            {
+                              "$lte": [
+                                "$$v",
+                                1.7976931348623157e+308
+                              ]
+                            }
+                          ]
+                        },
+                        "input": "$embedding"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$eq": [
+                    "$embedding_text",
+                    {
+                      "$reduce": {
+                        "in": {
+                          "$cond": [
+                            {
+                              "$eq": [
+                                {
+                                  "$type": "$$this"
+                                },
+                                "string"
+                              ]
+                            },
+                            {
+                              "$concat": [
+                                "$$value",
+                                {
+                                  "$cond": [
+                                    {
+                                      "$eq": [
+                                        "$$value",
+                                        ""
+                                      ]
+                                    },
+                                    "",
+                                    " | "
+                                  ]
+                                },
+                                "$$this"
+                              ]
+                            },
+                            "<invalid-keyword>"
+                          ]
+                        },
+                        "initialValue": "",
+                        "input": "$keywords"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            false
+          ]
+        },
+        "$jsonSchema": {
+          "additionalProperties": false,
+          "bsonType": "object",
+          "properties": {
+            "_id": {
+              "bsonType": "string",
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "content_fingerprint": {
+              "bsonType": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "embedding": {
+              "bsonType": "array",
+              "items": {
+                "bsonType": [
+                  "double",
+                  "int",
+                  "long",
+                  "decimal"
+                ],
+                "maximum": 1.7976931348623157e+308,
+                "minimum": -1.7976931348623157e+308
+              },
+              "maxItems": 384,
+              "minItems": 384
+            },
+            "embedding_model": {
+              "bsonType": "string",
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "embedding_text": {
+              "bsonType": "string",
+              "minLength": 1
+            },
+            "is_current": {
+              "bsonType": "bool"
+            },
+            "keywords": {
+              "bsonType": "array",
+              "items": {
+                "bsonType": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "projection_generation": {
+              "bsonType": "int",
+              "minimum": 1
+            },
+            "resource_version_id": {
+              "bsonType": "string",
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "title": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "maxLength": 500
+            },
+            "unit_type": {
+              "enum": [
+                "CHAPTER",
+                "LESSON",
+                "SECTION",
+                "PAGE_TEXT",
+                "TXT_TEXT",
+                "CSV_TEXT",
+                "DOCX_TEXT",
+                "XLSX_TEXT",
+                "PPTX_TEXT",
+                "IMAGE_TEXT"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "required": [
+            "_id",
+            "created_at",
+            "updated_at",
+            "resource_version_id",
+            "unit_type",
+            "keywords",
+            "embedding_text",
+            "embedding",
+            "embedding_model"
+          ],
+          "title": "etl-mongo-foundation-v1"
+        }
+      },
+      "learning_resources": {
+        "$jsonSchema": {
+          "additionalProperties": false,
+          "bsonType": "object",
+          "properties": {
+            "_id": {
+              "bsonType": "string",
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "authors": {
+              "bsonType": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "additionalProperties": false,
+                "bsonType": "object",
+                "properties": {
+                  "name": {
+                    "bsonType": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "organization": {
+                    "bsonType": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "role": {
+                    "bsonType": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "description": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "tags": {
+              "bsonType": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "bsonType": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "required": [
+            "_id",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "etl-mongo-foundation-v1"
+        }
+      },
+      "mongo_content_units": {
+        "$expr": {
+          "$and": [
+            {
+              "$or": [
+                {
+                  "$eq": [
+                    {
+                      "$ifNull": [
+                        "$content_unit_id",
+                        null
+                      ]
+                    },
+                    null
+                  ]
+                },
+                {
+                  "$eq": [
+                    "$content_unit_id",
+                    "$_id"
+                  ]
+                }
+              ]
+            },
+            {
+              "$or": [
+                {
+                  "$eq": [
+                    {
+                      "$ifNull": [
+                        "$page_from",
+                        null
+                      ]
+                    },
+                    null
+                  ]
+                },
+                {
+                  "$eq": [
+                    {
+                      "$ifNull": [
+                        "$page_to",
+                        null
+                      ]
+                    },
+                    null
+                  ]
+                },
+                {
+                  "$gte": [
+                    "$page_to",
+                    "$page_from"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "$jsonSchema": {
+          "additionalProperties": false,
+          "bsonType": "object",
+          "properties": {
+            "_id": {
+              "bsonType": "string",
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "content_unit_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "is_current": {
+              "bsonType": "bool"
+            },
+            "keywords": {
+              "bsonType": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "bsonType": "string",
+                "minLength": 1
+              },
+              "maxItems": 5,
+              "uniqueItems": true
+            },
+            "markdown": {
+              "bsonType": "string"
+            },
+            "page_from": {
+              "bsonType": [
+                "int",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "page_result_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "page_to": {
+              "bsonType": [
+                "int",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "projection_generation": {
+              "bsonType": "int",
+              "minimum": 1
+            },
+            "resource_version_id": {
+              "bsonType": "string",
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "text": {
+              "bsonType": "string"
+            },
+            "title": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "maxLength": 500
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "required": [
+            "_id",
+            "created_at",
+            "updated_at",
+            "resource_version_id",
+            "text",
+            "markdown"
+          ],
+          "title": "etl-mongo-foundation-v1"
+        }
+      },
+      "ocr_pages": {
+        "$expr": {
+          "$cond": [
+            {
+              "$and": [
+                {
+                  "$eq": [
+                    {
+                      "$type": "$raw_text"
+                    },
+                    "string"
+                  ]
+                },
+                {
+                  "$eq": [
+                    {
+                      "$type": "$job_id"
+                    },
+                    "string"
+                  ]
+                },
+                {
+                  "$eq": [
+                    {
+                      "$type": "$page_num"
+                    },
+                    "int"
+                  ]
+                }
+              ]
+            },
+            {
+              "$and": [
+                {
+                  "$eq": [
+                    "$char_count",
+                    {
+                      "$strLenCP": "$raw_text"
+                    }
+                  ]
+                },
+                {
+                  "$eq": [
+                    "$_id",
+                    {
+                      "$concat": [
+                        "$job_id",
+                        ":",
+                        {
+                          "$toString": "$page_num"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            false
+          ]
+        },
+        "$jsonSchema": {
+          "additionalProperties": false,
+          "bsonType": "object",
+          "properties": {
+            "_id": {
+              "bsonType": "string",
+              "maxLength": 41,
+              "minLength": 1
+            },
+            "char_count": {
+              "bsonType": "int",
+              "minimum": 0
+            },
+            "confidence": {
+              "bsonType": [
+                "double",
+                "int",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "engine_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "engine_version": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "job_id": {
+              "bsonType": "string",
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "page_num": {
+              "bsonType": "int",
+              "minimum": 1
+            },
+            "projection_generation": {
+              "bsonType": "int",
+              "minimum": 1
+            },
+            "raw_text": {
+              "bsonType": "string"
+            },
+            "resource_version_id": {
+              "bsonType": "string",
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "source_checksum": {
+              "bsonType": "string",
+              "minLength": 1
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "required": [
+            "_id",
+            "created_at",
+            "updated_at",
+            "job_id",
+            "resource_version_id",
+            "page_num",
+            "raw_text",
+            "char_count",
+            "source_checksum"
+          ],
+          "title": "etl-mongo-foundation-v1"
+        }
+      },
+      "users": {
+        "$jsonSchema": {
+          "additionalProperties": false,
+          "bsonType": "object",
+          "properties": {
+            "_id": {
+              "bsonType": "string",
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "address": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "maxLength": 1000
+            },
+            "bio": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "maxLength": 2000
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "organization_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "maxLength": 255
+            },
+            "subject_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "maxLength": 30,
+              "minLength": 1
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "required": [
+            "_id",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "etl-mongo-foundation-v1"
+        }
+      }
+    }
+  },
+  "references": {
+    "AUDIT_MASTER_READONLY.sql": "18d59e44840c3684907709969bdc7480c4150e18cbc2a02262720812950e63a2",
+    "AUDIT_SOURCE_READONLY.sql": "3344dddb7c133f48331d719675c9777c43ab700ea0beed3e4fe567dd15e3179d",
+    "BAO_CAO_KIEM_TOAN_2026_10_17.md": "14a9a66ecca67eaf41dba13e8cd78c831ce10ead4cdd81ce7344f9508c3e1e9e",
+    "ERD_MASTER_DE_XUAT_10_BANG.png": "57a64d7ef429b86f5b2aec6f79f902af820c6ebf1c0b1cdc4869d2b5ba7be173",
+    "ERD_SOURCE_GOC_15_BANG.jpg": "8cf84b7d5bd93425cc6683e1ac8059c03631cd5f5cf6bc0babeb11f148f1bab3",
+    "MO_TA_MONGODB_BOW.xlsx": "0b1dd9ae55a499c9ee5b11d988dd43cc353ed3aae7edac24d0c6ad9323505de4",
+    "MO_TA_SOURCE_POSTGRESQL.xlsx": "ec2da1a82ece1a62aed367c8b91f7de2192d9c6675545294482521cb90be6640",
+    "QUY_TAC_TAO_MA_POSTGRESQL.xlsx": "861741a562168754fa64c0f99e23c1a3aa818aa339b4bad56c2a075a9142521d"
+  },
+  "scope": "STATIC_ONLY; NO_DOTENV; NO_DATABASE; NO_DDL; NO_MIGRATION_EXECUTION",
+  "source": {
+    "content_units": {
+      "columns": {
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "mongo_id": {
+          "definition": "mongo_id VARCHAR(30) UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "page_from": {
+          "definition": "page_from INTEGER",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        },
+        "page_to": {
+          "definition": "page_to INTEGER",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        },
+        "parent_unit_id": {
+          "definition": "parent_unit_id VARCHAR(30) REFERENCES content_units(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "content_units.id",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "resource_version_id": {
+          "definition": "resource_version_id VARCHAR(30) NOT NULL REFERENCES resource_versions(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "resource_versions.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "retrieval_eligible": {
+          "definition": "retrieval_eligible BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "review_status": {
+          "definition": "review_status content_review_status NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "CONTENT_REVIEW_STATUS",
+          "unique": false
+        },
+        "sequence_no": {
+          "definition": "sequence_no INTEGER NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        },
+        "title": {
+          "definition": "title VARCHAR(500)",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(500)",
+          "unique": false
+        },
+        "unit_type": {
+          "definition": "unit_type content_unit_type NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "CONTENT_UNIT_TYPE",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:87",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "education_levels": {
+      "columns": {
+        "code": {
+          "definition": "code VARCHAR(30) NOT NULL UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:14",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:14",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_at": {
+          "definition": "deleted_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:14",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_by": {
+          "definition": "deleted_by VARCHAR(30)",
+          "evidence": "alembic_source/schema_v1.sql:14",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:14",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "is_active": {
+          "definition": "is_active BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:14",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "name_vi": {
+          "definition": "name_vi VARCHAR(100) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:14",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(100)",
+          "unique": false
+        },
+        "ordinal": {
+          "definition": "ordinal SMALLINT NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:14",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "SMALLINT",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:14",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "grade_levels": {
+      "columns": {
+        "code": {
+          "definition": "code VARCHAR(30) NOT NULL UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "created_by": {
+          "definition": "created_by VARCHAR(30)",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "deleted_at": {
+          "definition": "deleted_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_by": {
+          "definition": "deleted_by VARCHAR(30)",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "education_level_id": {
+          "definition": "education_level_id VARCHAR(30) NOT NULL REFERENCES education_levels(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "education_levels.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "is_active": {
+          "definition": "is_active BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "mongo_id": {
+          "definition": "mongo_id VARCHAR(24)",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(24)",
+          "unique": false
+        },
+        "name_vi": {
+          "definition": "name_vi VARCHAR(100) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(100)",
+          "unique": false
+        },
+        "ordinal": {
+          "definition": "ordinal SMALLINT NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "SMALLINT",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "updated_by": {
+          "definition": "updated_by VARCHAR(30)",
+          "evidence": "alembic_source/schema_v1.sql:20",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "id_counters": {
+      "columns": {
+        "last_seq": {
+          "definition": "last_seq INTEGER NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:10",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        },
+        "period": {
+          "definition": "period VARCHAR(4) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:10",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(4)",
+          "unique": false
+        },
+        "prefix": {
+          "definition": "prefix VARCHAR(8) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:10",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(8)",
+          "unique": false
+        }
+      },
+      "constraints": [
+        "PRIMARY KEY (prefix, period)",
+        "CHECK (last_seq >= 0)"
+      ]
+    },
+    "learning_resources": {
+      "columns": {
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "created_by": {
+          "definition": "created_by VARCHAR(30) NOT NULL REFERENCES users(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "users.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "deleted_at": {
+          "definition": "deleted_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_by": {
+          "definition": "deleted_by VARCHAR(30)",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "is_active": {
+          "definition": "is_active BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "mongo_id": {
+          "definition": "mongo_id VARCHAR(30) UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "provider_id": {
+          "definition": "provider_id VARCHAR(30) REFERENCES providers(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "providers.id",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "publication_status": {
+          "definition": "publication_status publication_status NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "PUBLICATION_STATUS",
+          "unique": false
+        },
+        "resource_type_id": {
+          "definition": "resource_type_id VARCHAR(30) NOT NULL REFERENCES resource_types(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "resource_types.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "title": {
+          "definition": "title VARCHAR(500)",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(500)",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:56",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "ocr_jobs": {
+      "columns": {
+        "completed_at": {
+          "definition": "completed_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "completed_pages": {
+          "definition": "completed_pages INTEGER NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        },
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "failed_pages": {
+          "definition": "failed_pages INTEGER NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "postprocess_enqueued_at": {
+          "definition": "postprocess_enqueued_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "resource_version_id": {
+          "definition": "resource_version_id VARCHAR(30) NOT NULL UNIQUE REFERENCES resource_versions(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "resource_versions.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "started_at": {
+          "definition": "started_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "status": {
+          "definition": "status ocr_job_status NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "OCR_JOB_STATUS",
+          "unique": false
+        },
+        "total_pages": {
+          "definition": "total_pages INTEGER NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        },
+        "triggered_by": {
+          "definition": "triggered_by VARCHAR(30) NOT NULL REFERENCES users(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "users.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:95",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "ocr_page_tasks": {
+      "columns": {
+        "completed_at": {
+          "definition": "completed_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "error_message": {
+          "definition": "error_message TEXT",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TEXT",
+          "unique": false
+        },
+        "heartbeat_at": {
+          "definition": "heartbeat_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "job_id": {
+          "definition": "job_id VARCHAR(30) NOT NULL REFERENCES ocr_jobs(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "ocr_jobs.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "local_image_path": {
+          "definition": "local_image_path VARCHAR(500) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(500)",
+          "unique": false
+        },
+        "page_num": {
+          "definition": "page_num INTEGER NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        },
+        "retry_count": {
+          "definition": "retry_count INTEGER NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        },
+        "started_at": {
+          "definition": "started_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "status": {
+          "definition": "status ocr_page_task_status NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "OCR_PAGE_TASK_STATUS",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "worker_id": {
+          "definition": "worker_id VARCHAR(100)",
+          "evidence": "alembic_source/schema_v1.sql:103",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(100)",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "providers": {
+      "columns": {
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:34",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_at": {
+          "definition": "deleted_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:34",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_by": {
+          "definition": "deleted_by VARCHAR(30)",
+          "evidence": "alembic_source/schema_v1.sql:34",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:34",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "is_active": {
+          "definition": "is_active BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:34",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "name": {
+          "definition": "name VARCHAR(255) NOT NULL UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:34",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)",
+          "unique": true
+        },
+        "provider_type": {
+          "definition": "provider_type provider_type NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:34",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "PROVIDER_TYPE",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:34",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "resource_grade_levels": {
+      "columns": {
+        "grade_level_id": {
+          "definition": "grade_level_id VARCHAR(30) NOT NULL REFERENCES grade_levels(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:64",
+          "fk": "grade_levels.id",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "resource_id": {
+          "definition": "resource_id VARCHAR(30) NOT NULL REFERENCES learning_resources(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:64",
+          "fk": "learning_resources.id",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": false
+        }
+      },
+      "constraints": [
+        "PRIMARY KEY (resource_id, grade_level_id)"
+      ]
+    },
+    "resource_subjects": {
+      "columns": {
+        "is_primary": {
+          "definition": "is_primary BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:69",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "resource_id": {
+          "definition": "resource_id VARCHAR(30) NOT NULL REFERENCES learning_resources(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:69",
+          "fk": "learning_resources.id",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "subject_id": {
+          "definition": "subject_id VARCHAR(30) NOT NULL REFERENCES subjects(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:69",
+          "fk": "subjects.id",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": false
+        }
+      },
+      "constraints": [
+        "PRIMARY KEY (resource_id, subject_id)"
+      ]
+    },
+    "resource_types": {
+      "columns": {
+        "code": {
+          "definition": "code VARCHAR(50) NOT NULL UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:40",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(50)",
+          "unique": true
+        },
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:40",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_at": {
+          "definition": "deleted_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:40",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_by": {
+          "definition": "deleted_by VARCHAR(30)",
+          "evidence": "alembic_source/schema_v1.sql:40",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:40",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "is_active": {
+          "definition": "is_active BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:40",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "name_vi": {
+          "definition": "name_vi VARCHAR(150) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:40",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(150)",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:40",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "resource_versions": {
+      "columns": {
+        "assigned_at": {
+          "definition": "assigned_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "assigned_by": {
+          "definition": "assigned_by VARCHAR(30) REFERENCES users(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "users.id",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "assigned_reviewer_id": {
+          "definition": "assigned_reviewer_id VARCHAR(30) REFERENCES users(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "users.id",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "final_approved_at": {
+          "definition": "final_approved_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "final_approved_by": {
+          "definition": "final_approved_by VARCHAR(30) REFERENCES users(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "users.id",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "lifecycle_status": {
+          "definition": "lifecycle_status lifecycle_status NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "LIFECYCLE_STATUS",
+          "unique": false
+        },
+        "mongo_id": {
+          "definition": "mongo_id VARCHAR(30) UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "parent_version_id": {
+          "definition": "parent_version_id VARCHAR(30) REFERENCES resource_versions(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "resource_versions.id",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "pre_ocr_approved_at": {
+          "definition": "pre_ocr_approved_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "pre_ocr_approved_by": {
+          "definition": "pre_ocr_approved_by VARCHAR(30) REFERENCES users(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "users.id",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "rejection_reason": {
+          "definition": "rejection_reason TEXT",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TEXT",
+          "unique": false
+        },
+        "resource_id": {
+          "definition": "resource_id VARCHAR(30) NOT NULL REFERENCES learning_resources(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "learning_resources.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "source_hash": {
+          "definition": "source_hash VARCHAR(64) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(64)",
+          "unique": false
+        },
+        "storage_bucket": {
+          "definition": "storage_bucket VARCHAR(255) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)",
+          "unique": false
+        },
+        "storage_object_key": {
+          "definition": "storage_object_key VARCHAR(500) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(500)",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "uploaded_by": {
+          "definition": "uploaded_by VARCHAR(30) NOT NULL REFERENCES users(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "users.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "version_number": {
+          "definition": "version_number INTEGER NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:74",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "INTEGER",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "roles": {
+      "columns": {
+        "code": {
+          "definition": "code VARCHAR(50) NOT NULL UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:45",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(50)",
+          "unique": true
+        },
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:45",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_at": {
+          "definition": "deleted_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:45",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_by": {
+          "definition": "deleted_by VARCHAR(30)",
+          "evidence": "alembic_source/schema_v1.sql:45",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "description": {
+          "definition": "description VARCHAR(255)",
+          "evidence": "alembic_source/schema_v1.sql:45",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(255)",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:45",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "is_active": {
+          "definition": "is_active BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:45",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "name": {
+          "definition": "name VARCHAR(255) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:45",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:45",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "subjects": {
+      "columns": {
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_at": {
+          "definition": "deleted_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "deleted_by": {
+          "definition": "deleted_by VARCHAR(30)",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "grade_id": {
+          "definition": "grade_id VARCHAR(30) NOT NULL REFERENCES grade_levels(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "grade_levels.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "is_active": {
+          "definition": "is_active BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "mongo_id": {
+          "definition": "mongo_id VARCHAR(24)",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(24)",
+          "unique": false
+        },
+        "subject_name": {
+          "definition": "subject_name VARCHAR(255) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)",
+          "unique": false
+        },
+        "subject_slug": {
+          "definition": "subject_slug VARCHAR(255) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:28",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        }
+      },
+      "constraints": []
+    },
+    "users": {
+      "columns": {
+        "created_at": {
+          "definition": "created_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "email": {
+          "definition": "email VARCHAR(255) NOT NULL UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)",
+          "unique": true
+        },
+        "email_verified_at": {
+          "definition": "email_verified_at TIMESTAMPTZ",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        },
+        "full_name": {
+          "definition": "full_name VARCHAR(255)",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(255)",
+          "unique": false
+        },
+        "hashed_password": {
+          "definition": "hashed_password VARCHAR(255) NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(255)",
+          "unique": false
+        },
+        "id": {
+          "definition": "id VARCHAR(30) PRIMARY KEY",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "",
+          "nullable": false,
+          "pk": true,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "is_active": {
+          "definition": "is_active BOOLEAN NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        "mongo_id": {
+          "definition": "mongo_id VARCHAR(30) UNIQUE",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "",
+          "nullable": true,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": true
+        },
+        "role_id": {
+          "definition": "role_id VARCHAR(30) NOT NULL REFERENCES roles(id) ON DELETE RESTRICT",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "roles.id",
+          "nullable": false,
+          "pk": false,
+          "type": "VARCHAR(30)",
+          "unique": false
+        },
+        "updated_at": {
+          "definition": "updated_at TIMESTAMPTZ NOT NULL",
+          "evidence": "alembic_source/schema_v1.sql:50",
+          "fk": "",
+          "nullable": false,
+          "pk": false,
+          "type": "TIMESTAMPTZ",
+          "unique": false
+        }
+      },
+      "constraints": []
+    }
+  },
+  "source_enums": {
+    "content_review_status": [
+      "PENDING",
+      "APPROVED",
+      "REJECTED"
+    ],
+    "content_unit_type": [
+      "PART",
+      "CHAPTER",
+      "LESSON",
+      "SECTION",
+      "SUBSECTION"
+    ],
+    "lifecycle_status": [
+      "UPLOADED",
+      "PENDING_PRE_REVIEW",
+      "QUEUED",
+      "PROCESSING",
+      "READY_FOR_REVIEW",
+      "APPROVED",
+      "REJECTED",
+      "FAILED",
+      "CANCELLED"
+    ],
+    "ocr_job_status": [
+      "QUEUED",
+      "PROCESSING",
+      "POSTPROCESSING",
+      "COMPLETED",
+      "FAILED",
+      "CANCELLED"
+    ],
+    "ocr_page_task_status": [
+      "PENDING",
+      "PROCESSING",
+      "COMPLETED",
+      "FAILED",
+      "CANCELLED"
+    ],
+    "provider_type": [
+      "PUBLISHER",
+      "SCHOOL",
+      "ORGANIZATION",
+      "INTERNAL"
+    ],
+    "publication_status": [
+      "DRAFT",
+      "PUBLISHED",
+      "ARCHIVED"
+    ]
+  },
+  "triggers": [
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "education_levels",
+      "trigger": "trg_education_levels_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "grade_levels",
+      "trigger": "trg_grade_levels_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "subjects",
+      "trigger": "trg_subjects_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "providers",
+      "trigger": "trg_providers_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "resource_types",
+      "trigger": "trg_resource_types_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "roles",
+      "trigger": "trg_roles_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "users",
+      "trigger": "trg_users_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "learning_resources",
+      "trigger": "trg_learning_resources_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "resource_versions",
+      "trigger": "trg_resource_versions_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "content_units",
+      "trigger": "trg_content_units_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "ocr_jobs",
+      "trigger": "trg_ocr_jobs_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_set_updated_at",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "ocr_page_tasks",
+      "trigger": "trg_ocr_page_tasks_updated_at"
+    },
+    {
+      "event": "BEFORE DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_require_soft_delete",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "education_levels",
+      "trigger": "trg_education_levels_soft_delete_only"
+    },
+    {
+      "event": "BEFORE DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_require_soft_delete",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "grade_levels",
+      "trigger": "trg_grade_levels_soft_delete_only"
+    },
+    {
+      "event": "BEFORE DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_require_soft_delete",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "subjects",
+      "trigger": "trg_subjects_soft_delete_only"
+    },
+    {
+      "event": "BEFORE DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_require_soft_delete",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "providers",
+      "trigger": "trg_providers_soft_delete_only"
+    },
+    {
+      "event": "BEFORE DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_require_soft_delete",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "resource_types",
+      "trigger": "trg_resource_types_soft_delete_only"
+    },
+    {
+      "event": "BEFORE DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_require_soft_delete",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "roles",
+      "trigger": "trg_roles_soft_delete_only"
+    },
+    {
+      "event": "BEFORE DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_require_soft_delete",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "users",
+      "trigger": "trg_users_soft_delete_only"
+    },
+    {
+      "event": "BEFORE DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_require_soft_delete",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "learning_resources",
+      "trigger": "trg_learning_resources_soft_delete_only"
+    },
+    {
+      "event": "AFTER INSERT/UPDATE/DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_touch_resource",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "resource_subjects",
+      "trigger": "trg_resource_subjects_touch_resource"
+    },
+    {
+      "event": "AFTER INSERT/UPDATE/DELETE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_touch_resource",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "resource_grade_levels",
+      "trigger": "trg_resource_grade_levels_touch_resource"
+    },
+    {
+      "event": "AFTER UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_touch_dependents",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "providers",
+      "trigger": "trg_providers_touch_dependents"
+    },
+    {
+      "event": "AFTER UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_touch_dependents",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "resource_types",
+      "trigger": "trg_resource_types_touch_dependents"
+    },
+    {
+      "event": "AFTER UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_touch_dependents",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "roles",
+      "trigger": "trg_roles_touch_dependents"
+    },
+    {
+      "event": "AFTER UPDATE",
+      "evidence": "alembic_source/versions/s0002_triggers.py:29",
+      "function": "source_touch_dependents",
+      "installed_in": "s0002",
+      "layer": "SOURCE",
+      "live": "NOT_VERIFIED",
+      "removed_in": "s0002 downgrade",
+      "table": "education_levels",
+      "trigger": "trg_education_levels_touch_dependents"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic/versions/0006_source_compatibility.py:31",
+      "function": "master_set_local_updated_at",
+      "installed_in": "0006",
+      "layer": "MASTER",
+      "live": "NOT_VERIFIED",
+      "removed_in": "0006 downgrade",
+      "table": "resource_versions",
+      "trigger": "trg_resource_versions_local_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic/versions/0006_source_compatibility.py:31",
+      "function": "master_set_local_updated_at",
+      "installed_in": "0006",
+      "layer": "MASTER",
+      "live": "NOT_VERIFIED",
+      "removed_in": "0006 downgrade",
+      "table": "ocr_jobs",
+      "trigger": "trg_ocr_jobs_local_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic/versions/0006_source_compatibility.py:31",
+      "function": "master_set_local_updated_at",
+      "installed_in": "0006",
+      "layer": "MASTER",
+      "live": "NOT_VERIFIED",
+      "removed_in": "0006 downgrade",
+      "table": "ocr_page_tasks",
+      "trigger": "trg_ocr_page_tasks_local_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic/versions/0006_source_compatibility.py:31",
+      "function": "master_set_local_updated_at",
+      "installed_in": "0006",
+      "layer": "MASTER",
+      "live": "NOT_VERIFIED",
+      "removed_in": "0006 downgrade",
+      "table": "content_units",
+      "trigger": "trg_content_units_local_updated_at"
+    },
+    {
+      "event": "BEFORE UPDATE",
+      "evidence": "alembic/versions/0006_source_compatibility.py:31",
+      "function": "master_set_local_updated_at",
+      "installed_in": "0006",
+      "layer": "MASTER",
+      "live": "NOT_VERIFIED",
+      "removed_in": "0006 downgrade",
+      "table": "ocr_page_results",
+      "trigger": "trg_ocr_page_results_local_updated_at"
+    },
+    {
+      "event": "BEFORE INSERT/UPDATE OF parent_unit_id,resource_version_id",
+      "evidence": "alembic/versions/0006_source_compatibility.py:31",
+      "function": "master_guard_content_parent",
+      "installed_in": "0006",
+      "layer": "MASTER",
+      "live": "NOT_VERIFIED",
+      "removed_in": "0006 downgrade",
+      "table": "content_units",
+      "trigger": "trg_content_parent_guard"
+    }
+  ]
+}

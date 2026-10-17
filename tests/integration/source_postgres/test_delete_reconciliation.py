@@ -2,7 +2,6 @@ from contextlib import contextmanager
 
 import pytest
 from bson import BSON
-from fastapi.testclient import TestClient
 from pymongo import MongoClient
 from sqlalchemy import text
 
@@ -10,6 +9,7 @@ from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 pytestmark = pytest.mark.postgres
 
@@ -137,6 +137,7 @@ def test_reappear_timeout_and_mass_change_never_apply(source, pg_container, monk
 
 
 def test_mongo_unchanged_and_api_gate_after_tombstone(source, pg_container, mongo_test_database):
+    pg_container.settings.admin_enabled = True
     service = setup(source, pg_container)
     client = MongoClient(mongo_test_database[0], serverSelectionTimeoutMS=3000)
     db = client[mongo_test_database[1]]

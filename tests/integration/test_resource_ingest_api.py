@@ -5,13 +5,13 @@ from threading import Barrier
 
 import pymupdf
 import pytest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.domain.core import ResourceCreateError
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.domain.resource import CreateResourceCommand
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 
 def pdf_bytes():

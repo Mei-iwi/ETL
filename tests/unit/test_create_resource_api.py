@@ -3,9 +3,9 @@ import io
 
 import pymupdf
 import pytest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.main import UploadBodyLimitMiddleware, create_app
+from tests.local_admin_client import TestClient
 
 
 def pdf_bytes():

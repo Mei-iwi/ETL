@@ -5,13 +5,14 @@ from xml.etree import ElementTree
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.adapters.extraction import NativeDocumentExtractor
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry, InvalidFileContent
 from data_sync_etl.main import create_app
 from data_sync_etl.ports.processing import OCRResult
+from tests.indexing_support import setup_index
+from tests.local_admin_client import TestClient
 
 
 def sample(extension):
@@ -148,6 +149,7 @@ def test_xlsx_override_takes_precedence_over_default(tmp_path):
 
 @pytest.mark.parametrize('extension', FORMATS)
 def test_real_upload_worker_content_units_with_memory_projection(container, extension):
+    setup_index(container)
     container.settings.admin_enabled = True
     if extension in {'.png', '.jpg', '.jpeg'}:
         container.ocr.engine = ImageEngineDouble()
@@ -419,6 +421,8 @@ def test_native_processing_retry_keeps_version_job_and_units(container, monkeypa
 def test_update_version_accepts_native_formats_without_duplicate_versions(container, extension):
     container.settings.admin_enabled = True
     container.sync.run(full=True)
+    with container.uow() as repo:
+        repo.update("master_learning_resources", "resource-1", {"source_origin": "LOCAL"})
     mime = sorted(FormatValidatorRegistry().find_validator('sample' + extension).mime_types)[0]
     payload = sample(extension)
     with TestClient(create_app(container), client=('127.0.0.1', 50000)) as client:

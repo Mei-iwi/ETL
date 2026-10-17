@@ -1,17 +1,18 @@
-from fastapi.testclient import TestClient
-
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 
 def test_create_resource_version_route(container, pdf_file):
     container.sync.run(full=True)
+    container.settings.admin_enabled = True
+    with container.uow() as repo:
+        repo.update("master_learning_resources", "resource-1", {"source_origin": "LOCAL"})
     payload = pdf_file.read_bytes()
 
     with TestClient(create_app(container)) as client:
         response = client.post(
             "/api/v1/resource/resource-1/versions",
             files={"file": ("version.pdf", payload, "application/pdf")},
-            data={"uploaded_by": "user-1"},
         )
 
         assert response.status_code == 201
@@ -33,6 +34,7 @@ def test_create_resource_version_route(container, pdf_file):
 
 
 def test_create_resource_version_rejects_unknown_resource(container, pdf_file):
+    container.settings.admin_enabled = True
     payload = pdf_file.read_bytes()
     with TestClient(create_app(container)) as client:
         response = client.post(

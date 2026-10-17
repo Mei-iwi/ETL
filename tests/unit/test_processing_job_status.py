@@ -1,7 +1,13 @@
+import pytest
 from conftest import completed, ingest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
+
+
+@pytest.fixture(autouse=True)
+def privileged_local_read(container):
+    container.settings.admin_enabled = True
 
 
 def test_processing_job_status_pending(container):

@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import FileResponse, PlainTextResponse, StreamingResponse
 
+from data_sync_etl.api.admin_access import require_local_admin
 from data_sync_etl.api.evaluation_schemas import (
     DatasetRequest,
     DatasetResponse,
@@ -131,11 +132,7 @@ class JobInput(AdminInput):
 
 
 def services(request):
-    if not request.app.state.container.settings.admin_enabled:
-        raise HTTPException(
-            403, "Admin API disabled; enable only on a trusted local development interface"
-        )
-    return request.app.state.container
+    return require_local_admin(request)
 
 
 def source_file_admin(request):
@@ -299,8 +296,18 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
         if not container.storage.exists(bucket, key):
             raise DomainError('File unavailable')
         path = container.storage.get_local_path(bucket, key)
+        validator = container.format_registry.find_validator("file" + suffix)
+        size = path.stat().st_size
+        if size > validator.max_size_bytes:
+            raise HTTPException(413, "Tệp vượt giới hạn định dạng.")
+        with path.open("rb") as stream:
+            validator.validate(suffix, media_types[suffix], stream.read(16), size)
+    except HTTPException:
+        raise
     except (DomainError, OSError):
         raise HTTPException(404, 'Tệp chưa sẵn sàng hoặc không còn tồn tại.') from None
+    except Exception:
+        raise HTTPException(502, "Dịch vụ tệp đang gián đoạn.") from None
     return FileResponse(path, media_type=media_types[suffix], filename=f'hoc-lieu-{id}{suffix}',
                         content_disposition_type='attachment' if download else 'inline',
                         headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
@@ -511,9 +518,12 @@ def update_resource_metadata(
     body: UpdateResourceMetadataRequest,
     request: Request,
 ) -> UpdateResourceMetadataResponse:
+    container = services(request)
+    if "uploaded_by" in body.model_fields_set:
+        raise HTTPException(400, "uploaded_by requires an authenticated identity")
     fields = body.model_dump(exclude_unset=True)
     try:
-        result = request.app.state.container.update_resource_metadata.execute(
+        result = container.update_resource_metadata.execute(
             UpdateResourceMetadataCommand(
                 resource_id=id,
                 supplied_fields=frozenset(fields),
@@ -622,6 +632,9 @@ def create_resource_version(
     file: Annotated[UploadFile, File()],
     uploaded_by: str | None = Form(None, max_length=30),
 ) -> CreateResourceVersionResponse:
+    container = services(request)
+    if uploaded_by and uploaded_by.strip():
+        raise HTTPException(400, "uploaded_by requires an authenticated identity")
     if not file.filename:
         raise HTTPException(400, "A filename is required")
     try:
@@ -629,7 +642,7 @@ def create_resource_version(
         stream.seek(0, 2)
         file_size = stream.tell()
         stream.seek(0)
-        result = request.app.state.container.resource_version_create.execute(
+        result = container.resource_version_create.execute(
             CreateResourceVersionCommand(
                 resource_id=id,
                 filename=file.filename,
@@ -824,7 +837,15 @@ def index_version(id: ResourceId, request: Request, response: Response):
 
 @router.post("/admin/resources/{id}/versions/ingest")
 def ingest(id: ResourceId, body: IngestInput, request: Request):
-    return services(request).ingestion.run(id, body.bucket, body.object_key, body.uploaded_by)
+    container = services(request)
+    if body.uploaded_by is not None:
+        raise HTTPException(400, "uploaded_by requires an authenticated identity")
+    try:
+        return container.ingestion.run(id, body.bucket, body.object_key, local_only=True)
+    except NewResourceVersionNotFound:
+        raise HTTPException(404, "Resource not found") from None
+    except InvalidResourceVersion as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
 
 
 @router.get("/api/v1/resource-versions/{id}/chunks", tags=[TAG_INDEXING],
@@ -835,14 +856,21 @@ def chunk_preview(id: ResourceId, request: Request,
                    limit: Annotated[int, Query(ge=1, le=100)] = 10,
                    content_unit_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None):
     try:
+        request.app.state.container.search.authorize_content_version(id, access=search_access(request))
         return request.app.state.container.indexing.chunks(
             id, offset=offset, limit=limit, content_unit_id=content_unit_id)
     except Exception as exc:
+        from data_sync_etl.domain.search import SearchError
+        if isinstance(exc, SearchError):
+            raise search_error(exc) from None
         raise index_error(exc) from None
 
 
 @router.post("/admin/resource-versions/{id}/ocr-jobs")
 def create_job(id: ResourceId, request: Request, body: JobInput | None = None):
+    services(request)
+    if body and body.triggered_by is not None:
+        raise HTTPException(400, "triggered_by requires an authenticated identity")
     return services(request).ocr.create_job(id, body.triggered_by if body else None)
 
 
@@ -890,6 +918,10 @@ def list_public_content_units(
     search: Annotated[str, Query(max_length=200)] = "",
 ) -> dict:
     try:
+        request.app.state.container.search.authorize_content_version(id, access=search_access(request))
+    except Exception as exc:
+        raise search_error(exc) from None
+    try:
         return request.app.state.container.orchestrator.content_units(
             id, offset=offset, limit=limit, search=search
         )
@@ -905,6 +937,5 @@ def content_units(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     search: Annotated[str, Query(max_length=200)] = "",
 ):
-    return services(request).orchestrator.content_units(
-        id, offset=offset, limit=limit, search=search
-    )
+    services(request)
+    return list_public_content_units(id, request, offset, limit, search)

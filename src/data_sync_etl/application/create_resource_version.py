@@ -1,9 +1,14 @@
 from data_sync_etl.domain.core import DomainError, new_id, now
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
+from data_sync_etl.domain.resource_metadata import (
+    ResourceMetadataOwnershipError,
+    assert_resource_metadata_editable,
+)
 from data_sync_etl.domain.resource_version import (
     CreateResourceVersionCommand,
     CreateResourceVersionResult,
 )
+from data_sync_etl.domain.search_access import denied
 from data_sync_etl.logging import event, flow
 from data_sync_etl.ports.processing import StoragePort
 from data_sync_etl.ports.repositories import UnitOfWork
@@ -30,6 +35,12 @@ class CreateResourceVersionUseCase:
         self.format_registry = format_registry
 
     def execute(self, command: CreateResourceVersionCommand) -> CreateResourceVersionResult:
+        # Reject ownership/state before even reading bytes, then check again under
+        # the existing write lock after storage to cover a concurrent change.
+        with self.uow() as repo:
+            self.assert_editable(repo.get("master_learning_resources", command.resource_id))
+        if command.uploaded_by and command.uploaded_by.strip():
+            raise InvalidResourceVersion("uploaded_by requires an authenticated identity")
         try:
             command.validate()
             validator = self.format_registry.find_validator(command.filename)
@@ -62,10 +73,7 @@ class CreateResourceVersionUseCase:
                     resource = repo.get(
                         "master_learning_resources", command.resource_id, lock=True
                     )
-                    if resource is None:
-                        raise ResourceVersionNotFound("Resource not found")
-                    if not resource["is_active"] or resource["deleted_at"] is not None:
-                        raise InvalidResourceVersion("Resource is inactive or deleted", 409)
+                    self.assert_editable(resource)
 
                     previous = repo.find(
                         "resource_versions",
@@ -98,8 +106,9 @@ class CreateResourceVersionUseCase:
                         )
                         result = self._result("CREATED", command, version, command.declared_mime)
 
-            if result.action == "NO_CHANGE" and stored.created:
-                self.storage.delete(stored.bucket, stored.object_key)
+            # Published content-addressed bytes may already be shared by another
+            # transaction. Never unlink them on a failed/no-change request.
+            # save_stream owns and removes its private temporary upload itself.
             event(
                 resource_id=command.resource_id,
                 resource_version_id=result.resource_version_id,
@@ -108,15 +117,22 @@ class CreateResourceVersionUseCase:
             )
             return result
         except (ResourceVersionNotFound, InvalidResourceVersion):
-            if stored.created:
-                self.storage.delete(stored.bucket, stored.object_key)
             raise
         except Exception as exc:
-            if stored.created:
-                self.storage.delete(stored.bucket, stored.object_key)
             raise ResourceVersionPersistenceError(
                 "Database rejected the resource version"
             ) from exc
+
+    @staticmethod
+    def assert_editable(resource):
+        if resource is None:
+            raise ResourceVersionNotFound("Resource not found")
+        try:
+            assert_resource_metadata_editable(resource)
+        except ResourceMetadataOwnershipError as exc:
+            raise InvalidResourceVersion(str(exc), 409) from None
+        if resource.get("is_active") is not True or denied(resource):
+            raise InvalidResourceVersion("Resource is inactive, deleted or restricted", 409)
 
     @staticmethod
     def _result(action, command, version, declared_mime):

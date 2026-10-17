@@ -1,0 +1,21 @@
+{
+  "added": [],
+  "blocked_removal_contracts": [
+    [
+      "POST",
+      "/admin/resources/{id}/versions/ingest"
+    ],
+    [
+      "POST",
+      "/admin/resource-versions/{id}/ocr-jobs"
+    ]
+  ],
+  "business_method_paths": 40,
+  "data_or_schema_writes": false,
+  "documented_operations": 39,
+  "documented_paths": 38,
+  "keep": 48,
+  "models_unchanged": true,
+  "registered_method_paths": 48,
+  "removed": []
+}

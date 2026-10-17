@@ -1,12 +1,12 @@
 from unittest.mock import Mock
 
 import pytest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.cli import main as cli
 from data_sync_etl.composition import Container
 from data_sync_etl.config import Settings
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 
 def test_admin_default_and_startup_warning(container, caplog):

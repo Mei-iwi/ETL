@@ -6,7 +6,6 @@ from hashlib import sha256
 from math import isfinite
 
 import pytest
-from fastapi.testclient import TestClient
 from pymongo import MongoClient
 from sqlalchemy import text
 
@@ -19,6 +18,7 @@ from data_sync_etl.application.indexing import IndexingService
 from data_sync_etl.config import Settings
 from data_sync_etl.main import create_app
 from tests.integration.source_postgres.test_file_import_flow import setup_import
+from tests.local_admin_client import TestClient
 
 pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
     os.environ.get("ETL_TEST_REAL_EMBEDDING") != "1",
@@ -80,6 +80,8 @@ def real_context(source, pg_container, mongo_test_database, tmp_path, real_embed
     c.capabilities = replace(c.capabilities, ocr_engine="native", embedding_runtime=real_embedding)
     c.mongo_projector.documents = MongoContentStore(db, invalidate_content_bags=False)
     c.indexing = IndexingService(c.uow, MongoContentReader(db), real_embedding, c.settings, bags=MongoBagStore(db, 384))
+    c.settings.search_internal_dev_enabled = True
+    c.search.indexing, c.search.bags = c.indexing, c.indexing.bags
     c.processing_finalizer.on_content_ready = c.indexing.enqueue_auto
     original = setup_import(source, c, tmp_path)
     original_bytes = original.read_bytes()

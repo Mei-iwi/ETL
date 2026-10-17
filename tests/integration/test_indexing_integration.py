@@ -5,7 +5,6 @@ from threading import Event
 
 import pytest
 from conftest import ingest
-from fastapi.testclient import TestClient
 from pymongo import MongoClient
 
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
@@ -15,6 +14,7 @@ from data_sync_etl.application.indexing import IndexingService
 from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.main import create_app
 from tests.indexing_support import ModelDouble, structured_projection
+from tests.local_admin_client import TestClient
 
 pytestmark = pytest.mark.postgres
 
@@ -30,6 +30,9 @@ def index_context(pg_container, mongo_test_database):
     c.mongo_projector.documents = MongoContentStore(db)
     index = IndexingService(c.uow, MongoContentReader(db), ModelDouble(), c.settings, bags=MongoBagStore(db, 3))
     c.indexing = index
+    c.search.indexing = index
+    c.search.bags = index.bags
+    c.settings.search_internal_dev_enabled = True
     c.processing_finalizer.on_content_ready = index.enqueue_auto
     try:
         yield c, db, index

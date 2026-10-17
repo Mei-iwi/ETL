@@ -1,7 +1,13 @@
-from fastapi.testclient import TestClient
+import pytest
 
 from data_sync_etl.domain.core import now
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
+
+
+@pytest.fixture(autouse=True)
+def privileged_local_read(container):
+    container.settings.admin_enabled = True
 
 
 def test_resource_detail_success(container):

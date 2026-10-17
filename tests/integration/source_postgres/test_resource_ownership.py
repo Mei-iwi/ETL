@@ -1,9 +1,9 @@
 import pytest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.source_ownership import state_hash
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 from .test_source import execute, use_source
 
@@ -12,6 +12,7 @@ pytestmark = pytest.mark.postgres
 
 def test_real_source_patch_readonly_incremental_bootstrap_and_drift(source, pg_container):
     c = pg_container
+    c.settings.admin_enabled = True
     use_source(c, source)
     c.sync.run(full=True)
     with c.uow() as repo:

@@ -1,11 +1,13 @@
-from conftest import completed
-from fastapi.testclient import TestClient
+import pytest
 
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
+from tests.unit.test_search import searchable as searchable
 
 
-def test_content_units_read_pagination_search_and_version_isolation(container):
-    version, _ = completed(container)
+@pytest.mark.parametrize("searchable", [{"unreviewed": True}], indirect=True)
+def test_content_units_read_pagination_search_and_version_isolation(searchable):
+    container, version = searchable
     other = container.ingestion.run("resource-2", "input", "sample.pdf")["version"]
     container.ocr.create_job(other["id"])
     while container.worker.once("test-worker"):
@@ -38,14 +40,15 @@ def test_content_units_read_pagination_search_and_version_isolation(container):
         assert repo.count("etl_stage_runs", {"stage": "MONGO_PROJECTION"}) == 2
 
 
-def test_content_units_admin_validation_and_empty_version(container, pdf_file):
-    container.sync.run(full=True)
-    version = container.ingestion.run("resource-1", "input", "sample.pdf")["version"]
+def test_content_units_admin_validation_and_empty_version(searchable):
+    container, _ = searchable
+    version = container.ingestion.run("resource-2", "input", "sample.pdf")["version"]
     path = f"/admin/resource-versions/{version['id']}/content-units"
+    container.settings.admin_enabled = False
     with TestClient(create_app(container)) as client:
         assert client.get(path).status_code == 403
         container.settings.admin_enabled = True
-        assert client.get(path).json() == {"items": [], "total": 0, "offset": 0, "limit": 50}
-        assert client.get("/admin/resource-versions/missing/content-units").status_code == 400
+        assert client.get(path).status_code == 409
+        assert client.get("/admin/resource-versions/missing/content-units").status_code == 404
         for params in ({"offset": -1}, {"limit": 0}, {"limit": 101}, {"search": "x" * 201}):
             assert client.get(path, params=params).status_code == 422

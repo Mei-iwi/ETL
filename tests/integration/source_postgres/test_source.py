@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import DBAPIError
 
@@ -13,6 +12,7 @@ from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 from .conftest import migrate_source
 
@@ -148,6 +148,7 @@ def test_erd_metadata_and_revision_replay(source_database):
 
 
 def test_json_postgresql_equivalence_and_idempotency(source, pg_container):
+    pg_container.settings.admin_enabled = True
     # Source requires an author. Align both fake seeds; adapter itself never fabricates one.
     path = pg_container.source.root / "resources.json"
     rows = json.loads(path.read_text(encoding="utf-8"))
@@ -290,6 +291,7 @@ def test_relation_add_move_and_delete_last(source, pg_container):
 
 
 def test_null_source_preserved_and_visible(source, pg_container):
+    pg_container.settings.admin_enabled = True
     execute(
         source, "UPDATE learning_resources SET provider_id=NULL,title=NULL WHERE id='resource-1'"
     )

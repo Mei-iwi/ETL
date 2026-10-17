@@ -1,0 +1,2257 @@
+[
+  {
+    "call_sites": [
+      "README.md:357",
+      "frontend/src/components/layout/Header.tsx:17",
+      "frontend/src/pages/system/SystemStatusPage.tsx:34",
+      "tests/unit/test_api_migrations.py:16",
+      "tests/unit/test_boundaries.py:16",
+      "tests/unit/test_mongo_foundation.py:369"
+    ],
+    "category": "READ_PUBLIC",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:153",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/components/layout/Header.tsx:17",
+      "frontend/src/pages/system/SystemStatusPage.tsx:34"
+    ],
+    "guard_calls": [],
+    "handler": "health",
+    "method": "GET",
+    "path": "/health",
+    "request": null,
+    "response": "None",
+    "service_refs": [
+      "uow"
+    ],
+    "success_status": 200,
+    "tags": [
+      "System"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_api_migrations.py:16",
+      "tests/unit/test_boundaries.py:16",
+      "tests/unit/test_mongo_foundation.py:369"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/searchApi.ts:37",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:198",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:311",
+      "tests/integration/test_search_integration.py:25",
+      "tests/integration/test_search_integration.py:57",
+      "tests/unit/test_search.py:100",
+      "tests/unit/test_search.py:117",
+      "tests/unit/test_search.py:129",
+      "tests/unit/test_search.py:130",
+      "tests/unit/test_search.py:131",
+      "tests/unit/test_search.py:164",
+      "tests/unit/test_search.py:165",
+      "tests/unit/test_search.py:167",
+      "tests/unit/test_search.py:204",
+      "tests/unit/test_search.py:207",
+      "tests/unit/test_search_access.py:26",
+      "tests/unit/test_search_access.py:31",
+      "tests/unit/test_search_access.py:34",
+      "tests/unit/test_search_access.py:67",
+      "tests/unit/test_search_access.py:114",
+      "tests/unit/test_search_access.py:124",
+      "tests/unit/test_search_access.py:125",
+      "tests/unit/test_search_access.py:165",
+      "tests/unit/test_search_context.py:105"
+    ],
+    "category": "SEARCH_CONTEXT",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:165",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/searchApi.ts:37"
+    ],
+    "guard_calls": [
+      "search_access"
+    ],
+    "handler": "search_materials",
+    "method": "POST",
+    "path": "/api/v1/search",
+    "request": "<class 'data_sync_etl.api.search_schemas.SearchRequest'>",
+    "response": "<class 'data_sync_etl.api.search_schemas.SearchResponse'>",
+    "service_refs": [
+      "search"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Retrieval and Search"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:198",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:311",
+      "tests/integration/test_search_integration.py:25",
+      "tests/integration/test_search_integration.py:57",
+      "tests/unit/test_search.py:100",
+      "tests/unit/test_search.py:117",
+      "tests/unit/test_search.py:129",
+      "tests/unit/test_search.py:130",
+      "tests/unit/test_search.py:131",
+      "tests/unit/test_search.py:164",
+      "tests/unit/test_search.py:165",
+      "tests/unit/test_search.py:167",
+      "tests/unit/test_search.py:204",
+      "tests/unit/test_search.py:207",
+      "tests/unit/test_search_access.py:26",
+      "tests/unit/test_search_access.py:31",
+      "tests/unit/test_search_access.py:34",
+      "tests/unit/test_search_access.py:67",
+      "tests/unit/test_search_access.py:114",
+      "tests/unit/test_search_access.py:124",
+      "tests/unit/test_search_access.py:125",
+      "tests/unit/test_search_access.py:165",
+      "tests/unit/test_search_context.py:105"
+    ]
+  },
+  {
+    "call_sites": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:236",
+      "tests/unit/test_evaluation.py:34",
+      "tests/unit/test_evaluation.py:60",
+      "tests/unit/test_evaluation.py:86",
+      "tests/unit/test_evaluation.py:93",
+      "tests/unit/test_evaluation.py:112",
+      "tests/unit/test_evaluation.py:159",
+      "tests/unit/test_evaluation.py:182",
+      "tests/unit/test_evaluation.py:220",
+      "tests/unit/test_evaluation.py:229",
+      "tests/unit/test_evaluation.py:254",
+      "tests/unit/test_evaluation.py:283",
+      "tests/unit/test_evaluation.py:292",
+      "tests/unit/test_evaluation.py:325",
+      "tests/unit/test_evaluation.py:347"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_TEST_SCRIPT",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:182",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "evaluation_services"
+    ],
+    "handler": "create_evaluation_dataset",
+    "method": "POST",
+    "path": "/api/v1/evaluations/datasets",
+    "request": "<class 'data_sync_etl.api.evaluation_schemas.DatasetRequest'>",
+    "response": "<class 'data_sync_etl.api.evaluation_schemas.DatasetResponse'>",
+    "service_refs": [],
+    "success_status": 201,
+    "tags": [
+      "Experimentation and Evaluation"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:236",
+      "tests/unit/test_evaluation.py:34",
+      "tests/unit/test_evaluation.py:60",
+      "tests/unit/test_evaluation.py:86",
+      "tests/unit/test_evaluation.py:93",
+      "tests/unit/test_evaluation.py:112",
+      "tests/unit/test_evaluation.py:159",
+      "tests/unit/test_evaluation.py:182",
+      "tests/unit/test_evaluation.py:220",
+      "tests/unit/test_evaluation.py:229",
+      "tests/unit/test_evaluation.py:254",
+      "tests/unit/test_evaluation.py:283",
+      "tests/unit/test_evaluation.py:292",
+      "tests/unit/test_evaluation.py:325",
+      "tests/unit/test_evaluation.py:347"
+    ]
+  },
+  {
+    "call_sites": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:239",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:243",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:256",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:292",
+      "tests/unit/test_evaluation.py:38",
+      "tests/unit/test_evaluation.py:44",
+      "tests/unit/test_evaluation.py:51",
+      "tests/unit/test_evaluation.py:54",
+      "tests/unit/test_evaluation.py:61",
+      "tests/unit/test_evaluation.py:62",
+      "tests/unit/test_evaluation.py:63",
+      "tests/unit/test_evaluation.py:101",
+      "tests/unit/test_evaluation.py:103",
+      "tests/unit/test_evaluation.py:104",
+      "tests/unit/test_evaluation.py:114",
+      "tests/unit/test_evaluation.py:117",
+      "tests/unit/test_evaluation.py:119",
+      "tests/unit/test_evaluation.py:160",
+      "tests/unit/test_evaluation.py:161",
+      "tests/unit/test_evaluation.py:162",
+      "tests/unit/test_evaluation.py:183",
+      "tests/unit/test_evaluation.py:185",
+      "tests/unit/test_evaluation.py:190",
+      "tests/unit/test_evaluation.py:201",
+      "tests/unit/test_evaluation.py:202",
+      "tests/unit/test_evaluation.py:203",
+      "tests/unit/test_evaluation.py:221",
+      "tests/unit/test_evaluation.py:223",
+      "tests/unit/test_evaluation.py:230",
+      "tests/unit/test_evaluation.py:242",
+      "tests/unit/test_evaluation.py:256",
+      "tests/unit/test_evaluation.py:299",
+      "tests/unit/test_evaluation.py:327",
+      "tests/unit/test_evaluation.py:349"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_TEST_SCRIPT",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:192",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "evaluation_services"
+    ],
+    "handler": "run_evaluation",
+    "method": "POST",
+    "path": "/api/v1/evaluations/runs",
+    "request": "<class 'data_sync_etl.api.evaluation_schemas.RunRequest'>",
+    "response": "<class 'data_sync_etl.api.evaluation_schemas.RunResponse'>",
+    "service_refs": [],
+    "success_status": 201,
+    "tags": [
+      "Experimentation and Evaluation"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:239",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:243",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:256",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:292",
+      "tests/unit/test_evaluation.py:38",
+      "tests/unit/test_evaluation.py:44",
+      "tests/unit/test_evaluation.py:51",
+      "tests/unit/test_evaluation.py:54",
+      "tests/unit/test_evaluation.py:61",
+      "tests/unit/test_evaluation.py:62",
+      "tests/unit/test_evaluation.py:63",
+      "tests/unit/test_evaluation.py:101",
+      "tests/unit/test_evaluation.py:103",
+      "tests/unit/test_evaluation.py:104",
+      "tests/unit/test_evaluation.py:114",
+      "tests/unit/test_evaluation.py:117",
+      "tests/unit/test_evaluation.py:119",
+      "tests/unit/test_evaluation.py:160",
+      "tests/unit/test_evaluation.py:161",
+      "tests/unit/test_evaluation.py:162",
+      "tests/unit/test_evaluation.py:183",
+      "tests/unit/test_evaluation.py:185",
+      "tests/unit/test_evaluation.py:190",
+      "tests/unit/test_evaluation.py:201",
+      "tests/unit/test_evaluation.py:202",
+      "tests/unit/test_evaluation.py:203",
+      "tests/unit/test_evaluation.py:221",
+      "tests/unit/test_evaluation.py:223",
+      "tests/unit/test_evaluation.py:230",
+      "tests/unit/test_evaluation.py:242",
+      "tests/unit/test_evaluation.py:256",
+      "tests/unit/test_evaluation.py:299",
+      "tests/unit/test_evaluation.py:327",
+      "tests/unit/test_evaluation.py:349"
+    ]
+  },
+  {
+    "call_sites": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:243",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:256",
+      "tests/unit/test_evaluation.py:44",
+      "tests/unit/test_evaluation.py:51",
+      "tests/unit/test_evaluation.py:54",
+      "tests/unit/test_evaluation.py:62",
+      "tests/unit/test_evaluation.py:63",
+      "tests/unit/test_evaluation.py:103",
+      "tests/unit/test_evaluation.py:117",
+      "tests/unit/test_evaluation.py:119",
+      "tests/unit/test_evaluation.py:161",
+      "tests/unit/test_evaluation.py:162",
+      "tests/unit/test_evaluation.py:185",
+      "tests/unit/test_evaluation.py:202",
+      "tests/unit/test_evaluation.py:203",
+      "tests/unit/test_evaluation.py:223"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_TEST_SCRIPT",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:236",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "evaluation_services"
+    ],
+    "handler": "get_evaluation_run",
+    "method": "GET",
+    "path": "/api/v1/evaluations/runs/{id}",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.evaluation_schemas.RunDetailResponse'>",
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Experimentation and Evaluation"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:243",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:256",
+      "tests/unit/test_evaluation.py:44",
+      "tests/unit/test_evaluation.py:51",
+      "tests/unit/test_evaluation.py:54",
+      "tests/unit/test_evaluation.py:62",
+      "tests/unit/test_evaluation.py:63",
+      "tests/unit/test_evaluation.py:103",
+      "tests/unit/test_evaluation.py:117",
+      "tests/unit/test_evaluation.py:119",
+      "tests/unit/test_evaluation.py:161",
+      "tests/unit/test_evaluation.py:162",
+      "tests/unit/test_evaluation.py:185",
+      "tests/unit/test_evaluation.py:202",
+      "tests/unit/test_evaluation.py:203",
+      "tests/unit/test_evaluation.py:223"
+    ]
+  },
+  {
+    "call_sites": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:256",
+      "tests/unit/test_evaluation.py:51",
+      "tests/unit/test_evaluation.py:54",
+      "tests/unit/test_evaluation.py:63",
+      "tests/unit/test_evaluation.py:103",
+      "tests/unit/test_evaluation.py:119",
+      "tests/unit/test_evaluation.py:162",
+      "tests/unit/test_evaluation.py:223"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_TEST_SCRIPT",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:251",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "evaluation_services"
+    ],
+    "handler": "export_evaluation_report",
+    "method": "GET",
+    "path": "/api/v1/evaluations/runs/{id}/report",
+    "request": null,
+    "response": "None",
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Experimentation and Evaluation"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:256",
+      "tests/unit/test_evaluation.py:51",
+      "tests/unit/test_evaluation.py:54",
+      "tests/unit/test_evaluation.py:63",
+      "tests/unit/test_evaluation.py:103",
+      "tests/unit/test_evaluation.py:119",
+      "tests/unit/test_evaluation.py:162",
+      "tests/unit/test_evaluation.py:223"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/searchApi.ts:41",
+      "src/data_sync_etl/application/search.py:162",
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:203",
+      "tests/unit/test_search_access.py:68",
+      "tests/unit/test_search_access.py:166",
+      "tests/unit/test_search_context.py:38",
+      "tests/unit/test_search_context.py:84",
+      "tests/unit/test_search_context.py:105"
+    ],
+    "category": "SEARCH_CONTEXT",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:268",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/searchApi.ts:41"
+    ],
+    "guard_calls": [
+      "search_access"
+    ],
+    "handler": "chunk_context",
+    "method": "GET",
+    "path": "/api/v1/chunks/{context_id}/context",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.search_schemas.ContextResponse'>",
+    "service_refs": [
+      "search"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Retrieval and Search"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_content_pipeline_acceptance.py:203",
+      "tests/unit/test_search_access.py:68",
+      "tests/unit/test_search_access.py:166",
+      "tests/unit/test_search_context.py:38",
+      "tests/unit/test_search_context.py:84",
+      "tests/unit/test_search_context.py:105"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/pages/library/ResourceFilePanel.tsx:36",
+      "tests/unit/test_resource_file.py:17",
+      "tests/unit/test_resource_file.py:54",
+      "tests/unit/test_resource_file.py:61",
+      "tests/unit/test_sync_local_drive_regression.py:142"
+    ],
+    "category": "FILE_STREAM",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:280",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/pages/library/ResourceFilePanel.tsx:36"
+    ],
+    "guard_calls": [
+      "search_access"
+    ],
+    "handler": "resource_file",
+    "method": "GET",
+    "path": "/api/v1/resource-versions/{id}/file",
+    "request": null,
+    "response": "None",
+    "service_refs": [
+      "search",
+      "storage"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_resource_file.py:17",
+      "tests/unit/test_resource_file.py:54",
+      "tests/unit/test_resource_file.py:61",
+      "tests/unit/test_sync_local_drive_regression.py:142"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/pages/system/SystemCapalitiesPage.tsx:72",
+      "tests/unit/test_api_migrations.py:119",
+      "tests/unit/test_media_out_of_scope.py:142"
+    ],
+    "category": "READ_PUBLIC",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:314",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/pages/system/SystemCapalitiesPage.tsx:72"
+    ],
+    "guard_calls": [],
+    "handler": "system_capabilities",
+    "method": "GET",
+    "path": "/api/v1/system/capabilities",
+    "request": null,
+    "response": "None",
+    "service_refs": [
+      "capabilities"
+    ],
+    "success_status": 200,
+    "tags": [
+      "System"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_api_migrations.py:119",
+      "tests/unit/test_media_out_of_scope.py:142"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/libraryLookupApi.ts:91",
+      "tests/unit/test_subject_api.py:11",
+      "tests/unit/test_subject_api.py:26",
+      "tests/unit/test_subject_api.py:40",
+      "tests/unit/test_subject_api.py:54",
+      "tests/unit/test_subject_api.py:66",
+      "tests/unit/test_subject_api.py:67"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:325",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/libraryLookupApi.ts:91"
+    ],
+    "guard_calls": [],
+    "handler": "list_subjects",
+    "method": "GET",
+    "path": "/api/v1/subjects",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.subject_schemas.SubjectListResponse'>",
+    "service_refs": [
+      "subject_listing"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_subject_api.py:11",
+      "tests/unit/test_subject_api.py:26",
+      "tests/unit/test_subject_api.py:40",
+      "tests/unit/test_subject_api.py:54",
+      "tests/unit/test_subject_api.py:66",
+      "tests/unit/test_subject_api.py:67"
+    ]
+  },
+  {
+    "call_sites": [
+      "tests/unit/test_subject_api.py:54",
+      "tests/unit/test_subject_api.py:67"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_TEST_SCRIPT",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:350",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [],
+    "handler": "recommended_subjects",
+    "method": "GET",
+    "path": "/api/v1/subjects/recommended",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.subject_schemas.RecommendedSubjectListResponse'>",
+    "service_refs": [
+      "subject_recommendation"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_subject_api.py:54",
+      "tests/unit/test_subject_api.py:67"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/libraryLookupApi.ts:79",
+      "tests/unit/test_resource_lookups.py:20",
+      "tests/unit/test_resource_lookups.py:53",
+      "tests/unit/test_resource_lookups.py:77",
+      "tests/unit/test_resource_lookups.py:98",
+      "tests/unit/test_resource_lookups.py:109",
+      "tests/unit/test_resource_lookups.py:130",
+      "tests/unit/test_resource_lookups.py:136"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:373",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/libraryLookupApi.ts:79"
+    ],
+    "guard_calls": [],
+    "handler": "list_resource_types",
+    "method": "GET",
+    "path": "/api/v1/resource-types",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.resource_lookup_schemas.ResourceTypeListResponse'>",
+    "service_refs": [
+      "resource_lookups"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_resource_lookups.py:20",
+      "tests/unit/test_resource_lookups.py:53",
+      "tests/unit/test_resource_lookups.py:77",
+      "tests/unit/test_resource_lookups.py:98",
+      "tests/unit/test_resource_lookups.py:109",
+      "tests/unit/test_resource_lookups.py:130",
+      "tests/unit/test_resource_lookups.py:136"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/libraryLookupApi.ts:83",
+      "tests/unit/test_resource_lookups.py:21",
+      "tests/unit/test_resource_lookups.py:54",
+      "tests/unit/test_resource_lookups.py:78",
+      "tests/unit/test_resource_lookups.py:110",
+      "tests/unit/test_resource_lookups.py:131",
+      "tests/unit/test_resource_lookups.py:137"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:393",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/libraryLookupApi.ts:83"
+    ],
+    "guard_calls": [],
+    "handler": "list_providers",
+    "method": "GET",
+    "path": "/api/v1/providers",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.resource_lookup_schemas.ProviderListResponse'>",
+    "service_refs": [
+      "resource_lookups"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_resource_lookups.py:21",
+      "tests/unit/test_resource_lookups.py:54",
+      "tests/unit/test_resource_lookups.py:78",
+      "tests/unit/test_resource_lookups.py:110",
+      "tests/unit/test_resource_lookups.py:131",
+      "tests/unit/test_resource_lookups.py:137"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/libraryLookupApi.ts:87",
+      "tests/unit/test_resource_lookups.py:22",
+      "tests/unit/test_resource_lookups.py:55",
+      "tests/unit/test_resource_lookups.py:132",
+      "tests/unit/test_resource_lookups.py:138"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:413",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/libraryLookupApi.ts:87"
+    ],
+    "guard_calls": [],
+    "handler": "list_grade_levels",
+    "method": "GET",
+    "path": "/api/v1/grade-levels",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.resource_lookup_schemas.GradeLevelListResponse'>",
+    "service_refs": [
+      "resource_lookups"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_resource_lookups.py:22",
+      "tests/unit/test_resource_lookups.py:55",
+      "tests/unit/test_resource_lookups.py:132",
+      "tests/unit/test_resource_lookups.py:138"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/pages/library/LibraryCreatePage.tsx:152",
+      "frontend/src/pages/library/LibraryListPage.tsx:94",
+      "frontend/src/pages/library/LibraryResourceDetailPage.tsx:61",
+      "frontend/src/pages/library/LibraryUpdateVersion.tsx:84",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:49",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:52",
+      "frontend/src/pages/library/ResourceFilePanel.tsx:22",
+      "frontend/src/services/indexingApi.ts:36",
+      "frontend/src/services/indexingApi.ts:40",
+      "frontend/src/services/resourceApi.ts:60",
+      "src/data_sync_etl/main.py:26",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:151",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:152",
+      "tests/integration/source_postgres/test_resource_ownership.py:21",
+      "tests/integration/source_postgres/test_source.py:191",
+      "tests/integration/source_postgres/test_source.py:194",
+      "tests/integration/source_postgres/test_source.py:310",
+      "tests/integration/source_postgres/test_source.py:314",
+      "tests/integration/test_resource_ingest_api.py:45",
+      "tests/unit/test_create_resource_api.py:35",
+      "tests/unit/test_create_resource_api.py:76",
+      "tests/unit/test_create_resource_api.py:165",
+      "tests/unit/test_create_resource_api.py:167",
+      "tests/unit/test_create_resource_api.py:223",
+      "tests/unit/test_create_resource_api.py:238",
+      "tests/unit/test_media_out_of_scope.py:26",
+      "tests/unit/test_media_out_of_scope.py:75",
+      "tests/unit/test_multiformat.py:156",
+      "tests/unit/test_multiformat.py:377",
+      "tests/unit/test_multiformat.py:393",
+      "tests/unit/test_multiformat.py:461",
+      "tests/unit/test_resource_detail.py:11",
+      "tests/unit/test_resource_detail.py:40",
+      "tests/unit/test_resource_detail.py:57",
+      "tests/unit/test_resource_list.py:12",
+      "tests/unit/test_resource_list.py:40",
+      "tests/unit/test_resource_list.py:63",
+      "tests/unit/test_resource_list.py:80",
+      "tests/unit/test_resource_list_versions.py:11",
+      "tests/unit/test_resource_lookups.py:112",
+      "tests/unit/test_resource_metadata_ownership.py:44",
+      "tests/unit/test_resource_metadata_ownership.py:45",
+      "tests/unit/test_resource_metadata_ownership.py:63",
+      "tests/unit/test_resource_metadata_ownership.py:90",
+      "tests/unit/test_resource_metadata_ownership.py:98",
+      "tests/unit/test_resource_metadata_ownership.py:107",
+      "tests/unit/test_resource_metadata_ownership.py:111",
+      "tests/unit/test_resource_versions.py:15",
+      "tests/unit/test_resource_versions.py:38",
+      "tests/unit/test_resource_versions.py:46",
+      "tests/unit/test_resource_versions.py:54",
+      "tests/unit/test_update_resource_metadata.py:74"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:433",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/pages/library/LibraryCreatePage.tsx:152",
+      "frontend/src/pages/library/LibraryListPage.tsx:94",
+      "frontend/src/pages/library/LibraryResourceDetailPage.tsx:61",
+      "frontend/src/pages/library/LibraryUpdateVersion.tsx:84",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:49",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:52",
+      "frontend/src/pages/library/ResourceFilePanel.tsx:22",
+      "frontend/src/services/indexingApi.ts:36",
+      "frontend/src/services/indexingApi.ts:40",
+      "frontend/src/services/resourceApi.ts:60"
+    ],
+    "guard_calls": [],
+    "handler": "list_resources",
+    "method": "GET",
+    "path": "/api/v1/resources",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.resource_schemas.ResouceListResponse'>",
+    "service_refs": [
+      "resource_listing"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_delete_reconciliation.py:151",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:152",
+      "tests/integration/source_postgres/test_resource_ownership.py:21",
+      "tests/integration/source_postgres/test_source.py:191",
+      "tests/integration/source_postgres/test_source.py:194",
+      "tests/integration/source_postgres/test_source.py:310",
+      "tests/integration/source_postgres/test_source.py:314",
+      "tests/integration/test_resource_ingest_api.py:45",
+      "tests/unit/test_create_resource_api.py:35",
+      "tests/unit/test_create_resource_api.py:76",
+      "tests/unit/test_create_resource_api.py:165",
+      "tests/unit/test_create_resource_api.py:167",
+      "tests/unit/test_create_resource_api.py:223",
+      "tests/unit/test_create_resource_api.py:238",
+      "tests/unit/test_media_out_of_scope.py:26",
+      "tests/unit/test_media_out_of_scope.py:75",
+      "tests/unit/test_multiformat.py:156",
+      "tests/unit/test_multiformat.py:377",
+      "tests/unit/test_multiformat.py:393",
+      "tests/unit/test_multiformat.py:461",
+      "tests/unit/test_resource_detail.py:11",
+      "tests/unit/test_resource_detail.py:40",
+      "tests/unit/test_resource_detail.py:57",
+      "tests/unit/test_resource_list.py:12",
+      "tests/unit/test_resource_list.py:40",
+      "tests/unit/test_resource_list.py:63",
+      "tests/unit/test_resource_list.py:80",
+      "tests/unit/test_resource_list_versions.py:11",
+      "tests/unit/test_resource_lookups.py:112",
+      "tests/unit/test_resource_metadata_ownership.py:44",
+      "tests/unit/test_resource_metadata_ownership.py:45",
+      "tests/unit/test_resource_metadata_ownership.py:63",
+      "tests/unit/test_resource_metadata_ownership.py:90",
+      "tests/unit/test_resource_metadata_ownership.py:98",
+      "tests/unit/test_resource_metadata_ownership.py:107",
+      "tests/unit/test_resource_metadata_ownership.py:111",
+      "tests/unit/test_resource_versions.py:15",
+      "tests/unit/test_resource_versions.py:38",
+      "tests/unit/test_resource_versions.py:46",
+      "tests/unit/test_resource_versions.py:54",
+      "tests/unit/test_update_resource_metadata.py:74"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/pages/library/LibraryResourceDetailPage.tsx:61",
+      "frontend/src/pages/library/LibraryUpdateVersion.tsx:84",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:49",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:52",
+      "frontend/src/pages/library/ResourceFilePanel.tsx:22",
+      "frontend/src/services/indexingApi.ts:40",
+      "frontend/src/services/resourceApi.ts:60",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:151",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:152",
+      "tests/integration/source_postgres/test_resource_ownership.py:21",
+      "tests/integration/source_postgres/test_source.py:194",
+      "tests/integration/source_postgres/test_source.py:310",
+      "tests/integration/source_postgres/test_source.py:314",
+      "tests/unit/test_media_out_of_scope.py:75",
+      "tests/unit/test_resource_detail.py:11",
+      "tests/unit/test_resource_detail.py:40",
+      "tests/unit/test_resource_detail.py:57",
+      "tests/unit/test_resource_metadata_ownership.py:44",
+      "tests/unit/test_resource_metadata_ownership.py:45",
+      "tests/unit/test_resource_metadata_ownership.py:63",
+      "tests/unit/test_resource_metadata_ownership.py:90",
+      "tests/unit/test_resource_metadata_ownership.py:98",
+      "tests/unit/test_resource_metadata_ownership.py:107",
+      "tests/unit/test_resource_metadata_ownership.py:111",
+      "tests/unit/test_resource_versions.py:15",
+      "tests/unit/test_resource_versions.py:38",
+      "tests/unit/test_resource_versions.py:46",
+      "tests/unit/test_resource_versions.py:54",
+      "tests/unit/test_update_resource_metadata.py:74"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:467",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/pages/library/LibraryResourceDetailPage.tsx:61",
+      "frontend/src/pages/library/LibraryUpdateVersion.tsx:84",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:49",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:52",
+      "frontend/src/pages/library/ResourceFilePanel.tsx:22",
+      "frontend/src/services/indexingApi.ts:40",
+      "frontend/src/services/resourceApi.ts:60"
+    ],
+    "guard_calls": [],
+    "handler": "get_resource",
+    "method": "GET",
+    "path": "/api/v1/resources/{id}",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.resource_schemas.ResourceDetailResponse'>",
+    "service_refs": [
+      "resource_detail"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_delete_reconciliation.py:151",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:152",
+      "tests/integration/source_postgres/test_resource_ownership.py:21",
+      "tests/integration/source_postgres/test_source.py:194",
+      "tests/integration/source_postgres/test_source.py:310",
+      "tests/integration/source_postgres/test_source.py:314",
+      "tests/unit/test_media_out_of_scope.py:75",
+      "tests/unit/test_resource_detail.py:11",
+      "tests/unit/test_resource_detail.py:40",
+      "tests/unit/test_resource_detail.py:57",
+      "tests/unit/test_resource_metadata_ownership.py:44",
+      "tests/unit/test_resource_metadata_ownership.py:45",
+      "tests/unit/test_resource_metadata_ownership.py:63",
+      "tests/unit/test_resource_metadata_ownership.py:90",
+      "tests/unit/test_resource_metadata_ownership.py:98",
+      "tests/unit/test_resource_metadata_ownership.py:107",
+      "tests/unit/test_resource_metadata_ownership.py:111",
+      "tests/unit/test_resource_versions.py:15",
+      "tests/unit/test_resource_versions.py:38",
+      "tests/unit/test_resource_versions.py:46",
+      "tests/unit/test_resource_versions.py:54",
+      "tests/unit/test_update_resource_metadata.py:74"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:52",
+      "frontend/src/pages/library/ResourceFilePanel.tsx:22",
+      "frontend/src/services/indexingApi.ts:40",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:152",
+      "tests/unit/test_media_out_of_scope.py:75",
+      "tests/unit/test_resource_versions.py:15",
+      "tests/unit/test_resource_versions.py:38",
+      "tests/unit/test_resource_versions.py:46",
+      "tests/unit/test_resource_versions.py:54"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:480",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:52",
+      "frontend/src/pages/library/ResourceFilePanel.tsx:22",
+      "frontend/src/services/indexingApi.ts:40"
+    ],
+    "guard_calls": [],
+    "handler": "list_resource_versions",
+    "method": "GET",
+    "path": "/api/v1/resources/{id}/versions",
+    "request": null,
+    "response": "list[dict]",
+    "service_refs": [
+      "resource_versions"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_delete_reconciliation.py:152",
+      "tests/unit/test_media_out_of_scope.py:75",
+      "tests/unit/test_resource_versions.py:15",
+      "tests/unit/test_resource_versions.py:38",
+      "tests/unit/test_resource_versions.py:46",
+      "tests/unit/test_resource_versions.py:54"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/processingApi.ts:84",
+      "frontend/src/services/processingApi.ts:105",
+      "tests/integration/test_processing_retry_integration.py:53",
+      "tests/integration/test_processing_retry_integration.py:56",
+      "tests/integration/test_processing_retry_integration.py:68",
+      "tests/integration/test_processing_retry_integration.py:98",
+      "tests/integration/test_processing_retry_integration.py:103",
+      "tests/integration/test_processing_retry_integration.py:143",
+      "tests/integration/test_processing_retry_integration.py:146",
+      "tests/unit/test_media_out_of_scope.py:60",
+      "tests/unit/test_media_out_of_scope.py:63",
+      "tests/unit/test_media_out_of_scope.py:105",
+      "tests/unit/test_media_out_of_scope.py:106",
+      "tests/unit/test_multiformat.py:168",
+      "tests/unit/test_multiformat.py:383",
+      "tests/unit/test_multiformat.py:405",
+      "tests/unit/test_multiformat.py:407",
+      "tests/unit/test_multiformat.py:412",
+      "tests/unit/test_processing_job_retry.py:39",
+      "tests/unit/test_processing_job_retry.py:88",
+      "tests/unit/test_processing_job_retry.py:90",
+      "tests/unit/test_processing_job_retry.py:91",
+      "tests/unit/test_processing_job_retry.py:99",
+      "tests/unit/test_processing_job_retry.py:100",
+      "tests/unit/test_processing_job_status.py:12",
+      "tests/unit/test_processing_job_status.py:32",
+      "tests/unit/test_processing_job_status.py:47",
+      "tests/unit/test_processing_job_status.py:59",
+      "tests/unit/test_processing_job_status.py:73",
+      "tests/unit/test_processing_job_status.py:81",
+      "tests/unit/test_processing_job_status.py:93",
+      "tests/unit/test_processing_job_status.py:104"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:493",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/processingApi.ts:84",
+      "frontend/src/services/processingApi.ts:105"
+    ],
+    "guard_calls": [],
+    "handler": "get_processing_job",
+    "method": "GET",
+    "path": "/api/v1/processing-jobs/{job_id}",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.processing_schemas.ProcessingJobStatusResponse'>",
+    "service_refs": [
+      "processing_job_detail"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Multimedia Data Processing and Normalization"
+    ],
+    "test_script_calls": [
+      "tests/integration/test_processing_retry_integration.py:53",
+      "tests/integration/test_processing_retry_integration.py:56",
+      "tests/integration/test_processing_retry_integration.py:68",
+      "tests/integration/test_processing_retry_integration.py:98",
+      "tests/integration/test_processing_retry_integration.py:103",
+      "tests/integration/test_processing_retry_integration.py:143",
+      "tests/integration/test_processing_retry_integration.py:146",
+      "tests/unit/test_media_out_of_scope.py:60",
+      "tests/unit/test_media_out_of_scope.py:63",
+      "tests/unit/test_media_out_of_scope.py:105",
+      "tests/unit/test_media_out_of_scope.py:106",
+      "tests/unit/test_multiformat.py:168",
+      "tests/unit/test_multiformat.py:383",
+      "tests/unit/test_multiformat.py:405",
+      "tests/unit/test_multiformat.py:407",
+      "tests/unit/test_multiformat.py:412",
+      "tests/unit/test_processing_job_retry.py:39",
+      "tests/unit/test_processing_job_retry.py:88",
+      "tests/unit/test_processing_job_retry.py:90",
+      "tests/unit/test_processing_job_retry.py:91",
+      "tests/unit/test_processing_job_retry.py:99",
+      "tests/unit/test_processing_job_retry.py:100",
+      "tests/unit/test_processing_job_status.py:12",
+      "tests/unit/test_processing_job_status.py:32",
+      "tests/unit/test_processing_job_status.py:47",
+      "tests/unit/test_processing_job_status.py:59",
+      "tests/unit/test_processing_job_status.py:73",
+      "tests/unit/test_processing_job_status.py:81",
+      "tests/unit/test_processing_job_status.py:93",
+      "tests/unit/test_processing_job_status.py:104"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/resourceApi.ts:60",
+      "tests/integration/source_postgres/test_resource_ownership.py:21",
+      "tests/integration/source_postgres/test_source.py:314",
+      "tests/unit/test_resource_metadata_ownership.py:44",
+      "tests/unit/test_resource_metadata_ownership.py:63",
+      "tests/unit/test_resource_metadata_ownership.py:90",
+      "tests/unit/test_resource_metadata_ownership.py:98",
+      "tests/unit/test_resource_metadata_ownership.py:107",
+      "tests/unit/test_resource_metadata_ownership.py:111",
+      "tests/unit/test_update_resource_metadata.py:74"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:509",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/resourceApi.ts:60"
+    ],
+    "guard_calls": [],
+    "handler": "update_resource_metadata",
+    "method": "PATCH",
+    "path": "/api/v1/resources/{id}/metadata",
+    "request": "<class 'data_sync_etl.api.resource_metadata_schemas.UpdateResourceMetadataRequest'>",
+    "response": "<class 'data_sync_etl.api.resource_metadata_schemas.UpdateResourceMetadataResponse'>",
+    "service_refs": [
+      "update_resource_metadata"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_resource_ownership.py:21",
+      "tests/integration/source_postgres/test_source.py:314",
+      "tests/unit/test_resource_metadata_ownership.py:44",
+      "tests/unit/test_resource_metadata_ownership.py:63",
+      "tests/unit/test_resource_metadata_ownership.py:90",
+      "tests/unit/test_resource_metadata_ownership.py:98",
+      "tests/unit/test_resource_metadata_ownership.py:107",
+      "tests/unit/test_resource_metadata_ownership.py:111",
+      "tests/unit/test_update_resource_metadata.py:74"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/pages/library/LibraryCreatePage.tsx:152",
+      "frontend/src/pages/library/LibraryListPage.tsx:94",
+      "frontend/src/pages/library/LibraryResourceDetailPage.tsx:61",
+      "frontend/src/pages/library/LibraryUpdateVersion.tsx:84",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:49",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:52",
+      "frontend/src/pages/library/ResourceFilePanel.tsx:22",
+      "frontend/src/services/indexingApi.ts:36",
+      "frontend/src/services/indexingApi.ts:40",
+      "frontend/src/services/resourceApi.ts:60",
+      "src/data_sync_etl/main.py:26",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:151",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:152",
+      "tests/integration/source_postgres/test_resource_ownership.py:21",
+      "tests/integration/source_postgres/test_source.py:191",
+      "tests/integration/source_postgres/test_source.py:194",
+      "tests/integration/source_postgres/test_source.py:310",
+      "tests/integration/source_postgres/test_source.py:314",
+      "tests/integration/test_resource_ingest_api.py:45",
+      "tests/unit/test_create_resource_api.py:35",
+      "tests/unit/test_create_resource_api.py:76",
+      "tests/unit/test_create_resource_api.py:165",
+      "tests/unit/test_create_resource_api.py:167",
+      "tests/unit/test_create_resource_api.py:223",
+      "tests/unit/test_create_resource_api.py:238",
+      "tests/unit/test_media_out_of_scope.py:26",
+      "tests/unit/test_media_out_of_scope.py:75",
+      "tests/unit/test_multiformat.py:156",
+      "tests/unit/test_multiformat.py:377",
+      "tests/unit/test_multiformat.py:393",
+      "tests/unit/test_multiformat.py:461",
+      "tests/unit/test_resource_detail.py:11",
+      "tests/unit/test_resource_detail.py:40",
+      "tests/unit/test_resource_detail.py:57",
+      "tests/unit/test_resource_list.py:12",
+      "tests/unit/test_resource_list.py:40",
+      "tests/unit/test_resource_list.py:63",
+      "tests/unit/test_resource_list.py:80",
+      "tests/unit/test_resource_list_versions.py:11",
+      "tests/unit/test_resource_lookups.py:112",
+      "tests/unit/test_resource_metadata_ownership.py:44",
+      "tests/unit/test_resource_metadata_ownership.py:45",
+      "tests/unit/test_resource_metadata_ownership.py:63",
+      "tests/unit/test_resource_metadata_ownership.py:90",
+      "tests/unit/test_resource_metadata_ownership.py:98",
+      "tests/unit/test_resource_metadata_ownership.py:107",
+      "tests/unit/test_resource_metadata_ownership.py:111",
+      "tests/unit/test_resource_versions.py:15",
+      "tests/unit/test_resource_versions.py:38",
+      "tests/unit/test_resource_versions.py:46",
+      "tests/unit/test_resource_versions.py:54",
+      "tests/unit/test_update_resource_metadata.py:74"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:555",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/pages/library/LibraryCreatePage.tsx:152",
+      "frontend/src/pages/library/LibraryListPage.tsx:94",
+      "frontend/src/pages/library/LibraryResourceDetailPage.tsx:61",
+      "frontend/src/pages/library/LibraryUpdateVersion.tsx:84",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:49",
+      "frontend/src/pages/library/LibraryVersionHistoryPage.tsx:52",
+      "frontend/src/pages/library/ResourceFilePanel.tsx:22",
+      "frontend/src/services/indexingApi.ts:36",
+      "frontend/src/services/indexingApi.ts:40",
+      "frontend/src/services/resourceApi.ts:60"
+    ],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "create_resource",
+    "method": "POST",
+    "path": "/api/v1/resources",
+    "request": "<class 'fastapi._compat.v2.Body_create_resource_api_v1_resources_post'>",
+    "response": "<class 'data_sync_etl.api.resource_create_schemas.CreateResourceResponse'>",
+    "service_refs": [
+      "resource_create"
+    ],
+    "success_status": 201,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_delete_reconciliation.py:151",
+      "tests/integration/source_postgres/test_delete_reconciliation.py:152",
+      "tests/integration/source_postgres/test_resource_ownership.py:21",
+      "tests/integration/source_postgres/test_source.py:191",
+      "tests/integration/source_postgres/test_source.py:194",
+      "tests/integration/source_postgres/test_source.py:310",
+      "tests/integration/source_postgres/test_source.py:314",
+      "tests/integration/test_resource_ingest_api.py:45",
+      "tests/unit/test_create_resource_api.py:35",
+      "tests/unit/test_create_resource_api.py:76",
+      "tests/unit/test_create_resource_api.py:165",
+      "tests/unit/test_create_resource_api.py:167",
+      "tests/unit/test_create_resource_api.py:223",
+      "tests/unit/test_create_resource_api.py:238",
+      "tests/unit/test_media_out_of_scope.py:26",
+      "tests/unit/test_media_out_of_scope.py:75",
+      "tests/unit/test_multiformat.py:156",
+      "tests/unit/test_multiformat.py:377",
+      "tests/unit/test_multiformat.py:393",
+      "tests/unit/test_multiformat.py:461",
+      "tests/unit/test_resource_detail.py:11",
+      "tests/unit/test_resource_detail.py:40",
+      "tests/unit/test_resource_detail.py:57",
+      "tests/unit/test_resource_list.py:12",
+      "tests/unit/test_resource_list.py:40",
+      "tests/unit/test_resource_list.py:63",
+      "tests/unit/test_resource_list.py:80",
+      "tests/unit/test_resource_list_versions.py:11",
+      "tests/unit/test_resource_lookups.py:112",
+      "tests/unit/test_resource_metadata_ownership.py:44",
+      "tests/unit/test_resource_metadata_ownership.py:45",
+      "tests/unit/test_resource_metadata_ownership.py:63",
+      "tests/unit/test_resource_metadata_ownership.py:90",
+      "tests/unit/test_resource_metadata_ownership.py:98",
+      "tests/unit/test_resource_metadata_ownership.py:107",
+      "tests/unit/test_resource_metadata_ownership.py:111",
+      "tests/unit/test_resource_versions.py:15",
+      "tests/unit/test_resource_versions.py:38",
+      "tests/unit/test_resource_versions.py:46",
+      "tests/unit/test_resource_versions.py:54",
+      "tests/unit/test_update_resource_metadata.py:74"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/resourceApi.ts:85",
+      "tests/unit/test_create_resource_version.py:12",
+      "tests/unit/test_create_resource_version.py:26",
+      "tests/unit/test_create_resource_version.py:39",
+      "tests/unit/test_media_out_of_scope.py:32",
+      "tests/unit/test_media_out_of_scope.py:47",
+      "tests/unit/test_media_out_of_scope.py:91",
+      "tests/unit/test_multiformat.py:425",
+      "tests/unit/test_multiformat.py:428"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:618",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/resourceApi.ts:85"
+    ],
+    "guard_calls": [],
+    "handler": "create_resource_version",
+    "method": "POST",
+    "path": "/api/v1/resource/{id}/versions",
+    "request": "<class 'fastapi._compat.v2.Body_create_resource_version_api_v1_resource__id__versions_post'>",
+    "response": "<class 'data_sync_etl.api.resource_version_schemas.CreateResourceVersionResponse'>",
+    "service_refs": [
+      "resource_version_create"
+    ],
+    "success_status": 201,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_create_resource_version.py:12",
+      "tests/unit/test_create_resource_version.py:26",
+      "tests/unit/test_create_resource_version.py:39",
+      "tests/unit/test_media_out_of_scope.py:32",
+      "tests/unit/test_media_out_of_scope.py:47",
+      "tests/unit/test_media_out_of_scope.py:91",
+      "tests/unit/test_multiformat.py:425",
+      "tests/unit/test_multiformat.py:428"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/processingApi.ts:60",
+      "tests/integration/source_postgres/test_runtime.py:36",
+      "tests/integration/test_mongo_processing.py:61",
+      "tests/integration/test_mongo_processing.py:107",
+      "tests/integration/test_processing_retry_integration.py:39",
+      "tests/integration/test_processing_retry_integration.py:132",
+      "tests/integration/test_resource_ingest_api.py:65",
+      "tests/unit/test_media_out_of_scope.py:58",
+      "tests/unit/test_multiformat.py:162",
+      "tests/unit/test_multiformat.py:178",
+      "tests/unit/test_multiformat.py:381",
+      "tests/unit/test_multiformat.py:398",
+      "tests/unit/test_multiformat.py:466",
+      "tests/unit/test_process_version.py:24",
+      "tests/unit/test_process_version.py:96",
+      "tests/unit/test_process_version.py:137",
+      "tests/unit/test_process_version.py:153",
+      "tests/unit/test_process_version.py:160",
+      "tests/unit/test_process_version.py:162",
+      "tests/unit/test_process_version.py:163",
+      "tests/unit/test_process_version.py:174",
+      "tests/unit/test_process_version.py:486"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:673",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/processingApi.ts:60"
+    ],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "process_resource_version",
+    "method": "POST",
+    "path": "/api/v1/resource-versions/{id}/process",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.processing_schemas.ProcessVersionResponse'>",
+    "service_refs": [
+      "process_version"
+    ],
+    "success_status": 202,
+    "tags": [
+      "Multimedia Data Processing and Normalization"
+    ],
+    "test_script_calls": [
+      "tests/integration/source_postgres/test_runtime.py:36",
+      "tests/integration/test_mongo_processing.py:61",
+      "tests/integration/test_mongo_processing.py:107",
+      "tests/integration/test_processing_retry_integration.py:39",
+      "tests/integration/test_processing_retry_integration.py:132",
+      "tests/integration/test_resource_ingest_api.py:65",
+      "tests/unit/test_media_out_of_scope.py:58",
+      "tests/unit/test_multiformat.py:162",
+      "tests/unit/test_multiformat.py:178",
+      "tests/unit/test_multiformat.py:381",
+      "tests/unit/test_multiformat.py:398",
+      "tests/unit/test_multiformat.py:466",
+      "tests/unit/test_process_version.py:24",
+      "tests/unit/test_process_version.py:96",
+      "tests/unit/test_process_version.py:137",
+      "tests/unit/test_process_version.py:153",
+      "tests/unit/test_process_version.py:160",
+      "tests/unit/test_process_version.py:162",
+      "tests/unit/test_process_version.py:163",
+      "tests/unit/test_process_version.py:174",
+      "tests/unit/test_process_version.py:486"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/processingApi.ts:84",
+      "tests/integration/test_processing_retry_integration.py:53",
+      "tests/integration/test_processing_retry_integration.py:56",
+      "tests/integration/test_processing_retry_integration.py:68",
+      "tests/integration/test_processing_retry_integration.py:98",
+      "tests/integration/test_processing_retry_integration.py:103",
+      "tests/integration/test_processing_retry_integration.py:143",
+      "tests/integration/test_processing_retry_integration.py:146",
+      "tests/unit/test_media_out_of_scope.py:63",
+      "tests/unit/test_media_out_of_scope.py:105",
+      "tests/unit/test_multiformat.py:407",
+      "tests/unit/test_processing_job_retry.py:39",
+      "tests/unit/test_processing_job_retry.py:88",
+      "tests/unit/test_processing_job_retry.py:90",
+      "tests/unit/test_processing_job_retry.py:91",
+      "tests/unit/test_processing_job_retry.py:99",
+      "tests/unit/test_processing_job_retry.py:100"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:705",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/processingApi.ts:84"
+    ],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "retry_processing_job",
+    "method": "POST",
+    "path": "/api/v1/processing-jobs/{job_id}/retry",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.processing_schemas.RetryProcessingJobResponse'>",
+    "service_refs": [
+      "retry_processing_job"
+    ],
+    "success_status": 202,
+    "tags": [
+      "Multimedia Data Processing and Normalization"
+    ],
+    "test_script_calls": [
+      "tests/integration/test_processing_retry_integration.py:53",
+      "tests/integration/test_processing_retry_integration.py:56",
+      "tests/integration/test_processing_retry_integration.py:68",
+      "tests/integration/test_processing_retry_integration.py:98",
+      "tests/integration/test_processing_retry_integration.py:103",
+      "tests/integration/test_processing_retry_integration.py:143",
+      "tests/integration/test_processing_retry_integration.py:146",
+      "tests/unit/test_media_out_of_scope.py:63",
+      "tests/unit/test_media_out_of_scope.py:105",
+      "tests/unit/test_multiformat.py:407",
+      "tests/unit/test_processing_job_retry.py:39",
+      "tests/unit/test_processing_job_retry.py:88",
+      "tests/unit/test_processing_job_retry.py:90",
+      "tests/unit/test_processing_job_retry.py:91",
+      "tests/unit/test_processing_job_retry.py:99",
+      "tests/unit/test_processing_job_retry.py:100"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/masterSyncApi.ts:26",
+      "frontend/src/services/masterSyncApi.ts:36",
+      "frontend/src/services/masterSyncApi.ts:45",
+      "frontend/src/services/masterSyncApi.ts:56",
+      "frontend/src/services/masterSyncApi.ts:75",
+      "frontend/src/services/masterSyncApi.ts:92",
+      "tests/unit/test_api_migrations.py:20",
+      "tests/unit/test_api_migrations.py:21",
+      "tests/unit/test_api_migrations.py:23",
+      "tests/unit/test_api_migrations.py:32",
+      "tests/unit/test_api_migrations.py:43",
+      "tests/unit/test_api_migrations.py:45",
+      "tests/unit/test_api_migrations.py:57",
+      "tests/unit/test_api_migrations.py:59",
+      "tests/unit/test_api_migrations.py:62",
+      "tests/unit/test_api_migrations.py:65",
+      "tests/unit/test_api_migrations.py:69",
+      "tests/unit/test_api_migrations.py:83",
+      "tests/unit/test_api_migrations.py:96",
+      "tests/unit/test_api_migrations.py:108",
+      "tests/unit/test_master_metadata_projection.py:74",
+      "tests/unit/test_master_metadata_projection.py:110",
+      "tests/unit/test_master_metadata_projection.py:372",
+      "tests/unit/test_source_file_import.py:235",
+      "tests/unit/test_source_file_import.py:238",
+      "tests/unit/test_source_file_import.py:240",
+      "tests/unit/test_source_file_import.py:241",
+      "tests/unit/test_source_file_import.py:243",
+      "tests/unit/test_source_file_import.py:244",
+      "tests/unit/test_source_file_import.py:263",
+      "tests/unit/test_source_file_import.py:268",
+      "tests/unit/test_source_file_import.py:274",
+      "tests/unit/test_source_file_import.py:371",
+      "tests/unit/test_source_file_import.py:373",
+      "tests/unit/test_source_file_import.py:378",
+      "tests/unit/test_source_sync_files.py:9",
+      "tests/unit/test_source_sync_files.py:11",
+      "tests/unit/test_source_sync_files.py:14",
+      "tests/unit/test_source_sync_files.py:36",
+      "tests/unit/test_source_sync_files.py:44",
+      "tests/unit/test_source_sync_files.py:46",
+      "tests/unit/test_source_sync_files.py:59"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:727",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/masterSyncApi.ts:26",
+      "frontend/src/services/masterSyncApi.ts:36",
+      "frontend/src/services/masterSyncApi.ts:45",
+      "frontend/src/services/masterSyncApi.ts:56",
+      "frontend/src/services/masterSyncApi.ts:75",
+      "frontend/src/services/masterSyncApi.ts:92"
+    ],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "sync_master_data",
+    "method": "POST",
+    "path": "/api/v1/master-data/sync",
+    "request": "<class 'data_sync_etl.api.master_sync_schemas.MasterSyncRequest'>",
+    "response": "dict[str, data_sync_etl.api.master_sync_schemas.MasterSyncRunResult]",
+    "service_refs": [
+      "sync"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_api_migrations.py:20",
+      "tests/unit/test_api_migrations.py:21",
+      "tests/unit/test_api_migrations.py:23",
+      "tests/unit/test_api_migrations.py:32",
+      "tests/unit/test_api_migrations.py:43",
+      "tests/unit/test_api_migrations.py:45",
+      "tests/unit/test_api_migrations.py:57",
+      "tests/unit/test_api_migrations.py:59",
+      "tests/unit/test_api_migrations.py:62",
+      "tests/unit/test_api_migrations.py:65",
+      "tests/unit/test_api_migrations.py:69",
+      "tests/unit/test_api_migrations.py:83",
+      "tests/unit/test_api_migrations.py:96",
+      "tests/unit/test_api_migrations.py:108",
+      "tests/unit/test_master_metadata_projection.py:74",
+      "tests/unit/test_master_metadata_projection.py:110",
+      "tests/unit/test_master_metadata_projection.py:372",
+      "tests/unit/test_source_file_import.py:235",
+      "tests/unit/test_source_file_import.py:238",
+      "tests/unit/test_source_file_import.py:240",
+      "tests/unit/test_source_file_import.py:241",
+      "tests/unit/test_source_file_import.py:243",
+      "tests/unit/test_source_file_import.py:244",
+      "tests/unit/test_source_file_import.py:263",
+      "tests/unit/test_source_file_import.py:268",
+      "tests/unit/test_source_file_import.py:274",
+      "tests/unit/test_source_file_import.py:371",
+      "tests/unit/test_source_file_import.py:373",
+      "tests/unit/test_source_file_import.py:378",
+      "tests/unit/test_source_sync_files.py:9",
+      "tests/unit/test_source_sync_files.py:11",
+      "tests/unit/test_source_sync_files.py:14",
+      "tests/unit/test_source_sync_files.py:36",
+      "tests/unit/test_source_sync_files.py:44",
+      "tests/unit/test_source_sync_files.py:46",
+      "tests/unit/test_source_sync_files.py:59"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/masterSyncApi.ts:75",
+      "tests/unit/test_api_migrations.py:21",
+      "tests/unit/test_api_migrations.py:45",
+      "tests/unit/test_api_migrations.py:57",
+      "tests/unit/test_source_sync_files.py:46"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:740",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/masterSyncApi.ts:75"
+    ],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "master_sync_status",
+    "method": "GET",
+    "path": "/api/v1/master-data/sync/status",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.master_sync_schemas.MasterSyncStatusResponse'>",
+    "service_refs": [
+      "auto_sync",
+      "source_file_import",
+      "sync"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_api_migrations.py:21",
+      "tests/unit/test_api_migrations.py:45",
+      "tests/unit/test_api_migrations.py:57",
+      "tests/unit/test_source_sync_files.py:46"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/masterSyncApi.ts:92",
+      "tests/unit/test_api_migrations.py:23",
+      "tests/unit/test_api_migrations.py:59",
+      "tests/unit/test_api_migrations.py:62",
+      "tests/unit/test_api_migrations.py:65",
+      "tests/unit/test_api_migrations.py:69",
+      "tests/unit/test_api_migrations.py:96",
+      "tests/unit/test_api_migrations.py:108"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:751",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/masterSyncApi.ts:92"
+    ],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "configure_master_sync_auto",
+    "method": "PATCH",
+    "path": "/api/v1/master-data/sync/auto",
+    "request": "<class 'data_sync_etl.api.master_sync_schemas.MasterSyncAutoRequest'>",
+    "response": "<class 'data_sync_etl.api.master_sync_schemas.MasterSyncStatusResponse'>",
+    "service_refs": [
+      "auto_sync",
+      "source_file_import",
+      "sync"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_api_migrations.py:23",
+      "tests/unit/test_api_migrations.py:59",
+      "tests/unit/test_api_migrations.py:62",
+      "tests/unit/test_api_migrations.py:65",
+      "tests/unit/test_api_migrations.py:69",
+      "tests/unit/test_api_migrations.py:96",
+      "tests/unit/test_api_migrations.py:108"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/masterSyncApi.ts:26",
+      "frontend/src/services/masterSyncApi.ts:36",
+      "frontend/src/services/masterSyncApi.ts:45",
+      "tests/unit/test_source_file_import.py:235",
+      "tests/unit/test_source_file_import.py:238",
+      "tests/unit/test_source_file_import.py:240",
+      "tests/unit/test_source_file_import.py:241",
+      "tests/unit/test_source_file_import.py:243",
+      "tests/unit/test_source_file_import.py:244",
+      "tests/unit/test_source_file_import.py:263",
+      "tests/unit/test_source_file_import.py:268",
+      "tests/unit/test_source_file_import.py:274",
+      "tests/unit/test_source_file_import.py:371",
+      "tests/unit/test_source_file_import.py:373",
+      "tests/unit/test_source_file_import.py:378",
+      "tests/unit/test_source_sync_files.py:9",
+      "tests/unit/test_source_sync_files.py:11",
+      "tests/unit/test_source_sync_files.py:14",
+      "tests/unit/test_source_sync_files.py:36",
+      "tests/unit/test_source_sync_files.py:44",
+      "tests/unit/test_source_sync_files.py:59"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:766",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/masterSyncApi.ts:26",
+      "frontend/src/services/masterSyncApi.ts:36",
+      "frontend/src/services/masterSyncApi.ts:45"
+    ],
+    "guard_calls": [
+      "source_file_admin"
+    ],
+    "handler": "source_sync_files",
+    "method": "GET",
+    "path": "/api/v1/master-data/sync/files",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.master_sync_schemas.SourceSyncFilesResponse'>",
+    "service_refs": [
+      "source_file_import"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_source_file_import.py:235",
+      "tests/unit/test_source_file_import.py:238",
+      "tests/unit/test_source_file_import.py:240",
+      "tests/unit/test_source_file_import.py:241",
+      "tests/unit/test_source_file_import.py:243",
+      "tests/unit/test_source_file_import.py:244",
+      "tests/unit/test_source_file_import.py:263",
+      "tests/unit/test_source_file_import.py:268",
+      "tests/unit/test_source_file_import.py:274",
+      "tests/unit/test_source_file_import.py:371",
+      "tests/unit/test_source_file_import.py:373",
+      "tests/unit/test_source_file_import.py:378",
+      "tests/unit/test_source_sync_files.py:9",
+      "tests/unit/test_source_sync_files.py:11",
+      "tests/unit/test_source_sync_files.py:14",
+      "tests/unit/test_source_sync_files.py:36",
+      "tests/unit/test_source_sync_files.py:44",
+      "tests/unit/test_source_sync_files.py:59"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/masterSyncApi.ts:45",
+      "tests/unit/test_source_file_import.py:238",
+      "tests/unit/test_source_file_import.py:243"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:785",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/masterSyncApi.ts:45"
+    ],
+    "guard_calls": [
+      "source_file_admin"
+    ],
+    "handler": "retry_failed_source_files",
+    "method": "POST",
+    "path": "/api/v1/master-data/sync/files/retry-failed",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.master_sync_schemas.SourceFilesBatchRetryResponse'>",
+    "service_refs": [
+      "source_file_import"
+    ],
+    "success_status": 202,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_source_file_import.py:238",
+      "tests/unit/test_source_file_import.py:243"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/masterSyncApi.ts:36",
+      "tests/unit/test_source_file_import.py:240",
+      "tests/unit/test_source_file_import.py:241"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:796",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/masterSyncApi.ts:36"
+    ],
+    "guard_calls": [
+      "source_file_admin"
+    ],
+    "handler": "retry_source_file",
+    "method": "POST",
+    "path": "/api/v1/master-data/sync/files/{file_id}/retry",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.master_sync_schemas.SourceFileRetryResponse'>",
+    "service_refs": [
+      "source_file_import"
+    ],
+    "success_status": 202,
+    "tags": [
+      "Learning Resource Ingestion and Management"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_source_file_import.py:240",
+      "tests/unit/test_source_file_import.py:241"
+    ]
+  },
+  {
+    "call_sites": [
+      "tests/unit/test_api_migrations.py:19",
+      "tests/unit/test_api_migrations.py:71",
+      "tests/unit/test_api_migrations.py:147",
+      "tests/unit/test_api_migrations.py:150",
+      "tests/unit/test_boundaries.py:24",
+      "tests/unit/test_security_hardening.py:26"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_TEST_SCRIPT",
+    "decision": "KEEP",
+    "documented": false,
+    "evidence": "src/data_sync_etl/api/routes.py:807",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "sync",
+    "method": "POST",
+    "path": "/admin/sync/master",
+    "request": "<class 'data_sync_etl.api.master_sync_schemas.MasterSyncRequest'>",
+    "response": "None",
+    "service_refs": [
+      "sync"
+    ],
+    "success_status": 200,
+    "tags": [],
+    "test_script_calls": [
+      "tests/unit/test_api_migrations.py:19",
+      "tests/unit/test_api_migrations.py:71",
+      "tests/unit/test_api_migrations.py:147",
+      "tests/unit/test_api_migrations.py:150",
+      "tests/unit/test_boundaries.py:24",
+      "tests/unit/test_security_hardening.py:26"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/pages/library/ResourceFilePanel.tsx:45",
+      "frontend/src/services/indexingApi.ts:31",
+      "frontend/src/services/indexingApi.ts:50",
+      "src/data_sync_etl/application/indexing.py:180"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:814",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/pages/library/ResourceFilePanel.tsx:45",
+      "frontend/src/services/indexingApi.ts:31",
+      "frontend/src/services/indexingApi.ts:50"
+    ],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "index_version",
+    "method": "POST",
+    "path": "/api/v1/resource-versions/{id}/index",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.indexing_schemas.IndexRequestResponse'>",
+    "service_refs": [
+      "indexing"
+    ],
+    "success_status": 202,
+    "tags": [
+      "Data Chunking and Representation"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [],
+    "category": "ADMIN_WRITE",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:826",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "ingest",
+    "method": "POST",
+    "path": "/admin/resources/{id}/versions/ingest",
+    "request": "<class 'data_sync_etl.api.routes.IngestInput'>",
+    "response": "None",
+    "service_refs": [
+      "ingestion"
+    ],
+    "success_status": 200,
+    "tags": [],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/indexingApi.ts:46",
+      "tests/unit/test_indexing.py:96"
+    ],
+    "category": "READ_SENSITIVE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:833",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/indexingApi.ts:46"
+    ],
+    "guard_calls": [],
+    "handler": "chunk_preview",
+    "method": "GET",
+    "path": "/api/v1/resource-versions/{id}/chunks",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.indexing_schemas.ChunksResponse'>",
+    "service_refs": [
+      "indexing"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Data Chunking and Representation"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_indexing.py:96"
+    ]
+  },
+  {
+    "call_sites": [],
+    "category": "ADMIN_WRITE",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:845",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "create_job",
+    "method": "POST",
+    "path": "/admin/resource-versions/{id}/ocr-jobs",
+    "request": "data_sync_etl.api.routes.JobInput | None",
+    "response": "None",
+    "service_refs": [
+      "ocr"
+    ],
+    "success_status": 200,
+    "tags": [],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [
+      "frontend/src/pages/library/ResourceFilePanel.tsx:45",
+      "frontend/src/services/indexingApi.ts:50",
+      "src/data_sync_etl/application/indexing.py:180"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:852",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/pages/library/ResourceFilePanel.tsx:45",
+      "frontend/src/services/indexingApi.ts:50"
+    ],
+    "guard_calls": [],
+    "handler": "index_status",
+    "method": "GET",
+    "path": "/api/v1/resource-versions/{id}/index-status",
+    "request": null,
+    "response": "<class 'data_sync_etl.api.indexing_schemas.IndexStatusResponse'>",
+    "service_refs": [
+      "indexing"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Data Chunking and Representation"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [
+      "tests/unit/test_process_version.py:324"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_TEST_SCRIPT",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:860",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "postprocess",
+    "method": "POST",
+    "path": "/admin/resource-versions/{id}/postprocess",
+    "request": null,
+    "response": "None",
+    "service_refs": [
+      "postprocess"
+    ],
+    "success_status": 200,
+    "tags": [],
+    "test_script_calls": [
+      "tests/unit/test_process_version.py:324"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/indexingApi.ts:54"
+    ],
+    "category": "ADMIN_WRITE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:867",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/indexingApi.ts:54"
+    ],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "reindex_version",
+    "method": "POST",
+    "path": "/api/v1/resource-versions/{id}/reindex",
+    "request": "data_sync_etl.api.indexing_schemas.ReindexRequest | None",
+    "response": "<class 'data_sync_etl.api.indexing_schemas.IndexRequestResponse'>",
+    "service_refs": [
+      "indexing"
+    ],
+    "success_status": 202,
+    "tags": [
+      "Data Chunking and Representation"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [
+      "src/data_sync_etl/application/process_version.py:47",
+      "src/data_sync_etl/application/retry_processing_job.py:22",
+      "tests/unit/test_api_migrations.py:152",
+      "tests/unit/test_boundaries.py:26",
+      "tests/unit/test_processing_job_retry.py:60"
+    ],
+    "category": "ADMIN_READ",
+    "classification": "USED_TEST_SCRIPT",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:876",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "status",
+    "method": "GET",
+    "path": "/admin/resource-versions/{id}/etl-status",
+    "request": null,
+    "response": "None",
+    "service_refs": [
+      "orchestrator"
+    ],
+    "success_status": 200,
+    "tags": [],
+    "test_script_calls": [
+      "tests/unit/test_api_migrations.py:152",
+      "tests/unit/test_boundaries.py:26",
+      "tests/unit/test_processing_job_retry.py:60"
+    ]
+  },
+  {
+    "call_sites": [
+      "frontend/src/services/processingApi.ts:132",
+      "tests/unit/test_media_out_of_scope.py:98",
+      "tests/unit/test_media_out_of_scope.py:109",
+      "tests/unit/test_multiformat.py:170",
+      "tests/unit/test_multiformat.py:181",
+      "tests/unit/test_resource_version_content_units.py:9",
+      "tests/unit/test_resource_version_content_units.py:37",
+      "tests/unit/test_resource_version_content_units.py:50",
+      "tests/unit/test_resource_version_content_units.py:58"
+    ],
+    "category": "READ_SENSITIVE",
+    "classification": "USED_FRONTEND",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:885",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [
+      "frontend/src/services/processingApi.ts:132"
+    ],
+    "guard_calls": [],
+    "handler": "list_public_content_units",
+    "method": "GET",
+    "path": "/api/v1/resource-versions/{id}/content-units",
+    "request": null,
+    "response": "<class 'dict'>",
+    "service_refs": [
+      "orchestrator"
+    ],
+    "success_status": 200,
+    "tags": [
+      "Multimedia Data Processing and Normalization"
+    ],
+    "test_script_calls": [
+      "tests/unit/test_media_out_of_scope.py:98",
+      "tests/unit/test_media_out_of_scope.py:109",
+      "tests/unit/test_multiformat.py:170",
+      "tests/unit/test_multiformat.py:181",
+      "tests/unit/test_resource_version_content_units.py:9",
+      "tests/unit/test_resource_version_content_units.py:37",
+      "tests/unit/test_resource_version_content_units.py:50",
+      "tests/unit/test_resource_version_content_units.py:58"
+    ]
+  },
+  {
+    "call_sites": [
+      "tests/unit/test_content_units_api.py:14",
+      "tests/unit/test_content_units_api.py:44",
+      "tests/unit/test_content_units_api.py:49"
+    ],
+    "category": "READ_SENSITIVE",
+    "classification": "USED_TEST_SCRIPT",
+    "decision": "KEEP",
+    "documented": true,
+    "evidence": "src/data_sync_etl/api/routes.py:901",
+    "external_compatibility": "UNKNOWN: no owner-approved deprecation contract; no removal authorized",
+    "frontend_calls": [],
+    "guard_calls": [
+      "services"
+    ],
+    "handler": "content_units",
+    "method": "GET",
+    "path": "/admin/resource-versions/{id}/content-units",
+    "request": null,
+    "response": "None",
+    "service_refs": [
+      "orchestrator"
+    ],
+    "success_status": 200,
+    "tags": [],
+    "test_script_calls": [
+      "tests/unit/test_content_units_api.py:14",
+      "tests/unit/test_content_units_api.py:44",
+      "tests/unit/test_content_units_api.py:49"
+    ]
+  },
+  {
+    "call_sites": [],
+    "category": "READ_PUBLIC",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": false,
+    "evidence": "FastAPI framework",
+    "external_compatibility": "Framework documentation, not an unused internal business API",
+    "frontend_calls": [],
+    "guard_calls": [],
+    "handler": "openapi",
+    "method": "GET",
+    "path": "/openapi.json",
+    "request": null,
+    "response": null,
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Framework"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [],
+    "category": "READ_PUBLIC",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": false,
+    "evidence": "FastAPI framework",
+    "external_compatibility": "Framework documentation, not an unused internal business API",
+    "frontend_calls": [],
+    "guard_calls": [],
+    "handler": "openapi",
+    "method": "HEAD",
+    "path": "/openapi.json",
+    "request": null,
+    "response": null,
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Framework"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [],
+    "category": "READ_PUBLIC",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": false,
+    "evidence": "FastAPI framework",
+    "external_compatibility": "Framework documentation, not an unused internal business API",
+    "frontend_calls": [],
+    "guard_calls": [],
+    "handler": "swagger_ui_html",
+    "method": "GET",
+    "path": "/docs",
+    "request": null,
+    "response": null,
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Framework"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [],
+    "category": "READ_PUBLIC",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": false,
+    "evidence": "FastAPI framework",
+    "external_compatibility": "Framework documentation, not an unused internal business API",
+    "frontend_calls": [],
+    "guard_calls": [],
+    "handler": "swagger_ui_html",
+    "method": "HEAD",
+    "path": "/docs",
+    "request": null,
+    "response": null,
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Framework"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [],
+    "category": "READ_PUBLIC",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": false,
+    "evidence": "FastAPI framework",
+    "external_compatibility": "Framework documentation, not an unused internal business API",
+    "frontend_calls": [],
+    "guard_calls": [],
+    "handler": "swagger_ui_redirect",
+    "method": "GET",
+    "path": "/docs/oauth2-redirect",
+    "request": null,
+    "response": null,
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Framework"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [],
+    "category": "READ_PUBLIC",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": false,
+    "evidence": "FastAPI framework",
+    "external_compatibility": "Framework documentation, not an unused internal business API",
+    "frontend_calls": [],
+    "guard_calls": [],
+    "handler": "swagger_ui_redirect",
+    "method": "HEAD",
+    "path": "/docs/oauth2-redirect",
+    "request": null,
+    "response": null,
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Framework"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [],
+    "category": "READ_PUBLIC",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": false,
+    "evidence": "FastAPI framework",
+    "external_compatibility": "Framework documentation, not an unused internal business API",
+    "frontend_calls": [],
+    "guard_calls": [],
+    "handler": "redoc_html",
+    "method": "GET",
+    "path": "/redoc",
+    "request": null,
+    "response": null,
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Framework"
+    ],
+    "test_script_calls": []
+  },
+  {
+    "call_sites": [],
+    "category": "READ_PUBLIC",
+    "classification": "EXTERNALLY_EXPOSED_UNKNOWN",
+    "decision": "KEEP",
+    "documented": false,
+    "evidence": "FastAPI framework",
+    "external_compatibility": "Framework documentation, not an unused internal business API",
+    "frontend_calls": [],
+    "guard_calls": [],
+    "handler": "redoc_html",
+    "method": "HEAD",
+    "path": "/redoc",
+    "request": null,
+    "response": null,
+    "service_refs": [],
+    "success_status": 200,
+    "tags": [
+      "Framework"
+    ],
+    "test_script_calls": []
+  }
+]

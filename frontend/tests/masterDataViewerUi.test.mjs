@@ -46,7 +46,14 @@ test('Master Data read-only and file readiness/errors in real browser', {
             '/api/v1/grade-levels': [{ id: 'g1', grade_code: '6', grade_name_vi: 'Lớp 6' }],
             '/api/v1/subjects': [{ id: 's1', name: 'Toán', grade_level_id: 'g1' }],
         }
-        if (path in options) return json({ items: options[path], pagination: { page: 1, total_pages: 1 } })
+        if (path in options) {
+            const params = new URL(req.url, 'http://127.0.0.1').searchParams
+            const page = Number(params.get('page') || 1), size = Number(params.get('size') || 100)
+            const query = (params.get('q') || '').toLocaleLowerCase('vi')
+            const items = options[path].filter(row => Object.values(row).join(' ').toLocaleLowerCase('vi').includes(query))
+            return json({ items: items.slice((page - 1) * size, page * size),
+                pagination: { page, size, total: items.length, total_pages: Math.ceil(items.length / size) } })
+        }
         if (/^\/api\/v1\/resources\/r[01]$/.test(path)) return json({
             id: path.endsWith('r0') ? 'r0' : 'r1', title: 'Học liệu kiểm thử', source_origin: 'POSTGRESQL',
             provider_name: 'Đơn vị 1', resource_type_name_vi: 'Tài liệu', publication_status: 'PUBLISHED',
@@ -124,9 +131,13 @@ test('Master Data read-only and file readiness/errors in real browser', {
         await waitFor(() => evaluate('document.body?.textContent.includes("Trang 2/2")'))
         assert.equal(await evaluate('document.querySelectorAll("tbody tr").length'), 2)
         await capture('master-desktop')
+        await evaluate('document.querySelector("input").focus()')
+        await call('Input.insertText', { text: 'Đơn vị 8' })
+        await click('Lọc')
+        await waitFor(() => evaluate('document.querySelectorAll("tbody tr").length===1 && document.querySelector("tbody").textContent.includes("Đơn vị 8")'))
         await evaluate('const el=document.querySelector("select");el.value="subjects";el.dispatchEvent(new Event("change",{bubbles:true}))')
         await waitFor(() => evaluate('document.querySelector("tbody")?.textContent.includes("Toán")'))
-        assert.equal(await evaluate('document.querySelectorAll("form").length'), 0)
+        assert.equal(await evaluate('document.querySelector("form").method'), 'get')
         await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
         await capture('master-mobile')
         assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true)

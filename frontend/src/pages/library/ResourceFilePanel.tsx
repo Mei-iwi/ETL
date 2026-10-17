@@ -3,12 +3,17 @@ import styles from './LibraryResourceDetailPage.module.css'
 import { SearchContext } from '../search/SearchContext'
 import { canOpenFile, fileErrorMessage } from './fileReadiness'
 import type { FileIndexStatus } from './fileReadiness'
+import { readPreviewBlob } from './previewBody'
 
 type Version = { id: string; version_number: number; created_at: string }
 
-export function ResourceFilePanel({ resourceId, versionId, contextId, sourceOwned = false }: {
+type FilePanelProps = {
     resourceId: string; versionId: string | null; contextId: string | null; sourceOwned?: boolean
-}) {
+}
+export function ResourceFilePanel(props: FilePanelProps) {
+    return <VersionFilePanel key={JSON.stringify([props.resourceId, props.versionId])} {...props} />
+}
+function VersionFilePanel({ resourceId, versionId, contextId, sourceOwned = false }: FilePanelProps) {
     const [versions, setVersions] = useState<Version[]>([])
     const [selected, setSelected] = useState(versionId || '')
     const [error, setError] = useState('')
@@ -90,11 +95,7 @@ function FilePreview({ url }: { url: string }) {
         void fetch(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]) })
             .then(async response => {
                 if (!response.ok) throw new Error(fileErrorMessage(response.status))
-                if (Number(response.headers.get('Content-Length')) > 30 * 1024 * 1024) {
-                    await response.body?.cancel()
-                    throw new Error('Tệp lớn hơn 30 MB. Hãy tải về để xem.')
-                }
-                const blob = await response.blob()
+                const blob = await readPreviewBlob(response, controller.signal)
                 const text = blob.type.startsWith('text/') ? await blob.slice(0, 200000).text() : ''
                 if (controller.signal.aborted) return
                 objectUrl = URL.createObjectURL(blob)
@@ -122,7 +123,7 @@ function OfficeTextPreview({ url }: { url: string }) {
         const controller = new AbortController()
         void fetch(`${url}?view=text`, { signal: controller.signal }).then(async response => {
             if (!response.ok) throw new Error(fileErrorMessage(response.status))
-            const value = await response.text()
+            const value = await (await readPreviewBlob(response, controller.signal, 1024 * 1024)).text()
             if (!controller.signal.aborted) setText(value)
         }).catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Không tải được nội dung.') })
         return () => controller.abort()

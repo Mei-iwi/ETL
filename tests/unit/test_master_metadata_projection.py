@@ -3,7 +3,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.adapters.mongo.foundation_store import MongoMetadataStore
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyRepository
@@ -15,6 +14,7 @@ from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.mongo_documents import ResourceDescriptionDocument, UserProfileDocument
 from data_sync_etl.main import create_app
 from data_sync_etl.workers.master_sync import MasterSyncWorker
+from tests.local_admin_client import TestClient
 
 
 @pytest.fixture(autouse=True)
