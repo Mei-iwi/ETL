@@ -86,8 +86,8 @@
 }
 
 .processTable th {
-    color: white;
-    background-color: blue;
+    color: #ffffff;
+    background-color: #1e3a8a;
     font-size: 13px;
     font-weight: 700;
     white-space: nowrap;

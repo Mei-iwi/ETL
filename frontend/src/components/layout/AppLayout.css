@@ -80,12 +80,12 @@
 }
 
 .nav-item:hover {
-    color: #2563eb;
+    color: #1e3a8a;
     background-color: #f8fafc;
 }
 
 .nav-item.active {
-    color: #2563eb;
+    color: #1e3a8a;
 }
 
 .nav-item.active::after {
@@ -96,7 +96,7 @@
     left: 16px;
     height: 3px;
     border-radius: 3px 3px 0 0;
-    background-color: #2563eb;
+    background-color: #1e3a8a;
 }
 
 .connection-status {
@@ -258,18 +258,18 @@
 }
 
 .sub-menu-item:hover {
-    color: #2563eb;
+    color: #1e3a8a;
     background-color: #eff6ff;
 }
 
 .sub-menu-item.active {
     color: #ffffff;
-    background-color: #2563eb;
-    border-color: #2563eb;
-    box-shadow: 0 2px 6px rgb(37 99 235 / 20%);
+    background-color: #1e3a8a;
+    border-color: #1e3a8a;
+    box-shadow: 0 2px 6px rgb(30 58 138 / 20%);
 }
 
 .sub-menu-item:focus-visible {
-    outline: 3px solid rgb(37 99 235 / 25%);
+    outline: 3px solid rgb(30 58 138 / 25%);
     outline-offset: 2px;
 }

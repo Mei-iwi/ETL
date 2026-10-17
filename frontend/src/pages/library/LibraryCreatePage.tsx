@@ -305,18 +305,7 @@ export function LibraryCreatePage() {
     return (
         <section className={styles.page}>
             <header className={styles.pageHeader}>
-                <div className={styles.breadcrumb}>
-                    <span>Thư viện số</span>
-                    <span className={styles.breadcrumbDivider}>/</span>
-                    <span className={styles.breadcrumbCurrent}>
-                        Thêm học liệu
-                    </span>
-                </div>
-
                 <h1>Thêm học liệu số</h1>
-                <p className={styles.pageDescription}>
-                    Bổ sung tệp học liệu và thông tin để đưa vào thư viện số.
-                </p>
             </header>
 
             <CatalogNotice providers={providers} types={resourceTypes} />
