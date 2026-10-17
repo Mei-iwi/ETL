@@ -126,7 +126,7 @@ class PostgreSQLSourceAdapter:
         if engine is None:
             if not url or make_url(url).get_backend_name() != "postgresql":
                 raise DomainError("BLOCKED_SOURCE_MAPPING: PostgreSQL SOURCE_DATABASE_URL required")
-            engine = create_engine(url, hide_parameters=True, pool_timeout=5, connect_args={"connect_timeout": 5})
+            engine = create_engine(url, hide_parameters=True, connect_args={"connect_timeout": 5})
         if engine.dialect.name != "postgresql" or replay_seconds < 0:
             raise DomainError("BLOCKED_SOURCE_MAPPING: invalid PostgreSQL source configuration")
         self.engine = engine
