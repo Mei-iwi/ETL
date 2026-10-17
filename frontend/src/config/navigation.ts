@@ -48,7 +48,7 @@ export const navagationItems: NavigationGroup[] = [
             {
                 to: '/library/source-sync',
                 label: 'Đồng bộ dữ liệu nguồn',
-                end: true
+                end: false
             },
             {
                 to: '/library/source-sync-errors',
@@ -119,7 +119,8 @@ export const navagationItems: NavigationGroup[] = [
                 to: '/systems/capabilities',
                 label: 'Khả năng xử lý',
                 end: true,
-            }
+            },
+            { to: '/systems/master-data', label: 'Master Data', end: true }
         ]
     }
 ]

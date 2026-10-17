@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { Link, NavLink, Outlet } from 'react-router'
 import {
     configureMasterSyncAuto,
     getMasterSyncStatus,
@@ -35,6 +36,17 @@ const autoUnavailableLabels: Record<string, string> = {
     SOURCE_UNAVAILABLE: 'Không kết nối được dữ liệu nguồn',
     SYNC_FAILED: 'Lần tự động gần nhất thất bại',
     SYNC_BUSY: 'Đang có lượt đồng bộ khác',
+}
+
+export function SystemMasterSyncLayout() {
+    return <section className={styles.page}>
+        <h1>Đồng bộ dữ liệu nguồn</h1>
+        <nav className={styles.errorTabs} aria-label="Nhóm đồng bộ dữ liệu">
+            <NavLink to="/library/source-sync" end>Cấu hình đồng bộ</NavLink>
+            <NavLink to="/library/source-sync/files" end>Tệp học liệu từ nguồn</NavLink>
+        </nav>
+        <Outlet />
+    </section>
 }
 
 export function SystemMasterSyncPage() {
@@ -189,8 +201,7 @@ export function SystemMasterSyncPage() {
     }
 
     return (
-        <section className={styles.page}>
-            <h1>Đồng bộ dữ liệu nguồn</h1>
+        <div>
             {fileNotice && <p className={styles.notice} role="status">{fileNotice}</p>}
             {(actionError || statusError) && <p className={styles.error} role="alert">{actionError || statusError}</p>}
             <div className={`${styles.card} ${styles.statusCard}`}>
@@ -304,7 +315,7 @@ export function SystemMasterSyncPage() {
                 </div>
             )}
             {dialog}
-        </section>
+        </div>
     )
 }
 
@@ -338,7 +349,7 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
                 const response = await getSourceSyncFiles(cursor, requestController.signal, failedOnly ? {
                     size: 7,
                     status: retryableOnly === undefined ? 'failed' : retryableOnly ? 'failed-retryable' : 'failed-blocked',
-                } : {})
+                } : { size: 7 })
                 if (active && !requestController.signal.aborted && revision === filesRevisionRef.current && !retryingRef.current) {
                     setFiles(response)
                     onError('')
@@ -469,7 +480,15 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
                         <tbody>
                             {files.items.map((file) => (
                                 <tr key={file.source_version_id}>
-                                    <td>{file.resource_title ?? file.resource_id}</td>
+                                    <td><span className={styles.fileName} title={file.resource_title ?? file.resource_id}>{file.resource_title ?? file.resource_id}</span>
+                                        <details className={styles.fileDetails}><summary>Nguồn / đích</summary>
+                                            <div className={styles.fileMapping}>
+                                                <span>SOURCE: {file.source_version_id}</span>
+                                                <span>Master: {file.target_version_id || 'Chưa nhập'}</span>
+                                                {file.target_version_id && <Link to={`/library/processing?${new URLSearchParams({ resourceId: file.resource_id, versionId: file.target_version_id, ...(file.processing_job_id ? { jobId: file.processing_job_id } : {}) })}`}>Xem xử lý</Link>}
+                                            </div>
+                                        </details>
+                                    </td>
                                     <td>{file.source_version_number}</td>
                                     <td>{importLabels[file.import_status] ?? file.import_status}</td>
                                     <td>{file.etl_status ? etlLabels[file.etl_status] ?? file.etl_status : '—'}</td>

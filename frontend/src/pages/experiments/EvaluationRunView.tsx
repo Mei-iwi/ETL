@@ -62,6 +62,9 @@ function RunView({ id }: { id: string }) {
             {data && <>
                 <section className={layout.card}>
                     <h2>{data.dataset_name}</h2><p className={data.status === 'COMPLETED' ? styles.success : ['FAILED', 'NOT_COMPARABLE'].includes(data.status) ? styles.error : styles.pending}>Trạng thái: {data.status}</p>
+                    <p className={data.warnings.includes('LABELS_NOT_HUMAN_CONFIRMED') ? styles.pending : styles.muted}>
+                        {data.warnings.includes('LABELS_NOT_HUMAN_CONFIRMED') ? 'Nhãn chưa xác nhận — chỉ dùng kiểm thử.' : 'Nhãn đã xác nhận theo khai báo dataset.'}
+                    </p>
                     <p>{data.queries.length} truy vấn · {data.queries.reduce((count, query) => count + query.relevance.filter(label => label.grade >= data.relevance_threshold).length, 0)} nhãn dương · Đơn vị: học liệu.</p>
                     <details><summary>Thông tin lần chạy</summary>
                         <p className={styles.identifier}>Run ID: {data.id}</p>

@@ -154,6 +154,8 @@
 .filePreview img { display: block; max-width: 100%; max-height: 650px; object-fit: contain; margin: 16px auto; }
 .filePreview pre { max-height: 600px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; background: #f8fafc; line-height: 1.7; }
 .fileContext { margin-top: 16px; }
+.ready { color: #15803d; font-size: 14px; }
+.pending { color: #a16207; font-size: 14px; }
 
 @media (max-width: 600px) {
     .header h1 {
