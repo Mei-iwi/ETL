@@ -76,7 +76,7 @@ export const navagationItems: NavigationGroup[] = [
         children: [
             {
                 to: '/search/query-methods',
-                label: 'Phương pháp truy vấn',
+                label: 'Tìm kiếm học liệu',
                 end: true,
             }
         ]
