@@ -5,11 +5,11 @@ from threading import Event
 
 import pytest
 from conftest import ingest
-from fastapi.testclient import TestClient
 from pymongo import MongoClient
 
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 
 @pytest.mark.postgres

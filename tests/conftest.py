@@ -68,6 +68,7 @@ def container(tmp_path):
         ocr_engine="fake",
         source_adapter="json",
         admin_enabled=False,
+        app_environment="development",
     )
     result = Container(settings, engine, MemoryDocumentStore())
     yield result

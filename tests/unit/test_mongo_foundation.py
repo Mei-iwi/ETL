@@ -357,10 +357,9 @@ def test_save_keywords_requires_pg_leaf_and_matching_version():
 
 
 def test_api_can_start_with_mongo_unavailable(container):
-    from fastapi.testclient import TestClient
-
     from data_sync_etl.composition import Container
     from data_sync_etl.main import create_app
+    from tests.local_admin_client import TestClient
 
     settings = container.settings.model_copy(update={"mongo_uri": "mongodb://127.0.0.1:1"})
     runtime = Container(settings, container.engine)

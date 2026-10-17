@@ -3,7 +3,6 @@ from threading import Barrier
 
 import pytest
 from conftest import make_pdf, migrate
-from fastapi.testclient import TestClient
 from pymongo import MongoClient
 from sqlalchemy import MetaData, Table, select, text
 from sqlalchemy.exc import DBAPIError
@@ -12,6 +11,7 @@ from data_sync_etl.adapters.mongo.content_store import MongoContentStore
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyRepository
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 from .test_source import execute, use_source
 

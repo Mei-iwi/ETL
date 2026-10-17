@@ -1,15 +1,16 @@
-from conftest import completed, ingest
-from fastapi.testclient import TestClient
-
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
+from tests.unit.test_search import searchable as searchable
 
 
-def test_list_content_units_pagination_and_search(container):
-    version, _ = completed(container)
+def test_list_content_units_pagination_and_search(searchable):
+    container, version = searchable
     path = f"/api/v1/resource-versions/{version['id']}/content-units"
 
-    # API đọc content units dùng được khi admin API đang tắt.
-    assert container.settings.admin_enabled is False
+    container.settings.admin_enabled = False
+    with TestClient(create_app(container)) as denied:
+        assert denied.get(path).status_code == 403
+    container.settings.admin_enabled = True
 
     with TestClient(create_app(container)) as client:
         first = client.get(path, params={"offset": 0, "limit": 2})
@@ -32,19 +33,20 @@ def test_list_content_units_pagination_and_search(container):
     assert match.json()["items"][0]["sequence_no"] == 2
 
 
-def test_content_units_empty_before_processing(container):
-    version = ingest(container)
+def test_content_units_empty_before_processing(searchable):
+    container, _ = searchable
+    version = container.ingestion.run("resource-2", "input", "sample.pdf")["version"]
     path = f"/api/v1/resource-versions/{version['id']}/content-units"
 
     with TestClient(create_app(container)) as client:
         response = client.get(path)
 
-    assert response.status_code == 200
-    assert response.json()["items"] == []
-    assert response.json()["total"] == 0
+    assert response.status_code == 409
+    assert "items" not in response.json()
 
 
-def test_content_units_version_not_found(container):
+def test_content_units_version_not_found(searchable):
+    container, _ = searchable
     with TestClient(create_app(container)) as client:
         response = client.get(
             "/api/v1/resource-versions/not-found/content-units"
@@ -53,8 +55,8 @@ def test_content_units_version_not_found(container):
     assert response.status_code == 404
 
 
-def test_content_units_rejects_invalid_query_parameters(container):
-    version, _ = completed(container)
+def test_content_units_rejects_invalid_query_parameters(searchable):
+    container, version = searchable
     path = f"/api/v1/resource-versions/{version['id']}/content-units"
 
     with TestClient(create_app(container)) as client:

@@ -5,7 +5,6 @@ from datetime import timedelta
 from unittest.mock import Mock
 
 import pytest
-from fastapi.testclient import TestClient
 from test_multiformat import FORMATS, sample
 from test_source_file_import import discover_and_import
 from test_source_file_import import importing as importing
@@ -17,6 +16,7 @@ from data_sync_etl.config import Settings
 from data_sync_etl.domain.core import SourceFileError, now
 from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 
 @pytest.mark.parametrize("revocation", ["source_rejected", "source_inactive", "master_inactive"])

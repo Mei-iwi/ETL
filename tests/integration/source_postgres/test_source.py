@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import DBAPIError
 
@@ -13,6 +12,7 @@ from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 from .conftest import migrate_source
 

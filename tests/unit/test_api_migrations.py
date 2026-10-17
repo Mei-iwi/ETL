@@ -3,12 +3,12 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from conftest import migrate
-from fastapi.testclient import TestClient
 from sqlalchemy import inspect
 
 from data_sync_etl.cli.main import demo_run, parser
 from data_sync_etl.db.models import Base
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 
 def test_health_admin_disabled(container):

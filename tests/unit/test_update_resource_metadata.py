@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 
 import pytest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.application.update_resource_metadata import (
     InvalidMetadata,
@@ -10,6 +9,12 @@ from data_sync_etl.application.update_resource_metadata import (
 )
 from data_sync_etl.domain.resource_metadata import UpdateResourceMetadataCommand
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
+
+
+@pytest.fixture(autouse=True)
+def privileged_local_contract(container):
+    container.settings.admin_enabled = True
 
 
 class Repo:

@@ -188,6 +188,30 @@ class SearchService:
                            'NO_READY_INDEX' if metadata and not snapshots else
                            'NO_ACCESSIBLE_CONTENT' if not ready_count else 'OK'}
 
+    def authorize_content_version(self, version_id, *, access=None):
+        """Same whole-content rights as File/Context, without requiring an index.
+
+        Local processing/index previews must remain usable before INDEX_BUILD.
+        This does not weaken the existing file-viewer INDEX READY gate.
+        """
+        access = access or SearchAccess()
+        if access.scope != 'local_demo':
+            raise SearchError('FILE_NOT_FOUND', 404)
+        with self.indexing.uow() as repo:
+            try:
+                version, state = self.indexing._version(repo, version_id)
+                resource = repo.get('master_learning_resources', version['resource_id'])
+                if (not resource or resource['publication_status'] != 'PUBLISHED'
+                        or not resource['is_active'] or denied(resource) or denied(version)):
+                    raise SearchError('FILE_NOT_FOUND', 404)
+                if state != 'CONTENT_READY':
+                    raise SearchError('FILE_NOT_READY', 409)
+                snapshot = self.indexing._snapshot(repo, version_id)
+                if not {u['id'] for u in snapshot[2]} <= self._allowed_units(repo, snapshot, access):
+                    raise SearchError('FILE_NOT_FOUND', 404)
+            except IndexingError:
+                raise SearchError('FILE_NOT_FOUND', 404) from None
+
     def file_version(self, version_id, *, access=None, include_text=False):
         """A whole file requires permission for every unit, including parents."""
         access = access or SearchAccess()

@@ -73,7 +73,10 @@ def setup_index(c):
     reader = MemoryReader(c.documents)
     c.settings.index_embedding_dimension = 3
     c.settings.admin_enabled = True
+    c.settings.search_internal_dev_enabled = True
     c.indexing = IndexingService(c.uow, reader, ModelDouble(), c.settings, bags=MemoryBags(reader))
+    c.search.indexing = c.indexing
+    c.search.bags = c.indexing.bags
     c.processing_finalizer.on_content_ready = c.indexing.enqueue_auto
     return c.indexing
 

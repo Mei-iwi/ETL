@@ -3,12 +3,12 @@ from hashlib import sha256
 
 import pymupdf
 import pytest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.adapters.storage.source_local import SourceFileError, SourceLocalFileReader
 from data_sync_etl.application.source_file_import import SourceImportConflict
 from data_sync_etl.domain.core import now
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 
 @pytest.fixture

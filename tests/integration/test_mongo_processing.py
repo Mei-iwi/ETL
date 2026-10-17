@@ -3,7 +3,6 @@ from uuid import uuid4
 
 import pytest
 from conftest import ingest
-from fastapi.testclient import TestClient
 from pymongo import MongoClient
 
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
@@ -11,6 +10,7 @@ from data_sync_etl.adapters.mongo.schema import initialize
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.main import create_app
 from data_sync_etl.ports.processing import OCRResult
+from tests.local_admin_client import TestClient
 
 
 def test_real_mongo_projection_upserts_and_reconciliation(container):

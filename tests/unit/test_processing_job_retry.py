@@ -4,11 +4,11 @@ from threading import Event
 
 import pytest
 from conftest import ingest
-from fastapi.testclient import TestClient
 
 from data_sync_etl.domain.core import ProcessingRetryConflict, now
 from data_sync_etl.main import create_app
 from data_sync_etl.ports.processing import OCRResult
+from tests.local_admin_client import TestClient
 
 
 def failed_ocr(container, failed_pages=(2,)):

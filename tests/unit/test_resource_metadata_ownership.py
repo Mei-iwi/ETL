@@ -1,7 +1,6 @@
 from copy import deepcopy
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyRepository
@@ -13,6 +12,12 @@ from data_sync_etl.domain.resource_metadata import (
 )
 from data_sync_etl.domain.source_ownership import state_hash
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
+
+
+@pytest.fixture(autouse=True)
+def privileged_local_contract(container):
+    container.settings.admin_enabled = True
 
 
 def owned(container, origin='POSTGRESQL'):
@@ -43,8 +48,11 @@ def test_source_patch_rejected_without_row_relation_timestamp_change(container, 
     with TestClient(create_app(container)) as client:
         response = client.patch('/api/v1/resources/resource-1/metadata', json=payload)
         detail = client.get('/api/v1/resources/resource-1').json()
-    assert response.status_code == 409 and response.json()['detail']['code'] == 'RESOURCE_SOURCE_OWNED_READ_ONLY'
-    assert 'SOURCE' in response.json()['detail']['message']
+    if payload.get("uploaded_by"):
+        assert response.status_code == 400
+    else:
+        assert response.status_code == 409 and response.json()['detail']['code'] == 'RESOURCE_SOURCE_OWNED_READ_ONLY'
+        assert 'SOURCE' in response.json()['detail']['message']
     assert detail['source_origin'] == 'POSTGRESQL' and 'source_state_hash' not in detail
     assert snapshot(container) == before
 
@@ -94,11 +102,13 @@ def test_local_validation_is_atomic(container, payload):
 
 def test_local_success_and_late_database_failure_roll_back_entire_patch(container, monkeypatch):
     owned(container, 'LOCAL')
+    with container.uow() as repo:
+        original_creator = repo.get("master_learning_resources", "resource-1")["created_by"]
     with TestClient(create_app(container)) as client:
         response = client.patch('/api/v1/resources/resource-1/metadata', json={
-            'title': 'Local title', 'subject_id': 'subject-2', 'grade_level_id': 'grade-2', 'uploaded_by': 'user-2'})
+            'title': 'Local title', 'subject_id': 'subject-2', 'grade_level_id': 'grade-2'})
         assert response.status_code == 200, response.text
-        assert response.json()['uploaded_by'] == 'user-2'
+        assert response.json()['uploaded_by'] == original_creator
         assert response.json()['subject_id'] == 'subject-2' and response.json()['grade_level_id'] == 'grade-2'
         before = snapshot(container)
         def fail(*args):

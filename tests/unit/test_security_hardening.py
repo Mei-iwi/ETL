@@ -3,7 +3,6 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from data_sync_etl.domain.core import DomainError
@@ -11,6 +10,7 @@ from data_sync_etl.logging import event
 from data_sync_etl.main import create_app
 from data_sync_etl.ports.processing import OCRResult
 from data_sync_etl.ports.source import User
+from tests.local_admin_client import TestClient
 
 
 @pytest.mark.parametrize("exception", [RuntimeError, DomainError])

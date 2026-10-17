@@ -2,7 +2,6 @@ from copy import deepcopy
 
 import pytest
 from conftest import completed
-from fastapi.testclient import TestClient
 
 from data_sync_etl.application.content_bags import bag_structure
 from data_sync_etl.domain.core import DomainError
@@ -10,6 +9,7 @@ from data_sync_etl.domain.indexing import IndexingError, bag_of_words, validate_
 from data_sync_etl.domain.keywords import UnigramKeywords
 from data_sync_etl.main import create_app
 from tests.indexing_support import setup_index, structured_projection
+from tests.local_admin_client import TestClient
 
 
 def test_word_windows_unicode_offsets_overlap():
@@ -360,7 +360,7 @@ def test_post_routes_keep_admin_guard(container):
     container.settings.admin_enabled = False
     with TestClient(create_app(container)) as api:
         base = f"/api/v1/resource-versions/{version['id']}"
-        assert api.get(base + '/index-status').status_code == 200
+        assert api.get(base + '/index-status').status_code == 403
         for suffix in ('index', 'reindex'):
             assert api.post(base + '/' + suffix).status_code == 403
 

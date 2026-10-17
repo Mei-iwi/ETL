@@ -2,7 +2,6 @@ from contextlib import contextmanager
 
 import pytest
 from bson import BSON
-from fastapi.testclient import TestClient
 from pymongo import MongoClient
 from sqlalchemy import text
 
@@ -10,6 +9,7 @@ from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.main import create_app
+from tests.local_admin_client import TestClient
 
 pytestmark = pytest.mark.postgres
 
