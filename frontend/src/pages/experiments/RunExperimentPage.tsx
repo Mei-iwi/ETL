@@ -28,10 +28,12 @@ export function RunExperimentPage() {
         inFlight.current = true; setBusy(true)
         const current = new AbortController(); controller.current = current
         try {
-            const result = await runEvaluation({ dataset_id: dataset.trim(), methods: ['bow', 'vector', 'hybrid'],
-                k_values: ks.sort((a, b) => a - b), max_results: maxResults, warmup_queries: warmup }, current.signal, value => {
-                    if (!current.signal.aborted) { setProgress(value); if (value.run_id) recentEvaluationId('run', value.run_id) }
-                })
+            const result = await runEvaluation({
+                dataset_id: dataset.trim(), methods: ['bow', 'vector', 'hybrid'],
+                k_values: ks.sort((a, b) => a - b), max_results: maxResults, warmup_queries: warmup
+            }, current.signal, value => {
+                if (!current.signal.aborted) { setProgress(value); if (value.run_id) recentEvaluationId('run', value.run_id) }
+            })
             if (!current.signal.aborted) { recentEvaluationId('run', result.run_id); navigate(`/experiments/results?run_id=${result.run_id}`) }
         } catch (reason) { if (!current.signal.aborted) setError(reason instanceof Error ? reason.message : 'Không chạy được thực nghiệm.') }
         finally { inFlight.current = false; if (!current.signal.aborted) setBusy(false) }

@@ -83,26 +83,26 @@ function RunView({ id }: { id: string }) {
                         <button className={layout.secondaryButton} disabled={downloading || data.status !== 'COMPLETED'} onClick={() => void download('json')}>Tải JSON</button></div>
                     {data.status !== 'COMPLETED' && <p className={styles.pending}>Chỉ xuất báo cáo khi hoàn tất.</p>}
                     {downloadError && <p role="alert" className={styles.error}>{downloadError}</p>}
-                        <div className={styles.tableWrap}><table className={styles.table}>
-                            <thead><tr><th>Phương pháp</th><th>k</th><th>Precision@k</th><th>Recall@k</th><th>MRR@k</th><th>nDCG@k</th><th>TB ms</th><th>P50 ms</th><th>P95 ms</th><th>Thành công/Lỗi</th><th>Recall hợp lệ/loại</th></tr></thead>
-                            <tbody>{Object.entries(data.summary).flatMap(([method, summary]) => summary ? Object.entries(summary.metrics).map(([k, cells]) => <tr key={`${method}:${k}`}>
-                                <td>{method.toUpperCase()}</td><td>{k}</td><td>{number(cells.precision.value)}</td><td>{number(cells.recall.value)}</td>
-                                <td>{number(cells.mrr.value)}</td><td>{number(cells.ndcg.value)}</td><td>{number(summary.latency_ms.mean)}</td><td>{number(summary.latency_ms.p50)}</td><td>{number(summary.latency_ms.p95)}</td>
-                                <td>{summary.successful_queries}/{summary.failed_queries}</td><td>{cells.recall.valid_queries}/{cells.recall.excluded_queries}</td></tr>) : [])}</tbody>
-                        </table></div>
-                        <details><summary>Cách đọc chỉ số</summary><p className={styles.muted}>Chất lượng càng cao càng tốt; thời gian càng thấp càng tốt. Precision chia k kể cả thiếu kết quả; grade ≥ 1 là liên quan. n/a không phải 0. Recall/MRR/nDCG loại truy vấn không có nhãn dương khỏi trung bình. Điểm RRF không so trực tiếp với cosine.</p></details>
-                    </section>
-                    <details className={layout.card}><summary>Chi tiết theo truy vấn</summary>
-                        {data.observations.map(row => <details key={`${row.query_id}:${row.method}`} className={styles.query}>
-                            <summary>{row.query_id} · {row.method.toUpperCase()} · {row.error_code || `${number(row.latency_ms)} ms`}</summary>
-                            <p>{data.queries.find(query => query.query_id === row.query_id)?.query}</p>
-                            <p className={styles.identifier}>Nhãn: {data.queries.find(query => query.query_id === row.query_id)?.relevance.map(label => `${label.item_id}:${label.grade}`).join(', ')}</p>
-                            <ol>{row.ranked.map(item => <li className={styles.identifier} key={item.resource_id}>{item.resource_id} · {item.resource_version_id} · Điểm {number(item.score)}</li>)}</ol>
-                        </details>)}
-                        <div className={styles.row}><button className={layout.secondaryButton} disabled={offset === 0} onClick={() => setOffset(n => Math.max(0, n - 20))}>Trước</button>
-                            <span>{Math.min(offset + 1, data.pagination.total)}–{Math.min(offset + 20, data.pagination.total)}/{data.pagination.total}</span>
-                            <button className={layout.primaryButton} disabled={offset + 20 >= data.pagination.total} onClick={() => setOffset(n => n + 20)}>Tiếp</button></div>
-                    </details>
+                    <div className={styles.tableWrap}><table className={styles.table}>
+                        <thead><tr><th>Phương pháp</th><th>k</th><th>Precision@k</th><th>Recall@k</th><th>MRR@k</th><th>nDCG@k</th><th>TB ms</th><th>P50 ms</th><th>P95 ms</th><th>Thành công/Lỗi</th><th>Recall hợp lệ/loại</th></tr></thead>
+                        <tbody>{Object.entries(data.summary).flatMap(([method, summary]) => summary ? Object.entries(summary.metrics).map(([k, cells]) => <tr key={`${method}:${k}`}>
+                            <td>{method.toUpperCase()}</td><td>{k}</td><td>{number(cells.precision.value)}</td><td>{number(cells.recall.value)}</td>
+                            <td>{number(cells.mrr.value)}</td><td>{number(cells.ndcg.value)}</td><td>{number(summary.latency_ms.mean)}</td><td>{number(summary.latency_ms.p50)}</td><td>{number(summary.latency_ms.p95)}</td>
+                            <td>{summary.successful_queries}/{summary.failed_queries}</td><td>{cells.recall.valid_queries}/{cells.recall.excluded_queries}</td></tr>) : [])}</tbody>
+                    </table></div>
+                    <details><summary>Cách đọc chỉ số</summary><p className={styles.muted}>Chất lượng càng cao càng tốt; thời gian càng thấp càng tốt. Precision chia k kể cả thiếu kết quả; grade ≥ 1 là liên quan. n/a không phải 0. Recall/MRR/nDCG loại truy vấn không có nhãn dương khỏi trung bình. Điểm RRF không so trực tiếp với cosine.</p></details>
+                </section>
+                <details className={layout.card}><summary>Chi tiết theo truy vấn</summary>
+                    {data.observations.map(row => <details key={`${row.query_id}:${row.method}`} className={styles.query}>
+                        <summary>{row.query_id} · {row.method.toUpperCase()} · {row.error_code || `${number(row.latency_ms)} ms`}</summary>
+                        <p>{data.queries.find(query => query.query_id === row.query_id)?.query}</p>
+                        <p className={styles.identifier}>Nhãn: {data.queries.find(query => query.query_id === row.query_id)?.relevance.map(label => `${label.item_id}:${label.grade}`).join(', ')}</p>
+                        <ol>{row.ranked.map(item => <li className={styles.identifier} key={item.resource_id}>{item.resource_id} · {item.resource_version_id} · Điểm {number(item.score)}</li>)}</ol>
+                    </details>)}
+                    <div className={styles.row}><button className={layout.secondaryButton} disabled={offset === 0} onClick={() => setOffset(n => Math.max(0, n - 20))}>Trước</button>
+                        <span>{Math.min(offset + 1, data.pagination.total)}–{Math.min(offset + 20, data.pagination.total)}/{data.pagination.total}</span>
+                        <button className={layout.primaryButton} disabled={offset + 20 >= data.pagination.total} onClick={() => setOffset(n => n + 20)}>Tiếp</button></div>
+                </details>
             </>}
         </div>
     </section>

@@ -1,31 +1,192 @@
-.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
-.stack > * { min-width: 0; }
-.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.row > label { display: grid; gap: 7px; flex: 1; min-width: 150px; }
-.query { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; display: grid; gap: 10px; }
-.textarea { width: 100%; min-height: 85px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; resize: vertical; }
-.query input, .row input { width: 100%; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
-.muted { color: #64748b; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
-.error { color: #b91c1c; }
-.success { color: #15803d; }
-.pending { color: #a16207; }
-.tableWrap { overflow-x: auto; min-width: 0; max-width: 100%; }
-.table { border-collapse: collapse; width: 100%; font-size: 14px; }
-.table th, .table td { text-align: left; padding: 11px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
-.table th { background: #f8fafc; color: #334155; }
-.identifier { overflow-wrap: anywhere; font-size: 13px; }
-.controls { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 18px; }
-.methods { display: flex; flex-wrap: wrap; gap: 8px; }
-.methods span { background: #eff6ff; color: #1d4ed8; border-radius: 6px; padding: 6px 12px; font-size: 13px; }
-.progressArea { display: grid; gap: 10px; }
-.progress { display: block; appearance: none; width: 100%; height: 20px; border: 0; border-radius: 0; background: #e2e8f0; accent-color: #2563eb; overflow: hidden; }
-.progress::-webkit-progress-bar { background: #e2e8f0; border-radius: 0; }
-.progress::-webkit-progress-value { background: #2563eb; border-radius: 0; }
-.progress::-moz-progress-bar { background: #2563eb; border-radius: 0; }
-.progressArea label { color: #2563eb; }
-.lookup { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
-.lookup > label { flex: 1; min-width: 180px; }
-.query > summary { cursor: pointer; color: #15376a; font-weight: 600; overflow-wrap: anywhere; }
-.query[open] > summary { margin-bottom: 14px; }
-.stack details > summary { cursor: pointer; }
-.compactNote { margin: 8px 0; font-size: 13px; color: #64748b; }
+.stack {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    min-width: 0;
+}
+
+.stack>* {
+    min-width: 0;
+}
+
+.row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.row>label {
+    display: grid;
+    gap: 7px;
+    flex: 1;
+    min-width: 150px;
+}
+
+.query {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 14px;
+    display: grid;
+    gap: 10px;
+}
+
+.textarea {
+    width: 100%;
+    min-height: 85px;
+    padding: 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font: inherit;
+    resize: vertical;
+}
+
+.query input,
+.row input {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font: inherit;
+}
+
+.muted {
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.error {
+    color: #b91c1c;
+}
+
+.success {
+    color: #15803d;
+}
+
+.pending {
+    color: #a16207;
+}
+
+.tableWrap {
+    overflow-x: auto;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14px;
+}
+
+.table th,
+.table td {
+    text-align: left;
+    padding: 11px;
+    border-bottom: 1px solid #e2e8f0;
+    white-space: nowrap;
+}
+
+.table th {
+    background: #f8fafc;
+    color: #334155;
+}
+
+.identifier {
+    overflow-wrap: anywhere;
+    font-size: 13px;
+}
+
+.controls {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+    display: grid;
+    gap: 18px;
+}
+
+.methods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.methods span {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+.progressArea {
+    display: grid;
+    gap: 10px;
+}
+
+.progress {
+    display: block;
+    appearance: none;
+    width: 100%;
+    height: 20px;
+    border: 0;
+    border-radius: 0;
+    background: #e2e8f0;
+    accent-color: #2563eb;
+    overflow: hidden;
+}
+
+.progress::-webkit-progress-bar {
+    background: #e2e8f0;
+    border-radius: 0;
+}
+
+.progress::-webkit-progress-value {
+    background: #2563eb;
+    border-radius: 0;
+}
+
+.progress::-moz-progress-bar {
+    background: #2563eb;
+    border-radius: 0;
+}
+
+.progressArea label {
+    color: #2563eb;
+}
+
+.lookup {
+    display: flex;
+    gap: 12px;
+    align-items: end;
+    flex-wrap: wrap;
+}
+
+.lookup>label {
+    flex: 1;
+    min-width: 180px;
+}
+
+.query>summary {
+    cursor: pointer;
+    color: #15376a;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.query[open]>summary {
+    margin-bottom: 14px;
+}
+
+.stack details>summary {
+    cursor: pointer;
+}
+
+.compactNote {
+    margin: 8px 0;
+    font-size: 13px;
+    color: #64748b;
+}
