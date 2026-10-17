@@ -1,8 +1,9 @@
 """Paged read model over existing denormalized Master data, no catalog tables."""
 
+import json
 from math import ceil
 
-from sqlalchemy import String, func, literal, or_, select, true
+from sqlalchemy import String, column, func, literal, or_, select, text, true, union_all
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement
 
@@ -38,7 +39,7 @@ def _compile_casefold(element, compiler, **kwargs):
 
 
 class CatalogQueryMixin:
-    def catalog_page(self, kind, *, page, size, query=None):
+    def catalog_page(self, kind, *, page, size, query=None, source_rows=None):
         dialect = self.session.bind.dialect.name
         if dialect == "sqlite":
             self.session.connection().connection.driver_connection.create_function(
@@ -105,7 +106,8 @@ class CatalogQueryMixin:
                     func.count().label("frequency"),
                     func.max(func.coalesce(updated, model.updated_at)).label("freshness"),
                 )
-                .where(active.is_(True), deleted.is_(None), key != "", *(c != "" for c in identity))
+                .where(active.is_(True), deleted.is_(None), key != "", *(c != "" for c in identity),
+                       *([model.source_origin == "LOCAL"] if source_rows is not None else []))
                 .group_by(key, *identity)
                 .cte("snapshots")
             )
@@ -133,6 +135,29 @@ class CatalogQueryMixin:
                 else [ranked.c.key.label("code"), ranked.c.value1.label("name")]
             )
             base = select(*columns).where(ranked.c.position == 1).cte("catalog")
+        overlaps = literal(0)
+        if source_rows is not None and kind in {"providers", "types"}:
+            # A single JSON bind avoids huge IN lists/parameter limits. Both DBs do
+            # filtering, deterministic sort, count and page in SQL after the union.
+            key_name = fields[0]
+            payload = [{**{name: row.get(name) for name in fields},
+                        "available": "yes" if row["available"] else "no"} for row in source_rows]
+            columns = [*fields, "available"]
+            if dialect == "postgresql":
+                definitions = ",".join(name + " text" for name in columns)
+                source = text("SELECT * FROM json_to_recordset(CAST(:source_catalog AS json)) AS s(" + definitions + ")")
+            else:
+                source = text("SELECT " + ",".join(
+                    "json_extract(value,'$." + name + "') AS " + name for name in columns
+                ) + " FROM json_each(:source_catalog)")
+            source = source.bindparams(source_catalog=json.dumps(payload, ensure_ascii=False)).columns(
+                *(column(name, String) for name in columns)).cte("source_catalog")
+            overlaps = select(func.count()).select_from(base).where(
+                base.c[key_name].in_(select(source.c[key_name]))).scalar_subquery()
+            local = select(*(base.c[name] for name in fields)).where(
+                ~base.c[key_name].in_(select(source.c[key_name])))
+            full = select(*(source.c[name] for name in fields)).where(source.c.available == "yes")
+            base = union_all(full, local).cte("merged_catalog")
         stmt = select(base)
         term = (query or "").strip().casefold()
         if term:
@@ -149,12 +174,12 @@ class CatalogQueryMixin:
             if dialect == "postgresql"
             else filtered.c[identity_name],
         )
-        total = select(func.count().label("total")).select_from(filtered).cte("totals")
+        total = select(func.count().label("total"), overlaps.label("identity_overlaps")).select_from(filtered).cte("totals")
         paged = select(filtered).order_by(*order).offset((page - 1) * size).limit(size).cte("paged")
         # One statement/snapshot: count is preserved even for an empty/out-of-range page.
         rows = (
             self.session.execute(
-                select(total.c.total, *(paged.c[name] for name in fields)).select_from(
+                select(total.c.total, total.c.identity_overlaps, *(paged.c[name] for name in fields)).select_from(
                     total.outerjoin(paged, true())
                 ).order_by(fold(paged.c[sort_field]), paged.c[identity_name])
             )
@@ -168,6 +193,7 @@ class CatalogQueryMixin:
                 for row in rows
                 if row[identity_name] is not None
             ],
+            "identity_overlaps": rows[0]["identity_overlaps"],
             "pagination": {
                 "page": page,
                 "size": size,

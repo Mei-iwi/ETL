@@ -1,0 +1,28 @@
+{
+  "status": "UNCHANGED_IN_GIT",
+  "changed_physical_files": [],
+  "raw_hash_differences": [],
+  "counts_from_frozen_baseline": {
+    "master_business": 10,
+    "master_fields": 233,
+    "master_runtime": 8,
+    "master_tables": 18,
+    "mongo_business_indexes": 6,
+    "mongo_collections": 5,
+    "source_columns": 145,
+    "source_enums": 7,
+    "source_excel_fields": 145,
+    "source_fks": 22,
+    "source_tables": 15
+  },
+  "migration_heads": {
+    "MASTER": [
+      "0015"
+    ],
+    "SOURCE": [
+      "s0003"
+    ]
+  },
+  "governance": "BLOCKED_MISSING_EXTERNAL_REFERENCES",
+  "live_dev": "NOT_VERIFIED"
+}

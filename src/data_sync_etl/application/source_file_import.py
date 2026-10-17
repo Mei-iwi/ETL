@@ -97,7 +97,17 @@ class SourceFileImportService:
             "source_system": "postgresql", "source_version_id": source["source_version_id"]}, limit=1)
         if existing:
             row = repo.get("source_file_imports", existing[0]["id"], lock=True)
-            if (row["source_hash"].lower(), row["resource_id"], row["source_version_number"]) != (
+            lineage_changed = False
+            if row["target_version_id"]:
+                target = repo.get("resource_versions", row["target_version_id"])
+                parent = repo.find("source_file_imports", {
+                    "source_system": row["source_system"], "target_version_id": target["parent_version_id"]}, limit=1
+                ) if target and target["parent_version_id"] else []
+                expected = source.get("parent_version_id")
+                lineage_changed = target is None or (expected is None and target["parent_version_id"] is not None) or (
+                    expected is not None and (not parent or parent[0]["source_version_id"] != expected
+                                             or parent[0]["resource_id"] != row["resource_id"]))
+            if lineage_changed or (row["source_hash"].lower(), row["resource_id"], row["source_version_number"]) != (
                 source["source_hash"].lower(), source["resource_id"], source["source_version_number"]
             ):
                 repo.update("source_file_imports", row["id"], {
@@ -207,10 +217,101 @@ class SourceFileImportService:
         except Exception:
             self._fail(claimed, "IMPORT_OPERATION_FAILED", True)
 
+    def _lineage(self, row):
+        # Re-read SOURCE on every attempt; never persist a guessed dependency.
+        if row["source_system"] != "postgresql" or not hasattr(self.source, "get_version"):
+            raise SourceFileError("BLOCKED_SOURCE_MAPPING")
+        source = self.source.get_version(row["source_version_id"])
+        if source is None:
+            raise SourceFileError("SOURCE_VERSION_MISSING")
+        if (source["resource_id"], source["source_version_number"], source["source_hash"].lower()) != (
+                row["resource_id"], row["source_version_number"], row["source_hash"]):
+            raise SourceFileError("SOURCE_VERSION_MUTATED")
+        if (not source.get("resource_active", True) or source.get("resource_deleted_at") is not None
+                or source["source_lifecycle_status"] not in self.settings.source_file_allowed_statuses):
+            raise SourceFileError("BLOCKED_SOURCE_POLICY")
+        parent_id = source["parent_version_id"]
+        current, seen = parent_id, {row["source_version_id"]}
+        # Protect against malicious cycles and unbounded source chains without DDL.
+        for _ in range(128):
+            if current is None:
+                return parent_id
+            if current in seen:
+                raise SourceFileError("SOURCE_LINEAGE_CYCLE")
+            seen.add(current)
+            parent = self.source.get_version(current)
+            if parent is None:
+                raise SourceFileError("PARENT_SOURCE_MISSING")
+            if parent["resource_id"] != row["resource_id"]:
+                raise SourceFileError("PARENT_SOURCE_RESOURCE")
+            if (not parent.get("resource_active", True) or parent.get("resource_deleted_at") is not None
+                    or parent["source_lifecycle_status"] not in self.settings.source_file_allowed_statuses):
+                raise SourceFileError("PARENT_SOURCE_POLICY")
+            current = parent["parent_version_id"]
+        raise SourceFileError("SOURCE_LINEAGE_DEPTH_LIMIT")
+
+    def _parent(self, repo, row, parent_id):
+        if parent_id is None:
+            return None
+        mappings = repo.find("source_file_imports", {
+            "source_system": row["source_system"], "source_version_id": parent_id}, limit=1)
+        if not mappings:
+            raise SourceFileError("PARENT_PENDING", transient=True)
+        parent = mappings[0]
+        if parent["resource_id"] != row["resource_id"]:
+            raise SourceFileError("PARENT_MAPPING_INVALID")
+        if parent["status"] in {"FAILED", "RETRY_EXHAUSTED"}:
+            raise SourceFileError("PARENT_MAPPING_FAILED")
+        # IMPORTED/PROCESSING is a committed file mapping; OCR completion is independent.
+        if parent["status"] not in {"IMPORTED", "PROCESSING"}:
+            raise SourceFileError("PARENT_PENDING", transient=True)
+        target = repo.get("resource_versions", parent["target_version_id"]) if parent["target_version_id"] else None
+        if (target is None or target["resource_id"] != row["resource_id"]
+                or target["version_number"] != parent["source_version_number"]
+                or target["source_hash"] != parent["source_hash"]):
+            raise SourceFileError("PARENT_MAPPING_INVALID")
+        source_parent = self.source.get_version(parent_id)
+        if source_parent is None or (source_parent["source_version_number"], source_parent["source_hash"].lower()) != (
+                parent["source_version_number"], parent["source_hash"]):
+            raise SourceFileError("PARENT_MAPPING_INVALID")
+        seen, ancestor, source_ancestor = set(), target, source_parent
+        for _ in range(128):
+            if (ancestor["id"] in seen or ancestor["resource_id"] != row["resource_id"]
+                    or ancestor["version_number"] != source_ancestor["source_version_number"]
+                    or ancestor["source_hash"] != source_ancestor["source_hash"].lower()):
+                raise SourceFileError("PARENT_MAPPING_INVALID")
+            seen.add(ancestor["id"])
+            expected = source_ancestor["parent_version_id"]
+            if ancestor["parent_version_id"] is None:
+                if expected is not None:
+                    raise SourceFileError("PARENT_MAPPING_INVALID")
+                return target["id"]
+            if expected is None:
+                raise SourceFileError("PARENT_MAPPING_INVALID")
+            historical = repo.find("source_file_imports", {
+                "source_system": row["source_system"], "target_version_id": ancestor["parent_version_id"]}, limit=1)
+            if (not historical or historical[0]["source_version_id"] != expected
+                    or historical[0]["resource_id"] != row["resource_id"]
+                    or historical[0]["status"] not in {"IMPORTED", "PROCESSING"}):
+                raise SourceFileError("PARENT_MAPPING_INVALID")
+            source_ancestor = self.source.get_version(expected)
+            if source_ancestor is None:
+                raise SourceFileError("PARENT_MAPPING_INVALID")
+            ancestor = repo.get("resource_versions", ancestor["parent_version_id"])
+            if ancestor is None:
+                raise SourceFileError("PARENT_MAPPING_INVALID")
+        raise SourceFileError("SOURCE_LINEAGE_DEPTH_LIMIT")
+
     def _import(self, claimed):
         with self.uow() as repo:
             row = self._owned(repo, claimed)
+            if not self._source_allowed(row):
+                raise SourceFileError("BLOCKED_SOURCE_POLICY")
             self._master(repo, row["resource_id"])
+        parent_id = self._lineage(row)
+        with self.uow() as repo:
+            self._owned(repo, claimed)
+            self._parent(repo, row, parent_id)
         if not self._source_allowed(row):
             raise SourceFileError("BLOCKED_SOURCE_POLICY")
         if not re.fullmatch(r"[0-9a-f]{64}", row["source_hash"]):
@@ -262,13 +363,12 @@ class SourceFileImportService:
                 "resource_id": row["resource_id"], "version_number": row["source_version_number"]}, limit=1)
             if collision:
                 raise SourceFileError("BLOCKED_SOURCE_MAPPING")
-            previous = repo.find("resource_versions", {"resource_id": row["resource_id"]},
-                                 order=("-version_number",), limit=1)
-            if previous and previous[0]["version_number"] >= row["source_version_number"]:
-                raise SourceFileError("BLOCKED_SOURCE_MAPPING")
+            if self._lineage(row) != parent_id:
+                raise SourceFileError("SOURCE_VERSION_MUTATED")
+            parent = self._parent(repo, row, parent_id)
             version = repo.insert("resource_versions", {
                 "resource_id": row["resource_id"], "version_number": row["source_version_number"],
-                "parent_version_id": previous[0]["id"] if previous else None,
+                "parent_version_id": parent,
                 "storage_bucket": stored.bucket, "storage_object_key": stored.object_key,
                 "source_hash": stored.source_hash, "lifecycle_status": "INGESTED",
             })

@@ -14,12 +14,6 @@ const stateLabels: Record<IndexStatusResult['index_status'], string> = {
     BLOCKED_RUNTIME: 'Chưa sẵn sàng', BLOCKED_STRUCTURE: 'Nội dung không hợp lệ',
 }
 
-function statusTone(status: IndexStatusResult['index_status']) {
-    if (status === 'READY') return 'success'
-    if (['FAILED', 'BLOCKED_RUNTIME', 'BLOCKED_STRUCTURE'].includes(status)) return 'error'
-    return status === 'NOT_STARTED' ? 'neutral' : 'warning'
-}
-
 function statusNotice(status: IndexStatusResult) {
     if (status.index_status === 'BLOCKED_RUNTIME') {
         if (status.error_code === 'BLOCKED_INDEX_SCHEMA') return 'Schema MongoDB chưa hợp lệ. Liên hệ quản trị viên.'

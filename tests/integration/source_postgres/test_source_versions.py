@@ -20,11 +20,15 @@ def test_version_reader_keyset_and_private_fields(source):
         for number in range(1, 4):
             connection.execute(text(
                 "INSERT INTO resource_versions (id,resource_id,version_number,lifecycle_status,"
-                "storage_bucket,storage_object_key,source_hash,uploaded_by,created_at,updated_at) "
+                "storage_bucket,storage_object_key,source_hash,uploaded_by,created_at,updated_at,parent_version_id) "
                 "VALUES (:id,:resource,:number,'UPLOADED','private-bucket','private-object',"
-                ":hash,:user,now(),now())"
+                ":hash,:user,now(),now(),:parent)"
             ), {"id": f"test-version-{number}", "resource": resource_id, "number": number,
-                "hash": "a" * 64, "user": user_id})
+                "hash": "a" * 64, "user": user_id, "parent": None if number == 1 else "test-version-1"})
+    private = source.adapter.version_page(size=3)["items"]
+    assert [v["parent_version_id"] for v in private] == [None, "test-version-1", "test-version-1"]
+    assert source.adapter.get_version("test-version-3")["parent_version_id"] == "test-version-1"
+    assert source.adapter.get_version("absent") is None
     first = source.adapter.list_versions(size=2)
     second = source.adapter.list_versions(after=first["next_cursor"], size=2)
     assert [row["source_version_id"] for row in first["items"]] == ["test-version-1", "test-version-2"]

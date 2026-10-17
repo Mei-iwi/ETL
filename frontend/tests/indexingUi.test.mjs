@@ -44,8 +44,8 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
             const second = path.includes('version-two')
             const state = forcedState ?? (waitingForOcr && ++ocrReads < 2 ? 'CONTENT_NOT_READY' : structureBlocked ? 'BLOCKED_STRUCTURE' : blockStatus ? 'BLOCKED_RUNTIME' : !second && activeRun ? (++pendingReads < 2 ? 'PENDING' : 'READY') : 'NOT_STARTED')
             return json({ resource_version_id: second ? 'version-two' : 'version-test', processing_status: state === 'CONTENT_NOT_READY' ? 'OCR_PENDING' : 'CONTENT_READY',
-                index_status: state, representation_mode: state === 'BLOCKED_STRUCTURE' ? 'unavailable' : 'fallback', auto_enabled: autoEnabled, bag_count: state === 'READY' ? 7 : 0,
-                bags: state === 'READY' ? Array.from({ length: 7 }, (_, i) => ({ id: `root-test-${i}`, title: `Test Bag ${i + 1}`, unit_type: 'PAGE_TEXT', representation_mode: 'fallback', keywords: ['toán'], embedding_text: 'toán', embedding_model: 'ui-test-only@1', embedding_dimension: 3, vector_ready: true })) : [],
+                index_status: state, representation_mode: state === 'BLOCKED_STRUCTURE' ? 'unavailable' : 'fallback', auto_enabled: autoEnabled, bag_count: state === 'READY' ? 11 : 0,
+                bags: state === 'READY' ? Array.from({ length: 11 }, (_, i) => ({ id: `root-test-${i}`, title: `Test Bag ${i + 1}`, unit_type: 'PAGE_TEXT', representation_mode: 'fallback', keywords: ['toán'], embedding_text: 'toán', embedding_model: 'ui-test-only@1', embedding_dimension: 3, vector_ready: true })) : [],
                 latest_run_id: second ? null : activeRun, published_run_id: state === 'READY' ? activeRun : null, chunk_count: 0,
                 error_code: state === 'BLOCKED_STRUCTURE' ? 'BAG_STRUCTURE_UNAVAILABLE' : state === 'BLOCKED_RUNTIME' || state === 'FAILED' ? blockCode : null,
                 bow_ready: state === 'READY', vector_ready: state === 'READY', embedding_model: 'ui-test-only', embedding_dimension: 3,
@@ -149,28 +149,27 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         assert.equal(await evaluate("new URL(location.href).searchParams.get('resourceId')"), 'resource-test')
         await capture('chunks-desktop')
         await evaluate("Array.from(document.querySelectorAll('[data-index-panel=chunks] button')).find(b => b.textContent.trim() === 'Tiếp').click()")
-        await waitFor(() => evaluate("document.body.textContent.includes('Chunk 11') && !document.body.textContent.includes('Chunk 10')"))
-        await evaluate("document.querySelector('[data-index-panel=chunks] details').open = true")
-        assert.equal(await evaluate("document.querySelector('[data-index-panel=chunks] details').textContent.includes('Văn bản tiếng Việt')"), true)
+        await waitFor(() => evaluate("document.querySelector('[data-index-panel=chunks] tbody tr td')?.textContent === '#11' && document.querySelectorAll('[data-index-panel=chunks] tbody tr').length === 1"))
+        assert.equal(await evaluate("document.querySelector('[data-index-panel=chunks] tbody tr td:nth-child(4)').textContent.includes('Văn bản tiếng Việt')"), true)
         await tab('Chỉ mục')
         await tab('Phân đoạn')
-        assert.equal(await evaluate("document.querySelector('[data-index-panel=chunks]').textContent.includes('Chunk 11')"), true, 'pagination is preserved when switching views')
+        assert.equal(await evaluate("document.querySelector('[data-index-panel=chunks] tbody tr td')?.textContent === '#11'"), true, 'pagination is preserved when switching views')
         await tab('Chỉ mục')
         assert.equal(postCount, 0, 'switching views never POSTs')
         await evaluate("const buildButton = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')); buildButton.click(); buildButton.click()")
         await waitFor(() => evaluate("document.body.textContent.includes('run-test')"))
         assert.equal(postCount, 1)
-        assert.equal(await evaluate("getComputedStyle(document.querySelector('[data-index-panel=index] [role=status]')).color"), 'rgb(161, 98, 7)')
+        await waitFor(() => evaluate("document.querySelector('[data-index-panel=index] tbody tr:nth-child(2) td')?.textContent === 'Đang chờ'"))
         await waitFor(() => evaluate("document.body.textContent.includes('Đang chờ xử lý.')"))
         const readCount = statusReads
         await waitFor(async () => { await delay(200); return statusReads > readCount })
         await waitFor(() => evaluate("document.body.textContent.includes('Chỉ mục sẵn sàng.')"))
-        assert.equal(await evaluate("getComputedStyle(document.querySelector('[data-index-panel=index] [role=status]')).color"), 'rgb(21, 128, 61)')
+        assert.equal(await evaluate("document.querySelector('[data-index-panel=index] tbody tr:nth-child(2) td')?.textContent"), 'Sẵn sàng')
         await capture('index-desktop')
         await tab('ContentBag')
-        assert.equal(await evaluate("document.querySelectorAll('[data-index-panel=bags] article').length"), 6)
+        assert.equal(await evaluate("document.querySelectorAll('[data-index-panel=bags] tbody tr').length"), 10)
         await evaluate("Array.from(document.querySelectorAll('[data-index-panel=bags] button')).find(b => b.textContent === 'Tiếp').click()")
-        assert.equal(await evaluate("document.querySelectorAll('[data-index-panel=bags] article').length"), 1)
+        assert.equal(await evaluate("document.querySelectorAll('[data-index-panel=bags] tbody tr').length"), 1)
         await evaluate("Array.from(document.querySelectorAll('[data-index-panel=bags] button')).find(b => b.textContent === 'Trước').click()")
         await capture('bags-desktop')
         await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
@@ -189,7 +188,7 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Xây dựng chỉ mục')).click()")
         await waitFor(() => evaluate("document.body.textContent.includes('Model chưa sẵn sàng.')"))
         assert.equal(postCount, 2)
-        assert.equal(await evaluate("getComputedStyle(document.querySelector('[role=alert]')).color"), 'rgb(185, 28, 28)')
+        assert.match(await evaluate("document.querySelector('[role=alert]')?.textContent"), /Model chưa sẵn sàng/ )
         await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tái lập chỉ mục').click()")
         await waitFor(() => evaluate("document.querySelector('dialog')?.open"))
         await evaluate("Array.from(document.querySelectorAll('dialog button')).find(b => b.textContent === 'Hủy').click()")
@@ -258,7 +257,7 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
         autoEnabled = false
         await evaluate("const select = document.querySelector('#index-version'); select.value = 'version-two'; select.dispatchEvent(new Event('change', { bubbles: true }))")
         await waitFor(() => evaluate("document.body.textContent.includes('Chưa lập chỉ mục.') && !document.body.textContent.includes('rebuild-test')"))
-        assert.equal(await evaluate("document.querySelectorAll('[data-index-panel=chunks] details').length"), 0, 'previous version chunks are not rendered')
+        assert.equal(await evaluate("document.querySelectorAll('[data-index-panel=chunks] tbody tr').length"), 0, 'previous version chunks are not rendered')
     } finally {
         if (ws?.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ id: ++sequence, method: 'Browser.close' })); ws.close() }
         browser.kill()

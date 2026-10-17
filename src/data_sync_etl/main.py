@@ -125,6 +125,12 @@ def create_app(container=None):
                 response.headers["Cache-Control"] = "private, no-store"
             return response
 
+    from data_sync_etl.ports.source_catalogs import SourceCatalogError
+
+    @app.exception_handler(SourceCatalogError)
+    async def source_catalog_error(request, exc):
+        return JSONResponse(status_code=503, content={"detail": "SOURCE catalog read failed", "code": exc.status})
+
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):
         return JSONResponse(

@@ -14,6 +14,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 test('Master Data read-only and file readiness/errors in real browser', {
     skip: !existsSync(executable) || !existsSync(join(root, 'index.html')), timeout: 90000,
 }, async () => {
+    let catalogOnline = true
     let ready = false, fileStatus = 200, fileRequests = 0, writes = 0
     const server = createServer(async (req, res) => {
         const path = new URL(req.url, 'http://127.0.0.1').pathname
@@ -51,7 +52,9 @@ test('Master Data read-only and file readiness/errors in real browser', {
             const page = Number(params.get('page') || 1), size = Number(params.get('size') || 100)
             const query = (params.get('q') || '').toLocaleLowerCase('vi')
             const items = options[path].filter(row => Object.values(row).join(' ').toLocaleLowerCase('vi').includes(query))
-            return json({ items: items.slice((page - 1) * size, page * size),
+            return json({ catalog: { source_status: catalogOnline ? 'SOURCE_OK' : 'SOURCE_UNAVAILABLE',
+                completeness: catalogOnline ? 'ALL_SOURCE_PLUS_LOCAL' : 'PARTIAL_FALLBACK' },
+                items: items.slice((page - 1) * size, page * size),
                 pagination: { page, size, total: items.length, total_pages: Math.ceil(items.length / size) } })
         }
         if (/^\/api\/v1\/resources\/r[01]$/.test(path)) return json({
@@ -127,6 +130,14 @@ test('Master Data read-only and file readiness/errors in real browser', {
         await open('/systems/master-data')
         await waitFor(() => evaluate('document.body?.textContent.includes("Trang 1/2")'))
         assert.equal(await evaluate('document.querySelectorAll("tbody tr").length'), 7)
+        await waitFor(() => evaluate('document.body.textContent.includes("Đầy đủ từ SOURCE")'))
+        catalogOnline = false
+        await click('Tải lại')
+        await waitFor(() => evaluate('document.body.textContent.includes("Dữ liệu dự phòng từ Master; có thể thiếu danh mục")'))
+        assert.equal(await evaluate('document.querySelectorAll("tbody tr").length'), 7)
+        catalogOnline = true
+        await click('Tải lại')
+        await waitFor(() => evaluate('document.body.textContent.includes("Đầy đủ từ SOURCE")'))
         await click('Sau')
         await waitFor(() => evaluate('document.body?.textContent.includes("Trang 2/2")'))
         assert.equal(await evaluate('document.querySelectorAll("tbody tr").length'), 2)
