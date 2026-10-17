@@ -120,7 +120,7 @@ export function LibraryResourceDetailPage() {
             </Link>
 
             <header className={styles.header}>
-                <p className={styles.eyebrow}>Chi tiết học liệu</p>
+                <h1 className={styles.eyebrow}>Chi tiết học liệu</h1>
                 <h1>{resource.title}</h1>
             </header>
 
