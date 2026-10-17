@@ -1,0 +1,26 @@
+{
+  "apply_flag": "--apply",
+  "apply_policy": "Existing CLI only; separate target, backup, compatibility checks and operator approval required.",
+  "bootstrap_flag": "--bootstrap-empty",
+  "business_index_count": 6,
+  "collections": [
+    "content_bags",
+    "learning_resources",
+    "mongo_content_units",
+    "ocr_pages",
+    "users"
+  ],
+  "dimension": 384,
+  "external_state": "This Git manifest is not a live migration receipt; no schema_migrations collection.",
+  "historical_issue": "B02 Fallback documentation unresolved; preserve current runtime contract.",
+  "indexes_sha256": "10b64e511751553dbd773cd371c8cde6a48510323ea6bdb699758c928f5696d6",
+  "installer": "python -m data_sync_etl.adapters.mongo.schema",
+  "manifest_version": 1,
+  "mode": "CHECK_ONLY",
+  "read_only_flags": [
+    "--inventory",
+    "--check"
+  ],
+  "schema_version": "etl-mongo-foundation-v1",
+  "validators_sha256": "acdb6258cbd9822168a349caa942429f5f9459ad56282be69e8dc49a6b2c0606"
+}
