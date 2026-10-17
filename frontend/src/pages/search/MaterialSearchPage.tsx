@@ -62,7 +62,7 @@ function SearchForm({ params }: { params: URLSearchParams }) {
         <form role="search" aria-label="Tra cứu học liệu" className={`${layout.card} ${layout.form} ${styles.searchForm}`} onSubmit={submit}>
             <div className={styles.searchBar}><div className={`${layout.field} ${styles.queryField}`}><label htmlFor="search-query" className={styles.visuallyHidden}>Tìm kiếm học liệu</label>
                 <Search size={20} aria-hidden="true" className={styles.searchIcon} />
-                <input id="search-query" type="search" value={query} onChange={event => { setQuery(event.target.value); setError('') }} maxLength={300} placeholder="Nhập từ khóa hoặc mô tả điều bạn muốn học…" aria-describedby={error ? 'search-error search-method-help' : 'search-method-help'} aria-invalid={Boolean(error)} required /></div>
+                <input id="search-query" type="search" value={query} onChange={event => { setQuery(event.target.value); setError('') }} maxLength={300} placeholder="Nhập từ khóa hoặc mô tả điều bạn muốn học…" aria-describedby={error ? 'search-error' : undefined} aria-invalid={Boolean(error)} required /></div>
                 <button type="submit" className={layout.primaryButton} disabled={busy}>{busy ? 'Đang tìm…' : 'Tìm kiếm'}</button></div>
             <div className={styles.searchOptions}>
                 <fieldset className={styles.methodPicker}><legend className={styles.visuallyHidden}>Cách tìm kiếm</legend>

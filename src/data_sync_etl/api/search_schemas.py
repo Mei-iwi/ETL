@@ -131,6 +131,7 @@ SEARCH_ERROR_RESPONSES = {status: {'model': SearchErrorResponse} for status in (
 
 
 MESSAGES = {
+    'SEARCH_RUNTIME_BUSY': 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
     'SEARCH_ACCESS_RESTRICTED': 'Truy cập tìm kiếm nội bộ bị hạn chế.',
     'SEARCH_LIMIT_EXCEEDED': 'Kho dữ liệu vượt giới hạn tìm kiếm. Hãy thu hẹp bộ lọc.',
     'SEARCH_TIMEOUT': 'Tìm kiếm quá thời gian. Hãy thu hẹp bộ lọc.',

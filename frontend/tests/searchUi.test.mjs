@@ -34,16 +34,23 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             for await (const part of req) raw += part
             const body = JSON.parse(raw)
             bodies.push(body)
+            body.representation_unit = 'content_bag'
+            body.ready_bag_count = 1
             if (mode === 'slow') await new Promise(resolve => { releaseSearch = resolve })
+            if (mode === 'malformed') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{broken') }
+            if (mode === 'null') return json(null)
+            if (mode === 'array') return json([])
+            if (mode === 'missing') return json({ total: 1, items: [] })
+            if (mode === 'network') return res.destroy()
             if (mode === 'error') return json({ detail: { code: 'BLOCKED_EMBEDDING_RUNTIME', message: 'Model chưa sẵn sàng.' } }, 503)
             if (mode === 'denied') return json({ detail: { code: 'SEARCH_ACCESS_RESTRICTED', message: 'Truy cập tìm kiếm nội bộ bị hạn chế.' } }, 403)
             if (mode === 'empty') return json({ ...body, items: [], total: 0, total_pages: 0, message: 'NO_READY_INDEX', ranking_algorithm: 'rrf-v1' })
             if (mode === 'public') return json({ ...body, access_scope: 'public', items: [], total: 0, total_pages: 0, message: 'PUBLIC_ACCESS_UNCONFIRMED', ranking_algorithm: 'rrf-v1' })
             return json({ ...body, access_scope: 'local_demo', total: 8, total_pages: 2, message: 'OK', ranking_algorithm: 'rrf-v1', items: Array.from({ length: body.page === 1 ? 5 : 3 }, (_, offset) => ({
                 resource_id: `r${(body.page - 1) * 5 + offset + 1}`, resource_title: `Học liệu ${(body.page - 1) * 5 + offset + 1}`, resource_version_id: 'v1', version_number: 1,
-                provider_name: 'Nhà cung cấp', resource_type_code: 'DOC', bag_id: 'b1', representation_mode: 'fallback',
+                provider_name: 'Nhà cung cấp', resource_type_code: 'DOC', bag_id: 'b1', bag_title: null, unit_type: 'SECTION', representation_mode: 'fallback',
                 score: .03, score_components: { bow: .5, vector: .7 }, matched_bag_count: 1, matched_keywords: ['toán'],
-                snippet: 'Văn bản <script>không được thực thi</script>', page_from: 2, page_to: 2, content_unit_id: 'unit-1', context_id: 'token-1',
+                snippet: 'Văn bản <script>không được thực thi</script>', page_from: 2, page_to: 2, content_unit_id: 'unit-1', context_id: 'token-1', context_url: '/api/v1/chunks/token-1/context',
             })) })
         }
         if (url.pathname === '/api/v1/chunks/token-1/context') {
@@ -124,7 +131,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("document.querySelector('#search-query').value"), 'Phương trình bậc hai')
         assert.equal(await evaluate("document.activeElement.id"), 'search-query')
         await click('Theo ý nghĩa')
-        assert.equal(await evaluate("document.querySelector('#search-method-help').textContent.includes('cách diễn đạt khác')"), true)
+        assert.equal(await evaluate("document.querySelector('fieldset button[aria-pressed=\"true\"]')?.textContent"), 'Theo ý nghĩa')
         await click('Theo từ khóa')
         await waitFor(() => evaluate("document.querySelector('fieldset button[aria-pressed=\"true\"]')?.textContent === 'Theo từ khóa'"))
         assert.equal(postCount, 0)
@@ -250,6 +257,19 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("document.querySelectorAll('article').length"), 0)
         assert.equal(await evaluate("document.querySelector('#search-query').value"), 'new')
         assert.equal(await evaluate("document.querySelector('button[type=submit]').disabled"), false)
+
+        // Completed malformed/network responses must leave loading and permit retry.
+        for (const failure of ['malformed', 'null', 'array', 'missing', 'network']) {
+            mode = failure
+            await open(`/search/result?q=${failure}&method=bow`)
+            await waitFor(() => evaluate("!!document.querySelector('[role=alert]')"))
+            assert.equal(await evaluate("!!document.querySelector('section[aria-busy=true]')"), false)
+            assert.equal(await evaluate("document.querySelector('button[type=submit]').disabled"), false)
+            assert.equal(await evaluate("document.body.textContent.includes('Đang tìm kiếm')"), false)
+            mode = 'results'
+            await click('Thử lại')
+            await waitFor(() => evaluate("document.querySelectorAll('article').length === 5"))
+        }
 
     } finally {
         releaseSearch?.()
