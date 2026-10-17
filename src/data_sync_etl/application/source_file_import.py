@@ -387,7 +387,7 @@ class SourceFileImportService:
             repo.update("source_file_imports", row["id"], {
                 "status": "RETRY_EXHAUSTED" if transient and exhausted else "RETRY_WAIT" if transient else "FAILED",
                 "last_error_code": code, "claim_token": None, "lease_expires_at": None,
-                "next_retry_at": now() + timedelta(seconds=delay + random.uniform(0, delay / 4))
+                "next_retry_at": now() + timedelta(seconds=min(3600, delay + random.uniform(0, delay / 4)))
                 if transient and not exhausted else None, "updated_at": now(),
             })
         self._report(claimed, 'FAILED', code)

@@ -205,3 +205,20 @@ def test_parent_arrival_automatically_recovers_before_retry_budget(importing, mo
         assert child["status"] == "PROCESSING" and child["manual_retries"] == 0 and child["attempts"] == 2
         assert repo.get("resource_versions", child["target_version_id"])["parent_version_id"] == parent["target_version_id"]
         assert repo.get("resource_versions", child["target_version_id"])["version_number"] == 3
+
+
+@pytest.mark.parametrize("base_seconds", [3000, 3600])
+def test_parent_retry_jitter_respects_final_one_hour_cap(importing, monkeypatch, base_seconds):
+    c, rows, _ = importing
+    root = rows.pop()
+    rows.append({**root, "source_version_id": "source-version-3", "source_version_number": 3,
+                 "parent_version_id": root["source_version_id"]})
+    monkeypatch.setattr(c.source, "get_version", lambda id: next(
+        (dict(r) for r in [root, *rows] if r["source_version_id"] == id), None), raising=False)
+    c.settings.source_file_import_retry_seconds = base_seconds
+    stamp = now()
+    monkeypatch.setattr("data_sync_etl.application.source_file_import.now", lambda: stamp)
+    monkeypatch.setattr("data_sync_etl.application.source_file_import.random.uniform", lambda low, high: high)
+    pending = run(c)
+    assert pending["status"] == "RETRY_WAIT" and pending["last_error_code"] == "PARENT_PENDING"
+    assert 0 < (pending["next_retry_at"] - stamp).total_seconds() <= 3600

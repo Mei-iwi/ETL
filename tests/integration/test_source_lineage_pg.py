@@ -10,6 +10,7 @@ from tests.unit.test_source_lineage import (  # noqa: F401
     test_null_source_parent_stays_null,
     test_parent_arrival_automatically_recovers_before_retry_budget,
     test_parent_pending_bounded_and_manual_recovery,
+    test_parent_retry_jitter_respects_final_one_hour_cap,
     test_source_branch_and_late_number,
     test_source_parent_changes_during_copy_rolls_back_mapping,
     test_successful_parent_change_is_reported_without_repair,
