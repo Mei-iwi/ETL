@@ -54,6 +54,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         if (url.pathname === '/api/v1/resources/r1') return json({ id: 'r1', title: 'Học liệu 1', provider_name: 'Nhà cung cấp',
             resource_type_name_vi: 'Tài liệu', publication_status: 'PUBLISHED', is_active: true, created_at: '2026-10-16', updated_at: '2026-10-16', subjects: [], grade_levels: [] })
         if (url.pathname === '/api/v1/resources/r1/versions') return json([{ id: 'v1', version_number: 1, created_at: '2026-10-16' }])
+        if (url.pathname === '/api/v1/resource-versions/v1/index-status') return json({ processing_status: 'CONTENT_READY', index_status: 'READY' })
         if (url.pathname === '/api/v1/resource-versions/v1/file') {
             if (url.searchParams.get('view') === 'text') {
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
@@ -166,7 +167,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 1')"))
         assert.equal(await evaluate("!!document.querySelector('#search-query')"), true)
         await waitFor(() => evaluate("document.querySelector('#search-query')?.value === 'toán'"))
-        assert.equal(await evaluate("document.querySelector('#search-grade').value"), 'g1')
+        await waitFor(() => evaluate("document.querySelector('#search-grade')?.value === 'g1'"))
         await evaluate("document.querySelector('article h2 a').click()")
         await waitFor(() => evaluate("document.body.textContent.includes('Tệp học liệu')"))
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Xem tệp')?.disabled === false"))

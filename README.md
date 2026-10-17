@@ -427,6 +427,12 @@ Metadata Master → MongoDB mặc định shared chỉ đối chiếu. `MASTER_M
 
 ## 10. Lỗi thường gặp
 
+Tài liệu kiến trúc/nghiệm thu: [SOURCE–Master–Mongo](docs/architecture/README.md),
+[migration inventory](docs/architecture/migrations.md), [OAuth Drive chỉ đọc](docs/acceptance/drive-readonly.md),
+[Ground Truth cần chấm thủ công](docs/acceptance/ground-truth.md), [báo cáo Prompt05](docs/audits/frontend-masterdata/report.md).
+Hệ thống → Master Data chỉ đọc danh mục; provider/type là snapshot đã đồng bộ, không toàn bộ SOURCE.
+Chi tiết học liệu chỉ bật Xem/Tải khi nội dung và chỉ mục sẵn sàng; API vẫn kiểm quyền/tệp đích.
+
 | Hiện tượng | Cách kiểm tra |
 | --- | --- |
 | HTTP 503 / `BLOCKED_INDEX_SCHEMA` | Chạy `python -m data_sync_etl.adapters.mongo.schema --check`, xem log `mongo-init`. Schema cũ cần backup và phê duyệt sửa, không xóa volume hoặc bỏ guard. |

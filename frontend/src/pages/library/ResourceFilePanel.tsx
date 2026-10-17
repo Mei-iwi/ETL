@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import styles from './LibraryResourceDetailPage.module.css'
 import { SearchContext } from '../search/SearchContext'
+import { canOpenFile, fileErrorMessage } from './fileReadiness'
+import type { FileIndexStatus } from './fileReadiness'
 
 type Version = { id: string; version_number: number; created_at: string }
 
@@ -12,6 +14,9 @@ export function ResourceFilePanel({ resourceId, versionId, contextId, sourceOwne
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(true)
     const [open, setOpen] = useState(false)
+    const [readiness, setReadiness] = useState<{ id: string; status: FileIndexStatus } | null>(null)
+    const [statusError, setStatusError] = useState<{ id: string; message: string } | null>(null)
+    const [attempt, setAttempt] = useState(0)
     useEffect(() => {
         const controller = new AbortController()
         void fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/versions`, { signal: controller.signal })
@@ -29,6 +34,27 @@ export function ResourceFilePanel({ resourceId, versionId, contextId, sourceOwne
     }, [resourceId, versionId])
     const valid = versions.some(row => row.id === selected)
     const url = `/api/v1/resource-versions/${encodeURIComponent(selected)}/file`
+    const status = readiness?.id === selected ? readiness.status : null
+    const ready = valid && canOpenFile(status) && statusError?.id !== selected
+    useEffect(() => {
+        if (!valid) return
+        const controller = new AbortController()
+        let timer: number | undefined
+        async function poll() {
+            try {
+                const response = await fetch(`/api/v1/resource-versions/${encodeURIComponent(selected)}/index-status`, { signal: controller.signal })
+                if (!response.ok) throw new Error(fileErrorMessage(response.status))
+                const data: FileIndexStatus = await response.json()
+                if (!controller.signal.aborted) { setReadiness({ id: selected, status: data }); setStatusError(null) }
+            } catch (reason) {
+                if (!controller.signal.aborted) setStatusError({ id: selected, message: reason instanceof Error ? reason.message : 'Không tải được trạng thái tệp.' })
+            } finally {
+                if (!controller.signal.aborted) timer = window.setTimeout(poll, document.hidden ? 15000 : 5000)
+            }
+        }
+        void poll()
+        return () => { controller.abort(); if (timer !== undefined) window.clearTimeout(timer) }
+    }, [selected, valid, attempt])
     return <section className={styles.panel}>
         <h2>Tệp học liệu</h2>
         {error && <p role="alert" className={styles.error}>{error}</p>}
@@ -41,11 +67,16 @@ export function ResourceFilePanel({ resourceId, versionId, contextId, sourceOwne
                 onChange={event => { setSelected(event.target.value); setOpen(false) }}>
                 {versions.map(row => <option value={row.id} key={row.id}>Phiên bản {row.version_number} · {new Date(row.created_at).toLocaleDateString('vi-VN')}</option>)}
             </select></label>
-            <button className={styles.historyLink} disabled={!valid} onClick={() => setOpen(value => !value)}>
+            <button className={styles.historyLink} disabled={!ready} onClick={() => setOpen(value => !value)}>
                 {open ? 'Đóng tệp' : 'Xem tệp'}</button>
-            {valid && <a className={styles.secondaryButton} href={`${url}?download=true`} download>Tải tệp</a>}
+            {ready && <a className={styles.secondaryButton} href={`${url}?download=true`} download>Tải tệp</a>}
+            {valid && <button className={styles.secondaryButton} onClick={() => setAttempt(n => n + 1)}>Kiểm tra lại</button>}
         </div>
-        {open && valid && <FilePreview key={selected} url={url} />}
+        {valid && <p role="status" className={ready ? styles.ready : styles.pending}>
+            Phiên bản đã tiếp nhận · Nội dung {status?.processing_status === 'CONTENT_READY' ? 'sẵn sàng' : 'chưa sẵn sàng'} · Chỉ mục {status?.index_status === 'READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}
+        </p>}
+        {statusError?.id === selected && <p role="alert" className={styles.error}>{statusError.message}</p>}
+        {open && ready && <FilePreview key={selected} url={url} />}
         {contextId && selected === versionId && <div className={styles.fileContext}><SearchContext id={contextId} /></div>}
     </section>
 }
@@ -58,9 +89,7 @@ function FilePreview({ url }: { url: string }) {
         let objectUrl = ''
         void fetch(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]) })
             .then(async response => {
-                if (response.status === 409) throw new Error('Tệp chưa sẵn sàng. Kiểm tra xử lý và chỉ mục.')
-                if (!response.ok) throw new Error(response.status === 404 || response.status === 403
-                    ? 'Tệp chưa sẵn sàng hoặc bạn chưa có quyền xem.' : 'Không tải được tệp.')
+                if (!response.ok) throw new Error(fileErrorMessage(response.status))
                 if (Number(response.headers.get('Content-Length')) > 30 * 1024 * 1024) {
                     await response.body?.cancel()
                     throw new Error('Tệp lớn hơn 30 MB. Hãy tải về để xem.')
@@ -92,7 +121,7 @@ function OfficeTextPreview({ url }: { url: string }) {
     useEffect(() => {
         const controller = new AbortController()
         void fetch(`${url}?view=text`, { signal: controller.signal }).then(async response => {
-            if (!response.ok) throw new Error('Nội dung chưa sẵn sàng hoặc bạn chưa có quyền xem.')
+            if (!response.ok) throw new Error(fileErrorMessage(response.status))
             const value = await response.text()
             if (!controller.signal.aborted) setText(value)
         }).catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Không tải được nội dung.') })

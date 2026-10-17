@@ -13,6 +13,7 @@ import { OverviewProcess } from './pages/overview/OverviewProcess'
 
 import { LibraryListPage } from './pages/library/LibraryListPage'
 import { LibrarySyncErrorsPage } from './pages/library/LibrarySyncErrorsPage'
+import { LibrarySourceFilesPage } from './pages/library/LibrarySourceFilesPage'
 import { LibraryCreatePage } from './pages/library/LibraryCreatePage'
 import { LibraryProcessingPage } from './pages/library/LibraryProcessingPage'
 import { LibraryIndexingPage } from './pages/library/LibraryIndexingPage'
@@ -27,8 +28,9 @@ import { ExperimentsReportPage } from './pages/experiments/ExperimentsReportsPag
 import { RunExperimentPage } from './pages/experiments/RunExperimentPage'
 
 import { SystemStatusPage } from './pages/system/SystemStatusPage'
+import { MasterDataPage } from './pages/system/MasterDataPage'
 import { SystemCapalitiesPage } from './pages/system/SystemCapalitiesPage'
-import { SystemMasterSyncPage } from './pages/system/SystemMasterSyncPage'
+import { SystemMasterSyncLayout, SystemMasterSyncPage } from './pages/system/SystemMasterSyncPage'
 import { LibraryUpdateVersion } from './pages/library/LibraryUpdateVersion'
 
 export default function App() {
@@ -51,7 +53,11 @@ export default function App() {
             <Route path='add' element={<LibraryCreatePage />} />
             <Route path='processing' element={<LibraryProcessingPage />} />
             <Route path='indexing' element={<LibraryIndexingPage />} />
-            <Route path='source-sync' element={<SystemMasterSyncPage />} />
+            <Route path='source-sync' element={<SystemMasterSyncLayout />}>
+              <Route index element={<SystemMasterSyncPage />} />
+              <Route path='files' element={<LibrarySourceFilesPage />} />
+            </Route>
+            <Route path='source-files' element={<Navigate to='/library/source-sync/files' replace />} />
             <Route path='source-sync-errors'>
               <Route index element={<Navigate to='retry' replace />} />
               <Route path='retry' element={<LibrarySyncErrorsPage key='retry' />} />
@@ -78,6 +84,7 @@ export default function App() {
           <Route path='systems'>
             <Route index element={<Navigate to='status' />} />
             <Route path='status' element={<SystemStatusPage />} />
+            <Route path='master-data' element={<MasterDataPage />} />
             <Route path='capabilities' element={<SystemCapalitiesPage />} />
             <Route path='master-sync' element={<Navigate to='/library/source-sync' replace />} />
           </Route>

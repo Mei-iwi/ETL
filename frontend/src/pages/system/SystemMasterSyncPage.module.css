@@ -418,6 +418,39 @@
     margin-top: 16px;
 }
 
+.fileTable.importTable th,
+.fileTable.importTable td {
+    padding: 9px 8px;
+    line-height: 1.4;
+}
+
+.fileName {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    color: #334155;
+    font-weight: 400;
+}
+
+.fileDetails {
+    margin-top: 4px;
+    font-size: 12px;
+}
+
+.fileDetails summary {
+    color: #64748b;
+    cursor: pointer;
+}
+
+.fileMapping {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    margin-top: 5px;
+}
+
 @media (max-width: 640px) {
     .card {
         padding: 18px;

@@ -1,9 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFile } from 'node:fs/promises'
 import { createDataset, runEvaluation, getEvaluationRun, getEvaluationReport, EvaluationApiError } from '../src/services/evaluationApi.ts'
 import { blankQuery, datasetInput, importDraft, setDraftGrade, number } from '../src/pages/experiments/evaluationHelpers.ts'
 
 const id = '01M4ZXS1XJ2B4H42CFY24KJY8C'
+test('Prompt05 draft imports 18 queries without inventing grades or Dev IDs', async () => {
+    const file = JSON.parse(await readFile(new URL('../../docs/acceptance/ground-truth-draft.json', import.meta.url), 'utf8'))
+    assert.equal(file.ground_truth_confirmed, false)
+    assert.equal(new Set(file.rows.map(row => row.query_id)).size, 18)
+    assert.ok(file.rows.every(row => row.resource_id === 'READY_RESOURCE_ID' && row.relevance === null))
+    const draft = importDraft(file)
+    assert.equal(draft.queries.length, 18)
+    assert.throws(() => datasetInput(draft.name, draft.description, draft.queries), /chưa chấm/)
+})
 test('adding queries after deletion or import never reuses an existing query ID', () => {
     const rows = [blankQuery(1), blankQuery(3), blankQuery(4)]
     assert.equal(blankQuery(rows.length + 1, rows).query_id, 'q5')
