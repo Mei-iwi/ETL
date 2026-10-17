@@ -19,6 +19,11 @@ LEGACY_MEDIA_ERROR_CODES = {'MEDIA_NO_AUDIO', 'NO_SPEECH_CONTENT', 'MEDIA_DURATI
                             'INVALID_MEDIA', 'STT_RESULT_INVALID', 'STT_OUTPUT_LIMIT_EXCEEDED',
                             'STT_RUNTIME_UNAVAILABLE', 'STT_TIMEOUT', 'STT_BUSY', 'STT_OPERATION_FAILED'}
 
+# Only stable, sanitized codes may leave persisted worker task diagnostics.
+PUBLIC_PROCESSING_ERROR_CODES = LEGACY_MEDIA_ERROR_CODES | {
+    'EMPTY_EXTRACTED_CONTENT', 'SOURCE_HASH_MISMATCH', 'BLOCKED_OCR_RUNTIME',
+}
+
 
 class ProcessingFormatError(DomainError):
     """Public safe code, without parser details or local paths."""

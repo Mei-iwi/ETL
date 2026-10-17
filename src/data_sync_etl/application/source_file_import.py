@@ -17,7 +17,7 @@ from data_sync_etl.domain.core import (
 )
 from data_sync_etl.domain.file_integrity import stream_hash
 from data_sync_etl.domain.format_validation import (
-    LEGACY_MEDIA_ERROR_CODES,
+    PUBLIC_PROCESSING_ERROR_CODES,
     FormatValidatorRegistry,
     ProcessingFormatError,
 )
@@ -364,7 +364,7 @@ class SourceFileImportService:
             for row in rows[:size]:
                 state, _ = self._processing(repo, row)
                 failed = repo.find('ocr_page_tasks', {'job_id': row['processing_job_id'], 'status': 'FAILED'}, limit=1) if row['processing_job_id'] else []
-                processing_code = failed[0]['error_message'] if failed and failed[0]['error_message'] in LEGACY_MEDIA_ERROR_CODES else None
+                processing_code = failed[0]['error_message'] if failed and failed[0]['error_message'] in PUBLIC_PROCESSING_ERROR_CODES else None
                 items.append({
                     "import_job_id": row["id"], "source_version_id": row["source_version_id"],
                     "resource_id": row["resource_id"], "resource_title": row["resource_title"],

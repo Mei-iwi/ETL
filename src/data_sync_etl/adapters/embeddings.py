@@ -54,7 +54,7 @@ class LocalSentenceEmbedding:
                 except Exception:
                     raise IndexingError("BLOCKED_EMBEDDING_RUNTIME", 503) from None
             if not self._checked:
-                validate_vector(self._model.encode("Kiểm tra mô hình ngữ nghĩa").tolist(), self.dimension)
+                self._encode("Kiểm tra mô hình ngữ nghĩa")
                 self._checked = True
 
     def ready(self):
@@ -67,4 +67,12 @@ class LocalSentenceEmbedding:
 
     def embed(self, text):
         self.prepare()
-        return validate_vector(self._model.encode(text, show_progress_bar=False).tolist(), self.dimension)
+        return self._encode(text)
+
+    def _encode(self, text):
+        try:
+            vector = self._model.encode(text, show_progress_bar=False).tolist()
+        except Exception:
+            self._checked = False
+            raise IndexingError("BLOCKED_EMBEDDING_RUNTIME", 503) from None
+        return validate_vector(vector, self.dimension)

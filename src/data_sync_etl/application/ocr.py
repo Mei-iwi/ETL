@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from data_sync_etl.domain.core import DomainError, job_terminal, new_id, now
+from data_sync_etl.domain.file_integrity import stream_hash
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry, ProcessingFormatError
 from data_sync_etl.logging import event
 from data_sync_etl.ports.processing import (
@@ -150,6 +151,11 @@ class OCRPipeline:
         path = self.storage.get_local_path(version["storage_bucket"], version["storage_object_key"])
         if path.suffix.lower() in ('.mp3', '.mp4'):
             raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
+        if path.suffix.lower() in ('.docx', '.xlsx', '.pptx'):
+            with self.storage.open_stream(version['storage_bucket'], version['storage_object_key']) as stream:
+                observed_hash = stream_hash(stream)
+            if observed_hash != version['source_hash']:
+                raise ProcessingFormatError('SOURCE_HASH_MISMATCH')
         if path.suffix.lower() != '.pdf':
             validator = self.formats.find_validator(path.name)
             validator.validate_path(path)
@@ -176,14 +182,21 @@ class OCRPipeline:
             ), None
         image = self.storage.image_path(task["id"], task["claim_token"])
         self.pdf.render_page_to_image(path, task["page_num"], image)
-        result = self.engine.recognize(image)
+        try:
+            result = self.engine.recognize(image)
+            if not result.text.strip() and not mixed_scan:
+                raise DomainError('EMPTY_EXTRACTED_CONTENT')
+        except Exception:
+            image.unlink(missing_ok=True)
+            raise
         if mixed_scan:
             result = OCRResult(
                 native + "\n" + result.text,
                 confidence=result.confidence,
                 engine_name=result.engine_name,
                 engine_version=result.engine_version,
-                metadata={**result.metadata, "mixed_native_text": True},
+                metadata={**result.metadata, "mixed_native_text": True,
+                          "ocr_empty": not bool(result.text.strip())},
             )
         return result, str(image)
 
@@ -252,6 +265,7 @@ class OCRPipeline:
                                'EXTRACTION_LIMIT_EXCEEDED', 'INVALID_CSV', 'UNSUPPORTED_TEXT_ENCODING',
                                'INVALID_IMAGE', 'INVALID_OPENXML_CONTAINER', 'OPENXML_LIMIT_EXCEEDED'}
             permanent_codes.add('UNSUPPORTED_PROCESSING_FORMAT')
+            permanent_codes.add('SOURCE_HASH_MISMATCH')
             if code in permanent_codes or code == 'BLOCKED_OCR_RUNTIME':
                 self._fail(repo, task, code, permanent=code in permanent_codes)
             else:
