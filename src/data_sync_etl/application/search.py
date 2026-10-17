@@ -89,12 +89,19 @@ class SearchService:
             # Preserve the query deadline (including prior schema work), but do not
             # spend it on first-use imports/weights. Both phases remain bounded.
             warmup_started = monotonic()
-            self.indexing.embedding.prepare()
+            embedding = self.indexing.embedding
+            prepare_query = getattr(embedding, 'prepare_query', None)
+            if prepare_query is None:
+                embedding.prepare()
+                encoder = embedding.embed
+            else:
+                encoder = prepare_query()
             warmup_seconds = monotonic() - warmup_started
             if warmup_seconds > self.settings.search_model_warmup_timeout_seconds:
                 raise SearchError('SEARCH_MODEL_WARMUP_TIMEOUT')
             started += warmup_seconds
-            vector = validate_vector(self.indexing.embedding.embed(query), self.settings.index_embedding_dimension)
+            dimension = self.settings.index_embedding_dimension
+            vector = validate_vector(encoder(query), dimension)
             self._deadline(started)
         with self.indexing.uow() as repo:
             metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
