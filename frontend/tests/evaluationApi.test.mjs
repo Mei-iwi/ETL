@@ -6,7 +6,7 @@ import { blankQuery, datasetInput, importDraft, setDraftGrade, number } from '..
 
 const id = '01M4ZXS1XJ2B4H42CFY24KJY8C'
 test('Prompt05 draft imports 18 queries without inventing grades or Dev IDs', async () => {
-    const file = JSON.parse(await readFile(new URL('../../docs/acceptance/ground-truth-draft.json', import.meta.url), 'utf8'))
+    const file = JSON.parse(await readFile(new URL('../../fixtures/evaluation/manual-ground-truth-template.json', import.meta.url), 'utf8'))
     assert.equal(file.ground_truth_confirmed, false)
     assert.equal(new Set(file.rows.map(row => row.query_id)).size, 18)
     assert.ok(file.rows.every(row => row.resource_id === 'READY_RESOURCE_ID' && row.relevance === null))

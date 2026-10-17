@@ -191,12 +191,12 @@ def main():
         "api_inventory.json": routes,
     }.items():
         path = OUT / name
-        if not path.exists() or name == "api_inventory.json":
+        if not path.exists():
             path.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-    header = "# API inventory ? G0\n\nOffline registered route inspection + dynamic-template source scan. No startup/DB/.env.\n"
+    header = "# API inventory - G0\n\nOffline registered route inspection + dynamic-template source scan. No startup/DB/.env.\n"
     header += "All routes KEEP; external consumers are UNKNOWN unless explicitly approved. Tests are usage evidence, not production clients.\n"
     header += "CLI/worker invoke shared application services, not HTTP; service_refs traces these without falsely marking their handlers dead.\n\n"
     header += "| Method | Path | Handler | Usage | Decision | Call sites |\n| --- | --- | --- | --- | --- | --- |\n"
@@ -206,8 +206,9 @@ def main():
             + ", ".join(row["call_sites"][:4])
             + " |\n"
         )
-    (OUT / "api_inventory.md").write_text(header, encoding="utf-8")
-    security = "# Security matrix ? baseline G0\n\nLocal admin config is NOT authentication. PUBLISHED is NOT public rights. No production identity provider.\n"
+    if not (OUT / "api_inventory.md").exists():
+        (OUT / "api_inventory.md").write_text(header, encoding="utf-8")
+    security = "# Security matrix - baseline G0\n\nLocal admin config is NOT authentication. PUBLISHED is NOT public rights. No production identity provider.\n"
     security += "Middleware currently only limits POST /resources. Handler checks can occur after multipart parsing.\n\n"
     security += "| Method/path | Category | Current guard calls | Risk / intended boundary |\n| --- | --- | --- | --- |\n"
     for row in routes:
@@ -220,7 +221,8 @@ def main():
             )
             + " |\n"
         )
-    (OUT / "security_matrix.md").write_text(security, encoding="utf-8")
+    if not (OUT / "security_matrix.md").exists():
+        (OUT / "security_matrix.md").write_text(security, encoding="utf-8")
     print(
         json.dumps(
             {

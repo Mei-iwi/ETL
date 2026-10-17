@@ -1,0 +1,151 @@
+{
+  "name": "Dự thảo 18 truy vấn cần chấm thủ công",
+  "description": "ID mẫu; chưa xác minh corpus; chưa phải Ground Truth.",
+  "ground_truth_confirmed": false,
+  "rows": [
+    {
+      "query_id": "q01",
+      "query_text": "Quy tắc cộng hai phân số khác mẫu số",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q02",
+      "query_text": "Làm thế nào để trừ hai phân số không cùng mẫu?",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q03",
+      "query_text": "Quy đồng mẫu số trước khi tính tổng",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q04",
+      "query_text": "Bài tập cộng trừ phân số lớp 6",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q05",
+      "query_text": "Phân biệt cộng phân số và nhân phân số",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q06",
+      "query_text": "Tính diện tích hình chữ nhật",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q07",
+      "query_text": "Cách tính phần diện tích một hình có bốn góc vuông",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q08",
+      "query_text": "Chu vi và diện tích khác nhau như thế nào?",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q09",
+      "query_text": "Dữ liệu thống kê và cách đọc bảng số liệu",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q10",
+      "query_text": "Tìm bài tập thống kê có bảng tính",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q11",
+      "query_text": "Lập biểu đồ từ số liệu khảo sát",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q12",
+      "query_text": "Thực vật cần những điều kiện nào để sinh trưởng?",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q13",
+      "query_text": "Ảnh minh họa cấu tạo tế bào",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q14",
+      "query_text": "Vai trò của nước đối với cơ thể sinh vật",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q15",
+      "query_text": "Dòng thời gian các sự kiện lịch sử",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q16",
+      "query_text": "Tư liệu về một giai đoạn lịch sử Việt Nam",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q17",
+      "query_text": "Tìm hướng dẫn học tập ở dạng trình chiếu",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    },
+    {
+      "query_id": "q18",
+      "query_text": "Phân số trong bài tập thống kê được dùng như thế nào?",
+      "resource_id": "READY_RESOURCE_ID",
+      "resource_title": "CHƯA CHỌN HỌC LIỆU",
+      "candidate_description": "Người kiểm duyệt chọn học liệu thực và chấm 0–3.",
+      "relevance": null
+    }
+  ]
+}

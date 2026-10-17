@@ -38,7 +38,7 @@ class CreateResourceVersionUseCase:
         # Reject ownership/state before even reading bytes, then check again under
         # the existing write lock after storage to cover a concurrent change.
         with self.uow() as repo:
-            self._editable(repo.get("master_learning_resources", command.resource_id))
+            self.assert_editable(repo.get("master_learning_resources", command.resource_id))
         if command.uploaded_by and command.uploaded_by.strip():
             raise InvalidResourceVersion("uploaded_by requires an authenticated identity")
         try:
@@ -73,7 +73,7 @@ class CreateResourceVersionUseCase:
                     resource = repo.get(
                         "master_learning_resources", command.resource_id, lock=True
                     )
-                    self._editable(resource)
+                    self.assert_editable(resource)
 
                     previous = repo.find(
                         "resource_versions",
@@ -124,7 +124,7 @@ class CreateResourceVersionUseCase:
             ) from exc
 
     @staticmethod
-    def _editable(resource):
+    def assert_editable(resource):
         if resource is None:
             raise ResourceVersionNotFound("Resource not found")
         try:

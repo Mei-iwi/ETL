@@ -6,6 +6,8 @@ import { localProxyGuard } from './devProxyBoundary.ts'
 export default defineConfig({
   plugins: [react(), { name: 'local-api-proxy-boundary', configureServer(server) {
     server.middlewares.use(localProxyGuard)
+  }, configurePreviewServer(server) {
+    server.middlewares.use(localProxyGuard)
   } }],
   preview: { host: '127.0.0.1' },
   server: {

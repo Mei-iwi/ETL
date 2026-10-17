@@ -358,6 +358,12 @@ Mở [giao diện](http://127.0.0.1:3000), [Swagger](http://127.0.0.1:8000/docs)
 
 Sau khi đổi `.env`, khởi động lại API và worker liên quan; không chỉ chờ `--reload`.
 
+API quản trị chỉ dùng trên **Dev local**: `APP_ENVIRONMENT=development`, `ADMIN_ENABLED=true`,
+Backend chạy đúng lệnh loopback `--no-proxy-headers` ở trên. Frontend cũng phải truy cập từ máy local;
+request qua proxy công khai, Host/Origin bên ngoài hoặc header Forwarded bị từ chối.
+Đây không phải đăng nhập/RBAC Production; không mở cổng quản trị ra mạng.
+Không truyền `uploaded_by`/`triggered_by` để tự nhận danh tính; học liệu SOURCE/UNKNOWN không được sửa/tạo phiên bản thủ công.
+
 ## 8. Kiểm tra chức năng
 
 1. Nguồn PostgreSQL có dữ liệu: chạy `etl source-file-precheck` để kiểm tra cấu hình/nguồn (có thể tải file để xác minh, không phải lệnh đồng bộ). Sau đó chạy Full lần đầu từ giao diện hoặc `etl sync-master --stream all --full`.
@@ -406,6 +412,7 @@ Kiểm tra mã nguồn:
 ```bash
 python -m pytest tests/unit -q
 python -m ruff check .
+node --experimental-strip-types --test frontend/tests/*.test.mjs
 npm.cmd --prefix frontend run build
 npm.cmd --prefix frontend run lint
 git diff --check
@@ -427,11 +434,22 @@ Metadata Master → MongoDB mặc định shared chỉ đối chiếu. `MASTER_M
 
 ## 10. Lỗi thường gặp
 
-Tài liệu kiến trúc/nghiệm thu: [SOURCE–Master–Mongo](docs/architecture/README.md),
-[migration inventory](docs/architecture/migrations.md), [OAuth Drive chỉ đọc](docs/acceptance/drive-readonly.md),
-[Ground Truth cần chấm thủ công](docs/acceptance/ground-truth.md), [báo cáo Prompt05](docs/audits/frontend-masterdata/report.md).
+Tài liệu hiện có: [báo cáo kiểm thử và giới hạn](docs/audits/api-hardening/final_report.md),
+[danh sách API](docs/audits/api-hardening/api_inventory.md),
+[chính sách truy cập](docs/audits/api-hardening/security_after.md),
+[baseline schema](docs/audits/erd-contract/contract_snapshot.json),
+[quyết định còn chờ duyệt](docs/audits/master-migration/decisions.json).
+Các báo cáo Prompt01–05 bị xóa ở nhánh nền chưa được khôi phục; không coi các liên kết lịch sử đó là tài liệu hiện có.
+
+[Mẫu 18 truy vấn](fixtures/evaluation/manual-ground-truth-template.json) chỉ để chuẩn bị gán nhãn;
+thay ID mẫu bằng học liệu thử nghiệm được phép, chấm relevance 0–3 thủ công, rồi mới xác nhận Ground Truth.
+Không lấy điểm/thứ hạng Search làm nhãn. Google Drive OAuth thật chưa được nghiệm thu trong đợt hardening này;
+các bước chỉ đọc ở mục 6 cần được người vận hành cho phép và tự cung cấp credential ngoài Git.
+
 Hệ thống → Master Data chỉ đọc danh mục; provider/type là snapshot đã đồng bộ, không toàn bộ SOURCE.
 Chi tiết học liệu chỉ bật Xem/Tải khi nội dung và chỉ mục sẵn sàng; API vẫn kiểm quyền/tệp đích.
+Preview giới hạn 30 MiB theo số byte thực tải (Office text 1 MiB); tệp lớn dùng thao tác tải tệp trong giới hạn định dạng hiện có.
+Chưa sửa lineage SOURCE dạng nhánh/out-of-order (B04), chưa mở toàn bộ danh mục SOURCE (B09).
 
 | Hiện tượng | Cách kiểm tra |
 | --- | --- |
@@ -446,3 +464,5 @@ Chi tiết học liệu chỉ bật Xem/Tải khi nội dung và chỉ mục s�
 | Search rỗng / Thực nghiệm 403 | Kiểm tra quyền, local Dev và cấu hình mục 8; không tự mở dữ liệu thật cho công khai. |
 | `etl.exe` bị khóa khi pip install | Ctrl+C API/worker đang dùng `.venv`, sau đó chạy lại pip; không cần xóa dữ liệu. |
 | Giao diện không gọi được API | Kiểm tra Backend cổng 8000, Frontend cổng 3000 và Health; tránh chạy nhầm API cũ. |
+| API quản trị trả 403 | Kiểm tra Dev local, `ADMIN_ENABLED`, lệnh loopback không proxy; không giả header/actor để bỏ chặn. Production cần mô hình xác thực được phê duyệt riêng. |
+| Preview trả 413 | Tệp vượt ngân sách xem trước hoặc giới hạn định dạng; không bỏ kiểm tra quyền/kích thước để tải. |

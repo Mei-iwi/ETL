@@ -28,3 +28,10 @@ def test_schema_baseline_and_register_do_not_approve_pending_schema():
     register = json.loads((ROOT / "docs/audits/master-migration/decisions.json").read_text(encoding="utf-8"))
     assert register["approved_schema_changes"] == []
     assert register["schema_policy"] == "PRESERVE"
+
+
+def test_openapi_keep_routes_and_models_match_g0_baseline():
+    _, current = inventory()
+    before = json.loads((ROOT / "docs/audits/api-hardening/openapi_before.json").read_text(encoding="utf-8"))
+    assert current["paths"] == before["paths"]
+    assert current["components"] == before["components"]

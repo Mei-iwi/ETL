@@ -1,3 +1,4 @@
+from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.logging import event, flow
 from data_sync_etl.ports.processing import StoragePort
@@ -8,13 +9,16 @@ class ResourceIngestion:
     def __init__(self, uow: UnitOfWork, storage: StoragePort):
         self.uow, self.storage = uow, storage
 
-    def run(self, resource_id, bucket, object_key, uploaded_by=None):
+    def run(self, resource_id, bucket, object_key, uploaded_by=None, *, local_only=False):
+        # Legacy HTTP entry point must not bypass the canonical LOCAL ownership
+        # policy. Trusted CLI/orchestration retains its existing import contract.
+        validate = CreateResourceVersionUseCase.assert_editable if local_only else self._validate
         with flow():
             with self.uow() as repo:
-                self._validate(repo.get("master_learning_resources", resource_id))
+                validate(repo.get("master_learning_resources", resource_id))
             snapshot = self.storage.snapshot(bucket, object_key)
             with self.uow() as repo:
-                self._validate(repo.get("master_learning_resources", resource_id, lock=True))
+                validate(repo.get("master_learning_resources", resource_id, lock=True))
                 previous = repo.find(
                     "resource_versions",
                     {"resource_id": resource_id},

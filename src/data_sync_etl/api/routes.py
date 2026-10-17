@@ -837,10 +837,15 @@ def index_version(id: ResourceId, request: Request, response: Response):
 
 @router.post("/admin/resources/{id}/versions/ingest")
 def ingest(id: ResourceId, body: IngestInput, request: Request):
-    services(request)
+    container = services(request)
     if body.uploaded_by is not None:
         raise HTTPException(400, "uploaded_by requires an authenticated identity")
-    return services(request).ingestion.run(id, body.bucket, body.object_key, body.uploaded_by)
+    try:
+        return container.ingestion.run(id, body.bucket, body.object_key, local_only=True)
+    except NewResourceVersionNotFound:
+        raise HTTPException(404, "Resource not found") from None
+    except InvalidResourceVersion as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
 
 
 @router.get("/api/v1/resource-versions/{id}/chunks", tags=[TAG_INDEXING],

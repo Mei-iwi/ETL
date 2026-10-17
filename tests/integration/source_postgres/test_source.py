@@ -148,6 +148,7 @@ def test_erd_metadata_and_revision_replay(source_database):
 
 
 def test_json_postgresql_equivalence_and_idempotency(source, pg_container):
+    pg_container.settings.admin_enabled = True
     # Source requires an author. Align both fake seeds; adapter itself never fabricates one.
     path = pg_container.source.root / "resources.json"
     rows = json.loads(path.read_text(encoding="utf-8"))
@@ -290,6 +291,7 @@ def test_relation_add_move_and_delete_last(source, pg_container):
 
 
 def test_null_source_preserved_and_visible(source, pg_container):
+    pg_container.settings.admin_enabled = True
     execute(
         source, "UPDATE learning_resources SET provider_id=NULL,title=NULL WHERE id='resource-1'"
     )
