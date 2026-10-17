@@ -19,7 +19,7 @@ class RetryProcessingJob:
             "job_status": job["status"],
             "processing_status": processing_status,
             "action": action,
-            "status_url": f"/admin/resource-versions/{version_id}/etl-status",
+            "status_url": f"/api/v1/resource-versions/{version_id}/etl-status",
         }
 
     def run(self, job_id: str) -> dict:

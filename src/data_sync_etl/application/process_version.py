@@ -44,5 +44,5 @@ class ProcessResourceVersion:
             "job_status": job["status"],
             "processing_status": state,
             "action": action,
-            "status_url": (f"/admin/resource-versions/{version_id}/etl-status"),
+            "status_url": f"/api/v1/resource-versions/{version_id}/etl-status",
         }
