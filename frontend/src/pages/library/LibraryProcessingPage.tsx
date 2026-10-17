@@ -244,6 +244,9 @@ export function LibraryProcessingPage() {
     const canRetry = currentResult?.processing_status === 'OCR_FAILED' || currentResult?.processing_status === 'FINALIZATION_FAILED'
     const unsupportedFormat = blockedVersionId === versionId || currentResult?.error_code === 'UNSUPPORTED_PROCESSING_FORMAT'
     const mediaErrors: Record<string, string> = {
+        EMPTY_EXTRACTED_CONTENT: 'Không trích xuất được văn bản.',
+        SOURCE_HASH_MISMATCH: 'Tệp đã thay đổi. Cần nhập phiên bản mới.',
+        BLOCKED_OCR_RUNTIME: 'Kiểm tra Tesseract và bộ ngôn ngữ OCR.',
         UNSUPPORTED_PROCESSING_FORMAT: 'Định dạng này không được hỗ trợ xử lý.',
         MEDIA_NO_AUDIO: 'Tệp không có luồng âm thanh.', NO_SPEECH_CONTENT: 'Không có nội dung lời nói.',
         MEDIA_DURATION_EXCEEDED: 'Thời lượng vượt giới hạn.', INVALID_MEDIA: 'Audio/video không hợp lệ.',

@@ -1,6 +1,6 @@
 from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import ProcessingJobNotFound
-from data_sync_etl.domain.format_validation import LEGACY_MEDIA_ERROR_CODES
+from data_sync_etl.domain.format_validation import PUBLIC_PROCESSING_ERROR_CODES
 from data_sync_etl.ports.repositories import UnitOfWork
 
 
@@ -27,7 +27,7 @@ class GetProcessingJob:
 
             return {
                 "id": job["id"],
-                "error_code": "UNSUPPORTED_PROCESSING_FORMAT" if unsupported else error_code if error_code in LEGACY_MEDIA_ERROR_CODES else None,
+                "error_code": "UNSUPPORTED_PROCESSING_FORMAT" if unsupported else error_code if error_code in PUBLIC_PROCESSING_ERROR_CODES else None,
                 "resource_version_id": job["resource_version_id"],
                 "status": job["status"],
                 "processing_status": processing_state(repo, job),
