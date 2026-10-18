@@ -97,6 +97,25 @@ class RunResponse(StrictDTO):
     finished_at: str | None
 
 
+class RunListItem(StrictDTO):
+    id: str
+    dataset_id: str
+    dataset_name: str
+    status: Literal['RUNNING', 'COMPLETED', 'FAILED', 'PARTIAL', 'NOT_COMPARABLE']
+    created_at: str
+    finished_at: str | None
+    duration_ms: float | None = None
+    query_count: int
+
+
+class RunListResponse(StrictDTO):
+    items: list[RunListItem]
+    page: int
+    size: int
+    total: int
+    total_pages: int
+
+
 class RunDetailResponse(StrictDTO):
     id: str
     dataset_id: str

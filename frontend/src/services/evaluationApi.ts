@@ -1,4 +1,4 @@
-import type { DatasetInput, DatasetCreated, RunInput, RunCreated, EvaluationRun, EvaluationProgress } from '../types/evaluation'
+import type { DatasetInput, DatasetCreated, RunInput, RunCreated, EvaluationRun, EvaluationProgress, EvaluationRunList } from '../types/evaluation'
 
 export class EvaluationApiError extends Error {
     status: number
@@ -64,6 +64,24 @@ export async function runEvaluation(input: RunInput, signal?: AbortSignal, onPro
         }
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
 }
+export async function listEvaluationRuns(page = 1, signal?: AbortSignal): Promise<EvaluationRunList> {
+    const data = await (await request(`/runs?page=${page}&size=7`, signal)).json()
+    if (!data || !Array.isArray(data.items) || !Number.isInteger(data.page) || data.page !== page
+        || data.size !== 7 || !Number.isInteger(data.total) || data.total < 0
+        || !Number.isInteger(data.total_pages) || data.total_pages < 1 || data.items.length > 7
+        || data.items.some((row: EvaluationRunList['items'][number]) => !row
+            || typeof row.id !== 'string' || !/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(row.id)
+            || typeof row.dataset_id !== 'string' || !/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(row.dataset_id)
+            || typeof row.dataset_name !== 'string' || typeof row.created_at !== 'string'
+            || !Number.isFinite(Date.parse(row.created_at))
+            || !['RUNNING', 'COMPLETED', 'FAILED', 'PARTIAL', 'NOT_COMPARABLE'].includes(row.status)
+            || !Number.isInteger(row.query_count) || row.query_count < 0
+            || (row.duration_ms !== null && (typeof row.duration_ms !== 'number' || !Number.isFinite(row.duration_ms) || row.duration_ms < 0)))) {
+        throw new Error('Không tải được danh sách thực nghiệm.')
+    }
+    return data
+}
+
 export async function getEvaluationRun(id: string, offset = 0, signal?: AbortSignal): Promise<EvaluationRun> {
     return (await request(`/runs/${validId(id)}?offset=${offset}&limit=20`, signal)).json()
 }

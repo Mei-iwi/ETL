@@ -23,6 +23,7 @@ from data_sync_etl.api.evaluation_schemas import (
     DatasetRequest,
     DatasetResponse,
     RunDetailResponse,
+    RunListResponse,
     RunRequest,
     RunResponse,
     evaluation_error,
@@ -228,6 +229,17 @@ def run_evaluation(body: RunRequest, request: Request, response: Response):
         run = service.run(body.model_dump(), access)
         return {'run_id': run['id'], 'status': run['status'], 'dataset_id': run['dataset_id'],
                 'warnings': run['warnings'], 'finished_at': run['finished_at']}
+    except Exception as exc:
+        raise evaluation_error(exc) from None
+
+
+@router.get('/api/v1/evaluations/runs', tags=[TAG_EVALUATION], response_model=RunListResponse)
+def list_evaluation_runs(request: Request, response: Response,
+                         page: int = Query(default=1, ge=1), size: int = Query(default=7, ge=1, le=50)):
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        service, access = evaluation_services(request)
+        return service.list_runs(access, page, size)
     except Exception as exc:
         raise evaluation_error(exc) from None
 
