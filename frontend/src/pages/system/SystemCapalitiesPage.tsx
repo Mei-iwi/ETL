@@ -37,11 +37,19 @@ type CapabilitiesData = {
             dimensions: number | null
             implemented?: boolean
             runtime_status?: string
+            configured?: boolean
+            runtime_verified?: boolean
+            runtime_scope?: string
         }
     }
     retrieval: {
         modes: string[]
         filters: string[]
+        methods?: Array<{ mode: string; requires_embedding: boolean; runtime_status: string }>
+        context_supported?: boolean
+        pagination_supported?: boolean
+        access_policy?: string
+        public_search_supported?: boolean
     }
     storage: {
         metadata: string
@@ -185,7 +193,7 @@ export function SystemCapalitiesPage() {
                     <h2>Biểu diễn vector</h2>
                     <p>
                         Trạng thái: {' '}
-                        {data.representations.vector.enabled ? 'Runtime đã kiểm tra và sẵn sàng' : data.representations.vector.implemented ? 'Đã tích hợp, runtime model chưa được xác nhận sẵn sàng' : 'Chưa tích hợp vào pipeline'}
+                        {data.representations.vector.enabled ? 'Model đã chạy thành công' : data.representations.vector.runtime_status === 'BLOCKED_EMBEDDING_RUNTIME' ? 'Model chưa cấu hình hoặc không khả dụng' : data.representations.vector.runtime_status === 'NOT_VERIFIED' ? 'Model local đã cấu hình, chưa xác minh hoạt động' : data.representations.vector.implemented ? 'Đã tích hợp' : 'Chưa tích hợp'}
                     </p>
                     <p>
                         Phương pháp: {' '}
@@ -196,10 +204,28 @@ export function SystemCapalitiesPage() {
                         {data.representations.vector.dimensions ?? 'Chưa xác nhận'}
                     </p>
                     <p>Bag of Words: {data.representations.bag_of_words ? 'Đã tích hợp' : 'Chưa tích hợp vào pipeline'}</p>
+                    {data.representations.vector.runtime_scope === 'current_process' && <p>Trạng thái của Backend hiện tại. Tải lại trang không tự nạp hoặc chạy model.</p>}
                 </article>
                 <article className={styles.card}>
                     <h2>Tra cứu nội dung</h2>
-                    <p>{data.retrieval.modes.length ? `Chế độ: ${data.retrieval.modes.join(', ')}` : 'Chưa tích hợp API tìm kiếm nội dung'}</p>
+                    {data.retrieval.modes.length ? <ul className={styles.searchMethods}>
+                        {data.retrieval.modes.map(mode => {
+                            const status = data.retrieval.methods?.find(method => method.mode === mode)?.runtime_status
+                            const label = ({ bow: 'BoW · Từ khóa', vector: 'Vector · Ngữ nghĩa', hybrid: 'Hybrid · Kết hợp' } as Record<string, string>)[mode] ?? mode
+                            return <li key={mode}>
+                                <span>{label}</span>
+                                <span className={status === 'READY' || status === 'NOT_REQUIRED' ? styles.ready : status === 'BLOCKED_EMBEDDING_RUNTIME' ? styles.blocked : styles.pending}>
+                                    {status === 'NOT_REQUIRED' ? 'Không cần model' : status === 'READY' ? 'Model hoạt động' : status === 'BLOCKED_EMBEDDING_RUNTIME' ? 'Model chưa khả dụng' : status === 'NOT_VERIFIED' ? 'Đã cấu hình model' : 'Đã tích hợp'}
+                                </span>
+                            </li>
+                        })}
+                    </ul> : <p>Chưa tích hợp tìm kiếm</p>}
+                    <p>Bộ lọc: {data.retrieval.filters.map(filter => ({
+                        subject_id: 'Môn học', grade_level_id: 'Khối lớp', resource_type_code: 'Loại học liệu',
+                        resource_id: 'Học liệu', resource_version_id: 'Phiên bản',
+                    } as Record<string, string>)[filter] ?? filter).join(', ') || 'Chưa hỗ trợ'}</p>
+                    {data.retrieval.context_supported && <p>Xem ngữ cảnh: Có hỗ trợ</p>}
+                    {data.retrieval.pagination_supported && <p>Phân trang kết quả: Có hỗ trợ</p>}
                 </article>
                 <article className={styles.card}>
                     <h2>Lưu trữ</h2>

@@ -5,7 +5,7 @@ import { createDataset, recentEvaluationId } from '../../services/evaluationApi'
 import type { DatasetCreated } from '../../types/evaluation'
 import layout from '../library/LibraryPages.module.css'
 import styles from './ExperimentPages.module.css'
-import { blankQuery, datasetInput, importDraft, setDraftGrade, warning } from './evaluationHelpers'
+import { blankQuery, datasetInput, importDraft, setDraftGrade, visibleWarnings, warning } from './evaluationHelpers'
 
 export function EvaluationDataPage() {
     const [name, setName] = useState('')
@@ -79,7 +79,7 @@ export function EvaluationDataPage() {
                 <p className={styles.identifier}>Dataset ID: {result.dataset_id}</p>
                 <div className={styles.row}><button className={layout.secondaryButton} onClick={() => { void navigator.clipboard.writeText(result.dataset_id).then(() => setCopied(true)).catch(() => setError('Không sao chép được ID.')) }}>{copied ? 'Đã sao chép' : 'Sao chép ID'}</button>
                     <Link className={layout.primaryButton} to={`/experiments/run?dataset_id=${result.dataset_id}`}>Chạy thực nghiệm</Link></div>
-                {result.validation.warnings.map(code => <p className={styles.muted} key={code}>{warning(code)}</p>)}
+                {visibleWarnings(result.validation.warnings).map(code => <p className={styles.muted} key={code}>{warning(code)}</p>)}
             </div>}
         </div>
     </section>
