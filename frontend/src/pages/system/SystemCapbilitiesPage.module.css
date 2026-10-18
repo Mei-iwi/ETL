@@ -133,6 +133,25 @@
     border-radius: 8px;
 }
 
+.card .searchMethods {
+    list-style: none;
+    padding: 0;
+}
+
+.searchMethods li {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid #e5eaf1;
+    font-size: 14px;
+}
+
+.card .ready { color: #15803d; }
+.card .pending { color: #a16207; }
+.card .blocked { color: #b91c1c; }
+
 .reloadButton {
     display: inline-flex;
     align-items: center;

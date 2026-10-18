@@ -5,7 +5,7 @@ import { getEvaluationReport, getEvaluationRun, recentEvaluationId } from '../..
 import type { EvaluationRun } from '../../types/evaluation'
 import layout from '../library/LibraryPages.module.css'
 import styles from './ExperimentPages.module.css'
-import { number, warning } from './evaluationHelpers'
+import { number, visibleWarnings, warning } from './evaluationHelpers'
 
 export function EvaluationRunView() {
     const [params] = useSearchParams()
@@ -22,6 +22,7 @@ function RunView({ id }: { id: string }) {
     const [attempt, setAttempt] = useState(0)
     const [downloading, setDownloading] = useState(false)
     const [downloadError, setDownloadError] = useState('')
+    const displayedWarnings = visibleWarnings(data?.warnings ?? [])
     const downloadController = useRef<AbortController | null>(null)
     const downloadBusy = useRef(false)
     useEffect(() => () => downloadController.current?.abort(), [])
@@ -62,9 +63,6 @@ function RunView({ id }: { id: string }) {
             {data && <>
                 <section className={layout.card}>
                     <h2>{data.dataset_name}</h2><p className={data.status === 'COMPLETED' ? styles.success : ['FAILED', 'NOT_COMPARABLE'].includes(data.status) ? styles.error : styles.pending}>Trạng thái: {data.status}</p>
-                    <p className={data.warnings.includes('LABELS_NOT_HUMAN_CONFIRMED') ? styles.pending : styles.muted}>
-                        {data.warnings.includes('LABELS_NOT_HUMAN_CONFIRMED') ? 'Nhãn chưa xác nhận — chỉ dùng kiểm thử.' : 'Nhãn đã xác nhận theo khai báo dataset.'}
-                    </p>
                     <p>{data.queries.length} truy vấn · {data.queries.reduce((count, query) => count + query.relevance.filter(label => label.grade >= data.relevance_threshold).length, 0)} nhãn dương · Đơn vị: học liệu.</p>
                     <details><summary>Thông tin lần chạy</summary>
                         <p className={styles.identifier}>Run ID: {data.id}</p>
@@ -73,8 +71,8 @@ function RunView({ id }: { id: string }) {
                         <p className={styles.identifier}>Model: {data.snapshot.model.id} · {data.snapshot.model.version} · {data.snapshot.model.dimension} chiều</p>
                         <p className={styles.muted}>{new Date(data.created_at).toLocaleString('vi-VN')}</p>
                     </details>
-                    {data.warnings.length > 0 && <details><summary>Lưu ý ({data.warnings.length})</summary>
-                        {data.warnings.map(code => <p className={code.includes('CHANGED') || code.includes('TIMEOUT') ? styles.error : styles.pending} key={code}>{warning(code)}</p>)}
+                    {displayedWarnings.length > 0 && <details><summary>Lưu ý ({displayedWarnings.length})</summary>
+                        {displayedWarnings.map(code => <p className={code.includes('CHANGED') || code.includes('TIMEOUT') ? styles.error : styles.pending} key={code}>{warning(code)}</p>)}
                     </details>}
                     <div className={styles.row}>
                         <Link className={layout.secondaryButton} to={`/experiments/run?dataset_id=${data.dataset_id}`}>Chạy lại</Link>

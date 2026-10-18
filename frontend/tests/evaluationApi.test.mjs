@@ -2,7 +2,16 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { createDataset, runEvaluation, getEvaluationRun, getEvaluationReport, EvaluationApiError } from '../src/services/evaluationApi.ts'
-import { blankQuery, datasetInput, importDraft, setDraftGrade, number } from '../src/pages/experiments/evaluationHelpers.ts'
+import { blankQuery, datasetInput, importDraft, setDraftGrade, number, visibleWarnings } from '../src/pages/experiments/evaluationHelpers.ts'
+
+test('hide only the unconfirmed-label notice without changing API warning data', () => {
+    const original = Object.freeze(['LABELS_NOT_HUMAN_CONFIRMED', 'EVALUATION_TIMEOUT',
+        'UNJUDGED_ITEMS_TREATED_AS_GRADE_0', 'LOCAL_DEMO_NOT_PRODUCTION_AUTH'])
+    assert.deepEqual(visibleWarnings(original), original.slice(1))
+    assert.equal(original[0], 'LABELS_NOT_HUMAN_CONFIRMED')
+    assert.deepEqual(visibleWarnings(['LABELS_NOT_HUMAN_CONFIRMED']), [])
+    assert.deepEqual(visibleWarnings([]), [])
+})
 
 const id = '01M4ZXS1XJ2B4H42CFY24KJY8C'
 test('Prompt05 draft imports 18 queries without inventing grades or Dev IDs', async () => {

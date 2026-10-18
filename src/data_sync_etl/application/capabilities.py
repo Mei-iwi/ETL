@@ -19,6 +19,8 @@ class CapabilityService:
         runtime = self.embedding_runtime
         vector_ready = bool(runtime and runtime.ready())
         available = bool(runtime and runtime.available())
+        runtime_status = ('READY' if vector_ready else 'NOT_VERIFIED' if available
+                          else 'BLOCKED_EMBEDDING_RUNTIME')
         return {
             'api_version': 'v1',
             'formats': FormatValidatorRegistry().describe(),
@@ -54,12 +56,27 @@ class CapabilityService:
                     'semantic': vector_ready,
                     'dimensions': runtime.dimension if available else None,
                     'implemented': True,
-                    'runtime_status': 'READY' if vector_ready else 'NOT_VERIFIED' if available else 'BLOCKED_EMBEDDING_RUNTIME',
+                    'configured': available,
+                    'runtime_verified': vector_ready,
+                    'runtime_scope': 'current_process',
+                    'runtime_status': runtime_status,
                 },
             },
             'retrieval': {
-                'modes': [],
-                'filters': [],
+                'modes': ['bow', 'vector', 'hybrid'],
+                'filters': ['subject_id', 'grade_level_id', 'resource_type_code',
+                            'resource_id', 'resource_version_id'],
+                # Implementation support is not corpus readiness or an access grant.
+                # These checks never load the model, infer vectors or query storage.
+                'methods': [
+                    {'mode': mode, 'requires_embedding': mode != 'bow',
+                     'runtime_status': 'NOT_REQUIRED' if mode == 'bow' else runtime_status}
+                    for mode in ('bow', 'vector', 'hybrid')
+                ],
+                'context_supported': True,
+                'pagination_supported': True,
+                'access_policy': 'LOCAL_DEMO_ONLY',
+                'public_search_supported': False,
             },
             'storage': {
                 'metadata': self.metadata_backend,

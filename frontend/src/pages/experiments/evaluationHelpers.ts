@@ -74,6 +74,8 @@ export function importDraft(value: unknown): { name: string; description: string
 }
 
 export const number = (value: number | null | undefined) => value == null ? 'n/a' : value.toFixed(4)
+// Presentation only: retain the original warning and label metadata in API/report data.
+export const visibleWarnings = (codes: string[]) => codes.filter(code => code !== 'LABELS_NOT_HUMAN_CONFIRMED')
 export const warning = (code: string) => ({
     UNJUDGED_ITEMS_TREATED_AS_GRADE_0: 'Học liệu chưa gán nhãn được tính grade 0.',
     LOCAL_DEMO_NOT_PRODUCTION_AUTH: 'Chỉ sử dụng trong Dev local; chưa có xác thực Production.',
