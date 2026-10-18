@@ -165,7 +165,7 @@ def search_materials(body: SearchRequest, request: Request):
         access = search_access(request)  # Never acquire runtime capacity before authorization.
         service = request.app.state.container.search
         with service.runtime_admission(body.method, access=access):
-            return service.search(**body.model_dump(), access=access)
+            return service.search_http(**body.model_dump(), access=access)
     except HTTPException:
         raise
     except Exception as exc:
