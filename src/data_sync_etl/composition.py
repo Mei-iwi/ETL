@@ -268,7 +268,9 @@ class Container:
             bags=self.content_bags,
         )
         self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
-        self.search = SearchService(self.indexing, self.settings, self.content_bags)
+        # Attest only the fixed LocalSentenceEmbedding used by HTTP Search.
+        self.search = SearchService(self.indexing, self.settings, self.content_bags,
+                                    query_cache_runtime=self.indexing.embedding)
         self.evaluations = EvaluationService(self.search, EvaluationFileStore(
             self.settings.storage_root, max_files=self.settings.evaluation_max_stored_files,
             max_bytes=self.settings.evaluation_max_file_bytes), self.settings)

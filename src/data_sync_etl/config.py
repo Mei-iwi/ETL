@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     search_max_bags: int = Field(default=2000, ge=1, le=10000)
     search_timeout_seconds: int = Field(default=15, ge=1, le=120)
     search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)
+    search_query_embedding_cache_enabled: bool = False
     app_environment: Literal['development', 'test', 'staging', 'production'] | None = None
     search_internal_dev_enabled: bool = False
     evaluation_max_queries: int = Field(default=20, ge=1, le=100)

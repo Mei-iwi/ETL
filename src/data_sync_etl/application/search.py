@@ -5,6 +5,7 @@ from threading import BoundedSemaphore
 from time import monotonic
 
 from data_sync_etl.application.content_bags import bag_structure, representation_mode
+from data_sync_etl.application.http_query_cache import HttpQueryVectorCache
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
 from data_sync_etl.domain.search import SearchError, binary_score, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
@@ -43,9 +44,35 @@ class QueryEmbeddingContext:
 
 
 class SearchService:
-    def __init__(self, indexing, settings, bags: SearchBagReader | None):
+    def __init__(self, indexing, settings, bags: SearchBagReader | None, *, query_cache_runtime=None):
         self.indexing, self.settings, self.bags = indexing, settings, bags
         self._http_model_slot = BoundedSemaphore(1)
+        self._http_query_vectors = (HttpQueryVectorCache(query_cache_runtime)
+                                    if query_cache_runtime is not None else None)
+
+    def search_http(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None):
+        """Called only inside the route's existing authorization/admission guard.
+
+        Direct Search/Evaluation callers keep the original uncached search().
+        Runtime prepare/schema and all live retrieval remain in that function.
+        """
+        cache = self._http_query_vectors
+        criteria = dict(query=query, method=method, filters=filters, page=page, size=size, access=access)
+        if not self.settings.search_query_embedding_cache_enabled or method == 'bow' or cache is None:
+            if cache is not None and not self.settings.search_query_embedding_cache_enabled:
+                cache.clear()
+                cache.count('bypass_disabled')
+            return self.search(**criteria)
+        if (type(access) is not SearchAccess or access.scope != 'local_demo'
+                or self.settings.app_environment != 'development' or not self.settings.admin_enabled
+                or not self.settings.search_internal_dev_enabled):
+            cache.clear()
+            cache.count('bypass_scope')
+            return self.search(**criteria)
+        with cache.request() as context:
+            result = self.search(**criteria, _query_context=context)
+            context.commit()
+            return result
 
     @contextmanager
     def runtime_admission(self, method, *, access):
