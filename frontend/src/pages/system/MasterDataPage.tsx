@@ -30,7 +30,9 @@ export function MasterDataPage() {
             const rows = response.items.map(row => kind === 'providers' ? [row.id, row.name, row.provider_type] :
                 kind === 'types' ? [row.code, row.name, '—'] : kind === 'grades' ? [row.id, row.grade_name_vi, row.grade_code] :
                     [row.id, row.name, row.grade_level_id]).map(row => row.map(value => value || '—'))
-            setData({ key, rows, pages, total: response.pagination.total, notice: kind === 'subjects' ? 'Danh mục active được quản lý trong Master.' : catalogMessage(response.catalog) }); setError(null)
+            const notice = kind === 'subjects' || ['ALL_SOURCE_PLUS_LOCAL', 'MASTER_MANAGED'].includes(response.catalog?.completeness ?? '')
+                ? '' : catalogMessage(response.catalog)
+            setData({ key, rows, pages, total: response.pagination.total, notice }); setError(null)
         }).catch(reason => {
             if (!controller.signal.aborted) setError({ key, message: reason instanceof Error ? reason.message : 'Không tải được danh mục.' })
         })
@@ -38,9 +40,8 @@ export function MasterDataPage() {
     }, [kind, page, term, attempt, key])
     const result = data?.key === key ? data : null
     return <section className={styles.page}>
-        <h1>Master Data</h1>
+        <h1>Danh mục học liệu</h1>
         <section className={styles.card}>
-            <h2>Danh mục chỉ đọc</h2>
             <form className={layout.actions} style={{ alignItems: 'flex-end' }} onSubmit={event => {
                 event.preventDefault(); setTerm(query.trim()); setPage(1); setAttempt(n => n + 1)
             }}>
@@ -51,7 +52,7 @@ export function MasterDataPage() {
                 <button className={layout.primaryButton}>Lọc</button>
                 <button type="button" className={layout.primaryButton} onClick={() => setAttempt(n => n + 1)}>Tải lại</button>
             </form>
-            {result && <p role="status" className={styles.notice}>{result.notice} Tổng: {result.total}</p>}
+            {result?.notice && <p role="status" className={styles.notice}>{result.notice}</p>}
             {error?.key === key ? <p role="alert" className={layout.alert}>{error.message}</p> :
                 !result ? <p role="status">Đang tải danh mục…</p> :
                     <><div className={styles.tableWrap}><table className={styles.fileTable}>
