@@ -75,7 +75,6 @@ export function EvaluationDataPage() {
                         }}>
                         <span className={upload.uploadIcon}><Upload aria-hidden="true" /></span>
                         <strong>{importing ? 'Đang đọc tệp…' : dragging ? 'Thả tệp vào đây' : 'Chọn tệp dữ liệu đánh giá'}</strong>
-                        <span className={upload.uploadHint}>Kéo thả tệp vào đây hoặc nhấn để chọn</span>
                         <span className={upload.fileTypes}>JSON · Tối đa 1 MB</span>
                     </button> : <div className={upload.selectedFile}>
                         <span className={upload.selectedFileIcon}><FileJson aria-hidden="true" /></span>
@@ -94,7 +93,6 @@ export function EvaluationDataPage() {
                         <label className={layout.field}>Nội dung<input aria-label={`Nội dung truy vấn ${index + 1}`} value={row.query} maxLength={300} required
                             onChange={e => setQueries(rows => rows.map((item, i) => i === index ? { ...item, query: e.target.value } : item))} /></label>
                         {row.candidates ? <>
-                            <div className={styles.muted}>Đã chấm {row.candidates.filter(item => item.grade !== null).length}/{row.candidates.length} học liệu</div>
                             {row.candidates.map(item => <div className={styles.query} key={item.id}>
                                 <label className={layout.field}>{item.title ? `${item.title} (${item.id})` : item.id}
                                     <select aria-label={`Điểm ${row.query_id} ${item.id}`} value={item.grade ?? ''}

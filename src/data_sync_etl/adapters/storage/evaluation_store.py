@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 from contextlib import contextmanager
+from itertools import islice
 from pathlib import Path
 
 from data_sync_etl.domain.evaluation import EvaluationError, canonical, checksum, validate_id
@@ -72,6 +73,20 @@ class EvaluationFileStore:
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
+
+    def list_runs(self):
+        try:
+            paths = list(islice(self.directory('runs').glob('*.json'), self.max_files + 1))
+            if len(paths) > self.max_files:
+                raise EvaluationError('EVALUATION_STORAGE_UNAVAILABLE', 503)
+            for path in paths:
+                try:
+                    yield self.get('runs', path.stem)
+                except EvaluationError as exc:
+                    if exc.code != 'EVALUATION_NOT_FOUND':
+                        raise
+        except OSError:
+            raise EvaluationError('EVALUATION_STORAGE_UNAVAILABLE', 503) from None
 
     def get(self, kind, identifier):
         validate_id(identifier)

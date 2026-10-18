@@ -570,7 +570,7 @@ export function LibraryCreatePage() {
                     </section>
 
                     {/* Trạng thái danh mục */}
-                    <section className={styles.statusCard}>
+                    {(catalogLoading || metadataLoading || catalogError || metadataError) && <section className={styles.statusCard}>
 
                         <div className={styles.statusContent}>
                             <h2>Trạng thái danh mục</h2>
@@ -593,13 +593,9 @@ export function LibraryCreatePage() {
                                         Tải lại danh mục
                                     </button>
                                 </>
-                            ) : (
-                                <p className={styles.statusDescription}>
-                                    Các danh mục đã sẵn sàng để tạo học liệu.
-                                </p>
-                            )}
+                            ) : null}
                         </div>
-                    </section>
+                    </section>}
                 </div>
 
                 {error && (

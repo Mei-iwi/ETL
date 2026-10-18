@@ -58,7 +58,7 @@ export function MasterDataPage() {
                     <><div className={styles.tableWrap}><table className={styles.fileTable}>
                         <thead><tr><th>Mã</th><th>Tên</th><th>{kind === 'subjects' ? 'Khối lớp (ID)' : kind === 'providers' ? 'Loại' : kind === 'grades' ? 'Mã khối' : 'Thông tin'}</th></tr></thead>
                         <tbody>{result.rows.map(row => <tr key={row[0]}>{row.map((cell, i) => <td key={i}>{cell}</td>)}</tr>)}</tbody>
-                    </table></div>{result.total === 0 && <p>Không có danh mục phù hợp trong kết quả hiện có.</p>}
+                    </table></div>{result.total === 0 && <p>Không có danh mục phù hợp.</p>}
                         <div className={styles.pagination}>
                             <button className={styles.button} disabled={page === 1} onClick={() => setPage(page - 1)}>Trước</button>
                             <span>Trang {page}/{result.pages}</span>

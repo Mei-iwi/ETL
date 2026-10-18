@@ -35,7 +35,7 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
             {!criteria.query ? <p role="status">Nhập truy vấn để tìm kiếm.</p> : error ?
                 <div className={layout.card}><p role="alert" className={styles.error}>{error}</p>
                     <button className={layout.primaryButton} onClick={() => { if (retrying.current) return; retrying.current = true; setError(''); setResult(null); setAttempt(value => value + 1) }}>Thử lại</button></div> :
-                !result ? <div role="status" className={styles.loading}><span className={styles.spinner} aria-hidden="true" /><div><strong>Đang tìm kiếm học liệu…</strong><p>Vui lòng chờ trong giây lát.</p></div></div> : <>
+                !result ? <div role="status" className={styles.loading}><span className={styles.spinner} aria-hidden="true" /><strong>Đang tìm kiếm…</strong></div> : <>
                     <div className={styles.resultSummary}>
                         <div><h2>Kết quả tìm kiếm</h2><p role="status"><strong>{result.total.toLocaleString('vi-VN')}</strong> kết quả cho <strong>“{criteria.query}”</strong></p></div>
                         {result.items.length > 0 && <span className={styles.metadata}>Phù hợp nhất trước · {Math.min((result.page - 1) * result.size + 1, result.total)}–{Math.min((result.page - 1) * result.size + result.items.length, result.total)} / {result.total}</span>}
@@ -47,7 +47,6 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                             result.message === 'NO_READY_INDEX' ? 'Chưa có học liệu lập chỉ mục sẵn sàng.' :
                             result.message === 'NO_ACCESSIBLE_CONTENT' ? 'Không có nội dung được phép truy xuất trong phạm vi hiện tại.' :
                             result.message === 'QUERY_NO_KEYWORDS' ? 'Truy vấn không có từ khóa phù hợp.' : 'Không tìm thấy học liệu phù hợp.'}</p>
-                        <p className={styles.metadata}>{result.message === 'OK' || result.message === 'QUERY_NO_KEYWORDS' ? 'Thử từ khóa ngắn hơn, cách diễn đạt khác hoặc bớt bộ lọc rồi tìm lại.' : 'Bạn có thể thử tìm lại sau hoặc liên hệ người quản lý học liệu.'}</p>
                     </div>}
                     {result.items.map((item, index) => <article key={item.resource_id} className={styles.searchResult}>
                         <div className={styles.resultTopline}><span className={styles.documentType}><FileText size={15} aria-hidden="true" /> Học liệu</span><span className={styles.source}>{item.provider_name || item.resource_type_code} · Phiên bản {item.version_number}</span></div>

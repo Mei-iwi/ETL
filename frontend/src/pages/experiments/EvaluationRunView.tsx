@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { getEvaluationReport, getEvaluationRun, recentEvaluationId } from '../../services/evaluationApi'
 import type { EvaluationRun } from '../../types/evaluation'
@@ -7,16 +6,21 @@ import layout from '../library/LibraryPages.module.css'
 import styles from './ExperimentPages.module.css'
 import { number, visibleWarnings, warning } from './evaluationHelpers'
 import { ExperimentPageHeader } from './ExperimentPageHeader'
+import { EvaluationHistory } from './EvaluationHistory'
 
 export function EvaluationRunView() {
     const [params] = useSearchParams()
     const id = params.get('run_id') || ''
-    return <RunView key={id} id={id} />
+    return <section className={`${layout.page} ${styles.page}`}>
+        <ExperimentPageHeader title="Kết quả và báo cáo" />
+        <div className={styles.stack}>
+            <EvaluationHistory selectedId={id} />
+            {id && <RunView key={id} id={id} />}
+        </div>
+    </section>
 }
 
 function RunView({ id }: { id: string }) {
-    const [, setParams] = useSearchParams()
-    const [input, setInput] = useState(id || recentEvaluationId('run'))
     const [data, setData] = useState<EvaluationRun | null>(null)
     const [error, setError] = useState('')
     const [offset, setOffset] = useState(0)
@@ -35,7 +39,6 @@ function RunView({ id }: { id: string }) {
             .catch(reason => { if (!controller.signal.aborted) { setData(null); setError(reason instanceof Error ? reason.message : 'Không tải được kết quả.') } })
         return () => controller.abort()
     }, [id, offset, attempt])
-    function open(event: FormEvent) { event.preventDefault(); setParams({ run_id: input.trim() }); setAttempt(n => n + 1) }
     async function download(format: 'csv' | 'json') {
         if (downloadBusy.current) return
         downloadBusy.current = true
@@ -51,15 +54,9 @@ function RunView({ id }: { id: string }) {
         } catch (reason) { if (!controller.signal.aborted) setDownloadError(reason instanceof Error ? reason.message : 'Không tải được báo cáo.') }
         finally { downloadBusy.current = false; if (!controller.signal.aborted) setDownloading(false) }
     }
-    return <section className={`${layout.page} ${styles.page}`}>
-        <ExperimentPageHeader title="Kết quả và báo cáo" />
+    return <>
         <div className={styles.stack}>
-            <form className={`${layout.card} ${styles.card} ${styles.lookup}`} onSubmit={open}>
-                <label className={layout.field}>Run ID<input value={input} required placeholder="Nhập ID lần chạy thực nghiệm" onChange={e => setInput(e.target.value)} /></label>
-                <button className={layout.primaryButton}>Xem kết quả</button>
-            </form>
-            {!id && <div className={styles.emptyState}><h2>Tra cứu kết quả thực nghiệm</h2><Link className={layout.secondaryButton} to="/experiments/run">Chạy thực nghiệm</Link></div>}
-            {error && <div role="alert" className={styles.error}>{error}</div>}
+            {error && <div role="alert" className={styles.error}>{error} <button className={layout.secondaryButton} onClick={() => setAttempt(n => n + 1)}>Thử lại</button></div>}
             {id && !error && !data && <div role="status" className={styles.pending}>Đang tải kết quả…</div>}
             {data && <>
                 <section className={`${layout.card} ${styles.card}`}>
@@ -107,5 +104,5 @@ function RunView({ id }: { id: string }) {
                 </details>
             </>}
         </div>
-    </section>
+    </>
 }

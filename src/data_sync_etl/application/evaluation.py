@@ -4,6 +4,7 @@ import inspect
 import io
 import platform
 from contextlib import closing
+from datetime import datetime
 from time import perf_counter
 
 from data_sync_etl.application.content_bags import bag_structure
@@ -255,6 +256,45 @@ class EvaluationService:
         if actual != expected:
             raise EvaluationError('EVALUATION_CORPUS_CHANGED', 409)
 
+    def list_runs(self, access, page=1, size=7):
+        self.authorized(access)
+        snapshots, rows = {}, []
+        for run in self.store.list_runs():
+            if run['scope'] != access.scope:
+                continue
+            filters = run['snapshot']['filters']
+            key = checksum(filters)
+            if key not in snapshots:
+                try:
+                    snapshots[key], _ = self.corpus(filters, access)
+                except EvaluationError as exc:
+                    if exc.code != 'EVALUATION_NO_READY_CORPUS':
+                        raise
+                    snapshots[key] = {'versions': []}
+            try:
+                self.check_run_access(run, access, snapshots[key])
+            except EvaluationError as exc:
+                if exc.code not in ('EVALUATION_FORBIDDEN', 'EVALUATION_QRELS_DENIED'):
+                    raise
+                continue
+            rows.append({key: run.get(key) for key in (
+                'id', 'dataset_id', 'dataset_name', 'status', 'created_at', 'finished_at', 'duration_ms'
+            )} | {'query_count': len(run['queries'])})
+        rows.sort(key=lambda row: (datetime.fromisoformat(row['created_at']).timestamp(), row['id']), reverse=True)
+        return {'items': rows[(page - 1) * size:page * size],
+                'page': page, 'size': size, 'total': len(rows),
+                'total_pages': max(1, (len(rows) + size - 1) // size)}
+
+    @staticmethod
+    def check_run_access(run, access, snapshot):
+        if run['scope'] != access.scope:
+            raise EvaluationError('EVALUATION_FORBIDDEN', 403)
+        allowed = {row['resource_id'] for row in snapshot['versions']}
+        referenced = {label['item_id'] for query in run['queries'] for label in query['relevance']}
+        referenced.update(item['resource_id'] for row in run['observations'] for item in row['ranked'])
+        if not referenced <= allowed:
+            raise EvaluationError('EVALUATION_QRELS_DENIED', 403)
+
     def get_run(self, identifier, access):
         self.authorized(access)
         run = self.store.get('runs', identifier)
@@ -262,11 +302,7 @@ class EvaluationService:
             raise EvaluationError('EVALUATION_FORBIDDEN', 403)
         # GET never runs Search or embeds a query. Recheck current read permissions.
         snapshot, _ = self.corpus(run['snapshot']['filters'], access)
-        allowed = {row['resource_id'] for row in snapshot['versions']}
-        referenced = {label['item_id'] for query in run['queries'] for label in query['relevance']}
-        referenced.update(item['resource_id'] for row in run['observations'] for item in row['ranked'])
-        if not referenced <= allowed:
-            raise EvaluationError('EVALUATION_QRELS_DENIED', 403)
+        self.check_run_access(run, access, snapshot)
         return run
 
     def report(self, identifier, access, format='csv'):

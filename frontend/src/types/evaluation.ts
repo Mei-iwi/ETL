@@ -13,6 +13,11 @@ export type RunInput = {
     dataset_id: string; methods: EvaluationMethod[]; k_values: number[]; max_results: number; warmup_queries: number
 }
 export type RunCreated = { run_id: string; dataset_id: string; status: string; warnings: string[] }
+export type EvaluationRunList = {
+    items: { id: string; dataset_id: string; dataset_name: string; status: string; created_at: string
+        finished_at: string | null; duration_ms: number | null; query_count: number }[]
+    page: number; size: number; total: number; total_pages: number
+}
 export type EvaluationProgress = { completed: number; total: number; percent: number; phase: string; run_id?: string }
 export type Metric = { value: number | null; valid_queries: number; excluded_queries: number }
 export type MethodSummary = {

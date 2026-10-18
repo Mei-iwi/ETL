@@ -342,6 +342,18 @@
     flex-wrap: wrap;
 }
 
+.historyHeading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.historySelected {
+    background: #eff6ff;
+}
+
 .lookup>label {
     flex: 1;
     min-width: 180px;

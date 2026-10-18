@@ -45,9 +45,10 @@ test('capabilities renders API methods, filters, context and actual runtime stat
         runtime_verified: false, runtime_scope: 'current_process' })
     for (const text of ['BoW', 'Vector', 'Hybrid', 'Không cần model', 'Đã cấu hình model',
         'Model chưa khả dụng', 'Môn học, Khối lớp', 'Xem ngữ cảnh', 'Phân trang kết quả',
-        'chưa xác minh hoạt động', 'Tải lại trang không tự nạp hoặc chạy model',
+        'chưa xác minh hoạt động',
         ]) assert.ok(html.includes(text), text)
     assert.ok(!html.includes('Chỉ thử nghiệm Dev local'))
+    assert.ok(!html.includes('Tải lại trang không tự nạp hoặc chạy model'))
     assert.ok(!html.includes('Chưa mở tìm kiếm công khai'))
     retrieval.methods[1].runtime_status = 'READY'
     assert.ok(render(retrieval, { enabled: true }).includes('Model đã chạy thành công'))
