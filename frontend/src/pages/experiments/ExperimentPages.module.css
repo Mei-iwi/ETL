@@ -1,3 +1,143 @@
+.page {
+    min-width: 0;
+    color: #1e293b;
+}
+
+.eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    color: #1e3a8a;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .12em;
+}
+
+.pageHeader h1 {
+    letter-spacing: -.025em;
+}
+
+.sectionHeading > div {
+    margin: 0;
+    color: #64748b;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.page .card {
+    min-width: 0;
+    padding: 24px 28px;
+}
+
+.card h2,
+.emptyState h2 {
+    margin: 0 0 8px;
+    color: #1e293b;
+    font-size: 17px;
+    line-height: 1.5;
+}
+
+.sectionHeading {
+    padding-bottom: 14px;
+    border-bottom: 1px solid #e5eaf1;
+}
+
+.sectionHeading h2 {
+    margin-bottom: 4px;
+}
+
+.page label,
+.fieldLabel {
+    color: #334155;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.page label > input,
+.page label > select,
+.page label > textarea {
+    min-width: 0;
+    font-weight: 400;
+}
+
+.page label > .muted {
+    font-weight: 400;
+}
+
+.page button,
+.page a {
+    font-family: inherit;
+    text-decoration: none;
+}
+
+.page :is(button, a, summary, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid #1e3a8a;
+    outline-offset: 3px;
+}
+
+.formFooter {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 18px;
+    border-top: 1px solid #e5eaf1;
+}
+
+.methodPanel {
+    padding: 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.methodPanel {
+    display: grid;
+    gap: 10px;
+}
+
+.disclosure {
+    padding: 14px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+}
+
+.disclosure > summary,
+.card details > summary,
+.queryDetails > summary {
+    color: #334155;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+
+.disclosure[open] > summary,
+.card details[open] > summary {
+    margin-bottom: 14px;
+}
+
+.queryDetails > .query {
+    margin-top: 16px;
+}
+
+.queryDetails > .row {
+    justify-content: flex-end;
+    margin-top: 18px;
+    font-size: 13px;
+    color: #64748b;
+}
+
+.emptyState {
+    padding: 36px 24px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 14px;
+    background: #fff;
+    text-align: center;
+}
+
 .stack {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -12,7 +152,7 @@
 .row {
     display: flex;
     gap: 12px;
-    align-items: center;
+    align-items: flex-start;
     flex-wrap: wrap;
 }
 
@@ -29,6 +169,7 @@
     padding: 16px;
     display: grid;
     gap: 12px;
+    background: #fbfcfe;
 }
 
 .textarea {
@@ -40,6 +181,9 @@
     font: inherit;
     font-size: 14.5px;
     resize: vertical;
+    color: #1e293b;
+    background: #fff;
+    line-height: 1.6;
 }
 
 .query input,
@@ -62,6 +206,12 @@
 
 .error {
     color: #b91c1c;
+    padding: 12px 14px;
+    border: 1px solid #fecaca;
+    border-radius: 9px;
+    background: #fef2f2;
+    font-size: 14px;
+    line-height: 1.6;
 }
 
 .success {
@@ -77,6 +227,8 @@
     min-width: 0;
     max-width: 100%;
     margin-top: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
 }
 
 .table {
@@ -98,6 +250,14 @@
     color: #475569;
     font-size: 13.5px;
     font-weight: 600;
+}
+
+.table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.table tbody tr:last-child td {
+    border-bottom: 0;
 }
 
 .identifier {
@@ -131,6 +291,17 @@
 .progressArea {
     display: grid;
     gap: 10px;
+    padding: 16px;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    background: #eff6ff;
+}
+
+.progressArea > div {
+    margin: 0;
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.6;
 }
 
 .progress {
@@ -195,4 +366,36 @@
     margin: 8px 0;
     font-size: 13px;
     color: #64748b;
+}
+
+@media (max-width: 640px) {
+    .page .card {
+        padding: 16px;
+    }
+
+    .pageHeader h1 {
+        font-size: 24px;
+    }
+
+    .row > label,
+    .lookup > label {
+        min-width: 0;
+        flex-basis: 100%;
+    }
+
+    .query,
+    .methodPanel,
+    .disclosure {
+        padding: 12px;
+    }
+
+    .formFooter > *,
+    .lookup > button {
+        flex: 1 1 100%;
+    }
+
+    .table th,
+    .table td {
+        padding: 10px 12px;
+    }
 }
