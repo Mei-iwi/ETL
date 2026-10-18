@@ -143,8 +143,8 @@
     padding: 8px 14px;
 
     color: #ffffff;
-    background-color: #2563eb;
-    border: 1px solid #2563eb;
+    background-color: #1e3a8a;
+    border: 1px solid #1e3a8a;
     border-radius: 8px;
 
     font-size: 14px;
@@ -154,7 +154,8 @@
 }
 
 .reloadButton:hover:not(:disabled) {
-    background-color: #1d4ed8;
+    background-color: #172554;
+    border-color: #172554;
 }
 
 .reloadButton:disabled {
@@ -164,7 +165,7 @@
 
 .reloadButton:focus-visible,
 .tableWrapper:focus-visible {
-    outline: 3px solid rgb(37 99 235 / 25%);
+    outline: 3px solid rgb(30 58 138 / 25%);
     outline-offset: 3px;
 }
 

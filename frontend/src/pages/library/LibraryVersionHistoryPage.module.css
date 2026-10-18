@@ -1,6 +1,6 @@
 .page {
     width: 100%;
-    max-width: 1000px;
+    max-width: 1240px;
     margin: 0 auto;
     padding-bottom: 24px;
     color: #334155;
@@ -9,7 +9,7 @@
 .backLink {
     display: inline-block;
     margin-bottom: 18px;
-    color: #2563eb;
+    color: #1e3a8a;
     font-size: 14px;
     font-weight: 600;
     text-decoration: none;
@@ -30,10 +30,10 @@
 }
 
 .resourceInfo {
-    padding: 18px 20px;
+    padding: 24px 28px;
     background: #ffffff;
     border: 1px solid #e5eaf1;
-    border-radius: 12px;
+    border-radius: 14px;
     box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
 }
 
@@ -50,10 +50,10 @@
 }
 
 .panel {
-    padding: 20px;
+    padding: 28px 32px;
     background: #ffffff;
     border: 1px solid #e5eaf1;
-    border-radius: 12px;
+    border-radius: 14px;
     box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
 }
 
@@ -88,7 +88,7 @@
 
 .status {
     padding: 5px 10px;
-    color: #1d4ed8;
+    color: #1e3a8a;
     background: #eff6ff;
     border-radius: 999px;
     font-size: 12px;
@@ -118,6 +118,39 @@
 .message {
     color: #64748b;
     text-align: center;
+}
+
+.actionButton,
+.actionButton:visited {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 14px;
+    min-height: 38px;
+    padding: 8px 16px;
+    color: #ffffff !important;
+    background-color: #1e3a8a;
+    border: 1px solid #1e3a8a;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.1s ease;
+}
+
+.actionButton:hover,
+.actionButton:focus {
+    color: #ffffff !important;
+    background-color: #172554;
+    border-color: #172554;
+    text-decoration: none;
+}
+
+.actionButton:active {
+    color: #ffffff !important;
+    transform: translateY(1px);
 }
 
 .error {

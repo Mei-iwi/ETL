@@ -12,6 +12,16 @@ body {
   margin: 0;
 }
 
+a:where(:not([class])) {
+  color: #1e3a8a;
+  text-decoration: none;
+}
+
+a:where(:not([class])):hover {
+  color: #172554;
+  text-decoration: underline;
+}
+
 select:hover {
   background-color: #ffffff;
 }

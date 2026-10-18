@@ -1,6 +1,6 @@
 .page {
     width: 100%;
-    max-width: 900px;
+    max-width: 1240px;
     margin: 0 auto;
     padding-bottom: 24px;
 }
@@ -12,10 +12,10 @@
 }
 
 .card {
-    padding: 24px;
+    padding: 28px 32px;
     background-color: #ffffff;
     border: 1px solid #e5eaf1;
-    border-radius: 12px;
+    border-radius: 14px;
     box-shadow: 0 4px 12px rgb(15 23 42 / 6%);
 }
 
@@ -121,7 +121,7 @@
 }
 
 .autoRow input:focus-visible {
-    outline: 2px solid #2563eb;
+    outline: 2px solid #1e3a8a;
     outline-offset: 3px;
 }
 
@@ -201,7 +201,7 @@
 }
 
 .autoRow input:checked {
-    background-color: #2563eb;
+    background-color: #1e3a8a;
 }
 
 .autoRow input:checked::after {
@@ -217,8 +217,8 @@
     min-height: 42px;
     padding: 9px 16px;
     color: #ffffff;
-    background-color: #2563eb;
-    border: 1px solid #2563eb;
+    background-color: #1e3a8a;
+    border: 1px solid #1e3a8a;
     border-radius: 8px;
     font-size: 14px;
     font-weight: 600;
@@ -226,7 +226,8 @@
 }
 
 .button:hover:not(:disabled) {
-    background-color: #1d4ed8;
+    background-color: #172554;
+    border-color: #172554;
 }
 
 .button:disabled {
@@ -275,16 +276,16 @@
 }
 
 .errorTabs a:hover {
-    color: #1d4ed8;
+    color: #1e3a8a;
 }
 
 .errorTabs a[aria-current='page'] {
-    color: #2563eb;
-    border-bottom-color: #2563eb;
+    color: #1e3a8a;
+    border-bottom-color: #1e3a8a;
 }
 
 .errorTabs a:focus-visible {
-    outline: 2px solid #2563eb;
+    outline: 2px solid #1e3a8a;
     outline-offset: -2px;
     border-radius: 4px;
 }
@@ -358,7 +359,7 @@
     line-height: 1.4;
     border-radius: 6px;
     white-space: nowrap;
-    color: #1d4ed8;
+    color: #1e3a8a;
     background-color: #eff6ff;
     border: 1px solid #bfdbfe;
     cursor: pointer;
@@ -368,11 +369,11 @@
 .files .fileAction:hover:not(:disabled) {
     background-color: #dbeafe;
     border-color: #93c5fd;
-    color: #1e40af;
+    color: #172554;
 }
 
 .files .fileAction:focus-visible {
-    outline: 2px solid #2563eb;
+    outline: 2px solid #1e3a8a;
     outline-offset: 2px;
 }
 
@@ -388,13 +389,13 @@
     font-weight: 600;
     border-radius: 8px;
     color: #ffffff;
-    background-color: #2563eb;
-    border: 1px solid #2563eb;
+    background-color: #1e3a8a;
+    border: 1px solid #1e3a8a;
 }
 
 .filesHeader .fileAction:hover:not(:disabled) {
-    background-color: #1d4ed8;
-    border-color: #1d4ed8;
+    background-color: #172554;
+    border-color: #172554;
     color: #ffffff;
 }
 

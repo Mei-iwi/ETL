@@ -171,7 +171,7 @@ export function LibraryVersionHistoryPage() {
                                         </dd>
                                     </div>
                                 </dl>
-                                <Link to={`/library/indexing?${new URLSearchParams({ resourceId: resourceId ?? '', versionId: version.id })}`}>Phân đoạn / chỉ mục →</Link>
+                                <Link className={styles.actionButton} to={`/library/indexing?${new URLSearchParams({ resourceId: resourceId ?? '', versionId: version.id })}`}>Phân đoạn / chỉ mục</Link>
                             </li>
                         ))}
                     </ol>
