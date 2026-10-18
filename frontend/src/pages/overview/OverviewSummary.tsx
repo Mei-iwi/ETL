@@ -12,9 +12,8 @@ export function OverviewSummary() {
             <section className={style.section}>
                 <h2>1. Giới thiệu về hệ thống</h2>
                 <p className={style.content}>
-                    Hệ thống hướng đến việc tiếp nhận, xử lý, tổ chức và tra cứu học liệu số thuộc nhiều định dạng
-                    khác nhau như văn bản, hình ảnh, âm thanh và video. Dữ liệu được chuẩn hóa, phân đoạn và xây dựng
-                    các biểu diễn phục vụ tìm kiếm dựa trên từ khóa và ngữ nghĩa.
+                    Tiếp nhận tài liệu và hình ảnh, chuẩn hóa nội dung và lập chỉ mục
+                    phục vụ tìm kiếm từ khóa, ngữ nghĩa và kết hợp.
                 </p>
             </section>
 

@@ -56,13 +56,12 @@ function SearchForm({ params }: { params: URLSearchParams }) {
     }
     return <section className={`${layout.page} ${styles.searchPage}`}>
         <header className={`${layout.pageHeader} ${styles.pageHeader}`}>
-            <span className={styles.eyebrow}><BookOpen size={16} aria-hidden="true" /> KHÁM PHÁ TRI THỨC</span>
             <h1>Tra cứu học liệu</h1>
         </header>
         <form role="search" aria-label="Tra cứu học liệu" className={`${layout.card} ${layout.form} ${styles.searchForm}`} onSubmit={submit}>
             <div className={styles.searchBar}><div className={`${layout.field} ${styles.queryField}`}><label htmlFor="search-query" className={styles.visuallyHidden}>Tìm kiếm học liệu</label>
                 <Search size={20} aria-hidden="true" className={styles.searchIcon} />
-                <input id="search-query" type="search" value={query} onChange={event => { setQuery(event.target.value); setError('') }} maxLength={300} placeholder="Nhập từ khóa hoặc mô tả điều bạn muốn học…" aria-describedby={error ? 'search-error' : undefined} aria-invalid={Boolean(error)} required /></div>
+                <input id="search-query" type="search" value={query} onChange={event => { setQuery(event.target.value); setError('') }} maxLength={300} placeholder="Nhập từ khóa hoặc câu hỏi…" aria-describedby={error ? 'search-error' : undefined} aria-invalid={Boolean(error)} required /></div>
                 <button type="submit" className={layout.primaryButton} disabled={busy}>{busy ? 'Đang tìm…' : 'Tìm kiếm'}</button></div>
             <div className={styles.searchOptions}>
                 <fieldset className={styles.methodPicker}><legend className={styles.visuallyHidden}>Cách tìm kiếm</legend>
@@ -70,7 +69,7 @@ function SearchForm({ params }: { params: URLSearchParams }) {
                         className={method === item.value ? styles.methodActive : styles.methodButton}
                         onClick={() => setMethod(item.value)}>{item.label}</button>)}
                 </fieldset>
-            <details className={styles.filterPanel}><summary><SlidersHorizontal size={16} aria-hidden="true" /> Bộ lọc{filterCount > 0 && <span className={styles.filterCount}>{filterCount}</span>}</summary><div className={styles.filterBody}><div className={styles.filterHeading}><strong>Thu hẹp phạm vi tìm kiếm</strong><span>Chọn bộ lọc rồi nhấn Tìm kiếm để áp dụng.</span></div><div className={styles.filters}>
+            <details className={styles.filterPanel}><summary><SlidersHorizontal size={16} aria-hidden="true" /> Bộ lọc{filterCount > 0 && <span className={styles.filterCount}>{filterCount}</span>}</summary><div className={styles.filterBody}><div className={styles.filters}>
                 <div className={layout.field}><label htmlFor="search-grade">Khối lớp</label>
                     <select id="search-grade" disabled={!catalog} value={filters.grade_level_id || ''}
                         onChange={event => setFilters({ ...filters, grade_level_id: event.target.value || null, subject_id: null })}>
@@ -103,7 +102,6 @@ function SearchForm({ params }: { params: URLSearchParams }) {
         {!initial.query && <div className={styles.welcome}>
             <div className={styles.welcomeIcon}><BookOpen size={30} aria-hidden="true" /></div>
             <h2>Bạn muốn tìm hiểu điều gì?</h2>
-            <p>Nhập một chủ đề, tên bài học hoặc câu hỏi. Thêm khối lớp và môn học để tìm sát nhu cầu hơn.</p>
             <div className={styles.suggestions}><span>Thử tìm với</span>{['Phương trình bậc hai', 'Định luật Newton', 'Cách viết bài văn nghị luận'].map(example => <button key={example} type="button" onClick={() => { setQuery(example); document.getElementById('search-query')?.focus() }}>{example}</button>)}</div>
         </div>}
     </section>

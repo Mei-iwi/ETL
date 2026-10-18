@@ -279,9 +279,6 @@ export function LibraryProcessingPage() {
                 <div className={styles.statusMessage} data-tone={mainStatus.tone} role="status">
                     <span aria-hidden="true">●</span>
                     <strong>{mainStatus.label}</strong>
-                    {currentResult?.job_status === 'RUNNING' && (
-                        <small>Hệ thống đang xử lý học liệu...</small>
-                    )}
                 </div>
 
                 {processingNotice && <p className={styles.notice}>{processingNotice}</p>}

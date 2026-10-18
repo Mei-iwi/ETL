@@ -204,7 +204,6 @@ export function SystemCapalitiesPage() {
                         {data.representations.vector.dimensions ?? 'Chưa xác nhận'}
                     </p>
                     <p>Bag of Words: {data.representations.bag_of_words ? 'Đã tích hợp' : 'Chưa tích hợp vào pipeline'}</p>
-                    {data.representations.vector.runtime_scope === 'current_process' && <p>Trạng thái của Backend hiện tại. Tải lại trang không tự nạp hoặc chạy model.</p>}
                 </article>
                 <article className={styles.card}>
                     <h2>Tra cứu nội dung</h2>

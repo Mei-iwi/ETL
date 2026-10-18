@@ -29,13 +29,13 @@ async function verify(mode, args, base) {
         const html = await response.text()
         const icons = [...html.matchAll(/<link[^>]+rel="icon"[^>]*>/g)]
         assert.equal(icons.length, 1)
-        assert.ok(icons[0][0].includes('type="image/png"'))
+        assert.ok(icons[0][0].includes('type="image/svg+xml"'))
         const href = /href="([^"]+)"/.exec(icons[0][0])[1]
-        assert.equal(href, base + 'favicon.png')
+        assert.equal(href, base + 'favicon.svg')
         const icon = await fetch(new URL(href, origin))
         assert.equal(icon.status, 200)
-        assert.ok(icon.headers.get('content-type').startsWith('image/png'))
-        assert.deepEqual(Buffer.from(await icon.arrayBuffer()).subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        assert.ok(icon.headers.get('content-type').startsWith('image/svg+xml'))
+        assert.ok((await icon.text()).includes('clip-path="url(#round)"'))
     } finally {
         const exited = new Promise(resolve => child.once('exit', resolve))
         child.kill()
@@ -43,13 +43,20 @@ async function verify(mode, args, base) {
     }
 }
 
-test('favicon public asset is PNG64 and HTML has one base-aware icon', async () => {
+test('favicon clips the unchanged PNG64 to a circle and HTML has one base-aware icon', async () => {
     const data = await readFile('frontend/public/favicon.png')
     assert.equal(data.readUInt32BE(16), 64)
     assert.equal(data.readUInt32BE(20), 64)
+    const svg = await readFile('frontend/public/favicon.svg', 'utf8')
+    assert.ok(svg.includes('viewBox="0 0 64 64"'))
+    assert.ok(svg.includes('<circle cx="32" cy="32" r="32"/>'))
+    assert.ok(svg.includes('clip-path="url(#round)"'))
+    const embedded = /href="data:image\/png;base64,([^"]+)"/.exec(svg)
+    assert.ok(embedded)
+    assert.deepEqual(Buffer.from(embedded[1], 'base64'), data)
     const html = await readFile('frontend/index.html', 'utf8')
     // Vite rewrites a public root asset for BASE_URL in both dev and build.
-    assert.ok(html.includes('href="/favicon.png"'))
+    assert.ok(html.includes('href="/favicon.svg"'))
 })
 test('favicon dev HTTP200 and correct MIME below subpath', { timeout: 30000 }, () =>
     verify('dev', ['--base', '/etl-test/'], '/etl-test/'))
