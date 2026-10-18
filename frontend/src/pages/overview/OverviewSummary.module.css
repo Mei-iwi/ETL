@@ -1,204 +1,158 @@
-.page {
+﻿.page {
     width: 100%;
-    max-width: 1180px;
+    max-width: 1240px;
+    min-width: 0;
     margin: 0 auto;
-    padding-bottom: 24px;
+    padding-bottom: 32px;
     color: #334155;
 }
 
 .hero {
-    margin-bottom: 28px;
-    padding: 28px 32px;
-    border-radius: 16px;
-}
-
-.eyebrow {
-    color: #1e3a8a;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    margin-bottom: 24px;
+    padding: 0 0 18px;
+    border-bottom: 1px solid #dbe3ee;
 }
 
 .hero h1 {
-    margin: 8px 0 10px;
+    margin: 0;
     color: #172554;
     font-size: clamp(26px, 3vw, 34px);
-    line-height: 1.2;
-}
-
-.lead {
-    max-width: 720px;
-    margin: 0;
-    color: #475569;
-    font-size: 16px;
-    line-height: 1.7;
+    line-height: 1.25;
+    letter-spacing: -.025em;
 }
 
 .section {
-    margin-top: 28px;
+    min-width: 0;
+    margin-top: 20px;
+    padding: 24px 28px;
+    border: 1px solid #e5eaf1;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 3px 14px rgb(15 23 42 / 3%);
 }
 
 .section h2 {
-    margin: 0 0 14px;
-    font-size: 20px;
-    line-height: 1.35;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #edf1f6;
+    color: #172554;
+    font-size: 19px;
+    line-height: 1.5;
+}
+
+.section h2::before {
+    content: '';
+    flex: 0 0 4px;
+    height: 18px;
+    border-radius: 4px;
+    background: #8da8d2;
 }
 
 .content {
-    max-width: 920px;
+    max-width: 100%;
     margin: 0;
+    padding: 18px 20px;
+    border: 1px solid #e4ecf8;
+    border-radius: 10px;
+    background: #f5f8fe;
     color: #475569;
     font-size: 15px;
-    line-height: 1.75;
+    line-height: 1.85;
 }
 
 .challengeList {
     display: grid;
-    gap: 10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
     margin: 0;
     padding: 0;
     list-style: none;
-    counter-reset: challenge;
 }
 
 .challengeList li {
-    display: grid;
-    grid-template-columns: minmax(180px, 240px) 1fr;
-    gap: 16px;
-    padding: 14px 16px;
-    background-color: #ffffff;
-    box-shadow: 0 2px 8px rgb(15 23 42 / 4%);
+    min-width: 0;
+    padding: 20px;
+    border: 1px solid #e5eaf1;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #f8fafc, #ffffff);
 }
 
 .challengeList strong {
+    display: block;
+    margin-bottom: 10px;
+    color: #334155;
     font-size: 14px;
+    line-height: 1.6;
 }
 
 .challengeList span {
-    color: #475569;
+    color: #64748b;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.75;
 }
 
 .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px;
 }
 
 .card {
-    min-height: 138px;
+    min-width: 0;
     padding: 20px;
-    background-color: #ffffff;
-    border: 1px solid #e5eaf1;
+    border: 1px solid #e2e8f0;
+    border-top: 3px solid #9db4d8;
     border-radius: 12px;
-    box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
-    transition: border-color 0.2s ease, transform 0.2s ease;
+    background: linear-gradient(160deg, #f7faff, #ffffff);
 }
 
 .card h3 {
     margin: 0 0 10px;
-    font-size: 16px;
+    color: #1e3a8a;
+    font-size: 15px;
+    line-height: 1.5;
 }
 
 .card p {
     margin: 0;
-    font-size: 14px;
-    line-height: 1.6;
-}
-
-.phaseGrid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
-}
-
-.phase {
-    display: flex;
-    gap: 16px;
-    padding: 20px;
-    background-color: #ffffff;
-    border: 1px solid #e5eaf1;
-    border-radius: 12px;
-}
-
-.phase>span {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 42px;
-    width: 42px;
-    height: 42px;
-    color: #ffffff;
-    background-color: #1e3a8a;
-    border-radius: 10px;
-    font-size: 14px;
-    font-weight: 700;
-}
-
-.phase h3 {
-    margin: 1px 0 6px;
-    color: #172554;
-    font-size: 16px;
-}
-
-.phase p {
-    margin: 0;
     color: #64748b;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.75;
 }
 
-.diagramFigure {
-    margin: 0;
-    padding: 16px;
-    background-color: #ffffff;
-    border: 1px solid #e5eaf1;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
-}
-
+.diagramFigure { margin: 0; }
 .diagramViewport {
     width: 100%;
     overflow-x: auto;
+    padding: 12px;
+    border: 1px solid #edf1f6;
+    border-radius: 10px;
+    background: #fff;
 }
-
-.diagram {
-    display: block;
-    width: 100%;
-    min-width: 760px;
-    height: auto;
-}
-
+.diagram { display: block; width: 100%; min-width: 680px; height: auto; }
 .diagramCaption {
-    margin-top: 12px;
+    margin-top: 14px;
     color: #64748b;
     font-size: 13px;
-    font-style: italic;
-    line-height: 1.5;
+    line-height: 1.6;
     text-align: center;
 }
 
-@media (max-width: 700px) {
-    .hero {
-        padding: 22px 20px;
-    }
+@media (max-width: 960px) {
+    .challengeList { grid-template-columns: minmax(0, 1fr); }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
-    .challengeList li,
-    .phaseGrid {
-        grid-template-columns: 1fr;
-    }
-
-    .challengeList li {
-        gap: 6px;
-    }
-
-    .diagramFigure {
-        padding: 12px;
-    }
-
-    .diagram {
-        min-width: 680px;
-    }
+@media (max-width: 600px) {
+    .hero { margin-bottom: 18px; padding-bottom: 14px; }
+    .section { margin-top: 16px; padding: 18px 16px; }
+    .section h2 { margin-bottom: 14px; padding-bottom: 12px; font-size: 17px; }
+    .grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .challengeList { gap: 12px; }
+    .card, .challengeList li { padding: 16px; }
+    .content { padding: 14px 16px; font-size: 14px; }
+    .diagramViewport { padding: 6px; }
 }

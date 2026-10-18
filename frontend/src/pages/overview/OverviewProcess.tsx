@@ -1,5 +1,5 @@
 import style from './OverviewProcess.module.css'
-import systemFlow from '../../assets/img/sytemflow.png'
+import { ProcessEntityDiagram } from './ProcessEntityDiagram'
 
 const processSteps = [
     {
@@ -61,44 +61,35 @@ export function OverviewProcess() {
 
             <section className={style.section}>
                 <h2>1. Sơ đồ tổng thể</h2>
-                <figure className={style.diagramFigure}>
-                    <img
-                        className={style.diagram}
-                        src={systemFlow}
-                        alt="Sơ đồ quy trình xử lý và tra cứu học liệu"
-                    />
-                    <figcaption className={style.diagramCaption}>
-                        Quy trình xử lý và tra cứu dữ liệu của hệ thống
-                    </figcaption>
-                </figure>
+                <ProcessEntityDiagram />
             </section>
 
             <section className={style.section}>
                 <h2>2. Chi tiết các bước xử lý</h2>
-                <div className={style.tableWrapper}>
+                <div className={style.tableWrapper} role="region" aria-label="Chi tiết các bước xử lý" tabIndex={0}>
                     <table className={style.processTable}>
                         <thead>
                             <tr>
                                 <th scope="col">Bước</th>
-                                <th scope="col">Tên bước</th>
-                                <th scope="col">Nội dung nên hiển thị</th>
+                                <th scope="col">Nội dung xử lý</th>
                                 <th scope="col">Kết quả đầu ra</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            {processSteps.map((item) => (
+                        {[
+                            { name: 'Chuẩn bị học liệu', steps: processSteps.slice(0, 6) },
+                            { name: 'Truy vấn và hiển thị kết quả', steps: processSteps.slice(6) },
+                        ].map(group => <tbody key={group.name}>
+                            <tr className={style.groupRow}><th colSpan={3} scope="rowgroup">{group.name}</th></tr>
+                            {group.steps.map((item) => (
                                 <tr key={item.step}>
-                                    <td>
-                                        <span className={style.stepNumber}>{item.step}</span>
-                                    </td>
-                                    <td className={style.stepName}>{item.name}</td>
+                                    <th scope="row"><div className={style.stepCell}><span className={style.stepNumber}>{String(item.step).padStart(2, '0')}</span><span className={style.stepName}>{item.name}</span></div></th>
                                     <td>{item.content}</td>
                                     <td>
                                         <span className={style.output}>{item.output}</span>
                                     </td>
                                 </tr>
                             ))}
-                        </tbody>
+                        </tbody>)}
                     </table>
                 </div>
             </section>
