@@ -1,30 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import styles from './SytemStatusPage.module.css'
-import system from '../../assets/img/system.png'
-import database from '../../assets/img/database.png'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Database, RefreshCw, Server } from 'lucide-react'
+import styles from './SystemStatusPage.module.css'
+
+type ConnectionState = 'checking' | 'online' | 'offline'
+type HealthData = {
+    status?: string
+    database?: string
+}
+
+const statusLabels: Record<ConnectionState, string> = {
+    checking: 'Đang kiểm tra…',
+    online: 'Đã kết nối',
+    offline: 'Chưa kết nối',
+}
+
+const summaryLabels: Record<ConnectionState, string> = {
+    checking: 'Đang kiểm tra kết nối',
+    online: 'Hệ thống hoạt động bình thường',
+    offline: 'Kết nối đang gặp sự cố',
+}
+
 export function SystemStatusPage() {
-
-    type ConnectionState = 'checking' | 'online' | 'offline'
-
     const [connectionState, setConnectionState] = useState<ConnectionState>('checking')
-
-    type HealthData = {
-        status?: string
-        database?: string
-        detail?: string
-    }
-
     const [healthData, setHealthData] = useState<HealthData | null>(null)
     const [healthError, setHealthError] = useState('')
-
-    const databaseState = connectionState === 'checking' ? 'checking' : healthData?.database === 'ok' ? 'online' : 'offline'
-
     const controllerRef = useRef<AbortController | null>(null)
+    const databaseState: ConnectionState = connectionState === 'checking'
+        ? 'checking'
+        : healthData?.database === 'ok' ? 'online' : 'offline'
 
     const checkHealth = useCallback(async () => {
         controllerRef.current?.abort()
         const controller = new AbortController()
         controllerRef.current = controller
+        const timeout = window.setTimeout(() => controller.abort(), 10000)
 
         setConnectionState('checking')
         setHealthData(null)
@@ -35,83 +44,70 @@ export function SystemStatusPage() {
                 signal: controller.signal,
                 cache: 'no-store',
             })
-
-            const data: HealthData = await response.json()
-
+            const data: HealthData | null = await response.json()
             if (controller.signal.aborted) return
 
-            const isOnline = response.ok &&
-                data.status === 'ok' &&
-                data.database === 'ok'
-
+            const isOnline = response.ok && data?.status === 'ok' && data?.database === 'ok'
             setConnectionState(isOnline ? 'online' : 'offline')
             setHealthData(data)
-
-            if (!response.ok) {
-                setHealthError(data.detail || `HTTP ${response.status}`)
+            if (!isOnline) {
+                setHealthError('Một số kết nối chưa sẵn sàng. Vui lòng kiểm tra lại sau ít phút.')
             }
-
-        } catch (e) {
-            if (controller.signal.aborted) return
+        } catch {
+            if (controllerRef.current !== controller) return
             setConnectionState('offline')
-
-            setHealthError(
-                e instanceof Error ? e.message : 'Mất kết nối'
-            )
+            setHealthError('Không thể kết nối đến hệ thống. Vui lòng kiểm tra mạng và thử lại.')
+        } finally {
+            window.clearTimeout(timeout)
         }
     }, [])
 
-
     useEffect(() => {
-        void checkHealth()
-
+        const initialCheck = window.setTimeout(() => void checkHealth(), 0)
         return () => {
+            window.clearTimeout(initialCheck)
             controllerRef.current?.abort()
+            controllerRef.current = null
         }
     }, [checkHealth])
 
-    return (
-        <section>
-            <h1>Trạng thái hệ thống</h1>
-            <div className={styles.content}>
-                <div className={styles.grid}>
-                    <p className={styles.card}>
-                        <strong>
-                            Trạng thái hệ thống:
-                        </strong>
-                        <img className={styles.img} src={system} alt="" />
-                        <span className={styles.statusRow}>
-                            <span className={`${styles.statusValue} connection-status ${connectionState}`} role="status" aria-live="polite">
-                                {connectionState === 'checking' && 'Đang kiểm tra...'}
-                                {connectionState === 'online' && 'Đã kết nối'}
-                                {connectionState === 'offline' && 'Mất kết nối'}
-                            </span>
-                        </span>
-                    </p>
-                    <p className={styles.card}>
-                        <strong>Trạng thái Database: </strong>
-                        <img className={styles.img} src={database} alt="" />
-                        <span className={styles.statusRow}>
-                            <span className={`${styles.statusValue} ${styles.databaseStatus} ${styles[databaseState]}`}>
-                                {connectionState === 'checking' ? 'Đang kiểm tra...'
-                                    : healthData?.database === 'ok' ? 'Database đã kết nối' : 'Database không khả dụng'}
-                            </span>
-                        </span>
-                    </p>
-                </div>
-                <button className={styles.btn} type="button" onClick={() => void checkHealth()} disabled={connectionState === 'checking'}>
-                    {connectionState === 'checking' ? 'Đang kiểm tra kết nối ...' : 'Kiểm tra lại'}
-                </button>
+    const services = [
+        { name: 'Hệ thống', label: 'Kết nối máy chủ', icon: Server, state: connectionState },
+        { name: 'Cơ sở dữ liệu', label: 'Kết nối dữ liệu', icon: Database, state: databaseState },
+    ]
 
-                {(healthData || healthError) && (
-                    <div className="health-respone">
-                        <h4>Phản hồi từ hệ thống</h4>
-                        {healthData
-                            ? <pre>{JSON.stringify(healthData, null, 2)}</pre>
-                            : <p role="alert">{healthError}</p>}
-                    </div>
-                )}
+    return (
+        <section className={styles.page} aria-labelledby="system-status-title">
+            <header className={styles.header}>
+                <h1 id="system-status-title">Trạng thái hệ thống</h1>
+            </header>
+
+            <div className={styles.panelHeader}>
+                <div className={styles.summary} role="status" aria-live="polite">
+                    <span className={`${styles.dot} ${styles[connectionState]}`} aria-hidden="true" />
+                    <div><h2>{summaryLabels[connectionState]}</h2></div>
+                </div>
+                <button className={styles.button} type="button" onClick={() => void checkHealth()} disabled={connectionState === 'checking'}>
+                    <RefreshCw size={15} className={connectionState === 'checking' ? styles.spin : undefined} aria-hidden="true" />
+                    {connectionState === 'checking' ? 'Đang kiểm tra…' : 'Kiểm tra lại'}
+                </button>
             </div>
+
+            <div className={styles.services} role="region" aria-label="Trạng thái kết nối dịch vụ" aria-busy={connectionState === 'checking'}>
+                {services.map(({ name, label, icon: Icon, state }) => (
+                    <article key={name} className={styles.service}>
+                        <div className={styles.serviceHeading}>
+                            <span className={styles.serviceIcon}><Icon size={25} strokeWidth={1.6} aria-hidden="true" /></span>
+                            <div><h3>{name}</h3><span className={styles.serviceLabel}>{label}</span></div>
+                        </div>
+                        <div className={styles.serviceStatus}>
+                            <span>Trạng thái</span>
+                            <span className={`${styles.badge} ${styles[state]}`}><span className={styles.dot} aria-hidden="true" />{statusLabels[state]}</span>
+                        </div>
+                    </article>
+                ))}
+            </div>
+            {healthError && <div className={styles.notice} role="alert">{healthError}</div>}
         </section>
     )
 }

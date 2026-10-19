@@ -32,7 +32,7 @@ function render(retrieval, vector = {}) {
     return renderToStaticMarkup(exports.SystemCapalitiesPage())
 }
 
-test('capabilities renders API methods, filters, context and actual runtime states', () => {
+test('capabilities renders methods and runtime states without removed detail sections', () => {
     const retrieval = {
         modes: ['bow', 'vector', 'hybrid'], filters: ['subject_id', 'grade_level_id'],
         methods: [
@@ -43,22 +43,23 @@ test('capabilities renders API methods, filters, context and actual runtime stat
     }
     const html = render(retrieval, { runtime_status: 'NOT_VERIFIED', configured: true,
         runtime_verified: false, runtime_scope: 'current_process' })
-    for (const text of ['BoW', 'Vector', 'Hybrid', 'Không cần model', 'Đã cấu hình model',
-        'Model chưa khả dụng', 'Môn học, Khối lớp', 'Xem ngữ cảnh', 'Phân trang kết quả',
-        'chưa xác minh hoạt động',
+    for (const text of ['Từ khóa', 'Ngữ nghĩa', 'Kết hợp', 'Sẵn sàng', 'Chưa xác minh model',
+        'Model chưa khả dụng', 'Xem ngữ cảnh', 'Phân trang', 'Tải lại',
         ]) assert.ok(html.includes(text), text)
+    for (const text of ['Thông số kỹ thuật', 'Định dạng tiếp nhận', 'Theo cấu hình hiện tại',
+        'Môn học, Khối lớp']) assert.ok(!html.includes(text), text)
     assert.ok(!html.includes('Chỉ thử nghiệm Dev local'))
     assert.ok(!html.includes('Tải lại trang không tự nạp hoặc chạy model'))
     assert.ok(!html.includes('Chưa mở tìm kiếm công khai'))
     retrieval.methods[1].runtime_status = 'READY'
-    assert.ok(render(retrieval, { enabled: true }).includes('Model đã chạy thành công'))
-    assert.ok(render(retrieval).includes('Model hoạt động'))
+    assert.ok(render(retrieval, { enabled: true }).includes('Model hoạt động'))
+    assert.ok(render(retrieval).includes('Sẵn sàng'))
 })
 
 test('capabilities does not invent methods when API lists none; supports older responses', () => {
-    assert.ok(render({ modes: [], filters: [] }).includes('Chưa tích hợp tìm kiếm'))
+    assert.ok(render({ modes: [], filters: [] }).includes('Chưa hỗ trợ'))
     const html = render({ modes: ['bow'], filters: ['future_filter'] })
-    assert.ok(html.includes('BoW'))
-    assert.ok(!html.includes('Hybrid'))
-    assert.ok(html.includes('future_filter'))
+    assert.ok(html.includes('Từ khóa'))
+    assert.ok(!html.includes('Kết hợp'))
+    assert.ok(!html.includes('future_filter'))
 })
