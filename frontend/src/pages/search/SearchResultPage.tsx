@@ -14,6 +14,14 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
     const [error, setError] = useState('')
     const [attempt, setAttempt] = useState(0)
     const retrying = useRef(false)
+    const navigating = useRef(false)
+    function goToPage(page: number) {
+        // React may batch rapid clicks before unmounting this page. Only one
+        // history entry/request belongs to this transition.
+        if (navigating.current) return
+        navigating.current = true
+        setParams(writeSearch({ ...criteria, page }))
+    }
     const encoded = params.toString()
     useEffect(() => {
         const request = readSearch(new URLSearchParams(encoded))
@@ -65,9 +73,9 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                         </dl></details>
                     </article>)}
                     {result.total_pages > 1 && <nav aria-label="Phân trang kết quả" className={styles.pagination}>
-                        <button className={layout.primaryButton} disabled={result.page <= 1} onClick={() => setParams(writeSearch({ ...criteria, page: result.page - 1 }))}>Trước</button>
+                        <button className={layout.primaryButton} disabled={result.page <= 1} onClick={() => goToPage(result.page - 1)}>Trước</button>
                         <span>Trang {result.page}/{result.total_pages}</span>
-                        <button className={layout.primaryButton} disabled={result.page >= result.total_pages} onClick={() => setParams(writeSearch({ ...criteria, page: result.page + 1 }))}>Tiếp</button>
+                        <button className={layout.primaryButton} disabled={result.page >= result.total_pages} onClick={() => goToPage(result.page + 1)}>Tiếp</button>
                     </nav>}
                 </>}
         </div>

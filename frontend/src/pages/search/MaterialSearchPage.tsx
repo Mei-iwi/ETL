@@ -12,8 +12,10 @@ import { SearchResults } from './SearchResultPage'
 
 export function MaterialSearchPage() {
     const [params] = useSearchParams()
-    // Keying the form restores criteria after back/forward, without setState in an effect.
-    return <SearchForm key={params.toString()} params={params} />
+    // Page navigation keeps the form/catalog mounted. A criteria change starts a
+    // new session; protected results below still remount and fetch on EVERY page.
+    const session = writeSearch({ ...readSearch(params), page: 1 }).toString()
+    return <SearchForm key={session} params={params} />
 }
 
 function SearchForm({ params }: { params: URLSearchParams }) {
