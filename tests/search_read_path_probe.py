@@ -12,6 +12,7 @@ from collections import Counter
 from contextvars import ContextVar
 from functools import wraps
 from pathlib import Path
+from threading import get_ident
 from time import perf_counter, process_time
 
 from bson import BSON
@@ -179,6 +180,14 @@ class MongoCommands(monitoring.CommandListener):
         self.probe = probe
         self.pending = {}
 
+    @staticmethod
+    def event_key(event):
+        # Server address is shared by every pooled connection. Request IDs can
+        # collide across Windows driver threads: correlate the physical socket
+        # and synchronous callback thread, not just (address, request_id).
+        return (get_ident(), event.connection_id,
+                getattr(event, 'server_connection_id', None), event.request_id)
+
     def started(self, event):
         trace = ACTIVE.get()
         if trace is None or not trace.enabled:
@@ -188,7 +197,7 @@ class MongoCommands(monitoring.CommandListener):
         command = event.command
         collection = (command.get('collection') if event.command_name == 'getMore'
                       else command.get(event.command_name))
-        self.pending[(event.connection_id, event.request_id)] = (trace, {
+        self.pending[self.event_key(event)] = (trace, {
             'backend': 'mongo', 'operation': event.command_name,
             'collection': collection if isinstance(collection, str) else 'catalog',
             'shape': hashlib.sha256(json.dumps(shape(command), sort_keys=True).encode()).hexdigest(),
@@ -196,7 +205,7 @@ class MongoCommands(monitoring.CommandListener):
             'phase': list(trace.stack), 'callsites': callsites()})
 
     def succeeded(self, event):
-        observed = self.pending.pop((event.connection_id, event.request_id), None)
+        observed = self.pending.pop(self.event_key(event), None)
         if observed:
             trace, item = observed
             cursor = event.reply.get('cursor', {})
@@ -207,7 +216,7 @@ class MongoCommands(monitoring.CommandListener):
             trace.operations.append(item)
 
     def failed(self, event):
-        observed = self.pending.pop((event.connection_id, event.request_id), None)
+        observed = self.pending.pop(self.event_key(event), None)
         if observed:
             trace, item = observed
             item.update(ms=event.duration_micros / 1000, failed=True)

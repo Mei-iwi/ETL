@@ -297,6 +297,47 @@ class MongoContentReader:
 
 
 class MongoBagStore:
+    def search_bags(self, root_ids, *, version_id, generation):
+        """Fresh, version-bounded read phase for Search ONLY; never a cache.
+
+        Read the exact requested Bags, then independently read current content.
+        _verified still performs its separate pre-read fingerprint and validates
+        all ownership/structure/model/keywords/vector fields. Writers/get_bag
+        retain their original per-document verification/timing.
+        """
+        ids = tuple(identifier(key) for key in root_ids)
+        version_id = identifier(version_id)
+        if (len(ids) > 10000 or len(set(ids)) != len(ids)
+                or type(generation) is not int or generation < 0):
+            raise DomainError('Search Bag batch bounds exceeded')
+        if not ids:
+            return {}
+        documents = {}
+        for offset in range(0, len(ids), 500):
+            batch = ids[offset:offset + 500]
+            allowed = set(batch)
+            selector = {'_id': {'$in': list(batch)}, 'resource_version_id': version_id, 'is_current': True}
+            # get_bag validates the FULL document with extra="forbid". A field
+            # projection would hide legacy restriction/unknown fields and weaken
+            # that contract, so the strict DTO requires the complete Bag here.
+            rows = self.database.content_bags.find(selector).sort('_id', 1).limit(len(batch) + 1)
+            for raw in rows:
+                doc = checked(ContentBagDocument, raw)
+                if doc.id not in allowed or doc.id in documents or doc.resource_version_id != version_id:
+                    raise DomainError('Search Bag batch identity mismatch')
+                documents[doc.id] = doc
+        # AFTER all Bag reads: never trust the earlier snapshot fingerprint as
+        # proof that Mongo content stayed unchanged during this phase.
+        try:
+            fingerprint = self.reader.content_fingerprint(version_id, generation=generation)
+        except DomainError:
+            return {key: None for key in ids}
+        return {key: doc if (doc is not None and doc.is_current
+                            and doc.projection_generation == generation
+                            and doc.content_fingerprint == fingerprint
+                            and len(doc.embedding) == self.dimension) else None
+                for key in ids for doc in [documents.get(key)]}
+
     def search_candidates(self, version_ids, *, model, limit):
         """Read at most cap+1, allowing caller to reject an incomplete global ranking."""
         if not 1 <= limit <= 10001 or len(version_ids) > 10000:

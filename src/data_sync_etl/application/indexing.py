@@ -122,14 +122,19 @@ class IndexingService:
             raise IndexingError('BLOCKED_EMBEDDING_RUNTIME', 503)
         self.bags.ensure_ready()
 
-    def _verified(self, snapshot, run, *, expected_bags=None):
+    def _verified(self, snapshot, run, *, expected_bags=None, bag_reader=None):
         roots = self._roots(snapshot)
         source_fp = self.reader.content_fingerprint(snapshot[0]['id'], generation=snapshot[1])
+        try:
+            bags = (bag_reader(list(roots), version_id=snapshot[0]['id'], generation=snapshot[1])
+                    if bag_reader is not None else None)
+        except DomainError:
+            raise IndexingError('INDEX_ARTIFACT_INVALID', 503) from None
         nodes, result = {u['id']: u for u in snapshot[2]}, []
         for root, leaves in roots.items():
             keywords = normalize_keywords([k for leaf in leaves for k in snapshot[5][leaf]])
             try:
-                bag = self.bags.get_bag(root)
+                bag = bags.get(root) if bags is not None else self.bags.get_bag(root)
             except DomainError:
                 raise IndexingError('INDEX_ARTIFACT_INVALID', 503) from None
             if (not bag or run['input_fingerprint'] != snapshot[3] or bag.content_fingerprint != source_fp

@@ -15,7 +15,7 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-path", type=Path, required=True)
-    parser.add_argument("--phase", choices=("preflight", "acceptance", "recovery", "extra", "invariants", "diagnose", "verify", "benchmark"), required=True)
+    parser.add_argument("--phase", choices=("preflight", "acceptance", "recovery", "extra", "invariants", "diagnose", "verify", "benchmark", "t2-targeted", "t2-benchmark", "t2-concurrency"), required=True)
     parser.add_argument("--run-tag", default="")
     args = parser.parse_args()
     if args.run_tag and not re.fullmatch(r'[a-z0-9-]{1,30}', args.run_tag):
@@ -28,6 +28,8 @@ def main():
         parser.error("Run from repository root")
     names = {"preflight": "T5_PREFLIGHT", "acceptance": "T1_ACCEPTANCE", "recovery": "T1_RECOVERY_ACCEPTANCE", "extra": "T1_RECOVERY_EXTRA", "invariants": "T1_RECOVERY_INVARIANTS", "benchmark": "T1_BENCHMARK_RECOVERY"}
     names.update(diagnose='T1_DIAGNOSE', verify='T1_HTTP_VERIFICATION')
+    names.update({'t2-targeted': 'T2_TARGETED', 't2-benchmark': 'T2_BENCHMARK'})
+    names['t2-concurrency'] = 'T2_CONCURRENCY'
     if args.phase == 'benchmark':
         import hashlib
         import json
@@ -45,11 +47,27 @@ def main():
                        for path, checksum in race['source_hashes'].items())
         except (OSError, ValueError, KeyError, AssertionError):
             parser.error('Recovery safety gates missing, failed or source changed; benchmark forbidden')
-    target = root / "docs/audits/search-pg-text-batch" / (
+    folder = 'search-mongo-batch' if args.phase.startswith('t2-') else 'search-pg-text-batch'
+    if args.phase == 't2-benchmark':
+        import hashlib
+        import json
+
+        proofs = []
+        for path in (root / 'docs/audits' / folder).glob('T2_TARGETED*.json'):
+            value = json.loads(path.read_text())
+            if (value.get('status') == 'TARGETED_PASS' and value.get('static_pairs') == 54
+                    and len(value.get('races', [])) == 84 and value.get('source_hashes')
+                    and all(hashlib.sha256((root / key).read_bytes()).hexdigest() == checksum
+                            for key, checksum in value['source_hashes'].items())):
+                proofs.append(value)
+        if not proofs:
+            parser.error('T2 targeted parity/race evidence missing or code changed; benchmark forbidden')
+    target = root / "docs/audits" / folder / (
         names[args.phase] + ("_" + args.run_tag if args.run_tag else "") + ".json"
     )
     if target.exists():
         parser.error("Refusing to overwrite previous recovery metrics")
+    target.parent.mkdir(parents=True, exist_ok=True)
     original = Path(subprocess.check_output(["git", "rev-parse", "--git-common-dir"], text=True).strip()).resolve().parent
     sys.path.insert(0, str(root / "src"))
     sys.path.insert(0, str(root))
@@ -219,6 +237,9 @@ def main():
                     "--basetemp",
                     str(Path(temp) / "pytest"),
                     "-s",
+                    "tests/integration/test_search_t2_physical.py::test_t2_concurrency" if args.phase == "t2-concurrency" else
+                    "tests/integration/test_search_t2_physical.py::test_t2_targeted" if args.phase == "t2-targeted" else
+                    "tests/integration/test_search_t2_physical.py::test_t2_benchmark" if args.phase == "t2-benchmark" else
                     "tests/integration/test_search_t1_recovery.py::test_race_semantics_recovery" if args.phase == "recovery" else
                     "tests/integration/test_search_t1_recovery.py::test_concurrency_and_access_recovery" if args.phase == "extra" else
                     "tests/integration/test_search_t1_recovery.py::test_postgres_invariants_recovery" if args.phase == "invariants" else

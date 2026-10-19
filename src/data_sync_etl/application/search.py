@@ -60,7 +60,7 @@ class SearchService:
         # HTTP Search alone opts in; direct/shared callers keep point reads.
         # Initial and final snapshots always hydrate independently.
         criteria = dict(query=query, method=method, filters=filters, page=page, size=size, access=access,
-                        _batch_texts=True)
+                        _batch_texts=True, _batch_bags=True)
         if not self.settings.search_query_embedding_cache_enabled or method == 'bow' or cache is None:
             if cache is not None and not self.settings.search_query_embedding_cache_enabled:
                 cache.clear()
@@ -100,7 +100,7 @@ class SearchService:
         if monotonic() - started > self.settings.search_timeout_seconds:
             raise SearchError('SEARCH_TIMEOUT')
 
-    def _ready_snapshot(self, repo, version_id, *, batch_texts=False, expected_bags=None):
+    def _ready_snapshot(self, repo, version_id, *, batch_texts=False, expected_bags=None, batch_bags=False):
         runs = self.indexing._runs(repo, version_id)
         if not runs or runs[0]['status'] != 'COMPLETED':
             return None
@@ -109,10 +109,11 @@ class SearchService:
                         if batch_texts else self.indexing._snapshot(repo, version_id))
             if runs[0]['input_fingerprint'] != snapshot[3]:
                 return None
-            if expected_bags is None:
-                self.indexing._verified(snapshot, runs[0])
-            else:
-                self.indexing._verified(snapshot, runs[0], expected_bags=expected_bags)
+            options = {} if expected_bags is None else {'expected_bags': expected_bags}
+            reader = getattr(self.bags, 'search_bags', None) if batch_bags else None
+            if reader is not None:
+                options['bag_reader'] = reader
+            self.indexing._verified(snapshot, runs[0], **options)
             return snapshot
         except IndexingError:
             return None
@@ -189,7 +190,7 @@ class SearchService:
         return roots, best
 
     def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
-               _query_context=None, _batch_texts=False):
+               _query_context=None, _batch_texts=False, _batch_bags=False):
         access = access or SearchAccess()
         started, filters = monotonic(), filters or {}
         query = normalize_query(query)
@@ -241,7 +242,7 @@ class SearchService:
         for version_id in sorted({bag.resource_version_id for bag in candidates}):
             self._deadline(started)
             with self.indexing.uow() as repo:
-                snapshot = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts)
+                snapshot = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts, batch_bags=_batch_bags)
                 allowed = self._allowed_units(repo, snapshot, access) if snapshot else set()
             if snapshot is None:
                 continue
@@ -250,10 +251,14 @@ class SearchService:
                 raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
             snapshots[version_id] = snapshot
             roots, snippets = self._snippets(snapshot, keywords, started, allowed)
-            for bag in (bag for bag in candidates if bag.resource_version_id == version_id):
+            version_bags = [bag for bag in candidates if bag.resource_version_id == version_id]
+            reader = getattr(self.bags, 'search_bags', None) if _batch_bags else None
+            current_bags = (reader([bag.id for bag in version_bags], version_id=version_id, generation=snapshot[1])
+                            if reader is not None else None)
+            for bag in version_bags:
                 self._deadline(started)
                 # Candidate may have been fetched before a concurrent invalidation.
-                current = self.bags.get_bag(bag.id)
+                current = current_bags.get(bag.id) if current_bags is not None else self.bags.get_bag(bag.id)
                 if not current or current != bag:
                     if _batch_texts:
                         with self.indexing.uow() as repo:
@@ -326,7 +331,7 @@ class SearchService:
                 expected_bags = {bag.id: bag for bag in candidates} if _batch_texts else None
                 for version_id in checked_versions:
                     fresh = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts,
-                                                 expected_bags=expected_bags)
+                                                 expected_bags=expected_bags, batch_bags=_batch_bags)
                     if version_id not in fresh_ids or fresh is None or fresh[3] != snapshots[version_id][3]:
                         if _batch_texts and (version_id not in fresh_ids or
                                 self._postgres_version_changed(repo, snapshots[version_id])):
