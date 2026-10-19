@@ -1,0 +1,317 @@
+.page {
+    width: 100%;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 4px 0 32px;
+    color: #172b4d;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.header h1 {
+    margin: 0;
+    color: #090147;
+    font-size: clamp(25px, 2.4vw, 32px);
+    font-weight: 750;
+    line-height: 1.2;
+    letter-spacing: -.035em;
+}
+
+.button, .secondaryButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 10px 20px;
+    border: 1px solid #1e3a8a;
+    border-radius: 9px;
+    background: #1e3a8a;
+    color: #fff;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 180ms ease, border-color 180ms ease;
+}
+
+.button:hover:not(:disabled) {
+    background: #172554;
+    border-color: #172554;
+}
+
+.secondaryButton {
+    background: #fff;
+    color: #1e3a8a;
+    border-color: #cbd5e1;
+}
+
+.secondaryButton:hover:not(:disabled) {
+    background: #eef3fb;
+    border-color: #93a9ca;
+}
+
+.button:disabled, .secondaryButton:disabled {
+    color: #94a3b8;
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+    cursor: not-allowed;
+}
+
+.button:focus-visible, .secondaryButton:focus-visible, .tableWrapper:focus-visible {
+    outline: 3px solid #93b1de;
+    outline-offset: 3px;
+}
+
+.tableWrapper {
+    overflow-x: auto;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    box-shadow: 0 4px 18px rgb(15 23 42 / 5%);
+}
+
+.table {
+    width: 100%;
+    min-width: 540px;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.table th, .table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #edf1f6;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.table th {
+    color: #080a0c;
+    background: #f7f9fc;
+    border-bottom-color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .035em;
+    white-space: nowrap;
+}
+
+.table tbody tr {
+    transition: background 160ms ease;
+}
+
+.table tbody tr:hover {
+    background: #dfe8f4;
+}
+
+.table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.title {
+    color: #000;
+    font-weight: 700;
+}
+
+.notice {
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    color: #991b1b;
+    background: #fff0f0;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.sectionHeader {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 24px 0 14px;
+}
+
+.sectionHeader h2 {
+    margin: 0;
+    font-size: 18px;
+    color: #172554;
+    font-weight: 650;
+}
+
+@media (max-width: 700px) {
+    .header {
+        align-items: flex-start;
+        margin-bottom: 18px;
+    }
+
+    .tableWrapper {
+        border-radius: 11px;
+    }
+
+    .table th, .table td {
+        padding: 11px 12px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .button, .secondaryButton, .table tbody tr {
+        transition: none;
+    }
+}
+
+.searchForm {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 20px 24px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    flex: 0 1 230px;
+}
+
+.field > span {
+    color: #475569;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.searchField {
+    flex: 1 1 260px;
+    max-width: 440px;
+}
+
+.field input, .field select {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 10px 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    color: #172b4d;
+    background: #fff;
+    font: inherit;
+    font-size: 14px;
+    outline: none;
+}
+
+.field input:focus, .field select:focus {
+    border-color: #1e3a8a;
+    box-shadow: 0 0 0 3px rgb(30 58 138 / 13%);
+}
+
+.clearButton, .retryButton {
+    padding: 10px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #1e3a8a;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.clearButton {
+    min-height: 42px;
+}
+
+.clearButton:hover, .retryButton:hover {
+    text-decoration: underline;
+}
+
+.clearButton:focus-visible, .retryButton:focus-visible {
+    outline: 3px solid #93b1de;
+    outline-offset: 2px;
+}
+
+.table {
+    table-layout: fixed;
+}
+
+.table th:first-child {
+    width: 30%;
+}
+
+.table th:last-child:not(:nth-child(2)) {
+    width: 27%;
+}
+
+.table td {
+    overflow-wrap: anywhere;
+}
+
+.code {
+    color: #64748b;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 13px;
+}
+
+.table .message {
+    padding: 40px 20px;
+    color: #64748b;
+    text-align: center;
+}
+
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 16px;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.pagination nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pagination .button {
+    min-height: 36px;
+    padding: 7px 12px;
+}
+
+@media (max-width: 700px) {
+    .searchForm {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 16px;
+    }
+
+    .field, .searchField {
+        flex: auto;
+        max-width: none;
+    }
+
+    .pagination {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .pagination nav {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
