@@ -131,6 +131,7 @@ SEARCH_ERROR_RESPONSES = {status: {'model': SearchErrorResponse} for status in (
 
 
 MESSAGES = {
+    'SEARCH_MODEL_LOADING': 'Đang khởi tạo mô hình tìm kiếm. Có thể chọn BoW.',
     'SEARCH_RUNTIME_BUSY': 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
     'SEARCH_ACCESS_RESTRICTED': 'Truy cập tìm kiếm nội bộ bị hạn chế.',
     'SEARCH_LIMIT_EXCEEDED': 'Kho dữ liệu vượt giới hạn tìm kiếm. Hãy thu hẹp bộ lọc.',
@@ -153,4 +154,5 @@ def search_error(exc):
     code = exc.code if known else 'SEARCH_UNAVAILABLE'
     return HTTPException(exc.status if known else 503, detail={
         'code': code, 'phase': 'search',
-        'message': MESSAGES.get(code, 'Không thể truy cập dữ liệu tìm kiếm. Vui lòng thử lại.')})
+        'message': MESSAGES.get(code, 'Không thể truy cập dữ liệu tìm kiếm. Vui lòng thử lại.')},
+        headers={'Retry-After': '2'} if code == 'SEARCH_MODEL_LOADING' else None)

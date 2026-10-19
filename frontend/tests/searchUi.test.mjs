@@ -17,12 +17,18 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     skip: !existsSync(executable) || !existsSync(join(root, 'dist/index.html')), timeout: 60000,
 }, async () => {
     let postCount = 0, contextCount = 0, mode = 'results', fileKind = 'image'
+    let modelState = 'LOADING'
     let releaseSearch
     const bodies = []
     const server = createServer(async (req, res) => {
         const url = new URL(req.url, 'http://localhost')
         const json = (body, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
         if (url.pathname === '/health') return json({ status: 'ok', database: 'ok' })
+        if (url.pathname === '/api/v1/search/model-status') return json({ state: modelState, ready: modelState === 'READY' })
+        if (url.pathname === '/api/v1/search/model-retry') {
+            assert.equal(req.method, 'POST')
+            return json({ state: modelState, ready: modelState === 'READY' })
+        }
         if (['/api/v1/subjects', '/api/v1/grade-levels', '/api/v1/resource-types'].includes(url.pathname)) {
             return json({ items: url.pathname.endsWith('subjects') ? [{ id: 's1', name: 'Toán', grade_level_id: 'g1' }] :
                 url.pathname.endsWith('grade-levels') ? [{ id: 'g1', grade_name_vi: 'Lớp 6' }] : [{ code: 'DOC', name: 'Tài liệu' }],
@@ -125,6 +131,17 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
         await open('/search')
         await waitFor(() => evaluate("document.querySelector('fieldset button[aria-pressed=\"true\"]')?.textContent === 'Tìm kết hợp'"))
+        await waitFor(() => evaluate("document.body.textContent.includes('Đang khởi tạo mô hình tìm kiếm')"))
+        assert.equal(await evaluate("document.querySelector('button[type=submit]').disabled"), true)
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('fieldset button')).find(b => b.textContent === 'Theo từ khóa').disabled"), false)
+        assert.equal(postCount, 0)
+        modelState = 'FAILED'
+        await click('Kiểm tra lại')
+        await waitFor(() => evaluate("document.body.textContent.includes('Mô hình chưa sẵn sàng')"))
+        assert.equal(await evaluate("document.querySelector('button[type=submit]').disabled"), true)
+        modelState = 'READY'
+        await click('Thử lại mô hình')
+        await waitFor(() => evaluate("document.querySelector('button[type=submit]').disabled === false"))
         await capture('search-welcome-desktop')
         assert.equal(await evaluate("document.querySelectorAll('nav[aria-label=\"Menu Tra cứu\"] a').length"), 1)
         await click('Phương trình bậc hai')

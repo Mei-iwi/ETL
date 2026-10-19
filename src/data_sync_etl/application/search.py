@@ -70,6 +70,10 @@ class SearchService:
             with self.runtime_admission(method, access=access or SearchAccess()):
                 return self.search_http(query, method, filters, page, size, access=access)
         CURRENT_SEARCH.get().check()
+        if method != 'bow' and access is not None and access.scope == 'local_demo':
+            ready = getattr(self.indexing.embedding, 'require_search_ready', None)
+            if ready is not None:
+                ready()
         # HTTP Search alone opts in; direct/shared callers keep point reads.
         # Initial and final snapshots always hydrate independently.
         criteria = dict(query=query, method=method, filters=filters, page=page, size=size, access=access,
@@ -122,6 +126,9 @@ class SearchService:
             return
         with self._http_inference.slot(call):
             call.reauthorize()
+            ready = getattr(self.indexing.embedding, 'require_search_ready', None)
+            if ready is not None:
+                ready()
             yield
 
     def _deadline(self, started):
@@ -132,6 +139,10 @@ class SearchService:
             raise SearchError('SEARCH_TIMEOUT')
 
     def _query_vector(self, query, context, started):
+        if CURRENT_SEARCH.get() is not None:
+            ready = getattr(self.indexing.embedding, 'require_search_ready', None)
+            if ready is not None:
+                ready()
         # Only this phase is FIFO/serialized. No request access data is shared.
         with self._inference():
             warmup_started = monotonic()
