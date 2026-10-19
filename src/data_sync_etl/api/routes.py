@@ -105,6 +105,7 @@ from data_sync_etl.domain.resource_metadata import (
     UpdateResourceMetadataCommand,
 )
 from data_sync_etl.domain.resource_version import CreateResourceVersionCommand
+from data_sync_etl.domain.search import SearchError
 
 #Swagger Tags
 TAG_SYSTEM: str = 'System'
@@ -160,16 +161,63 @@ def health(request: Request):
 @router.post('/api/v1/search', tags=[TAG_SEARCH], response_model=SearchResponse,
              responses=SEARCH_ERROR_RESPONSES,
              summary='Tra cứu học liệu theo BoW, Vector hoặc Hybrid')
-def search_materials(body: SearchRequest, request: Request):
+async def search_materials(body: SearchRequest, request: Request):
+    call = None
     try:
         access = search_access(request)  # Never acquire runtime capacity before authorization.
         service = request.app.state.container.search
-        with service.runtime_admission(body.method, access=access):
-            return service.search_http(**body.model_dump(), access=access)
+        def reauthorize():
+            # A request-local trusted policy lookup, never a role/user from JSON.
+            # Revoked or switched grants cannot survive the inference queue.
+            if search_access(request) != access:
+                raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
+        call = service.new_http_call(body.method, access=access, authorize=reauthorize)
+        completed, outcome = False, None
+
+        def execute():
+            try:
+                with service.runtime_admission(body.method, access=access, call=call):
+                    call.reauthorize()
+                    return True, service.search_http(**body.model_dump(), access=access)
+            except Exception as exc:
+                return False, exc  # Preserve the API error, not an ExceptionGroup.
+
+        async def disconnected(group):
+            while True:
+                if await request.is_disconnected():
+                    call.cancel('disconnect')
+                    group.cancel_scope.cancel()
+                    return
+                await anyio.sleep(.025)
+
+        try:
+            # Abandon WAITING for blocking I/O/model on timeout, not its lease.
+            # The bounded worker and inference permits are released by execute
+            # only after the actual work exits. No detached model threads added.
+            with anyio.fail_after(call.remaining()):
+                async with anyio.create_task_group() as group:
+                    group.start_soon(disconnected, group)
+                    outcome = await anyio.to_thread.run_sync(execute, abandon_on_cancel=True)
+                    completed = True
+                    group.cancel_scope.cancel()
+        except TimeoutError:
+            call.cancel('deadline')
+            raise SearchError('SEARCH_TIMEOUT') from None
+        if not completed:
+            raise SearchError('SEARCH_TIMEOUT')
+        succeeded, value = outcome
+        if not succeeded:
+            raise value
+        call.check()
+        call.reauthorize()
+        return value
     except HTTPException:
         raise
     except Exception as exc:
         raise search_error(exc) from None
+    finally:
+        if call is not None:
+            call.abandon()
 
 
 def evaluation_services(request):
