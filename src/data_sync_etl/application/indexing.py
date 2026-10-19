@@ -39,7 +39,7 @@ class IndexingService:
         return repo.find('etl_stage_runs', {'resource_version_id': version_id, 'stage': 'INDEX_BUILD'},
                          order=('-created_at', '-id'))
 
-    def _snapshot(self, repo, version_id):
+    def _snapshot(self, repo, version_id, *, text_reader=None):
         version, state = self._version(repo, version_id)
         if state != 'CONTENT_READY':
             raise IndexingError('CONTENT_NOT_READY')
@@ -60,9 +60,12 @@ class IndexingService:
         by_id = {doc.id: doc for doc in docs}
         if not projections or len(docs) != len(units) or len(by_id) != len(docs):
             raise IndexingError('CONTENT_NOT_READY')
+        # HTTP Search alone opts in. All other callers retain point-read timing.
+        texts = text_reader([unit['id'] for unit in units]) if text_reader is not None else None
         content, total_chars = [], 0
         for unit in units:
-            body, doc = repo.get('content_unit_texts', unit['id']), by_id.get(unit['id'])
+            body = texts.get(unit['id']) if texts is not None else repo.get('content_unit_texts', unit['id'])
+            doc = by_id.get(unit['id'])
             if (not body or not doc or unit['mongo_id'] != unit['id'] or doc.content_unit_id != unit['id']
                     or not doc.is_current or doc.projection_generation != generation or doc.resource_version_id != version_id
                     or doc.text != body['text'] or doc.page_from != unit['page_from'] or doc.page_to != unit['page_to']):
@@ -119,7 +122,7 @@ class IndexingService:
             raise IndexingError('BLOCKED_EMBEDDING_RUNTIME', 503)
         self.bags.ensure_ready()
 
-    def _verified(self, snapshot, run):
+    def _verified(self, snapshot, run, *, expected_bags=None):
         roots = self._roots(snapshot)
         source_fp = self.reader.content_fingerprint(snapshot[0]['id'], generation=snapshot[1])
         nodes, result = {u['id']: u for u in snapshot[2]}, []
@@ -130,6 +133,7 @@ class IndexingService:
             except DomainError:
                 raise IndexingError('INDEX_ARTIFACT_INVALID', 503) from None
             if (not bag or run['input_fingerprint'] != snapshot[3] or bag.content_fingerprint != source_fp
+                    or expected_bags is not None and bag != expected_bags.get(root)
                     or bag.resource_version_id != snapshot[0]['id'] or bag.projection_generation != snapshot[1]
                     or bag.unit_type != nodes[root]['unit_type'] or bag.title != nodes[root]['title']
                     or bag.keywords != keywords or bag.embedding_text != ' | '.join(keywords)

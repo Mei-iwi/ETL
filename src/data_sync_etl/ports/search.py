@@ -13,3 +13,7 @@ class SearchBagReader(Protocol):
 
 class SearchMetadataReader(Protocol):
     def search_versions(self, filters: dict, *, limit: int) -> list[dict]: ...
+
+
+class SearchTextReader(Protocol):
+    def search_unit_texts(self, unit_ids: list[str]) -> dict[str, dict]: ...
