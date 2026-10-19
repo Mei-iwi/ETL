@@ -15,7 +15,7 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-path", type=Path, required=True)
-    parser.add_argument("--phase", choices=("preflight", "acceptance", "recovery", "extra", "invariants", "diagnose", "verify", "benchmark", "t2-targeted", "t2-benchmark", "t2-concurrency", "t3-targeted", "t3-benchmark"), required=True)
+    parser.add_argument("--phase", choices=("preflight", "acceptance", "recovery", "extra", "invariants", "diagnose", "verify", "benchmark", "t2-targeted", "t2-benchmark", "t2-concurrency", "t3-targeted", "t3-benchmark", "t3-cold"), required=True)
     parser.add_argument("--run-tag", default="")
     args = parser.parse_args()
     if args.run_tag and not re.fullmatch(r'[a-z0-9-]{1,30}', args.run_tag):
@@ -31,6 +31,7 @@ def main():
     names.update({'t2-targeted': 'T2_TARGETED', 't2-benchmark': 'T2_BENCHMARK'})
     names['t2-concurrency'] = 'T2_CONCURRENCY'
     names.update({'t3-targeted': 'T3_TARGETED', 't3-benchmark': 'T3_BENCHMARK'})
+    names['t3-cold'] = 'T3_COLD_START'
     if args.phase == 'benchmark':
         import hashlib
         import json
@@ -256,6 +257,7 @@ def main():
                     "--basetemp",
                     str(Path(temp) / "pytest"),
                     "-s",
+                    "tests/integration/test_search_model_cold.py::test_cold_start_and_resident_search" if args.phase == "t3-cold" else
                     "tests/integration/test_search_t3_physical.py::test_t3_targeted" if args.phase == "t3-targeted" else
                     "tests/integration/test_search_t3_physical.py::test_t3_benchmark" if args.phase == "t3-benchmark" else
                     "tests/integration/test_search_t2_physical.py::test_t2_concurrency" if args.phase == "t2-concurrency" else

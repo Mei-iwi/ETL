@@ -9,14 +9,16 @@ import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
 import { methods, readSearch, writeSearch } from './searchParams'
 import { SearchResults } from './SearchResultPage'
+import { useSearchModel } from './useSearchModel'
 
 export function MaterialSearchPage() {
     const [params] = useSearchParams()
+    const model = useSearchModel()
     // Keying the form restores criteria after back/forward, without setState in an effect.
-    return <SearchForm key={params.toString()} params={params} />
+    return <SearchForm key={params.toString()} params={params} model={model} />
 }
 
-function SearchForm({ params }: { params: URLSearchParams }) {
+function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnType<typeof useSearchModel> }) {
     const initial = readSearch(params)
     const navigate = useNavigate()
     const [query, setQuery] = useState(initial.query)
@@ -25,7 +27,7 @@ function SearchForm({ params }: { params: URLSearchParams }) {
     const [catalog, setCatalog] = useState<{ subjects: SubjectOption[]; grades: GradeLevelOption[]; types: ResourceTypeOption[] } | null>(null)
     const [catalogError, setCatalogError] = useState('')
     const [error, setError] = useState('')
-    const [busy, setBusy] = useState(Boolean(initial.query))
+    const [busy, setBusy] = useState(false)
     const submitting = useRef(false)
     const filterCount = Object.values(filters).filter(Boolean).length
     const selectedFilters = [
@@ -46,7 +48,7 @@ function SearchForm({ params }: { params: URLSearchParams }) {
     }, [])
     function submit(event: FormEvent) {
         event.preventDefault()
-        if (busy || submitting.current) return
+        if (busy || submitting.current || (method !== 'bow' && !model.ready)) return
         const normalized = query.normalize('NFC').trim()
         if (!normalized || normalized.length > 300) { setError('Nhập nội dung cần tìm, tối đa 300 ký tự.'); return }
         const next = writeSearch({ query: normalized, method, filters, page: 1, size: 5 }).toString()
@@ -62,11 +64,12 @@ function SearchForm({ params }: { params: URLSearchParams }) {
             <div className={styles.searchBar}><div className={`${layout.field} ${styles.queryField}`}><label htmlFor="search-query" className={styles.visuallyHidden}>Tìm kiếm học liệu</label>
                 <Search size={20} aria-hidden="true" className={styles.searchIcon} />
                 <input id="search-query" type="search" value={query} onChange={event => { setQuery(event.target.value); setError('') }} maxLength={300} placeholder="Nhập từ khóa hoặc câu hỏi…" aria-describedby={error ? 'search-error' : undefined} aria-invalid={Boolean(error)} required /></div>
-                <button type="submit" className={layout.primaryButton} disabled={busy}>{busy ? 'Đang tìm…' : 'Tìm kiếm'}</button></div>
+                <button type="submit" className={layout.primaryButton} disabled={busy || (method !== 'bow' && !model.ready)}>{busy ? 'Đang tìm…' : 'Tìm kiếm'}</button></div>
             <div className={styles.searchOptions}>
                 <fieldset className={styles.methodPicker}><legend className={styles.visuallyHidden}>Cách tìm kiếm</legend>
                     {methods.map(item => <button key={item.value} type="button" aria-pressed={method === item.value}
                         className={method === item.value ? styles.methodActive : styles.methodButton}
+                        disabled={item.value !== 'bow' && !model.ready}
                         onClick={() => setMethod(item.value)}>{item.label}</button>)}
                 </fieldset>
             <details className={styles.filterPanel}><summary><SlidersHorizontal size={16} aria-hidden="true" /> Bộ lọc{filterCount > 0 && <span className={styles.filterCount}>{filterCount}</span>}</summary><div className={styles.filterBody}><div className={styles.filters}>
@@ -96,9 +99,15 @@ function SearchForm({ params }: { params: URLSearchParams }) {
                 <button type="button" key={item.key} aria-label={`Bỏ bộ lọc: ${item.label}`} onClick={() => setFilters({ ...filters, [item.key]: null, ...(item.key === 'grade_level_id' ? { subject_id: null } : {}) })}>{item.label}<X size={13} aria-hidden="true" /></button>)}</div>}
             {hasChanges && <p role="status" className={styles.methodHelp}>Nhấn Tìm kiếm để áp dụng thay đổi.</p>}
             {catalogError && <p role="status" className={styles.pending}>{catalogError}</p>}
+            {!model.ready && <div role="status" className={model.state === 'FAILED' || model.state === 'STOPPED' ? styles.error : styles.pending}>
+                {model.error ? 'Chưa kiểm tra được trạng thái tìm kiếm. Có thể chọn BoW.' :
+                    model.state === 'FAILED' || model.state === 'STOPPED' ? 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.' : 'Đang chuẩn bị tìm kiếm…'}
+                {' '}<button type="button" className={styles.textButton} onClick={model.state === 'FAILED' ? model.retry : model.refresh}>
+                    {model.state === 'FAILED' ? 'Thử lại' : 'Kiểm tra lại'}</button>
+            </div>}
             {error && <p id="search-error" role="alert" className={styles.error}>{error}</p>}
         </form>
-        {initial.query && <SearchResults key={params.toString()} params={params} onBusyChange={setBusy} />}
+        {initial.query && (initial.method === 'bow' || model.ready) && <SearchResults key={params.toString()} params={params} onBusyChange={setBusy} />}
         {!initial.query && <div className={styles.welcome}>
             <div className={styles.welcomeIcon}><BookOpen size={30} aria-hidden="true" /></div>
             <h2>Bạn muốn tìm hiểu điều gì?</h2>

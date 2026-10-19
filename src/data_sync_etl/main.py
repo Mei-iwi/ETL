@@ -96,13 +96,23 @@ def create_app(container=None):
     async def lifespan(app):
         app.state.container = container or Container()
         configure(app.state.container.settings.log_level)
+        embedding = getattr(getattr(app.state.container, 'indexing', None), 'embedding', None)
+        preload = getattr(embedding, 'start_preload', None)
+        if preload is not None:
+            preload()
         if app.state.container.settings.admin_enabled:
             logging.getLogger("etl").warning(
                 "Admin API enabled without authentication; bind only to 127.0.0.1 for local development"
             )
-        yield
-        if container is None:
-            app.state.container.close()
+        try:
+            yield
+        finally:
+            stop = getattr(embedding, 'stop_preload', None)
+            if stop is not None:
+                from starlette.concurrency import run_in_threadpool
+                await run_in_threadpool(stop)
+            if container is None:
+                app.state.container.close()
 
     app = FastAPI(title="Data Sync + ETL (local admin/dev)", lifespan=lifespan)
     configured = container.settings if container is not None else Settings()

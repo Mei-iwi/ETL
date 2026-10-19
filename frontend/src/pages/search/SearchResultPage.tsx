@@ -28,7 +28,7 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
             .then(data => { if (data && !controller.signal.aborted) { setResult(data); setError('') } })
             .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof SearchApiError ? reason.message : 'Tìm kiếm thất bại. Vui lòng thử lại.') })
             .finally(() => { if (!controller.signal.aborted) { retrying.current = false; onBusyChange?.(false) } })
-        return () => controller.abort()
+        return () => { controller.abort(); onBusyChange?.(false) }
     }, [encoded, attempt, onBusyChange])
     return <section className={styles.results} aria-label="Kết quả tìm kiếm" aria-busy={Boolean(criteria.query && !error && !result)} tabIndex={0}>
         <div className={styles.stack}>
