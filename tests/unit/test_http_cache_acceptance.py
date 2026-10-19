@@ -122,7 +122,7 @@ def test_cached_vector_does_not_hide_revoked_ancestor_or_context(searchable):
 @pytest.mark.parametrize('cache_enabled', [False, True])
 @pytest.mark.parametrize('warm', [False, True])
 @pytest.mark.parametrize('concurrency', [1, 2, 5, 10])
-def test_busy_failure_rate_and_slot_release(searchable, monkeypatch, cache_enabled, warm, concurrency):
+def test_concurrent_db_phase_and_slot_release(searchable, monkeypatch, cache_enabled, warm, concurrency):
     c, version = searchable
     model = configure(c, version)
     c.settings.search_query_embedding_cache_enabled = cache_enabled
@@ -144,7 +144,8 @@ def test_busy_failure_rate_and_slot_release(searchable, monkeypatch, cache_enabl
                 rivals = list(pool.map(lambda index: api.post('/api/v1/search', json={
                     'query': 'page' if index % 2 else 'different', 'method': 'hybrid'}), range(concurrency - 1)))
                 assert len(rivals) == concurrency - 1
-                assert all(row.status_code == 503 and row.json()['detail']['code'] == 'SEARCH_RUNTIME_BUSY' for row in rivals)
+                assert all(row.status_code == 200 or concurrency > 5 and row.status_code == 503
+                           and row.json()['detail']['code'] == 'SEARCH_RUNTIME_BUSY' for row in rivals)
                 assert api.post('/api/v1/search', json={'query': 'page', 'method': 'bow'}).status_code == 200
             finally:
                 release.set()

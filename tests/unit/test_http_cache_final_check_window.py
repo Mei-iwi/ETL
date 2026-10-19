@@ -22,7 +22,9 @@ def test_existing_post_validation_writer_window_same_off_on(searchable, monkeypa
     configure(c, version)
     lines, offset = inspect.getsourcelines(SearchService.search)
     tree = ast.parse(textwrap.dedent(''.join(lines))).body[0]
-    line = next(node.lineno for node in tree.body if isinstance(node, ast.Expr)
+    # Search may also check its deadline before expensive work. This probe must
+    # remain AFTER the final metadata/snapshot validation, not at the first check.
+    line = max(node.lineno for node in tree.body if isinstance(node, ast.Expr)
                 and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
                 and node.value.func.attr == '_deadline') + offset - 1
     original = c.search._deadline

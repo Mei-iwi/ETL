@@ -6,6 +6,11 @@ from time import monotonic
 
 from data_sync_etl.application.content_bags import bag_structure, representation_mode
 from data_sync_etl.application.http_query_cache import HttpQueryVectorCache
+from data_sync_etl.application.search_runtime import (
+    CURRENT_SEARCH,
+    SearchCall,
+    SearchInferenceQueue,
+)
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
 from data_sync_etl.domain.search import SearchError, binary_score, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
@@ -46,7 +51,11 @@ class QueryEmbeddingContext:
 class SearchService:
     def __init__(self, indexing, settings, bags: SearchBagReader | None, *, query_cache_runtime=None):
         self.indexing, self.settings, self.bags = indexing, settings, bags
-        self._http_model_slot = BoundedSemaphore(1)
+        self._http_inference = SearchInferenceQueue()
+        # Retain worker leases after HTTP timeout: repeated cancellations cannot
+        # spawn unbounded abandoned model/driver threads. BoW has separate room.
+        self._http_heavy_calls = BoundedSemaphore(16)
+        self._http_light_calls = BoundedSemaphore(8)
         self._http_query_vectors = (HttpQueryVectorCache(query_cache_runtime)
                                     if query_cache_runtime is not None else None)
 
@@ -57,6 +66,10 @@ class SearchService:
         Runtime prepare/schema and all live retrieval remain in that function.
         """
         cache = self._http_query_vectors
+        if CURRENT_SEARCH.get() is None:
+            with self.runtime_admission(method, access=access or SearchAccess()):
+                return self.search_http(query, method, filters, page, size, access=access)
+        CURRENT_SEARCH.get().check()
         # HTTP Search alone opts in; direct/shared callers keep point reads.
         # Initial and final snapshots always hydrate independently.
         criteria = dict(query=query, method=method, filters=filters, page=page, size=size, access=access,
@@ -78,27 +91,69 @@ class SearchService:
             return result
 
     @contextmanager
-    def runtime_admission(self, method, *, access):
-        """Bound HTTP Vector/Hybrid work per process, without queued model waiters.
+    def runtime_admission(self, method, *, access, call=None):
+        """Own a bounded HTTP worker, NOT the whole pipeline's inference lock."""
+        call = call or self.new_http_call(method, access=access)
+        token = None
+        try:
+            if not call.claim():
+                raise SearchError('SEARCH_TIMEOUT')
+            token = CURRENT_SEARCH.set(call)
+            call.check()
+            yield call
+        finally:
+            if token is not None:
+                CURRENT_SEARCH.reset(token)
+            call.finish()
 
-        Only the Search route uses this guard. Direct consumers and shared model
-        lifecycle are unchanged. A hung inference cannot be safely interrupted;
-        retain its slot until it actually returns, rejecting new heavy requests.
-        BoW and fail-closed public responses never acquire the model slot.
-        """
-        if method == 'bow' or access.scope != 'local_demo':
+    def new_http_call(self, method, *, access, authorize=None):
+        capacity = (self._http_heavy_calls if method != 'bow' and access.scope == 'local_demo'
+                    else self._http_light_calls)
+        if not capacity.acquire(blocking=False):
+            raise SearchError('SEARCH_RUNTIME_BUSY', 503)
+        return SearchCall(self.settings.search_timeout_seconds, capacity.release,
+                          self._http_inference.wake, authorize=authorize)
+
+    @contextmanager
+    def _inference(self):
+        call = CURRENT_SEARCH.get()
+        if call is None:  # Direct Search/Evaluation keeps its existing lifecycle.
             yield
             return
-        if not self._http_model_slot.acquire(blocking=False):
-            raise SearchError('SEARCH_RUNTIME_BUSY', 503)
-        try:
+        with self._http_inference.slot(call):
+            call.reauthorize()
             yield
-        finally:
-            self._http_model_slot.release()
 
     def _deadline(self, started):
+        call = CURRENT_SEARCH.get()
+        if call is not None:
+            call.check()
         if monotonic() - started > self.settings.search_timeout_seconds:
             raise SearchError('SEARCH_TIMEOUT')
+
+    def _query_vector(self, query, context, started):
+        # Only this phase is FIFO/serialized. No request access data is shared.
+        with self._inference():
+            warmup_started = monotonic()
+            embedding = self.indexing.embedding
+            prepare_query = getattr(embedding, 'prepare_query', None)
+            if prepare_query is None:
+                embedding.prepare()
+                encoder = embedding.embed
+            else:
+                encoder = prepare_query()
+            warmup_seconds = monotonic() - warmup_started
+            if warmup_seconds > self.settings.search_model_warmup_timeout_seconds:
+                raise SearchError('SEARCH_MODEL_WARMUP_TIMEOUT')
+            # Legacy direct callers retain their separate warmup allowance.
+            # HTTP has an additional absolute 15s budget, including queue/prepare.
+            started += warmup_seconds
+            self._deadline(started)
+            dimension = self.settings.index_embedding_dimension
+            vector = (context.encode(embedding, encoder, query, dimension) if context is not None
+                      else validate_vector(encoder(query), dimension))
+            self._deadline(started)
+            return vector, started
 
     def _ready_snapshot(self, repo, version_id, *, batch_texts=False, expected_bags=None, batch_bags=False):
         runs = self.indexing._runs(repo, version_id)
@@ -205,28 +260,10 @@ class SearchService:
         if self.bags is None:
             raise SearchError('SEARCH_SCHEMA_UNAVAILABLE')
         self.bags.ensure_ready()
+        self._deadline(started)
         vector = None
         if method in ('vector', 'hybrid'):
-            # Loading a local model is distinct from executing a bounded query.
-            # Preserve the query deadline (including prior schema work), but do not
-            # spend it on first-use imports/weights. These checks are cooperative,
-            # not preemption of a blocking model call; HTTP admission is bounded.
-            warmup_started = monotonic()
-            embedding = self.indexing.embedding
-            prepare_query = getattr(embedding, 'prepare_query', None)
-            if prepare_query is None:
-                embedding.prepare()
-                encoder = embedding.embed
-            else:
-                encoder = prepare_query()
-            warmup_seconds = monotonic() - warmup_started
-            if warmup_seconds > self.settings.search_model_warmup_timeout_seconds:
-                raise SearchError('SEARCH_MODEL_WARMUP_TIMEOUT')
-            started += warmup_seconds
-            dimension = self.settings.index_embedding_dimension
-            vector = (_query_context.encode(embedding, encoder, query, dimension) if _query_context is not None
-                      else validate_vector(encoder(query), dimension))
-            self._deadline(started)
+            vector, started = self._query_vector(query, _query_context, started)
         with self.indexing.uow() as repo:
             metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
         if len(metadata) > self.settings.search_max_bags:

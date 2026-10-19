@@ -15,7 +15,7 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-path", type=Path, required=True)
-    parser.add_argument("--phase", choices=("preflight", "acceptance", "recovery", "extra", "invariants", "diagnose", "verify", "benchmark", "t2-targeted", "t2-benchmark", "t2-concurrency"), required=True)
+    parser.add_argument("--phase", choices=("preflight", "acceptance", "recovery", "extra", "invariants", "diagnose", "verify", "benchmark", "t2-targeted", "t2-benchmark", "t2-concurrency", "t3-targeted", "t3-benchmark"), required=True)
     parser.add_argument("--run-tag", default="")
     args = parser.parse_args()
     if args.run_tag and not re.fullmatch(r'[a-z0-9-]{1,30}', args.run_tag):
@@ -30,6 +30,7 @@ def main():
     names.update(diagnose='T1_DIAGNOSE', verify='T1_HTTP_VERIFICATION')
     names.update({'t2-targeted': 'T2_TARGETED', 't2-benchmark': 'T2_BENCHMARK'})
     names['t2-concurrency'] = 'T2_CONCURRENCY'
+    names.update({'t3-targeted': 'T3_TARGETED', 't3-benchmark': 'T3_BENCHMARK'})
     if args.phase == 'benchmark':
         import hashlib
         import json
@@ -48,6 +49,18 @@ def main():
         except (OSError, ValueError, KeyError, AssertionError):
             parser.error('Recovery safety gates missing, failed or source changed; benchmark forbidden')
     folder = 'search-mongo-batch' if args.phase.startswith('t2-') else 'search-pg-text-batch'
+    if args.phase.startswith('t3-'):
+        folder = 'search-multi-client'
+    if args.phase == 't3-benchmark':
+        import hashlib
+        import json
+
+        proofs = [json.loads(path.read_text()) for path in (root / 'docs/audits' / folder).glob('T3_TARGETED*.json')]
+        if not any(value.get('status') == 'TARGETED_PASS' and value.get('source_hashes')
+                   and value.get('queued_revocation') and len(value.get('network_disconnects', [])) == 2
+                   and all(hashlib.sha256((root / key).read_bytes()).hexdigest() == checksum
+                           for key, checksum in value['source_hashes'].items()) for value in proofs):
+            parser.error('T3 targeted safety/HTTP evidence missing or source changed; benchmark forbidden')
     if args.phase == 't2-benchmark':
         import hashlib
         import json
@@ -199,6 +212,12 @@ def main():
                 SEARCH_QUERY_EMBEDDING_CACHE_ENABLED="false",
             )
 
+            http_ports = set()
+            if args.phase.startswith('t3-'):
+                from tests.search_t3_support import HTTP_PORTS
+
+                http_ports = HTTP_PORTS
+
             def audit(event, args):
                 if event == "open" and isinstance(args[0], (str, bytes, os.PathLike)):
                     path = Path(os.fsdecode(args[0])).resolve()
@@ -218,7 +237,7 @@ def main():
                         f.name == "_fallback_socketpair" and f.filename.endswith("socket.py")
                         for f in traceback.extract_stack()
                     )
-                    if not (local and (address[1] in (pg_port, mongo_port) or selfpipe)):
+                    if not (local and (address[1] in (pg_port, mongo_port) or address[1] in http_ports or selfpipe)):
                         raise RuntimeError("Connection outside owned test targets forbidden")
 
             sys.addaudithook(audit)
@@ -237,6 +256,8 @@ def main():
                     "--basetemp",
                     str(Path(temp) / "pytest"),
                     "-s",
+                    "tests/integration/test_search_t3_physical.py::test_t3_targeted" if args.phase == "t3-targeted" else
+                    "tests/integration/test_search_t3_physical.py::test_t3_benchmark" if args.phase == "t3-benchmark" else
                     "tests/integration/test_search_t2_physical.py::test_t2_concurrency" if args.phase == "t2-concurrency" else
                     "tests/integration/test_search_t2_physical.py::test_t2_targeted" if args.phase == "t2-targeted" else
                     "tests/integration/test_search_t2_physical.py::test_t2_benchmark" if args.phase == "t2-benchmark" else
