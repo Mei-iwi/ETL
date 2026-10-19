@@ -57,7 +57,10 @@ class SearchService:
         Runtime prepare/schema and all live retrieval remain in that function.
         """
         cache = self._http_query_vectors
-        criteria = dict(query=query, method=method, filters=filters, page=page, size=size, access=access)
+        # HTTP Search alone opts in; direct/shared callers keep point reads.
+        # Initial and final snapshots always hydrate independently.
+        criteria = dict(query=query, method=method, filters=filters, page=page, size=size, access=access,
+                        _batch_texts=True, _batch_bags=True)
         if not self.settings.search_query_embedding_cache_enabled or method == 'bow' or cache is None:
             if cache is not None and not self.settings.search_query_embedding_cache_enabled:
                 cache.clear()
@@ -97,18 +100,57 @@ class SearchService:
         if monotonic() - started > self.settings.search_timeout_seconds:
             raise SearchError('SEARCH_TIMEOUT')
 
-    def _ready_snapshot(self, repo, version_id):
+    def _ready_snapshot(self, repo, version_id, *, batch_texts=False, expected_bags=None, batch_bags=False):
         runs = self.indexing._runs(repo, version_id)
         if not runs or runs[0]['status'] != 'COMPLETED':
             return None
         try:
-            snapshot = self.indexing._snapshot(repo, version_id)
+            snapshot = (self.indexing._snapshot(repo, version_id, text_reader=repo.search_unit_texts)
+                        if batch_texts else self.indexing._snapshot(repo, version_id))
             if runs[0]['input_fingerprint'] != snapshot[3]:
                 return None
-            self.indexing._verified(snapshot, runs[0])
+            options = {} if expected_bags is None else {'expected_bags': expected_bags}
+            reader = getattr(self.bags, 'search_bags', None) if batch_bags else None
+            if reader is not None:
+                options['bag_reader'] = reader
+            self.indexing._verified(snapshot, runs[0], **options)
             return snapshot
         except IndexingError:
             return None
+
+    def _postgres_version_changed(self, repo, snapshot):
+        """Proof of a version-local PG change, NOT a Mongo freshness marker.
+
+        Called only on the T1 failure/recovery path. Discard ALL artifacts for
+        this version; remaining versions still undergo independent live checks.
+        Unknown/index/Mongo-only failures must retain SEARCH_INDEX_STALE.
+        """
+        old = snapshot[0]
+        version = repo.get('resource_versions', old['id'])
+        resource = repo.get('master_learning_resources', old['resource_id'])
+        if (not version or not resource or denied(resource) or denied(version)
+                or resource['publication_status'] != 'PUBLISHED'
+                or version['resource_id'] != old['resource_id']
+                or version['source_hash'] != old['source_hash']
+                or version['lifecycle_status'] not in ('INGESTED', 'APPROVED', 'PUBLISHED')):
+            return True
+        units = repo.find('content_units', {'resource_version_id': old['id']},
+                          order=('sequence_no', 'id'), limit=self.settings.index_max_units + 1)
+        if len(units) > min(self.settings.index_max_units, 10000):
+            raise SearchError('SEARCH_INDEX_STALE', 409)
+        previous = {unit['id']: unit for unit in snapshot[2]}
+        current = {unit['id']: unit for unit in units}
+        if len(current) != len(units):
+            raise SearchError('SEARCH_INDEX_STALE', 409)
+        if current.keys() != previous.keys():
+            return True
+        fields = ('parent_unit_id', 'unit_type', 'title', 'sequence_no', 'page_from', 'page_to',
+                  'review_status', 'retrieval_eligible', 'mongo_id')
+        if any(any(unit[key] != previous[key_id][key] for key in fields)
+               for key_id, unit in current.items()):
+            return True
+        texts = repo.search_unit_texts(list(current))
+        return any(key not in texts or texts[key]['text'] != previous[key]['text'] for key in current)
 
     def _allowed_units(self, repo, snapshot, access):
         resource = repo.get('master_learning_resources', snapshot[0]['resource_id'])
@@ -148,7 +190,7 @@ class SearchService:
         return roots, best
 
     def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
-               _query_context=None):
+               _query_context=None, _batch_texts=False, _batch_bags=False):
         access = access or SearchAccess()
         started, filters = monotonic(), filters or {}
         query = normalize_query(query)
@@ -196,10 +238,11 @@ class SearchService:
         if len(candidates) > self.settings.search_max_bags:
             raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
         by_bag, bow, semantic, snapshots, ready_count, source_chars = {}, {}, {}, {}, 0, 0
+        excluded = set()
         for version_id in sorted({bag.resource_version_id for bag in candidates}):
             self._deadline(started)
             with self.indexing.uow() as repo:
-                snapshot = self._ready_snapshot(repo, version_id)
+                snapshot = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts, batch_bags=_batch_bags)
                 allowed = self._allowed_units(repo, snapshot, access) if snapshot else set()
             if snapshot is None:
                 continue
@@ -208,11 +251,21 @@ class SearchService:
                 raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
             snapshots[version_id] = snapshot
             roots, snippets = self._snippets(snapshot, keywords, started, allowed)
-            for bag in (bag for bag in candidates if bag.resource_version_id == version_id):
+            version_bags = [bag for bag in candidates if bag.resource_version_id == version_id]
+            reader = getattr(self.bags, 'search_bags', None) if _batch_bags else None
+            current_bags = (reader([bag.id for bag in version_bags], version_id=version_id, generation=snapshot[1])
+                            if reader is not None else None)
+            for bag in version_bags:
                 self._deadline(started)
                 # Candidate may have been fetched before a concurrent invalidation.
-                current = self.bags.get_bag(bag.id)
+                current = current_bags.get(bag.id) if current_bags is not None else self.bags.get_bag(bag.id)
                 if not current or current != bag:
+                    if _batch_texts:
+                        with self.indexing.uow() as repo:
+                            isolated = self._postgres_version_changed(repo, snapshot)
+                        if isolated:
+                            excluded.add(version_id)
+                            break
                     raise SearchError('SEARCH_INDEX_STALE', 409)
                 if bag.id not in roots or bag.id not in snippets:
                     continue
@@ -227,42 +280,76 @@ class SearchService:
                 chunk = snippets[bag.id][1]
                 by_bag[bag.id] = (bag, chunk, matched,
                     representation_mode(snapshot[2], {bag.id: roots[bag.id]}))
-        scores = bow if method == 'bow' else semantic if method == 'vector' else rrf(bow, semantic)
-        grouped, matches = {}, {}
-        for bag_id in sorted(scores, key=lambda key: (-scores[key], key)):
-            bag, chunk, matched, mode = by_bag[bag_id]
-            row = by_version[bag.resource_version_id]
-            matches[row['resource_id']] = matches.get(row['resource_id'], 0) + 1
-            if row['resource_id'] in grouped:
-                continue
-            # A reversible, snapshot-bound identifier is added by the context helper.
-            snapshot = snapshots[bag.resource_version_id]
-            token = encode_context(bag.resource_version_id, chunk['content_unit_id'],
-                                   chunk['unit_chunk_sequence'], snapshot[3])
-            grouped[row['resource_id']] = {
-                **{key: value for key, value in row.items() if key != 'version_id'},
-                'resource_version_id': bag.resource_version_id,
-                'bag_id': bag.id, 'bag_title': bag.title, 'unit_type': bag.unit_type,
-                'representation_mode': mode, 'matched_keywords': matched, 'score': scores[bag_id],
-                'score_components': {key: branch[bag_id] for key, branch in
-                                     [('bow', bow), ('vector', semantic)] if bag_id in branch},
-                'snippet': chunk['text'][:400], 'page_from': chunk['page_from'], 'page_to': chunk['page_to'],
-                'content_unit_id': chunk['content_unit_id'], 'context_id': token,
-                'context_url': f'/api/v1/chunks/{token}/context',
-            }
+
+        def discard_versions():
+            nonlocal by_bag, bow, semantic, snapshots, ready_count
+            by_bag = {key: value for key, value in by_bag.items()
+                      if value[0].resource_version_id not in excluded}
+            bow = {key: value for key, value in bow.items() if key in by_bag}
+            semantic = {key: value for key, value in semantic.items() if key in by_bag}
+            snapshots = {key: value for key, value in snapshots.items() if key not in excluded}
+            ready_count = len(by_bag)
+        if excluded:
+            discard_versions()
+        def ranked():
+            scores = bow if method == 'bow' else semantic if method == 'vector' else rrf(bow, semantic)
+            grouped, matches = {}, {}
+            for bag_id in sorted(scores, key=lambda key: (-scores[key], key)):
+                bag, chunk, matched, mode = by_bag[bag_id]
+                row = by_version[bag.resource_version_id]
+                matches[row['resource_id']] = matches.get(row['resource_id'], 0) + 1
+                if row['resource_id'] in grouped:
+                    continue
+                # A reversible, snapshot-bound identifier is added by the context helper.
+                snapshot = snapshots[bag.resource_version_id]
+                token = encode_context(bag.resource_version_id, chunk['content_unit_id'],
+                                       chunk['unit_chunk_sequence'], snapshot[3])
+                grouped[row['resource_id']] = {
+                    **{key: value for key, value in row.items() if key != 'version_id'},
+                    'resource_version_id': bag.resource_version_id,
+                    'bag_id': bag.id, 'bag_title': bag.title, 'unit_type': bag.unit_type,
+                    'representation_mode': mode, 'matched_keywords': matched, 'score': scores[bag_id],
+                    'score_components': {key: branch[bag_id] for key, branch in
+                                         [('bow', bow), ('vector', semantic)] if bag_id in branch},
+                    'snippet': chunk['text'][:400], 'page_from': chunk['page_from'], 'page_to': chunk['page_to'],
+                    'content_unit_id': chunk['content_unit_id'], 'context_id': token,
+                    'context_url': f'/api/v1/chunks/{token}/context',
+                }
+            return grouped, matches
+        grouped, matches = ranked()
         # Recheck metadata and snapshots after ranking; never publish a known stale vector.
-        if grouped:
+        if grouped or (_batch_texts and excluded):
             with self.indexing.uow() as repo:
-                fresh_ids = {row['version_id'] for row in self._metadata(repo, filters, access,
-                    self.settings.search_max_bags + 1)}
-                for version_id in {item['resource_version_id'] for item in grouped.values()}:
-                    fresh = self._ready_snapshot(repo, version_id)
+                fresh_rows = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
+                fresh_by_version = {row['version_id']: row for row in fresh_rows}
+                fresh_ids = set(fresh_by_version)
+                if _batch_texts and (len(fresh_rows) > self.settings.search_max_bags
+                                     or fresh_ids - by_version.keys()):
+                    raise SearchError('SEARCH_INDEX_STALE', 409)
+                checked_versions = (set(snapshots) if _batch_texts else
+                                    {item['resource_version_id'] for item in grouped.values()})
+                expected_bags = {bag.id: bag for bag in candidates} if _batch_texts else None
+                for version_id in checked_versions:
+                    fresh = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts,
+                                                 expected_bags=expected_bags, batch_bags=_batch_bags)
                     if version_id not in fresh_ids or fresh is None or fresh[3] != snapshots[version_id][3]:
+                        if _batch_texts and (version_id not in fresh_ids or
+                                self._postgres_version_changed(repo, snapshots[version_id])):
+                            excluded.add(version_id)
+                            continue
+                        raise SearchError('SEARCH_INDEX_STALE', 409)
+                    if _batch_texts and fresh_by_version[version_id] != by_version[version_id]:
                         raise SearchError('SEARCH_INDEX_STALE', 409)
                     allowed = self._allowed_units(repo, fresh, access)
                     if any(not set(bag_structure(fresh[2])[item['bag_id']]) <= allowed
                            for item in grouped.values() if item['resource_version_id'] == version_id):
+                        if _batch_texts and self._postgres_version_changed(repo, snapshots[version_id]):
+                            excluded.add(version_id)
+                            continue
                         raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
+            if excluded:
+                discard_versions()
+                grouped, matches = ranked()
         self._deadline(started)
         items = sorted(grouped.values(), key=lambda item: (-item['score'], item['resource_id']))
         for item in items:

@@ -4,6 +4,7 @@ from sqlalchemy import exists, func, select
 
 from data_sync_etl.db.models import (
     ContentUnit,
+    ContentUnitText,
     EtlStageRun,
     MasterGradeLevel,
     MasterLearningResource,
@@ -14,10 +15,35 @@ from data_sync_etl.db.models import (
     Subject,
 )
 from data_sync_etl.domain.evaluation import EvaluationError
-from data_sync_etl.domain.indexing import digest
+from data_sync_etl.domain.indexing import IndexingError, digest
+
+SEARCH_TEXT_BATCH_SIZE = 500
 
 
 class SearchRepositoryMixin:
+    def search_unit_texts(self, unit_ids):
+        """Bounded request/phase-local hydration, using this repository's session.
+
+        No ordering/paging/authorization decisions: the snapshot keeps its exact
+        unit order and validates missing text against the live Mongo projection.
+        Never retain this mapping across snapshot phases or requests.
+        """
+        ids = tuple(unit_ids)
+        if (len(ids) > 10000 or len(set(ids)) != len(ids)
+                or any(type(key) is not str or not 1 <= len(key) <= 30 for key in ids)):
+            raise IndexingError('CONTENT_NOT_READY')
+        result = {}
+        for offset in range(0, len(ids), SEARCH_TEXT_BATCH_SIZE):
+            batch = ids[offset:offset + SEARCH_TEXT_BATCH_SIZE]
+            rows = self.session.execute(select(ContentUnitText.content_unit_id, ContentUnitText.text)
+                                        .where(ContentUnitText.content_unit_id.in_(batch))).mappings()
+            for row in rows:
+                key = row['content_unit_id']
+                if key in result:
+                    raise IndexingError('CONTENT_NOT_READY')
+                result[key] = dict(row)
+        return result
+
     def evaluation_state(self, filters, *, limit, max_units):
         """Bounded PG-only change marker; no text, embeddings or per-unit queries."""
         metadata = self.search_versions(filters, limit=limit + 1)
