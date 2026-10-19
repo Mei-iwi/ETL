@@ -158,6 +158,32 @@ def health(request: Request):
         raise HTTPException(503, "Database unavailable") from None
 
 
+@router.get('/api/v1/search/model-status', tags=[TAG_SEARCH])
+async def search_model_status(request: Request, response: Response):
+    # This process alone reports its resident model, never another worker's.
+    response.headers['Cache-Control'] = 'private, no-store'
+    embedding = request.app.state.container.indexing.embedding
+    status = getattr(embedding, 'search_status', None)
+    return status() if status is not None else {'state': 'FAILED', 'ready': False}
+
+
+@router.post('/api/v1/search/model-retry', tags=[TAG_SEARCH])
+async def retry_search_model(request: Request, response: Response):
+    try:
+        if search_access(request).scope != 'local_demo':
+            raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
+        embedding = request.app.state.container.indexing.embedding
+        retry = getattr(embedding, 'retry_preload', None)
+        if retry is None or not retry():
+            raise SearchError('BLOCKED_EMBEDDING_RUNTIME')
+        response.headers['Cache-Control'] = 'private, no-store'
+        return embedding.search_status()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise search_error(exc) from None
+
+
 @router.post('/api/v1/search', tags=[TAG_SEARCH], response_model=SearchResponse,
              responses=SEARCH_ERROR_RESPONSES,
              summary='Tra cứu học liệu theo BoW, Vector hoặc Hybrid')

@@ -1,0 +1,264 @@
+.page {
+    width: 100%;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 4px 0 32px;
+    color: #172b4d;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.header h1 {
+    margin: 0;
+    color: #090147;
+    font-size: clamp(25px, 2.4vw, 32px);
+    font-weight: 750;
+    line-height: 1.2;
+    letter-spacing: -.035em;
+}
+
+.button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 10px 20px;
+    border: 1px solid #1e3a8a;
+    border-radius: 9px;
+    background: #1e3a8a;
+    color: #fff;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 180ms ease, border-color 180ms ease;
+}
+
+.button:hover:not(:disabled) {
+    background: #172554;
+    border-color: #172554;
+}
+
+.button:disabled {
+    color: #94a3b8;
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+    cursor: not-allowed;
+}
+
+.button:focus-visible, .tableWrapper:focus-visible {
+    outline: 3px solid #93b1de;
+    outline-offset: 3px;
+}
+
+.tableWrapper {
+    overflow-x: auto;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    box-shadow: 0 4px 18px rgb(15 23 42 / 5%);
+}
+
+.table {
+    width: 100%;
+    min-width: 540px;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.table th, .table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #edf1f6;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.table th {
+    color: #080a0c;
+    background: #f7f9fc;
+    border-bottom-color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .035em;
+    white-space: nowrap;
+}
+
+.table tbody tr {
+    transition: background 160ms ease;
+}
+
+.table tbody tr:hover {
+    background: #dfe8f4;
+}
+
+.table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.notice {
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    color: #991b1b;
+    background: #fff0f0;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.sectionHeader {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 24px 0 14px;
+}
+
+.sectionHeader h2 {
+    margin: 0;
+    font-size: 18px;
+    color: #172554;
+    font-weight: 650;
+}
+
+@media (max-width: 700px) {
+    .header {
+        align-items: flex-start;
+        margin-bottom: 18px;
+    }
+
+    .tableWrapper {
+        border-radius: 11px;
+    }
+
+    .table th, .table td {
+        padding: 11px 12px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .button, .table tbody tr {
+        transition: none;
+    }
+}
+
+.formats {
+    min-width: 0;
+}
+
+.fileType {
+    color: #173b67;
+    font-weight: 700;
+}
+
+.featureGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+}
+
+.feature {
+    min-width: 0;
+    padding: 22px 24px;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 4px 12px rgb(15 23 42 / 4%);
+}
+
+.feature h3 {
+    margin: 0 0 16px;
+    color: #172554;
+    font-size: 16px;
+    font-weight: 650;
+}
+
+.rows {
+    margin: 0;
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    padding: 11px 0;
+    border-top: 1px solid #edf1f6;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.row dt {
+    color: #64748b;
+}
+
+.row dd {
+    margin: 0;
+    max-width: 60%;
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.support {
+    font-weight: 500;
+}
+
+.successIcon {
+    color: #15803d;
+}
+
+.pendingText, .checking {
+    color: #a16207;
+}
+
+.muted {
+    color: #64748b;
+}
+
+.badge {
+    font-size: 13px;
+}
+
+.inlineNote {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: #fffbeb;
+    border-radius: 8px;
+    color: #92690f;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.loading {
+    padding: 48px 20px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    text-align: center;
+    color: #64748b;
+    font-size: 14px;
+}
+
+@media (max-width: 700px) {
+    .featureGrid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .feature {
+        padding: 18px;
+    }
+
+    .row {
+        font-size: 13px;
+    }
+}
