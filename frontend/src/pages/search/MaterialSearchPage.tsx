@@ -100,10 +100,10 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
             {hasChanges && <p role="status" className={styles.methodHelp}>Nhấn Tìm kiếm để áp dụng thay đổi.</p>}
             {catalogError && <p role="status" className={styles.pending}>{catalogError}</p>}
             {!model.ready && <div role="status" className={model.state === 'FAILED' || model.state === 'STOPPED' ? styles.error : styles.pending}>
-                {model.error ? 'Chưa kiểm tra được mô hình. Có thể chọn BoW.' :
-                    model.state === 'FAILED' || model.state === 'STOPPED' ? 'Mô hình chưa sẵn sàng. Có thể chọn BoW.' : 'Đang khởi tạo mô hình tìm kiếm...'}
+                {model.error ? 'Chưa kiểm tra được trạng thái tìm kiếm. Có thể chọn BoW.' :
+                    model.state === 'FAILED' || model.state === 'STOPPED' ? 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.' : 'Đang chuẩn bị tìm kiếm…'}
                 {' '}<button type="button" className={styles.textButton} onClick={model.state === 'FAILED' ? model.retry : model.refresh}>
-                    {model.state === 'FAILED' ? 'Thử lại mô hình' : 'Kiểm tra lại'}</button>
+                    {model.state === 'FAILED' ? 'Thử lại' : 'Kiểm tra lại'}</button>
             </div>}
             {error && <p id="search-error" role="alert" className={styles.error}>{error}</p>}
         </form>

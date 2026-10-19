@@ -131,15 +131,15 @@ SEARCH_ERROR_RESPONSES = {status: {'model': SearchErrorResponse} for status in (
 
 
 MESSAGES = {
-    'SEARCH_MODEL_LOADING': 'Đang khởi tạo mô hình tìm kiếm. Có thể chọn BoW.',
+    'SEARCH_MODEL_LOADING': 'Đang chuẩn bị tìm kiếm. Có thể chọn BoW.',
     'SEARCH_RUNTIME_BUSY': 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
     'SEARCH_ACCESS_RESTRICTED': 'Truy cập tìm kiếm nội bộ bị hạn chế.',
     'SEARCH_LIMIT_EXCEEDED': 'Kho dữ liệu vượt giới hạn tìm kiếm. Hãy thu hẹp bộ lọc.',
     'SEARCH_TIMEOUT': 'Tìm kiếm quá thời gian. Hãy thu hẹp bộ lọc.',
-    'SEARCH_MODEL_WARMUP_TIMEOUT': 'Nạp model quá thời gian. Vui lòng thử lại.',
+    'SEARCH_MODEL_WARMUP_TIMEOUT': 'Chuẩn bị tìm kiếm quá thời gian. Vui lòng thử lại.',
     'SEARCH_INDEX_STALE': 'Chỉ mục vừa thay đổi. Vui lòng tìm lại.',
-    'BLOCKED_EMBEDDING_RUNTIME': 'Model embedding chưa sẵn sàng. Có thể chọn BoW.',
-    'INVALID_EMBEDDING': 'Vector hoặc số chiều model không hợp lệ.',
+    'BLOCKED_EMBEDDING_RUNTIME': 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.',
+    'INVALID_EMBEDDING': 'Tìm kiếm theo ngữ nghĩa chưa sẵn sàng.',
     'BLOCKED_INDEX_SCHEMA': 'Schema MongoDB chưa hợp lệ.',
     'SEARCH_SCHEMA_UNAVAILABLE': 'Chưa kết nối được dữ liệu chỉ mục.',
     'CONTEXT_NOT_FOUND': 'Không tìm thấy ngữ cảnh.',

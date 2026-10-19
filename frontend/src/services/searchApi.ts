@@ -52,14 +52,14 @@ function validContext(value: unknown, id: string, neighbors: number): value is C
 }
 
 const messages: Record<string, string> = {
-    SEARCH_MODEL_LOADING: 'Đang khởi tạo mô hình tìm kiếm. Có thể chọn BoW.',
+    SEARCH_MODEL_LOADING: 'Đang chuẩn bị tìm kiếm. Có thể chọn BoW.',
     SEARCH_RUNTIME_BUSY: 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
     SEARCH_ACCESS_RESTRICTED: 'Truy cập tìm kiếm nội bộ bị hạn chế.',
     SEARCH_LIMIT_EXCEEDED: 'Kho dữ liệu vượt giới hạn. Hãy thu hẹp bộ lọc.',
     SEARCH_TIMEOUT: 'Tìm kiếm quá thời gian. Vui lòng thử lại hoặc chọn BoW.',
-    SEARCH_MODEL_WARMUP_TIMEOUT: 'Nạp model quá thời gian. Vui lòng thử lại hoặc chọn BoW.',
-    BLOCKED_EMBEDDING_RUNTIME: 'Model chưa sẵn sàng. Có thể chọn BoW.',
-    INVALID_EMBEDDING: 'Model embedding chưa sẵn sàng. Có thể chọn BoW.',
+    SEARCH_MODEL_WARMUP_TIMEOUT: 'Chuẩn bị tìm kiếm quá thời gian. Vui lòng thử lại hoặc chọn BoW.',
+    BLOCKED_EMBEDDING_RUNTIME: 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.',
+    INVALID_EMBEDDING: 'Tìm kiếm theo ngữ nghĩa chưa sẵn sàng. Có thể chọn BoW.',
     SEARCH_INDEX_STALE: 'Chỉ mục vừa thay đổi. Vui lòng tìm lại.',
     CONTEXT_STALE: 'Nội dung đã thay đổi. Vui lòng tìm lại.',
 }
