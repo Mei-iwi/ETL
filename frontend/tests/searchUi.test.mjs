@@ -1,6 +1,7 @@
 // Built React pages exercised in Edge against isolated HTTP fixtures; no Dev data.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -9,20 +10,26 @@ import { dirname, extname, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const root = process.env.ETL_T4_FRONTEND_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const baseline = process.env.ETL_T4_BASELINE === '1'
 const executable = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 test('search form, methods, results, pagination, empty, error/retry and mobile layout', {
     skip: !existsSync(executable) || !existsSync(join(root, 'dist/index.html')), timeout: 60000,
 }, async () => {
-    let postCount = 0, contextCount = 0, mode = 'results', fileKind = 'image'
+    let postCount = 0, contextCount = 0, catalogCount = 0, mode = 'results', fileKind = 'image'
+    let resultCount = 8
     let modelState = 'LOADING'
     let releaseSearch
-    const bodies = []
+    const bodies = [], responses = []
     const server = createServer(async (req, res) => {
         const url = new URL(req.url, 'http://localhost')
-        const json = (body, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
+        const json = (body, status = 200) => {
+            const wire = JSON.stringify(body)
+            if (url.pathname === '/api/v1/search') responses.push({ status, sha256: createHash('sha256').update(wire).digest('hex') })
+            res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(wire)
+        }
         if (url.pathname === '/health') return json({ status: 'ok', database: 'ok' })
         if (url.pathname === '/api/v1/search/model-status') return json({ state: modelState, ready: modelState === 'READY' })
         if (url.pathname === '/api/v1/search/model-retry') {
@@ -30,6 +37,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             return json({ state: modelState, ready: modelState === 'READY' })
         }
         if (['/api/v1/subjects', '/api/v1/grade-levels', '/api/v1/resource-types'].includes(url.pathname)) {
+            catalogCount++
             return json({ items: url.pathname.endsWith('subjects') ? [{ id: 's1', name: 'Toán', grade_level_id: 'g1' }] :
                 url.pathname.endsWith('grade-levels') ? [{ id: 'g1', grade_name_vi: 'Lớp 6' }] : [{ code: 'DOC', name: 'Tài liệu' }],
                 pagination: { page: 1, total_pages: 1 } })
@@ -50,9 +58,12 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             if (mode === 'network') return res.destroy()
             if (mode === 'error') return json({ detail: { code: 'BLOCKED_EMBEDDING_RUNTIME', message: 'Model chưa sẵn sàng.' } }, 503)
             if (mode === 'denied') return json({ detail: { code: 'SEARCH_ACCESS_RESTRICTED', message: 'Truy cập tìm kiếm nội bộ bị hạn chế.' } }, 403)
+            if (mode === 'revoked') return json({ detail: { code: 'SEARCH_UNAVAILABLE' } }, 401)
+            if (mode === 'stale') return json({ detail: { code: 'SEARCH_INDEX_STALE' } }, 409)
+            if (mode === 'busy') return json({ detail: { code: 'SEARCH_RUNTIME_BUSY' } }, 503)
             if (mode === 'empty') return json({ ...body, items: [], total: 0, total_pages: 0, message: 'NO_READY_INDEX', ranking_algorithm: 'rrf-v1' })
             if (mode === 'public') return json({ ...body, access_scope: 'public', items: [], total: 0, total_pages: 0, message: 'PUBLIC_ACCESS_UNCONFIRMED', ranking_algorithm: 'rrf-v1' })
-            return json({ ...body, access_scope: 'local_demo', total: 8, total_pages: 2, message: 'OK', ranking_algorithm: 'rrf-v1', items: Array.from({ length: body.page === 1 ? 5 : 3 }, (_, offset) => ({
+            return json({ ...body, access_scope: 'local_demo', total: resultCount, total_pages: Math.ceil(resultCount / body.size), message: 'OK', ranking_algorithm: 'rrf-v1', items: Array.from({ length: Math.max(0, Math.min(body.size, resultCount - (body.page - 1) * body.size)) }, (_, offset) => ({
                 resource_id: `r${(body.page - 1) * 5 + offset + 1}`, resource_title: `Học liệu ${(body.page - 1) * 5 + offset + 1}`, resource_version_id: 'v1', version_number: 1,
                 provider_name: 'Nhà cung cấp', resource_type_code: 'DOC', bag_id: 'b1', bag_title: null, unit_type: 'SECTION', representation_mode: 'fallback',
                 score: .03, score_components: { bow: .5, vector: .7 }, matched_bag_count: 1, matched_keywords: ['toán'],
@@ -94,6 +105,8 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     const origin = `http://127.0.0.1:${server.address().port}`
     const profile = await mkdtemp(join(tmpdir(), 'etl-search-ui-'))
     const browser = spawn(executable, ['--headless=new', '--no-first-run', '--disable-extensions', '--disable-gpu',
+        // Synthetic benchmark intentionally exceeds normal human history rates.
+        ...(process.env.ETL_T4_METRICS ? ['--disable-ipc-flooding-protection'] : []),
         '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' })
     let ws, sequence = 0
     const pending = new Map()
@@ -215,6 +228,78 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("!!document.querySelector('#search-query')"), true)
         await waitFor(() => evaluate("document.querySelector('#search-query')?.value === 'toán'"))
         await waitFor(() => evaluate("document.querySelector('#search-grade')?.value === 'g1'"))
+        // Same-page duplicate clicks produce one request; the page body is never
+        // reused on back, including after access/revision failures.
+        for (const failure of ['revoked', 'denied', 'stale', 'busy']) {
+            mode = 'slow'
+            const before = postCount
+            await evaluate(`window.t4Form = document.querySelector('form'); for (let i=0;i<${baseline ? 1 : 10};i++) Array.from(document.querySelectorAll('button')).find(e => e.textContent === 'Tiếp').click()`)
+            await waitFor(() => !!releaseSearch && postCount === before + 1)
+            assert.equal(await evaluate("document.querySelectorAll('article').length"), 0, 'old protected page hidden during validation')
+            mode = failure
+            await evaluate('history.back()')
+            await waitFor(() => evaluate("!!document.querySelector('[role=alert]')"))
+            releaseSearch()
+            releaseSearch = undefined
+            assert.equal(await evaluate("document.querySelectorAll('article').length"), 0)
+            if (!baseline) assert.equal(await evaluate("window.t4Form === document.querySelector('form')"), true)
+            mode = 'results'
+            await click('Thử lại')
+            await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 1')"))
+        }
+        if (process.env.ETL_T4_METRICS) {
+            resultCount = 13
+            const samples = []
+            await call('Performance.enable')
+            async function measured(temperature, group, action, expected) {
+                const posts = postCount, catalogs = catalogCount
+                const cpu = process.cpuUsage()
+                const start = performance.now()
+                await action()
+                const result = await call('Runtime.evaluate', { awaitPromise: true, returnByValue: true,
+                    expression: `new Promise((resolve, reject) => {
+                        const ready = () => document.querySelector('article h2')?.textContent.trim() === ${JSON.stringify(expected)} && document.querySelector('section[aria-label="Kết quả tìm kiếm"]')?.textContent.includes(new URLSearchParams(location.search).get('q'));
+                        if (ready()) return resolve(true);
+                        const timer = setTimeout(() => { observer.disconnect(); reject(new Error('page timeout')) }, 5000);
+                        const observer = new MutationObserver(() => { if (ready()) { clearTimeout(timer); observer.disconnect(); resolve(true) } });
+                        observer.observe(document.body, { childList: true, subtree: true });
+                    })` }).catch(async error => {
+                        const state = await evaluate("({url: location.pathname + location.search, heading: document.querySelector('article h2')?.textContent, alert: document.querySelector('[role=alert]')?.textContent})")
+                        throw new Error(`${temperature}/${group}: ${error.message}; fixture UI state=${JSON.stringify(state)}`)
+                    })
+                assert.equal(result.exceptionDetails, undefined, `${temperature}/${group}`)
+                assert.equal(postCount - posts, 1, 'every page goes through live Search')
+                const usage = process.cpuUsage(cpu)
+                const memory = process.memoryUsage()
+                assert.equal(responses.at(-1).status, 200)
+                samples.push({ temperature, group, wall_ms: performance.now() - start,
+                    posts: postCount - posts, catalogs: catalogCount - catalogs,
+                    harness_cpu_ms: (usage.user + usage.system) / 1000, harness_rss_bytes: memory.rss,
+                    cache: 'OFF', SQL: null, Mongo: null, encodes: null, reranks: null,
+                    response: responses.at(-1) })
+            }
+            for (const temperature of ['cold', 'warm']) for (let i=0;i<30;i++) {
+                const path = `/search/query-methods?q=bench${temperature}${i}&method=bow`
+                const navigate = () => evaluate(`history.pushState({}, '', ${JSON.stringify(path)}); window.dispatchEvent(new PopStateEvent('popstate'))`)
+                // Cold means a new SPA Search form after leaving Search, not a
+                // cold browser/model. Warm means the app is already on Search.
+                if (temperature === 'cold') {
+                    await evaluate("history.pushState({}, '', '/search'); window.dispatchEvent(new PopStateEvent('popstate'))")
+                    await waitFor(() => evaluate("!document.querySelector('article') && document.querySelector('#search-query')?.value === ''"))
+                }
+                await measured(temperature, 'first', navigate, 'Học liệu 1')
+                await measured(temperature, 'new-2', () => click('Tiếp'), 'Học liệu 6')
+                await measured(temperature, 'new-3', () => click('Tiếp'), 'Học liệu 11')
+                await measured(temperature, 'visited', () => evaluate('history.back()'), 'Học liệu 6')
+                await measured(temperature, 'back', () => evaluate('history.back()'), 'Học liệu 1')
+            }
+            await writeFile(process.env.ETL_T4_METRICS, JSON.stringify({ baseline,
+                fixture: 'Edge isolated HTTP; cold=form lifetime, warm=existing Search; CPU/RSS=Node harness only; SQL/Mongo/model not present (null)',
+                samples }, null, 2))
+            resultCount = 8
+            await open('/search/query-methods?q=toán&method=bow')
+            await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 1')"))
+        }
         await evaluate("document.querySelector('article h2 a').click()")
         await waitFor(() => evaluate("document.body.textContent.includes('Tệp học liệu')"))
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Xem tệp')?.disabled === false"))

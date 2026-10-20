@@ -85,6 +85,7 @@ async function request<T>(path: string, validate: (value: unknown) => value is T
     try {
         const response = await fetch(path, {
             method: payload ? 'POST' : method, signal: combined,
+            cache: 'no-store',
             headers: { Accept: 'application/json', ...(payload ? { 'Content-Type': 'application/json' } : {}) },
             ...(payload ? { body: JSON.stringify(payload) } : {}),
         })

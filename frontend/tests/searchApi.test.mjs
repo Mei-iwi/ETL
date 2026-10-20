@@ -13,6 +13,7 @@ test('search sends exactly one POST with JSON criteria and encoded URL state', a
             calls++
             assert.equal(path, '/api/v1/search')
             assert.equal(init.method, 'POST')
+            assert.equal(init.cache, 'no-store')
             assert.equal(init.headers['Content-Type'], 'application/json')
             assert.deepEqual(JSON.parse(init.body), request)
             return Response.json({ ...searchResponse(request), items: [] })
@@ -78,6 +79,7 @@ test('context uses the search locator, encoded GET and bounded neighbors', async
         globalThis.fetch = async (path, init) => {
             assert.equal(path, '/api/v1/chunks/a%2Fb/context?neighbors=2')
             assert.equal(init.method, 'GET')
+            assert.equal(init.cache, 'no-store')
             assert.equal(init.body, undefined)
             return Response.json({ ...contextResponse(), context_id: 'a/b', neighbors: 2 })
         }
