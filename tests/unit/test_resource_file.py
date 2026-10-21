@@ -59,3 +59,4 @@ def test_file_never_bypasses_policy(searchable, change):
         assert not response.content.startswith(b'%PDF')
         if change != 'missing_file':
             assert api.get(f'/api/v1/resource-versions/{version_id}/file?view=text').status_code == expected
+        assert api.get(f'/api/v1/resource-versions/{version_id}/file?view=preview').status_code == expected

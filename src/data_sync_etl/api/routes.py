@@ -70,6 +70,7 @@ from data_sync_etl.api.search_schemas import (
     SearchResponse,
     search_error,
 )
+from data_sync_etl.api.source_file_response import SourceFileResponse, source_file_error
 from data_sync_etl.api.subject_schemas import (
     RecommendedSubjectListResponse,
     SubjectListResponse,
@@ -96,6 +97,7 @@ from data_sync_etl.domain.core import (
     ResourceCreateError,
     ResourceNotFound,
     ResourceVersionNotFound,
+    SourceFileError,
     SyncAlreadyRunning,
 )
 from data_sync_etl.domain.format_validation import ProcessingFormatError
@@ -363,15 +365,34 @@ def chunk_context(context_id: Annotated[str, Path(min_length=1, max_length=256)]
 @router.get('/api/v1/resource-versions/{id}/file', tags=[TAG_MASTER],
             responses=SEARCH_ERROR_RESPONSES,
             summary='Xem hoặc tải tệp học liệu được phép truy xuất')
-def resource_file(id: ResourceId, request: Request, download: bool = False, view: Literal['file', 'text'] = 'file'):
+def resource_file(id: ResourceId, request: Request, download: bool = False, view: Literal['file', 'text', 'preview'] = 'file'):
     container = request.app.state.container
     try:
         version = container.search.file_version(id, access=search_access(request), include_text=view == 'text')
     except Exception as exc:
         raise search_error(exc) from None
     if view == 'text':
+        try:
+            reference = container.source_resolver.resolve(id)
+            if reference.ownership == 'SOURCE_BACKED':
+                with container.source_resolver.temporary_path(reference):
+                    pass
+                version = container.search.file_version(id, access=search_access(request), include_text=True)
+        except SourceFileError as exc:
+            return source_file_error(exc)
+        except Exception as exc:
+            raise search_error(exc) from None
         return PlainTextResponse(version['preview_text'],
                                  headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
+    try:
+        reference = container.source_resolver.resolve(id)
+    except SourceFileError as exc:
+        return source_file_error(exc)
+    if reference.ownership == 'SOURCE_BACKED' or (view == 'preview' and not download):
+        access = search_access(request)
+        return SourceFileResponse(container.source_resolver, reference,
+                                  lambda: container.search.file_version(id, access=access), download=download,
+                                  preview=container.file_previews if view == 'preview' and not download else None)
     suffix = PurePosixPath(version['storage_object_key']).suffix.lower()
     media_types = {'.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
                    '.txt': 'text/plain', '.csv': 'text/csv',
@@ -400,6 +421,22 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
     return FileResponse(path, media_type=media_types[suffix], filename=f'hoc-lieu-{id}{suffix}',
                         content_disposition_type='attachment' if download else 'inline',
                         headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
+
+
+@router.get('/api/v1/resource-versions/{id}/source-info', tags=[TAG_MASTER],
+            summary='Tham chiếu nguồn được phép, không công khai locator nội bộ')
+def resource_source_info(id: ResourceId, request: Request):
+    container = request.app.state.container
+    try:
+        container.search.file_version(id, access=search_access(request))
+        reference = container.source_resolver.resolve(id)
+        info = container.source_resolver.display_reference(reference)
+        container.search.file_version(id, access=search_access(request))
+        return info
+    except SourceFileError as exc:
+        return source_file_error(exc)
+    except Exception as exc:
+        raise search_error(exc) from None
 
 
 @router.get(

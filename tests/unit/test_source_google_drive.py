@@ -266,7 +266,9 @@ def test_local_and_drive_same_queue_pipeline_snapshots_and_hash_gate(importing, 
         versions = repo.find('resource_versions')
         assert len(imports) == len(versions) == repo.count('ocr_jobs', {}) == 2
         assert all(i['target_version_id'] and i['processing_job_id'] for i in imports)
-        assert len({v['storage_object_key'] for v in versions}) == 1
+        assert {v['storage_object_key'] for v in versions} == {'test.pdf', 'files/blob/test.pdf'}
+        assert len({v['source_hash'] for v in versions}) == 1
+        assert not list((c.storage.root / 'resources').rglob('*'))
         assert all(c.orchestrator.status(v['id'])['processing_status'] == 'CONTENT_READY' for v in versions)
         texts = [[repo.get('content_unit_texts', unit['id'])['text'] for unit in
                   repo.find('content_units', {'resource_version_id': v['id']}, order=('sequence_no',))]
@@ -364,7 +366,9 @@ def assert_source_format_pipeline(importing, extension, provider, payload):
         version = repo.get('resource_versions', item['target_version_id'])
         assert version['source_hash'] == rows[0]['source_hash']
         assert c.orchestrator.status(version['id'])['processing_status'] == 'CONTENT_READY'
-    assert c.storage.get_local_path(version['storage_bucket'], version['storage_object_key']).read_bytes() == payload
+    with c.source_resolver.open_verified_stream(c.source_resolver.resolve(version['id'])) as stream:
+        assert stream.read() == payload
+    assert not list((c.storage.root / 'resources').rglob('*'))
     assert path.read_bytes() == payload
     assert index.chunks(version['id'])['total'] > 0
     index.enqueue(version['id'])

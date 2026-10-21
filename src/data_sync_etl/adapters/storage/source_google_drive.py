@@ -76,15 +76,17 @@ class SourceGoogleDriveFileReader:
             except RequestException:
                 raise SourceFileError('DRIVE_UNAVAILABLE', transient=True) from None
 
-    def _deadline(self, deadline):
+    def _deadline(self, deadline, cancelled=None):
+        if cancelled is not None and cancelled.is_set():
+            raise SourceFileError('SOURCE_REQUEST_CANCELLED')
         if self.clock() >= deadline:
             raise SourceFileError('DRIVE_TIMEOUT', transient=True)
 
-    def _get(self, session, file_id, deadline, *, media=False):
+    def _get(self, session, file_id, deadline, *, media=False, cancelled=None):
         params = {'supportsAllDrives': 'true', **({'alt': 'media'} if media else {'fields': FIELDS})}
         attempts = self.settings.source_drive_max_attempts
         for attempt in range(attempts):
-            self._deadline(deadline)
+            self._deadline(deadline, cancelled)
             try:
                 response = session.get(API + file_id, params=params, stream=True, allow_redirects=False,
                     timeout=min(self.settings.source_drive_timeout_seconds, max(.1, deadline - self.clock())))
@@ -102,15 +104,20 @@ class SourceGoogleDriveFileReader:
                     raise SourceFileError(code)
                 if attempt + 1 == attempts:
                     raise SourceFileError('DRIVE_RATE_LIMITED' if status == 429 else 'DRIVE_UNAVAILABLE', transient=True)
-            self.sleep(min(2 ** attempt + random.uniform(0, .25), max(0, deadline - self.clock())))
+            delay = min(2 ** attempt + random.uniform(0, .25), max(0, deadline - self.clock()))
+            if cancelled is not None:
+                if cancelled.wait(delay):
+                    raise SourceFileError('SOURCE_REQUEST_CANCELLED')
+            else:
+                self.sleep(delay)
         raise SourceFileError('DRIVE_UNAVAILABLE', transient=True)
 
-    def _metadata(self, session, file_id, deadline):
-        response = self._get(session, file_id, deadline)
+    def _metadata(self, session, file_id, deadline, cancelled=None):
+        response = self._get(session, file_id, deadline, cancelled=cancelled)
         try:
             chunks, size = [], 0
             for block in response.iter_content(CHUNK):
-                self._deadline(deadline)
+                self._deadline(deadline, cancelled)
                 size += len(block)
                 if size > 64 * 1024:
                     raise SourceFileError('INVALID_DRIVE_METADATA')
@@ -124,7 +131,7 @@ class SourceGoogleDriveFileReader:
         finally:
             response.close()
 
-    def _inside_root(self, session, metadata, root, deadline):
+    def _inside_root(self, session, metadata, root, deadline, cancelled=None):
         seen, current = set(), metadata
         for _ in range(32):
             parents = current.get('parents')
@@ -134,7 +141,7 @@ class SourceGoogleDriveFileReader:
             if not ID.fullmatch(parent) or parent in seen:
                 raise SourceFileError('DRIVE_OUTSIDE_ROOT')
             seen.add(parent)
-            current = self._metadata(session, parent, deadline)
+            current = self._metadata(session, parent, deadline, cancelled)
             if current.get('mimeType') != FOLDER:
                 raise SourceFileError('DRIVE_OUTSIDE_ROOT')
             if parent == root:
@@ -186,7 +193,7 @@ class SourceGoogleDriveFileReader:
                 if self._metadata(session, root, deadline).get('mimeType') != FOLDER:
                     raise SourceFileError('DRIVE_ROOT_INVALID')
 
-    def open_stream(self, bucket, object_key):
+    def open_stream(self, bucket, object_key, *, cancelled=None):
         if bucket not in self.roots:
             raise SourceFileError('DRIVE_BUCKET_NOT_ALLOWED')
         file_id, filename = self._reference(object_key)
@@ -194,10 +201,10 @@ class SourceGoogleDriveFileReader:
         temporary = tempfile.TemporaryFile(mode='w+b')
         try:
             with self._session() as session:
-                before = self._metadata(session, file_id, deadline)
+                before = self._metadata(session, file_id, deadline, cancelled)
                 size = self._validate_blob(before, filename)
-                self._inside_root(session, before, self.roots[bucket], deadline)
-                response = self._get(session, file_id, deadline, media=True)
+                self._inside_root(session, before, self.roots[bucket], deadline, cancelled)
+                response = self._get(session, file_id, deadline, media=True, cancelled=cancelled)
                 try:
                     headers = getattr(response, 'headers', {}) or {}
                     media_type = headers.get('Content-Type', headers.get('content-type', ''))
@@ -206,7 +213,7 @@ class SourceGoogleDriveFileReader:
                         raise SourceFileError('INVALID_DRIVE_RESPONSE')
                     downloaded = 0
                     for block in response.iter_content(CHUNK):
-                        self._deadline(deadline)
+                        self._deadline(deadline, cancelled)
                         downloaded += len(block)
                         if downloaded > size:
                             raise SourceFileError('DRIVE_SIZE_MISMATCH')
@@ -215,13 +222,31 @@ class SourceGoogleDriveFileReader:
                         raise SourceFileError('DRIVE_SIZE_MISMATCH', transient=True)
                 finally:
                     response.close()
-                after = self._metadata(session, file_id, deadline)
+                after = self._metadata(session, file_id, deadline, cancelled)
                 if any(before.get(k) != after.get(k) for k in ('version', 'name', 'size', 'mimeType', 'parents')):
                     raise SourceFileError('DRIVE_FILE_CHANGED')
                 self._validate_blob(after, filename)
-                self._inside_root(session, after, self.roots[bucket], deadline)
+                self._inside_root(session, after, self.roots[bucket], deadline, cancelled)
             temporary.seek(0)
             return temporary  # ImportService still verifies SOURCE SHA-256 before publication.
         except BaseException:
             temporary.close()
             raise
+
+    def revision(self, bucket, object_key, *, cancelled=None):
+        if bucket not in self.roots:
+            raise SourceFileError('DRIVE_BUCKET_NOT_ALLOWED')
+        file_id, filename = self._reference(object_key)
+        deadline = self.clock() + self.settings.source_drive_total_seconds
+        with self._session() as session:
+            metadata = self._metadata(session, file_id, deadline, cancelled)
+            self._validate_blob(metadata, filename)
+            self._inside_root(session, metadata, self.roots[bucket], deadline, cancelled)
+            return tuple(metadata.get(k) if k != 'parents' else tuple(metadata[k])
+                         for k in ('version', 'name', 'size', 'mimeType', 'parents'))
+
+    def original_url(self, bucket, object_key):
+        if bucket not in self.roots:
+            raise SourceFileError('DRIVE_BUCKET_NOT_ALLOWED')
+        file_id, _ = self._reference(object_key)
+        return f'https://drive.google.com/file/d/{file_id}/view'

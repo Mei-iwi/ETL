@@ -52,6 +52,10 @@ def test_openapi_keep_routes_and_models_match_g0_baseline():
             old_operations[method]["tags"] = [tag]
             old_operations[method]["operationId"] = current["paths"][new_path][method]["operationId"]
             before["paths"][new_path] = old_operations
+    # SOURCE-reference adds one explicitly authorized read-only capability route.
+    source_info = current['paths'].pop('/api/v1/resource-versions/{id}/source-info')
+    assert set(source_info) == {'get'}
+    assert source_info['get']['tags']
     assert current["paths"] == before["paths"]
     # B09 user-approved additive metadata only. All legacy model contracts and
     # required fields remain exact; keep the historical G0 snapshot frozen.

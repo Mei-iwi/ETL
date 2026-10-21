@@ -14,6 +14,8 @@ def test_process_version_creates_job(
     container.settings.admin_enabled = True
 
     container.sync.run(full=True)
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'source_origin': 'LOCAL'})
 
     version = container.ingestion.run(
         "resource-1",
@@ -81,6 +83,8 @@ def test_process_version_end_to_end(
 ):
     container.settings.admin_enabled = True
     container.sync.run(full=True)
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'source_origin': 'LOCAL'})
 
     version = container.ingestion.run(
         "resource-1",
@@ -165,6 +169,8 @@ def test_process_missing_and_admin_guard(container):
 
 def test_invalid_pdf_is_not_accepted(container):
     container.sync.run(full=True)
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'source_origin': 'LOCAL'})
     path = container.storage.get_local_path("input", "bad.pdf")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"not a PDF")

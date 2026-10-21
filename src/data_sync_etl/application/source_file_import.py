@@ -1,6 +1,5 @@
 """Durable source version discovery, import and stage-aware retry."""
 
-import os
 import random
 import re
 from datetime import timedelta
@@ -15,7 +14,6 @@ from data_sync_etl.domain.core import (
     new_id,
     now,
 )
-from data_sync_etl.domain.file_integrity import stream_hash
 from data_sync_etl.domain.format_validation import (
     PUBLIC_PROCESSING_ERROR_CODES,
     FormatValidatorRegistry,
@@ -49,6 +47,10 @@ class SourceFileImportService:
         except SourceFileError as exc:
             storage_error = exc.code
         error = storage_error if hasattr(self.source, 'version_page') else 'BLOCKED_SOURCE_DATABASE'
+        if hasattr(self.source, 'version_page') and not self.settings.source_reference_enabled:
+            error = 'SOURCE_REFERENCE_DISABLED'
+        elif hasattr(self.source, 'version_page') and not self.settings.source_temporary_files_enabled:
+            error = 'SOURCE_TEMP_POLICY_REQUIRED'
         with self.uow() as repo:
             worker = repo.get("sync_checkpoints", "source-file-worker")
         healthy = bool(worker and worker["last_id"] and worker["updated_at"] > now() - timedelta(seconds=30))
@@ -107,8 +109,8 @@ class SourceFileImportService:
                 lineage_changed = target is None or (expected is None and target["parent_version_id"] is not None) or (
                     expected is not None and (not parent or parent[0]["source_version_id"] != expected
                                              or parent[0]["resource_id"] != row["resource_id"]))
-            if lineage_changed or (row["source_hash"].lower(), row["resource_id"], row["source_version_number"]) != (
-                source["source_hash"].lower(), source["resource_id"], source["source_version_number"]
+            if lineage_changed or (row["source_hash"].lower(), row["resource_id"], row["source_version_number"], row['storage_bucket'], row['storage_object_key']) != (
+                source["source_hash"].lower(), source["resource_id"], source["source_version_number"], source['storage_bucket'], source['storage_object_key']
             ):
                 repo.update("source_file_imports", row["id"], {
                     "status": "FAILED", "last_error_code": "SOURCE_VERSION_MUTATED",
@@ -177,12 +179,23 @@ class SourceFileImportService:
 
     def execute(self, claimed):
         try:
+            self.resolver._enabled()
+            self.resolver.files = self.files
             if claimed["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
                 raise SourceFileError("UNSUPPORTED_SOURCE_FORMAT")
             if claimed["attempts"] > self.settings.source_file_import_max_attempts:
                 raise SourceFileError("WORKER_RECOVERY_EXHAUSTED", transient=True)
+            with self.uow() as repo:
+                current = self._owned(repo, claimed)
+                self._master(repo, current['resource_id'])
+                if not self._source_allowed(current):
+                    raise SourceFileError('BLOCKED_SOURCE_POLICY')
             if not claimed["target_version_id"]:
                 self._import(claimed)
+            else:
+                reference = self.resolver.resolve(claimed['target_version_id'])
+                with self.resolver.temporary_path(reference):
+                    pass
             with self.uow() as repo:
                 row = self._owned(repo, claimed)
                 self._master(repo, row["resource_id"])
@@ -318,6 +331,8 @@ class SourceFileImportService:
             raise SourceFileError("INVALID_SOURCE_HASH")
         if row["source_version_number"] < 1:
             raise SourceFileError("BLOCKED_SOURCE_MAPPING")
+        if '://' in row['storage_bucket'] or '://' in row['storage_object_key']:
+            raise SourceFileError('INVALID_SOURCE_LINK')
         try:
             validator = self.formats.find_validator(row['storage_object_key'])
         except DomainError:
@@ -325,33 +340,9 @@ class SourceFileImportService:
         if not validator.text_extraction_supported:
             raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT')
 
-        def verify(path):
-            with path.open("rb") as stream:
-                if stream_hash(stream) != row["source_hash"]:
-                    raise SourceFileError("SOURCE_HASH_MISMATCH")
-                stream.seek(0)
-                header = stream.read(16)
-            try:
-                validator.validate(validator.extension, sorted(validator.mime_types)[0], header, path.stat().st_size)
-                validator.validate_path(path)
-            except DomainError as exc:
-                code = str(exc).split(':', 1)[0]
-                safe_codes = {'UNSUPPORTED_TEXT_ENCODING', 'INVALID_IMAGE', 'OPENXML_LIMIT_EXCEEDED',
-                              'INVALID_OPENXML_CONTAINER', 'INVALID_OPENXML_XML', 'OPENXML_TYPE_MISMATCH',
-                              'UNSUPPORTED_OPENXML_MACROS'}
-                raise SourceFileError(code if code in safe_codes else
-                                      'INVALID_PDF' if validator.extension == '.pdf' else 'INVALID_SOURCE_FILE') from None
-
-        with self.files.open_stream(row["storage_bucket"], row["storage_object_key"]) as stream:
-            try:
-                stored = self.storage.save_stream(stream, max_size_bytes=validator.max_size_bytes,
-                                                  suffix=validator.extension, validate_path=verify)
-            except (SourceFileError, UploadTooLargeError):
-                raise
-            except DomainError:
-                raise SourceFileError("INVALID_PDF" if validator.extension == '.pdf' else "INVALID_SOURCE_FILE") from None
-        # File publication is idempotent by content hash. A crash here leaves reusable bytes,
-        # never a half-published object; shared bytes are not deleted on DB rollback.
+        reference = self.resolver.import_reference(row)
+        with self.resolver.temporary_path(reference):
+            pass  # Verify bytes and canonical metadata before publishing a mapping.
         with self.uow() as repo:
             row = self._owned(repo, claimed)
             self._master(repo, row["resource_id"])
@@ -369,8 +360,8 @@ class SourceFileImportService:
             version = repo.insert("resource_versions", {
                 "resource_id": row["resource_id"], "version_number": row["source_version_number"],
                 "parent_version_id": parent,
-                "storage_bucket": stored.bucket, "storage_object_key": stored.object_key,
-                "source_hash": stored.source_hash, "lifecycle_status": "INGESTED",
+                "storage_bucket": reference.bucket, "storage_object_key": reference.opaque_locator,
+                "source_hash": reference.expected_sha256, "lifecycle_status": "INGESTED",
             })
             repo.update("source_file_imports", row["id"], {
                 "target_version_id": version["id"], "updated_at": now(),
@@ -488,10 +479,10 @@ class SourceFileImportService:
             row = repo.get("source_file_imports", file_id, lock=True)
             if row is None:
                 raise SourceImportNotFound("Import job not found")
-            if not available and row["target_version_id"] is None:
-                raise SourceImportConflict("Source file storage unavailable")
             if not self._eligible(repo, row):
                 raise SourceImportConflict("Import job cannot be retried")
+            if not available and row["target_version_id"] is None:
+                raise SourceImportConflict("Source file storage unavailable")
             repo.update("source_file_imports", file_id, {
                 "status": "RETRY_PROCESSING" if row["status"] == "PROCESSING" else "PENDING",
                 "processing_retry_requested": row["status"] == "PROCESSING" or row["processing_retry_requested"],
@@ -519,10 +510,12 @@ class SourceFileImportService:
                 "next_cursor": rows[size - 1]["source_version_id"] if len(rows) > size else None}
 
     def precheck(self, mongo_client=None):
-        result = dict.fromkeys(["DB_SOURCE", "FILE_ROOT", "FILE_READ", "HASH", "DEST_STORAGE", "OCR_WORKER", "MONGO"], "BLOCKED")
+        result = dict.fromkeys(["DB_SOURCE", "FILE_ROOT", "FILE_READ", "HASH", "SOURCE_REFERENCE_POLICY", "OCR_WORKER", "MONGO"], "BLOCKED")
+        if not self.settings.source_reference_enabled or not self.settings.source_temporary_files_enabled:
+            return result
+        result['SOURCE_REFERENCE_POLICY'] = 'PASS'
         if hasattr(self.files, 'readiness'):
             result['FILE_BACKENDS'] = self.files.readiness(probe=True)
-        result["DEST_STORAGE"] = "PASS" if os.access(self.storage.root, os.W_OK) else "BLOCKED"
         try:
             self.files.check()
             result["FILE_ROOT"] = "PASS"
@@ -534,8 +527,9 @@ class SourceFileImportService:
             if page["items"] and result["FILE_ROOT"] == "PASS":
                 matches = []
                 for row in page["items"]:
-                    with self.files.open_stream(row["storage_bucket"], row["storage_object_key"]) as stream:
-                        matches.append(stream_hash(stream) == row["source_hash"].lower())
+                    reference = self.resolver.import_reference({**row, 'source_system': 'postgresql'})
+                    with self.resolver.temporary_path(reference):
+                        matches.append(True)
                 result["FILE_READ"] = "PASS"
                 result["HASH"] = "PASS" if all(matches) else "BLOCKED"
         except Exception:

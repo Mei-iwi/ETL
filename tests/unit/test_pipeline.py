@@ -53,6 +53,8 @@ def test_job_idempotency_and_three_pages(container):
 @pytest.mark.parametrize("value", [b"", b"not a pdf"])
 def test_invalid_pdf(container, value):
     container.sync.run(full=True)
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'source_origin': 'LOCAL'})
     path = container.storage.get_local_path("input", "bad.pdf")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(value)

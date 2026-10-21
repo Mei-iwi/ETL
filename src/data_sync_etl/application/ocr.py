@@ -1,6 +1,9 @@
+from contextlib import nullcontext
 from datetime import timedelta
+from functools import partial
+from types import SimpleNamespace
 
-from data_sync_etl.domain.core import DomainError, job_terminal, new_id, now
+from data_sync_etl.domain.core import DomainError, SourceFileError, job_terminal, new_id, now
 from data_sync_etl.domain.file_integrity import stream_hash
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry, ProcessingFormatError
 from data_sync_etl.logging import event
@@ -32,6 +35,18 @@ class OCRPipeline:
         self.native_documents = documents
 
     def create_job(self, version_id, triggered_by=None):
+        reference = self.resolver.resolve(version_id)
+        if reference.ownership == 'LOCAL_OWNED':
+            # Preserve LOCAL command idempotency even if its managed file later disappears.
+            with self.uow() as repo:
+                jobs = repo.find('ocr_jobs', {'resource_version_id': version_id},
+                                 order=('-created_at', '-id'), limit=1)
+            if jobs:
+                return jobs[0]
+        with self.resolver.temporary_path(reference) as path:
+            return self._create_job(version_id, triggered_by, path)
+
+    def _create_job(self, version_id, triggered_by, path):
         with self.uow() as repo:
             version = repo.get("resource_versions", version_id, lock=True)
             if version is None:
@@ -50,9 +65,6 @@ class OCRPipeline:
             )
             if existing:
                 return existing[0]
-            path = self.storage.get_local_path(
-                version["storage_bucket"], version["storage_object_key"]
-            )
             validator = self.formats.find_validator(path.name)
             if not validator.text_extraction_supported:
                 raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
@@ -148,11 +160,29 @@ class OCRPipeline:
         with self.uow() as repo:
             job = repo.get("ocr_jobs", task["job_id"])
             version = repo.get("resource_versions", job["resource_version_id"])
-        path = self.storage.get_local_path(version["storage_bucket"], version["storage_object_key"])
+        if version['storage_object_key'].lower().endswith(('.mp3', '.mp4')):
+            raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
+        reference = self.resolver.resolve(version['id'])
+        with self.resolver.temporary_path(reference) as path:
+            # Source images share the verified attempt directory, avoiding a second slot.
+            scope = nullcontext(path.parent if reference.ownership == 'SOURCE_BACKED' else None)
+            with scope as directory:
+                result, image = self._recognize_path(task, version, path, directory)
+            if reference.ownership == 'SOURCE_BACKED':
+                image = None  # source scratch is never retained in task metadata
+        return result, image
+
+    def _recognize_path(self, task, version, path, source_directory=None):
+        engine = self.engine
+        if source_directory is not None and hasattr(engine, 'recognize_scoped'):
+            engine = SimpleNamespace(
+                supports_images=engine.supports_images,
+                recognize=partial(engine.recognize_scoped, directory=source_directory),
+            )
         if path.suffix.lower() in ('.mp3', '.mp4'):
             raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
         if path.suffix.lower() in ('.docx', '.xlsx', '.pptx'):
-            with self.storage.open_stream(version['storage_bucket'], version['storage_object_key']) as stream:
+            with path.open('rb') as stream:
                 observed_hash = stream_hash(stream)
             if observed_hash != version['source_hash']:
                 raise ProcessingFormatError('SOURCE_HASH_MISMATCH')
@@ -160,7 +190,8 @@ class OCRPipeline:
             validator = self.formats.find_validator(path.name)
             validator.validate_path(path)
             if validator.ocr_requires_runtime:
-                return self.native_documents.recognize_image(path, self.storage.image_path(task['id'], task['claim_token']), self.engine)
+                image = source_directory / 'page.png' if source_directory else self.storage.image_path(task['id'], task['claim_token'])
+                return self.native_documents.recognize_image(path, image, engine)
             return self.native_documents.extract(path), None
         native = self.pdf.extract_native_text(path, task["page_num"])
         # Conservative native-text gate; empty/image-only pages need an OCR adapter.
@@ -180,10 +211,10 @@ class OCRPipeline:
             return OCRResult(
                 native, engine_name="native_pdf_text", metadata={"page_num": task["page_num"]}
             ), None
-        image = self.storage.image_path(task["id"], task["claim_token"])
+        image = source_directory / 'page.png' if source_directory else self.storage.image_path(task["id"], task["claim_token"])
         self.pdf.render_page_to_image(path, task["page_num"], image)
         try:
-            result = self.engine.recognize(image)
+            result = engine.recognize(image)
             if not result.text.strip() and not mixed_scan:
                 raise DomainError('EMPTY_EXTRACTED_CONTENT')
         except Exception:
@@ -266,7 +297,9 @@ class OCRPipeline:
                                'INVALID_IMAGE', 'INVALID_OPENXML_CONTAINER', 'OPENXML_LIMIT_EXCEEDED'}
             permanent_codes.add('UNSUPPORTED_PROCESSING_FORMAT')
             permanent_codes.add('SOURCE_HASH_MISMATCH')
-            if code in permanent_codes or code == 'BLOCKED_OCR_RUNTIME':
+            if isinstance(error, SourceFileError):
+                self._fail(repo, task, error.code, permanent=not error.transient)
+            elif code in permanent_codes or code == 'BLOCKED_OCR_RUNTIME':
                 self._fail(repo, task, code, permanent=code in permanent_codes)
             else:
                 self._fail(repo, task, "OCR attempt failed; verify document and OCR engine configuration")

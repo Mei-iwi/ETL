@@ -9,6 +9,16 @@ from data_sync_etl.domain.core import SourceFileError
 
 
 class SourceLocalFileReader:
+    def original_url(self, bucket, object_key):
+        return None
+
+    def revision(self, bucket, object_key, *, cancelled=None):
+        if cancelled is not None and cancelled.is_set():
+            raise SourceFileError('SOURCE_REQUEST_CANCELLED')
+        with self.open_stream(bucket, object_key) as stream:
+            value = os.fstat(stream.fileno())
+            return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+
     def __init__(self, root, destination_root):
         self.root = Path(root) if root is not None else None
         self.destination_root = Path(destination_root).resolve()
@@ -16,6 +26,8 @@ class SourceLocalFileReader:
     def check(self):
         if self.root is None or not self.root.is_absolute():
             raise SourceFileError("BLOCKED_SOURCE_STORAGE")
+        if self.root.is_symlink() or (hasattr(self.root, 'is_junction') and self.root.is_junction()):
+            raise SourceFileError('INVALID_SOURCE_PATH')
         try:
             root = self.root.resolve(strict=True)
             if (not root.is_dir() or not os.access(root, os.R_OK | os.X_OK)
@@ -25,7 +37,9 @@ class SourceLocalFileReader:
         except OSError:
             raise SourceFileError("BLOCKED_SOURCE_STORAGE") from None
 
-    def open_stream(self, bucket, object_key):
+    def open_stream(self, bucket, object_key, *, cancelled=None):
+        if cancelled is not None and cancelled.is_set():
+            raise SourceFileError('SOURCE_REQUEST_CANCELLED')
         self.check()
         parts = [bucket, *object_key.split("/")]
         # Reject Windows device names, ADS, UNC, control characters and ambiguous segments.

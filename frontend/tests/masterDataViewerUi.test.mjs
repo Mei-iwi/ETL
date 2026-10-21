@@ -8,14 +8,29 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { resolve, join, extname, sep, dirname, basename } from 'node:path'
 
-const root = resolve('frontend/dist')
+const root = resolve(process.env.ETL_TEST_DIST || 'frontend/dist')
 const executable = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+function pdfFixture() {
+    const stream = 'BT /F1 22 Tf 60 720 Td (Office PDF preview) Tj ET\n'
+    const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', `<< /Length ${stream.length} >>\nstream\n${stream}endstream`]
+    let pdf = '%PDF-1.4\n'
+    const offsets = [0]
+    for (const [index, object] of objects.entries()) { offsets.push(pdf.length); pdf += `${index + 1} 0 obj\n${object}\nendobj\n` }
+    const start = pdf.length
+    pdf += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Root 1 0 R /Size 6 >>\nstartxref\n${start}\n%%EOF\n`
+    return Buffer.from(pdf)
+}
+
 test('Master Data read-only and file readiness/errors in real browser', {
     skip: !existsSync(executable) || !existsSync(join(root, 'index.html')), timeout: 90000,
 }, async () => {
     let catalogOnline = true
-    let ready = false, fileStatus = 200, fileRequests = 0, writes = 0
+    let ready = false, fileStatus = 200, fileRequests = 0, writes = 0, originalAllowed = false, sourceInfoError = null
+    let fileMime = 'image/png', fileBody = null, textRequests = 0, previewRequests = 0
     const server = createServer(async (req, res) => {
         const path = new URL(req.url, 'http://127.0.0.1').pathname
         const json = (body, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
@@ -65,10 +80,16 @@ test('Master Data read-only and file readiness/errors in real browser', {
         if (path === '/api/v1/resources/r0/versions') return json([])
         if (path === '/api/v1/resources/r1/versions') return json([{ id: 'v1', version_number: 1, created_at: '2026-01-01' }])
         if (path === '/api/v1/resource-versions/v1/index-status') return json({ processing_status: 'CONTENT_READY', index_status: ready ? 'READY' : 'NOT_STARTED' })
+        if (path === '/api/v1/resource-versions/v1/source-info' && sourceInfoError) return json({ detail: { code: sourceInfoError } }, 503)
+        if (path === '/api/v1/resource-versions/v1/source-info') return json({ ownership: 'SOURCE_BACKED', provider: 'google_drive',
+            availability: 'UNKNOWN', can_open_original: originalAllowed, original_url: originalAllowed ? 'https://drive.google.com/file/d/approved-file/view' : null })
         if (path === '/api/v1/resource-versions/v1/file') {
             fileRequests++
+            if (new URL(req.url, 'http://127.0.0.1').searchParams.get('view') === 'preview') previewRequests++
+            if (new URL(req.url, 'http://127.0.0.1').searchParams.get('view') === 'text') { textRequests++; return json({}, 400) }
             if (fileStatus !== 200) return json({ detail: { code: 'FILE_NOT_READY' } }, fileStatus)
-            res.writeHead(200, { 'Content-Type': 'image/png' })
+            res.writeHead(200, { 'Content-Type': fileMime })
+            if (fileBody) return res.end(fileBody)
             return res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=', 'base64'))
         }
         if (path.startsWith('/api/')) return json({}, 404)
@@ -126,6 +147,8 @@ test('Master Data read-only and file readiness/errors in real browser', {
         })
         await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }))
         await call('Page.enable')
+        await call('Network.enable')
+        await call('Network.setBlockedURLs', { urls: ['https://drive.google.com/*'] })
         await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
         await open('/systems/master-data')
         await waitFor(() => evaluate('document.body?.textContent.includes("Trang 1 / 2")'))
@@ -196,6 +219,54 @@ test('Master Data read-only and file readiness/errors in real browser', {
         await click('Xem tệp')
         await waitFor(() => evaluate('!!document.querySelector("img[alt=\\"Nội dung tệp học liệu\\"]")'))
         await capture('file-ready')
+        assert.equal(await evaluate('!!Array.from(document.querySelectorAll("a")).find(a=>a.textContent==="Xem tệp bên ngoài")'), false)
+        assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).find(e=>e.textContent==="Xem tệp bên ngoài")?.disabled'), true)
+        assert.equal(await evaluate('document.body.textContent.includes("Tệp được truy xuất từ nguồn · Quyền và tính toàn vẹn")'), false)
+        assert.equal(await evaluate('document.body.textContent.includes("Nguồn chưa cung cấp liên kết mở trực tiếp cho tệp này.")'), true)
+        originalAllowed = true
+        await click('Kiểm tra lại')
+        await waitFor(() => evaluate('!!Array.from(document.querySelectorAll("a")).find(a=>a.textContent==="Xem tệp bên ngoài")'))
+        assert.deepEqual(await evaluate('(()=>{const a=Array.from(document.querySelectorAll("a")).find(a=>a.textContent==="Xem tệp bên ngoài");return [a.href,a.target,a.rel]})()'),
+            ['https://drive.google.com/file/d/approved-file/view', '_blank', 'noopener noreferrer'])
+        await capture('source-original-link')
+        assert.equal(await evaluate('!!document.querySelector("#external-source-link-status")'), false)
+        originalAllowed = false
+        sourceInfoError = 'SOURCE_REFERENCE_DISABLED'
+        await open('/library/r1')
+        await waitFor(() => evaluate('Array.from(document.querySelectorAll("[role=alert]")).some(e=>e.textContent.includes("chưa được bật"))'))
+        assert.equal(await evaluate('Array.from(document.querySelectorAll("[role=alert]")).some(e=>e.textContent.includes("Nguồn hiện không khả dụng"))'), false)
+        sourceInfoError = null
+        await click('Kiểm tra lại')
+        await waitFor(() => evaluate('!document.querySelector("[role=alert]")'))
+        fileMime = 'application/pdf'
+        fileBody = pdfFixture()
+        await open('/library/r1')
+        await waitFor(() => evaluate('Array.from(document.querySelectorAll("button")).find(e=>e.textContent===String.fromCharCode(88,101,109,32,116,7879,112))?.disabled === false'))
+        await click('Xem tệp')
+        await waitFor(() => evaluate('!!document.querySelector("iframe[title=\\"Xem t\u1ec7p PDF\\"]")'))
+        assert.equal(await evaluate('document.querySelector("iframe").src.startsWith("blob:")'), true)
+        assert.equal(await evaluate('document.querySelectorAll("pre").length'), 0)
+        assert.equal(await evaluate('!!Array.from(document.querySelectorAll("a")).find(a=>a.hasAttribute("download") && a.getAttribute("href")==="/api/v1/resource-versions/v1/file?download=true")'), true)
+        await capture('office-pdf-preview')
+        fileMime = 'application/json'
+        fileBody = Buffer.from(JSON.stringify({ kind: 'spreadsheet', truncated: false, sheets: [
+            { name: 'First', rows: [[{text:'Subject',bold:true},{text:'Value'}],[{text:'Math'},{text:'=1+2'}]] },
+            { name: 'Second', rows: [[{text:'<script>alert(1)</script>'}]] },
+        ] }))
+        await open('/library/r1')
+        await waitFor(() => evaluate('Array.from(document.querySelectorAll("button")).find(e=>e.textContent===String.fromCharCode(88,101,109,32,116,7879,112))?.disabled === false'))
+        await click('Xem tệp')
+        await waitFor(() => evaluate('!!document.querySelector("table[aria-label=First]")'))
+        assert.equal(await evaluate('document.querySelector("table[aria-label=First]").textContent.includes("=1+2")'), true)
+        await evaluate('document.querySelectorAll("button[role=tab]")[1].click()')
+        await waitFor(() => evaluate('!!document.querySelector("table[aria-label=Second]")'))
+        assert.equal(await evaluate('document.querySelector("table[aria-label=Second] td").textContent'), '<script>alert(1)</script>')
+        assert.equal(await evaluate('document.querySelectorAll("table[aria-label=Second] script").length'), 0)
+        await capture('spreadsheet-grid-preview')
+        fileMime = 'image/png'
+        fileBody = null
+        assert.equal(textRequests, 0)
+        assert.ok(previewRequests >= 3)
         for (const [status, text] of [[403, 'chưa có quyền xem'], [404, 'Không tìm thấy tệp'], [409, 'Tệp chưa sẵn sàng'], [502, 'Dịch vụ tệp đang gián đoạn']]) {
             fileStatus = status
             await open('/library/r1')

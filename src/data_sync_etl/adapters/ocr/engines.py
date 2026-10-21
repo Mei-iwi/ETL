@@ -78,11 +78,18 @@ class TesseractOCREngine:
         self._version = version.stdout.splitlines()[0].strip() if version.stdout else "unknown"
 
     def recognize(self, image_path):
+        return self._recognize(image_path)
+
+    def recognize_scoped(self, image_path, *, directory):
+        """Keep SOURCE subprocess scratch inside the caller's leased attempt."""
+        return self._recognize(image_path, directory=directory)
+
+    def _recognize(self, image_path, directory=None):
         if self._version is None:
             self._runtime()
         try:
             executable = str(Path(shutil.which(self.executable) or self.executable).resolve())
-            with tempfile.TemporaryDirectory(prefix="etl-ocr-") as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="etl-ocr-", dir=directory) as temp_dir:
                 temp_image = Path(temp_dir) / "input.png"
                 shutil.copyfile(image_path, temp_image)
                 # A relative ASCII filename avoids Windows native-library failures

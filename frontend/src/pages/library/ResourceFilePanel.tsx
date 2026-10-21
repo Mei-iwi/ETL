@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react'
 import styles from './LibraryResourceDetailPage.module.css'
 import { SearchContext } from '../search/SearchContext'
-import { canOpenFile, fileErrorMessage } from './fileReadiness'
+import { canOpenFile, fileResponseError } from './fileReadiness'
 import type { FileIndexStatus } from './fileReadiness'
 import { readPreviewBlob } from './previewBody'
+import { originalSourceUrl } from './sourceReference'
+import type { SourceInfo } from './sourceReference'
+import { SpreadsheetPreview } from './SpreadsheetPreview'
+import { parseSpreadsheetPreview } from './spreadsheetData'
+import type { SpreadsheetData } from './spreadsheetData'
 
 type Version = { id: string; version_number: number; created_at: string }
 
@@ -22,6 +27,8 @@ function VersionFilePanel({ resourceId, versionId, contextId, sourceOwned = fals
     const [readiness, setReadiness] = useState<{ id: string; status: FileIndexStatus } | null>(null)
     const [statusError, setStatusError] = useState<{ id: string; message: string } | null>(null)
     const [attempt, setAttempt] = useState(0)
+    const [sourceInfo, setSourceInfo] = useState<{ id: string; value: SourceInfo } | null>(null)
+    const [sourceError, setSourceError] = useState<{ id: string; message: string } | null>(null)
     useEffect(() => {
         const controller = new AbortController()
         void fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/versions`, { signal: controller.signal })
@@ -41,6 +48,28 @@ function VersionFilePanel({ resourceId, versionId, contextId, sourceOwned = fals
     const url = `/api/v1/resource-versions/${encodeURIComponent(selected)}/file`
     const status = readiness?.id === selected ? readiness.status : null
     const ready = valid && canOpenFile(status) && statusError?.id !== selected
+    const original = sourceInfo?.id === selected ? originalSourceUrl(sourceInfo.value) : null
+    const externalLinkReason = !ready ? 'Tệp chưa sẵn sàng để truy cập.'
+        : sourceError?.id === selected ? sourceError.message
+            : sourceInfo?.id !== selected ? 'Đang kiểm tra liên kết nguồn…'
+                : sourceInfo.value.provider !== 'google_drive' ? 'Nguồn hiện tại không cung cấp liên kết mở bên ngoài.'
+                    : 'Nguồn chưa cung cấp liên kết mở trực tiếp cho tệp này.'
+    useEffect(() => {
+        if (!ready || !sourceOwned) return
+        const controller = new AbortController()
+        void fetch(`/api/v1/resource-versions/${encodeURIComponent(selected)}/source-info`, { signal: controller.signal })
+            .then(async response => {
+                if (!response.ok) throw new Error(await fileResponseError(response))
+                const value: SourceInfo = await response.json()
+                if (!controller.signal.aborted) { setSourceInfo({ id: selected, value }); setSourceError(null) }
+            }).catch(reason => {
+                if (!controller.signal.aborted) {
+                    setSourceInfo(null)
+                    setSourceError({ id: selected, message: reason instanceof Error ? reason.message : 'Nguồn hiện không khả dụng.' })
+                }
+            })
+        return () => controller.abort()
+    }, [selected, ready, sourceOwned, attempt])
     useEffect(() => {
         if (!valid) return
         const controller = new AbortController()
@@ -48,7 +77,7 @@ function VersionFilePanel({ resourceId, versionId, contextId, sourceOwned = fals
         async function poll() {
             try {
                 const response = await fetch(`/api/v1/resource-versions/${encodeURIComponent(selected)}/index-status`, { signal: controller.signal })
-                if (!response.ok) throw new Error(fileErrorMessage(response.status))
+                if (!response.ok) throw new Error(await fileResponseError(response))
                 const data: FileIndexStatus = await response.json()
                 if (!controller.signal.aborted) { setReadiness({ id: selected, status: data }); setStatusError(null) }
             } catch (reason) {
@@ -75,59 +104,49 @@ function VersionFilePanel({ resourceId, versionId, contextId, sourceOwned = fals
             <button className={styles.historyLink} disabled={!ready} onClick={() => setOpen(value => !value)}>
                 {open ? 'Đóng tệp' : 'Xem tệp'}</button>
             {ready && <a className={styles.secondaryButton} href={`${url}?download=true`} download>Tải tệp</a>}
+            {ready && original && <a className={styles.secondaryButton} href={original}
+                target="_blank" rel="noopener noreferrer" title="Xem tệp trực tiếp tại nguồn trong tab mới">Xem tệp bên ngoài</a>}
+            {sourceOwned && valid && !(ready && original) && <button className={styles.secondaryButton}
+                disabled title={externalLinkReason} aria-describedby="external-source-link-status">Xem tệp bên ngoài</button>}
             {valid && <button className={styles.secondaryButton} onClick={() => setAttempt(n => n + 1)}>Kiểm tra lại</button>}
         </div>
         {valid && <p role="status" className={ready ? styles.ready : styles.pending}>
             Phiên bản đã tiếp nhận · Nội dung {status?.processing_status === 'CONTENT_READY' ? 'sẵn sàng' : 'chưa sẵn sàng'} · Chỉ mục {status?.index_status === 'READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}
         </p>}
         {statusError?.id === selected && <p role="alert" className={styles.error}>{statusError.message}</p>}
+        {sourceOwned && valid && !(ready && original) && <p id="external-source-link-status" className={styles.message}>{externalLinkReason}</p>}
+        {sourceError?.id === selected && <p role="alert" className={styles.error}>{sourceError.message}</p>}
         {open && ready && <FilePreview key={selected} url={url} />}
         {contextId && selected === versionId && <div className={styles.fileContext}><SearchContext id={contextId} /></div>}
     </section>
 }
 
 function FilePreview({ url }: { url: string }) {
-    const [file, setFile] = useState<{ url: string; type: string; size: number; text: string } | null>(null)
+    const [file, setFile] = useState<{ url: string; type: string; size: number; text: string; grid: SpreadsheetData | null } | null>(null)
     const [error, setError] = useState('')
     useEffect(() => {
         const controller = new AbortController()
         let objectUrl = ''
-        void fetch(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]) })
+        void fetch(`${url}?view=preview`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(240000)]) })
             .then(async response => {
-                if (!response.ok) throw new Error(fileErrorMessage(response.status))
+                if (!response.ok) throw new Error(await fileResponseError(response))
                 const blob = await readPreviewBlob(response, controller.signal)
                 const text = blob.type.startsWith('text/') ? await blob.slice(0, 200000).text() : ''
+                const grid = blob.type.split(';')[0] === 'application/json' ? parseSpreadsheetPreview(await blob.text().then(JSON.parse)) : null
                 if (controller.signal.aborted) return
                 objectUrl = URL.createObjectURL(blob)
-                setFile({ url: objectUrl, type: blob.type.split(';')[0], size: blob.size, text })
+                setFile({ url: objectUrl, type: blob.type.split(';')[0], size: blob.size, text, grid })
             }).catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Không tải được tệp.') })
         return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
     }, [url])
     if (error) return <p role="alert" className={styles.error}>{error}</p>
     if (!file) return <p className={styles.message}>Đang tải tệp…</p>
     return <div className={styles.filePreview}>
-        <p className={styles.subtitle}>{file.type === 'application/pdf' ? 'PDF' : file.type.startsWith('image/') ? 'Hình ảnh' :
-            file.type.startsWith('text/') ? 'Văn bản' : 'Tệp Office'} · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
-        {file.type === 'application/pdf' ? <iframe title="Xem tệp PDF" src={file.url} /> :
+        <p className={styles.subtitle}>{file.grid ? 'Bảng tính' : file.type === 'application/pdf' ? 'Bản xem PDF' : file.type.startsWith('image/') ? 'Hình ảnh' :
+            file.type.startsWith('text/') ? 'Văn bản' : 'Tệp học liệu'} · {(file.size / 1024 / 1024).toFixed(2)} MB · Tải xuống giữ định dạng gốc</p>
+        {file.grid ? <SpreadsheetPreview data={file.grid} /> : file.type === 'application/pdf' ? <iframe title="Xem tệp PDF" src={file.url} /> :
             file.type.startsWith('image/') ? <img src={file.url} alt="Nội dung tệp học liệu" /> :
                 file.type.startsWith('text/') ? <pre>{file.text}{file.size > 200000 && '\n… Tải tệp để xem toàn bộ.'}</pre> :
-                    <><p className={styles.message}>Nội dung văn bản. Tải tệp để xem đầy đủ định dạng Office.</p>
-                        <OfficeTextPreview url={url} /></>}
+                    <p className={styles.message}>Định dạng này chưa hỗ trợ xem trực tiếp tại đây. Hãy mở tại nguồn hoặc tải tệp để xem đúng định dạng.</p>}
     </div>
-}
-
-function OfficeTextPreview({ url }: { url: string }) {
-    const [text, setText] = useState<string | null>(null)
-    const [error, setError] = useState('')
-    useEffect(() => {
-        const controller = new AbortController()
-        void fetch(`${url}?view=text`, { signal: controller.signal }).then(async response => {
-            if (!response.ok) throw new Error(fileErrorMessage(response.status))
-            const value = await (await readPreviewBlob(response, controller.signal, 1024 * 1024)).text()
-            if (!controller.signal.aborted) setText(value)
-        }).catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Không tải được nội dung.') })
-        return () => controller.abort()
-    }, [url])
-    if (error) return <p className={styles.error} role="alert">{error}</p>
-    return text === null ? <p className={styles.message}>Đang tải nội dung…</p> : <pre>{text || 'Chưa có nội dung văn bản.'}</pre>
 }

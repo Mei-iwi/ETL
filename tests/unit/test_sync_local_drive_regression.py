@@ -54,17 +54,13 @@ def test_retry_of_already_copied_file_rechecks_policy(importing, monkeypatch, re
             "WAITING_FOR_MASTER" if revocation == "master_inactive" else "BLOCKED_SOURCE_POLICY"
         )
     assert not c.source_file_import.list_files()["items"][0]["retry_eligible"]
-    assert (
-        c.storage.get_local_path(
-            version["storage_bucket"], version["storage_object_key"]
-        ).read_bytes()
-        == source_path.read_bytes()
-    )
+    assert source_path.exists()
+    assert not list((c.storage.root / 'resources').rglob('*'))
 
 
 def test_revocation_during_copy_does_not_register_version_and_can_recover(importing, monkeypatch):
     c, rows, path = importing
-    original = c.storage.save_stream
+    original = c.source_files.open_stream
 
     def revoke_after_copy(*args, **kwargs):
         result = original(*args, **kwargs)
@@ -73,7 +69,7 @@ def test_revocation_during_copy_does_not_register_version_and_can_recover(import
             repo.update("source_file_imports", item["id"], {"source_lifecycle_status": "REJECTED"})
         return result
 
-    monkeypatch.setattr(c.storage, "save_stream", revoke_after_copy)
+    monkeypatch.setattr(c.source_files, "open_stream", revoke_after_copy)
     item = discover_and_import(c)
     assert item["last_error_code"] == "BLOCKED_SOURCE_POLICY"
     with c.uow() as repo:
@@ -84,7 +80,7 @@ def test_revocation_during_copy_does_not_register_version_and_can_recover(import
     # Reapproval is only a fixture SOURCE metadata update, never a fabricated target status.
     with c.uow() as repo:
         c.source_file_import._discover(repo, rows[0])
-    monkeypatch.setattr(c.storage, "save_stream", original)
+    monkeypatch.setattr(c.source_files, "open_stream", original)
     c.source_file_import.retry(item["id"])
     c.source_file_import.execute(c.source_file_import.claim())
     with c.uow() as repo:
@@ -118,7 +114,7 @@ def test_drive_200_html_error_page_is_rejected_without_retry_or_content_leak(con
 
 @pytest.mark.parametrize("provider", ["local", "google_drive"])
 @pytest.mark.parametrize("extension", FORMATS)
-def test_file_viewer_reads_destination_bytes_for_supported_sources(
+def test_file_viewer_reads_source_bytes_for_supported_sources(
     importing, monkeypatch, extension, provider
 ):
     payload = sample(extension)
@@ -132,11 +128,11 @@ def test_file_viewer_reads_destination_bytes_for_supported_sources(
     )
     with c.uow() as repo:
         version = repo.find("resource_versions")[0]
-    # The viewer must not reopen the source after import, even if it goes offline.
+    # The viewer must read SOURCE, never the old managed copy or path.
     monkeypatch.setattr(
-        c.source_file_import.files,
-        "open_stream",
-        Mock(side_effect=AssertionError("No source proxy")),
+        c.storage,
+        "get_local_path",
+        Mock(side_effect=AssertionError("No managed fallback")),
     )
     with TestClient(create_app(c)) as api:
         url = f"/api/v1/resource-versions/{version['id']}/file"
