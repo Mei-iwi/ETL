@@ -17,9 +17,17 @@ class SourceFileDispatcher:
             raise SourceFileError('SOURCE_BUCKET_NOT_ALLOWED')
         return 'local'
 
-    def open_stream(self, bucket, object_key):
+    def open_stream(self, bucket, object_key, *, cancelled=None):
         reader = self.drive if self.provider(bucket) == 'google_drive' else self.local
-        return reader.open_stream(bucket, object_key)
+        return reader.open_stream(bucket, object_key, **({'cancelled': cancelled} if cancelled is not None else {}))
+
+    def revision(self, bucket, object_key, *, cancelled=None):
+        reader = self.drive if self.provider(bucket) == 'google_drive' else self.local
+        return reader.revision(bucket, object_key, **({'cancelled': cancelled} if cancelled is not None else {}))
+
+    def original_url(self, bucket, object_key):
+        reader = self.drive if self.provider(bucket) == 'google_drive' else self.local
+        return reader.original_url(bucket, object_key)
 
     def readiness(self, *, probe=False):
         result = {}

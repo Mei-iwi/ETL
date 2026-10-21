@@ -14,6 +14,12 @@ from tests.local_admin_client import TestClient
 @pytest.fixture
 def importing(container, tmp_path, monkeypatch):
     container.sync.run(full=True)
+    container.settings.source_reference_enabled = True
+    container.settings.source_temporary_files_enabled = True
+    container.settings.source_temp_root = tmp_path / 'private-source-temp'
+    with container.uow() as repo:
+        for resource in repo.find('master_learning_resources'):
+            repo.update('master_learning_resources', resource['id'], {'source_origin': 'POSTGRESQL'})
     root = tmp_path / "source-files"
     path = root / "books" / "test.pdf"
     path.parent.mkdir(parents=True)
@@ -220,7 +226,7 @@ def test_crash_after_registration_resumes_without_recopy(importing, monkeypatch)
     row = discover_and_import(c)
     assert row["target_version_id"] and row["status"] == "RETRY_WAIT"
     monkeypatch.setattr(c.process_version, "run", process)
-    monkeypatch.setattr(c.source_files, "open_stream", lambda *_: (_ for _ in ()).throw(AssertionError("No recopy")))
+    monkeypatch.setattr(c.storage, 'save_stream', lambda *_a, **_k: (_ for _ in ()).throw(AssertionError('No durable copy')))
     with c.uow() as repo:
         repo.update("source_file_imports", row["id"], {"next_retry_at": now() - timedelta(seconds=1)})
     c.source_file_import.execute(c.source_file_import.claim())
@@ -279,7 +285,7 @@ def test_error_groups_filter_before_cursor_pagination(importing):
         assert all(not item["retry_eligible"] for item in blocked["items"])
 
 
-def test_crash_after_publication_reuses_bytes(importing, monkeypatch):
+def test_crash_before_mapping_revalidates_without_durable_bytes(importing, monkeypatch):
     c, _, _ = importing
     service = c.source_file_import
     master = service._master
@@ -293,14 +299,14 @@ def test_crash_after_publication_reuses_bytes(importing, monkeypatch):
     monkeypatch.setattr(service, "_master", interrupted)
     row = discover_and_import(c)
     assert row["target_version_id"] is None and row["status"] == "RETRY_WAIT"
-    assert len(list((c.storage.root / "resources").rglob("*.pdf"))) == 1
+    assert not list((c.storage.root / "resources").rglob("*.pdf"))
     monkeypatch.setattr(service, "_master", master)
     with c.uow() as repo:
         repo.update("source_file_imports", row["id"], {"next_retry_at": now() - timedelta(seconds=1)})
     service.execute(service.claim())
     with c.uow() as repo:
         assert repo.count("resource_versions", {}) == repo.count("ocr_jobs", {}) == 1
-    assert len(list((c.storage.root / "resources").rglob("*.pdf"))) == 1
+    assert not list((c.storage.root / "resources").rglob("*.pdf"))
 
 
 def test_ocr_manual_retry_keeps_file_and_job(importing, monkeypatch):
@@ -315,10 +321,17 @@ def test_ocr_manual_retry_keeps_file_and_job(importing, monkeypatch):
             break
     before = c.source_file_import.list_files()["items"][0]
     assert before["etl_status"] == "OCR_FAILED" and before["retry_eligible"]
-    c.source_files.root = None  # Processing retry must work even when source storage is offline.
+    root = c.source_files.root
+    c.source_files.root = None  # Retry must not hide a SOURCE outage with historical bytes.
     assert c.source_file_import.list_files()["items"][0]["retry_eligible"]
     c.source_file_import.retry(row["id"])
-    monkeypatch.setattr(c.source_files, "open_stream", lambda *_: (_ for _ in ()).throw(AssertionError("No recopy")))
+    c.source_file_import.execute(c.source_file_import.claim())
+    with c.uow() as repo:
+        blocked = repo.get('source_file_imports', row['id'])
+        assert blocked['last_error_code'] == 'BLOCKED_SOURCE_STORAGE'
+        assert blocked['processing_job_id'] == before['processing_job_id']
+    c.source_files.root = root
+    c.source_file_import.retry(row['id'])
     c.source_file_import.execute(c.source_file_import.claim())
     monkeypatch.setattr(c.ocr, "recognize", recognize)
     for _ in range(10):
@@ -346,7 +359,7 @@ def test_projection_retry_does_not_recopy_or_rerun_ocr(importing, monkeypatch):
     assert before["etl_status"] == "FINALIZATION_FAILED" and before["retry_eligible"]
     assert len(c.source_file_import.list_files(failed_only=True)["items"]) == 1
     c.source_file_import.retry(row["id"])
-    monkeypatch.setattr(c.source_files, "open_stream", lambda *_: (_ for _ in ()).throw(AssertionError("No recopy")))
+    monkeypatch.setattr(c.storage, 'save_stream', lambda *_a, **_k: (_ for _ in ()).throw(AssertionError('No durable copy')))
     c.source_file_import.execute(c.source_file_import.claim())
     monkeypatch.setattr(c.documents, "upsert_content_unit", write)
     c.worker.once("test-ocr")

@@ -8,6 +8,8 @@ from tests.unit.test_search import searchable as searchable
 @pytest.mark.parametrize("searchable", [{"unreviewed": True}], indirect=True)
 def test_content_units_read_pagination_search_and_version_isolation(searchable):
     container, version = searchable
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-2', {'source_origin': 'LOCAL'})
     other = container.ingestion.run("resource-2", "input", "sample.pdf")["version"]
     container.ocr.create_job(other["id"])
     while container.worker.once("test-worker"):
@@ -42,6 +44,8 @@ def test_content_units_read_pagination_search_and_version_isolation(searchable):
 
 def test_content_units_admin_validation_and_empty_version(searchable):
     container, _ = searchable
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-2', {'source_origin': 'LOCAL'})
     version = container.ingestion.run("resource-2", "input", "sample.pdf")["version"]
     path = f"/admin/resource-versions/{version['id']}/content-units"
     container.settings.admin_enabled = False

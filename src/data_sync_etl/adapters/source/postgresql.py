@@ -335,7 +335,8 @@ class PostgreSQLSourceAdapter:
                 raise DomainError("BLOCKED_SOURCE_VERSION_ACCESS")
             row = connection.execute(text(
                 "SELECT v.id AS source_version_id,v.resource_id,v.version_number AS source_version_number, "
-                "v.parent_version_id,v.source_hash,v.lifecycle_status::text AS source_lifecycle_status, "
+                "v.parent_version_id,v.source_hash,v.storage_bucket,v.storage_object_key,v.updated_at, "
+                "v.lifecycle_status::text AS source_lifecycle_status, "
                 "r.is_active AS resource_active,r.deleted_at AS resource_deleted_at "
                 "FROM resource_versions v JOIN learning_resources r ON r.id=v.resource_id WHERE v.id=:id"
             ), {"id": source_version_id}).mappings().one_or_none()

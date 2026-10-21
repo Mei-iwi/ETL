@@ -144,16 +144,16 @@ def test_inactive_source_resource_blocks_before_bytes(importing, monkeypatch, fa
     assert row["target_version_id"] is None
 
 
-def test_source_parent_changes_during_copy_rolls_back_mapping(importing, monkeypatch):
+def test_source_parent_changes_during_verification_rolls_back_mapping(importing, monkeypatch):
     c, rows, _ = importing
     root = run(c)
     add_version(rows, 2, rows[0]["source_version_id"])
-    save = c.storage.save_stream
+    save = c.source_files.open_stream
     def mutated(*args, **kwargs):
         result = save(*args, **kwargs)
         rows[1]["parent_version_id"] = None
         return result
-    monkeypatch.setattr(c.storage, "save_stream", mutated)
+    monkeypatch.setattr(c.source_files, "open_stream", mutated)
     child = run(c)
     assert child["last_error_code"] == "SOURCE_VERSION_MUTATED" and child["target_version_id"] is None
     with c.uow() as repo:

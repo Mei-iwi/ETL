@@ -57,3 +57,5 @@ class ResourceIngestion:
             raise DomainError("Resource not found")
         if not resource["is_active"] or resource["deleted_at"] is not None:
             raise DomainError("Resource is inactive or deleted")
+        if resource.get('source_origin') != 'LOCAL':
+            raise DomainError('BLOCKED_SOURCE_MAPPING: snapshots require LOCAL ownership')

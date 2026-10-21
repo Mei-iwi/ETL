@@ -46,6 +46,8 @@ def test_openxml_changed_after_import_is_rejected_before_parser(container, exten
     from tests.unit.test_multiformat import sample
 
     container.sync.run()
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'source_origin': 'LOCAL'})
     path = container.storage.get_local_path("input", "original" + extension)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(sample(extension))

@@ -170,8 +170,23 @@ def make_pdf(container, texts=None, name="sample.pdf"):
 
 def ingest(container, texts=None):
     container.sync.run(full=True)
+    # This fixture exercises LOCAL managed ingestion, not PostgreSQL SOURCE import.
+    with container.uow() as repo:
+        for resource_id in ('resource-1', 'resource-2'):
+            repo.update('master_learning_resources', resource_id, {'source_origin': 'LOCAL'})
     make_pdf(container, texts)
     return container.ingestion.run("resource-1", "input", "sample.pdf")["version"]
+
+
+def local_fixture_sync(container, sync):
+    """Attest synthetic JSON resources as LOCAL for managed/demo-only tests."""
+    def run(**kwargs):
+        result = sync(**kwargs)
+        with container.uow() as repo:
+            for resource_id in ('resource-1', 'resource-2'):
+                repo.update('master_learning_resources', resource_id, {'source_origin': 'LOCAL'})
+        return result
+    return run
 
 
 def completed(container, texts=None):

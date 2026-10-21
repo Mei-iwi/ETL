@@ -164,7 +164,9 @@ def test_migration_up_down_up(container):
     assert len(inspect(container.engine).get_foreign_keys("ocr_page_tasks")) == 1
 
 
-def test_cli_demo_and_rerun(container):
+def test_cli_demo_and_rerun(container, monkeypatch):
+    from conftest import local_fixture_sync
+    monkeypatch.setattr(container.sync, 'run', local_fixture_sync(container, container.sync.run))
     assert parser().parse_args(["sync-master", "--full"]).full
     assert parser().parse_args(
         ["run-master-sync-worker", "--worker-id", "worker-1", "--once"]

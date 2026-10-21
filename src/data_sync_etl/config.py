@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     reconcile_max_affected: int = Field(default=100, ge=1, le=1000)
     reconcile_max_ratio: float = Field(default=0.1, gt=0, le=1)
     source_file_storage_root: Path | None = Field(default=None, repr=False)
+    # Policy gates: disabling SOURCE access never restores the historical copier.
+    source_reference_enabled: bool = False
+    source_temporary_files_enabled: bool = False
+    source_temp_root: Path | None = Field(default=None, repr=False)
+    source_read_timeout_seconds: int = Field(default=120, ge=1, le=600)
+    source_temp_max_concurrency: int = Field(default=4, ge=1, le=32)
+    source_temp_orphan_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
+    office_pdf_executable: Path | None = Field(default=None, repr=False)
+    office_pdf_timeout_seconds: int = Field(default=90, ge=5, le=180)
     source_drive_enabled: bool = False
     source_drive_buckets: dict[str, str] = Field(default_factory=dict, repr=False)
     source_local_buckets: tuple[str, ...] = ()

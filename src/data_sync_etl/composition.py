@@ -26,11 +26,13 @@ from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.adapters.storage.source_dispatcher import SourceFileDispatcher
 from data_sync_etl.adapters.storage.source_google_drive import SourceGoogleDriveFileReader
 from data_sync_etl.adapters.storage.source_local import SourceLocalFileReader
+from data_sync_etl.adapters.storage.source_temporary import SourceTemporaryFiles
 from data_sync_etl.application.auto_sync import AutoSyncCoordinator
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
 from data_sync_etl.application.evaluation import EvaluationService
+from data_sync_etl.application.file_preview import FilePreviewService
 from data_sync_etl.application.get_processing_job import GetProcessingJob
 from data_sync_etl.application.get_resource_detail import GetResourceDetail
 from data_sync_etl.application.indexing import IndexingService
@@ -51,6 +53,7 @@ from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
 from data_sync_etl.application.source_file_import import SourceFileImportService
+from data_sync_etl.application.source_file_resolver import SourceFileResolver
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
@@ -300,6 +303,13 @@ class Container:
             self.process_version, self.retry_processing_job, self.settings,
             formats=self.format_registry,
         )
+        self.source_resolver = SourceFileResolver(
+            self.uow, self.source, self.source_files, self.storage, self.format_registry,
+            self.settings, SourceTemporaryFiles(self.settings, self.storage.root),
+        )
+        self.source_file_import.resolver = self.source_resolver
+        self.file_previews = FilePreviewService(self.source_resolver, self.settings)
+        self.ocr.resolver = self.source_resolver
         self.source_file_worker = SourceFileImportWorker(self.source_file_import)
         self.worker = OCRWorker(
             self.ocr,

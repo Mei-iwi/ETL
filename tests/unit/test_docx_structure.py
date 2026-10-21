@@ -12,6 +12,8 @@ from tests.indexing_support import setup_index
 
 def finish_docx(c, levels=(1, 2, 3), auto=False):
     c.sync.run(full=True)
+    with c.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'source_origin': 'LOCAL'})
     path = c.storage.get_local_path('input', 'headings.docx')
     path.parent.mkdir(parents=True, exist_ok=True)
     document = Document()
@@ -105,6 +107,8 @@ def test_existing_worker_gives_indexing_a_fair_turn():
 def test_empty_heading_does_not_make_bag_ready(container):
     index = setup_index(container)
     container.sync.run(full=True)
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'source_origin': 'LOCAL'})
     path = container.storage.get_local_path('input', 'heading-only.docx')
     path.parent.mkdir(parents=True, exist_ok=True)
     document = Document()

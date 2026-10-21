@@ -208,6 +208,11 @@ def test_extract_native_provenance_and_unicode(tmp_path, extension):
 @pytest.mark.parametrize('extension', ['.docx', '.xlsx', '.png', '.csv'])
 def test_source_import_preserves_original_bytes_and_projection(container, tmp_path, monkeypatch, extension):
     container.sync.run(full=True)
+    container.settings.source_reference_enabled = True
+    container.settings.source_temporary_files_enabled = True
+    container.settings.source_temp_root = tmp_path / 'source-temp'
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'source_origin': 'POSTGRESQL'})
     root = tmp_path / 'source'
     path = root / 'books' / ('sample' + extension)
     path.parent.mkdir(parents=True)
@@ -233,8 +238,9 @@ def test_source_import_preserves_original_bytes_and_projection(container, tmp_pa
     with container.uow() as repo:
         version = repo.get('resource_versions', listed['target_version_id'])
         assert repo.count('resource_versions', {}) == 1
-    saved = container.storage.get_local_path(version['storage_bucket'], version['storage_object_key'])
-    assert saved.read_bytes() == payload and saved.suffix == ('.jpg' if extension == '.jpeg' else extension)
+    with container.source_resolver.open_verified_stream(container.source_resolver.resolve(version['id'])) as stream:
+        assert stream.read() == payload
+    assert not list((container.storage.root / 'resources').rglob('*'))
     container.source_file_import.discover_once()
     assert not container.source_file_worker.once('source-format')
 
@@ -442,6 +448,11 @@ def test_update_version_accepts_native_formats_without_duplicate_versions(contai
 ])
 def test_source_invalid_formats_fail_without_target_version(container, tmp_path, monkeypatch, extension, payload, expected):
     container.sync.run(full=True)
+    container.settings.source_reference_enabled = True
+    container.settings.source_temporary_files_enabled = True
+    container.settings.source_temp_root = tmp_path / 'source-temp'
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'source_origin': 'POSTGRESQL'})
     root = tmp_path / 'source'
     path = root / 'books' / ('sample' + extension)
     path.parent.mkdir(parents=True)
