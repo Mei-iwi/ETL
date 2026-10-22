@@ -33,6 +33,18 @@ def checked(model, value):
         raise DomainError("Invalid Mongo document") from None
 
 
+class ProfileConflict(DomainError):
+    pass
+
+
+def user_profile_revision(document):
+    if document is None:
+        return 'missing'
+    value = json.dumps(document.model_dump(mode='json', by_alias=True, exclude_unset=True),
+                       sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
 def identifier(value):
     try:
         return TypeAdapter(DocumentId).validate_python(value)
@@ -105,6 +117,35 @@ class MongoMetadataStore:
 
     def get_user(self, document_id):
         return self._get("users", UserProfileDocument, document_id)
+
+    def update_personal_profile(self, document_id, changes, revision):
+        if not changes or set(changes) - {'organization_name', 'address', 'bio'}:
+            raise DomainError('Invalid personal profile fields')
+        document_id = identifier(document_id)
+        self.get_user(document_id)  # Reject legacy ObjectId collisions before writing.
+        collection = self.database.users
+        fields = {field.alias or name: 1 for name, field in UserProfileDocument.model_fields.items()}
+        raw = collection.find_one({'_id': document_id}, fields)
+        current = checked(UserProfileDocument, raw) if raw is not None else None
+        if user_profile_revision(current) != revision:
+            raise ProfileConflict('Personal profile changed')
+        stamp = now()
+        candidate = checked(UserProfileDocument, {
+            **(current.bson() if current else {'_id': document_id, 'created_at': stamp}),
+            **changes, 'updated_at': stamp})
+        if raw is None:
+            try:
+                collection.insert_one(candidate.bson())
+            except DuplicateKeyError:
+                raise ProfileConflict('Personal profile changed') from None
+        else:
+            conditions = [{key: {'$exists': False}} if key not in raw else
+                          {key: {'$exists': True, '$eq': raw[key]}} for key in fields if key != '_id']
+            result = collection.update_one({'_id': document_id, '$and': conditions},
+                {'$set': {**changes, 'updated_at': stamp}})
+            if not result.matched_count:
+                raise ProfileConflict('Personal profile changed')
+        return self.get_user(document_id)
 
     def upsert_resource(self, document: ResourceDescriptionDocument):
         self._upsert("learning_resources", ResourceDescriptionDocument, document)

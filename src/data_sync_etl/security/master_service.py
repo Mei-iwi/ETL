@@ -1,4 +1,4 @@
-"""Explicit admin and read-only MASTER identity realms; SOURCE roles grant no ETL admin."""
+"""Configured admin and verified MASTER roles, gated by ADMIN_ENABLED."""
 
 import hashlib
 import hmac
@@ -79,7 +79,9 @@ class MasterIdentityReader:
                         MasterLearningResource.is_active.is_(True), MasterLearningResource.deleted_at.is_(None),
                         MasterLearningResource.source_missing_at.is_(None),
                         MasterLearningResource.publication_status == 'PUBLISHED').limit(1001)).all()
-                    grants = set(owned) | set(self.settings.auth_master_resource_grants.get(user['id'], []))
+                    # Synced users can access only resources they created. Legacy
+                    # explicit grants must never expand ownership-based access.
+                    grants = set(owned)
                     if len(grants) > 1000 or any(not isinstance(value, str) or not 1 <= len(value) <= 30 for value in grants):
                         raise AuthError('AUTH_MASTER_GRANTS_INVALID', 503)
                     user['resource_ids'] = sorted(grants)
@@ -150,5 +152,8 @@ class MasterAuthService(AuthService):
         user = self.reader.read(user_id=session['external_user_id'], now=self.clock())
         if not eligible(user) or not hmac.compare_digest(session['external_fingerprint'], self.fingerprint(user)):
             raise AuthError('AUTH_SESSION_EXPIRED')
-        return Principal('master:' + user['id'], 'VIEWER', 'master_users', 'master-readonly', ('viewer',),
-                         user['full_name'] or '', user['email'], resource_ids=tuple(user['resource_ids']))
+        role = 'ADMIN' if self.settings.admin_enabled and user['role_code'] == 'ADMIN' else 'VIEWER'
+        return Principal('master:' + user['id'], role, 'master_users', 'master-readonly', (role.lower(),),
+                         user['full_name'] or '', user['email'],
+                         permissions=('sync', 'process', 'index', 'evaluation') if role == 'ADMIN' else (),
+                         resource_ids=tuple(user['resource_ids']))

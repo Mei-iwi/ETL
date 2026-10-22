@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
+import { canVisit, useAuth } from '../../auth/AuthProvider'
 import {
     getResourceTypes,
     type ResourceTypeOption,
@@ -34,6 +35,7 @@ type ResourceListResponse = {
 }
 
 export function LibraryListPage() {
+    const { principal } = useAuth()
     const [keyword, setKeyword] = useState('')
     const [query, setQuery] = useState('')
     const [page, setPage] = useState(1)
@@ -225,13 +227,15 @@ export function LibraryListPage() {
                                         >
                                             Lịch sử phiên bản
                                         </Link>
-                                        {' . '}
+                                        {canVisit(`/library/${encodeURIComponent(resource.id)}/update-version`, principal) && <>
+                                        {' · '}
                                         <Link
                                             className={styles.link}
                                             to={`/library/${encodeURIComponent(resource.id)}/update-version`}
                                             >
                                                 Cập nhật
                                             </Link>
+                                        </>}
                                     </td>
                                 </tr>
                             ))

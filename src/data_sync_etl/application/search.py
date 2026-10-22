@@ -365,6 +365,7 @@ class SearchService:
                 }
             return grouped, matches
         grouped, matches = ranked()
+        whole_file_access = {}
         # Recheck metadata and snapshots after ranking; never publish a known stale vector.
         if grouped or (_batch_texts and excluded):
             with self.indexing.uow() as repo:
@@ -389,6 +390,7 @@ class SearchService:
                     if _batch_texts and fresh_by_version[version_id] != by_version[version_id]:
                         raise SearchError('SEARCH_INDEX_STALE', 409)
                     allowed = self._allowed_units(repo, fresh, access)
+                    whole_file_access[version_id] = bool(fresh[2]) and {unit['id'] for unit in fresh[2]} <= allowed
                     if any(not set(bag_structure(fresh[2])[item['bag_id']]) <= allowed
                            for item in grouped.values() if item['resource_version_id'] == version_id):
                         if _batch_texts and self._postgres_version_changed(repo, snapshots[version_id]):
@@ -402,6 +404,7 @@ class SearchService:
         items = sorted(grouped.values(), key=lambda item: (-item['score'], item['resource_id']))
         for item in items:
             item['matched_bag_count'] = matches[item['resource_id']]
+            item['can_view_file'] = whole_file_access.get(item['resource_version_id'], False)
         total, offset = len(items), (page - 1) * size
         return {'query': query, 'method': method, 'page': page, 'size': size, 'total': total,
                 'total_pages': (total + size - 1) // size, 'items': items[offset:offset+size],

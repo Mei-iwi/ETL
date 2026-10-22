@@ -33,7 +33,7 @@ def master_auth(configured, monkeypatch):
         repo.update('master_users', 'user-1', {'email': 'master@etl.test', 'hashed_password': encoded(password),
             'source_origin': 'POSTGRESQL', 'source_missing_at': None, 'is_active': True,
             'deleted_at': None, 'email_verified_at': now(), 'role_is_active': True, 'role_deleted_at': None,
-            'role_code': 'ADMIN'})
+            'role_code': 'USER'})
     container.settings = container.settings.model_copy(update={'auth_mode': 'master_users',
         'auth_master_resource_grants': {'user-1': ['resource-1']}})
     monkeypatch.setattr('data_sync_etl.security.auth.create_auth_service', lambda settings:
@@ -58,7 +58,7 @@ def test_pbkdf2_known_vectors_and_bad_input(encoding):
     assert not verify_pbkdf2('DEMO_NON_AUTHENTICATING_HASH', password, encoding)
 
 
-def test_automatic_login_and_no_source_admin_promotion(master_auth):
+def test_automatic_login_keeps_regular_users_separate_from_configured_admin(master_auth):
     with make_client(master_auth) as api:
         assert api.get('/api/v1/auth/config').json()['mode'] == 'master_users'
         assert login(api, master_auth).status_code == 200
@@ -89,6 +89,38 @@ def test_admin_flag_blocks_configured_admin_and_preserves_boundary(master_auth):
         assert api.get('/api/v1/auth/me').json()['role'] == 'VIEWER'
         assert api.get('/api/v1/resources').status_code == 403
         assert api.post('/api/v1/resource-versions/any/index', headers=csrf(api), json={}).status_code == 403
+
+
+def test_synced_admin_gets_admin_capabilities_and_loses_them_on_role_change(master_auth):
+    container = master_auth[0]
+    with container.uow() as repo:
+        repo.update('master_users', 'user-1', {'role_code': 'ADMIN'})
+    with make_client(master_auth) as api:
+        assert login(api, master_auth).status_code == 200
+        me = api.get('/api/v1/auth/me').json()
+        assert me['id'] == 'master:user-1' and me['role'] == 'ADMIN' and me['roles'] == ['admin']
+        assert set(me['permissions']) == {'sync', 'process', 'index', 'evaluation'}
+        assert api.get('/api/v1/system/health').status_code == 200
+        assert api.get('/api/v1/resources?page=1&size=100&q=').json()['pagination']['total'] > 1
+        # Capability checks allow all admin routes; domain validation still runs.
+        from types import SimpleNamespace
+
+        from data_sync_etl.security.authorization import authorize
+
+        principal = api.app.state.auth.principal(SimpleNamespace(cookies=api.cookies))
+        for path in ['/api/v1/master-data/subjects', '/api/v1/resource-versions/any/index',
+                     '/api/v1/resource-versions/any/process', '/api/v1/evaluations/runs']:
+            authorize(SimpleNamespace(method='POST', url=SimpleNamespace(path=path)), principal)
+        container.settings.admin_enabled = False
+        assert api.get('/api/v1/auth/me').json()['role'] == 'VIEWER'
+        assert api.get('/api/v1/system/health').status_code == 403
+        container.settings.admin_enabled = True
+        assert api.get('/api/v1/auth/me').json()['role'] == 'ADMIN'
+        with container.uow() as repo:
+            repo.update('master_users', 'user-1', {'role_code': 'USER'})
+        assert api.get('/api/v1/auth/me').status_code == 401
+        assert login(api, master_auth).status_code == 200
+        assert api.get('/api/v1/auth/me').json()['role'] == 'VIEWER'
 
 
 def test_admin_disabled_does_not_require_admin_secret(master_auth, tmp_path):
@@ -168,11 +200,11 @@ def test_stale_watermark_is_not_freshness_and_ambiguous_email_denied(master_auth
 
 
 @pytest.mark.parametrize('method', ['bow', 'vector', 'hybrid'])
-def test_master_viewer_search_and_source_file_grants(source_viewer, master_auth, method):
+def test_master_viewer_search_and_source_file_ownership(source_viewer, master_auth, method):
     container, version, _, _ = source_viewer
     assert container is master_auth[0]
     with container.uow() as repo:
-        repo.update('master_learning_resources', version['resource_id'], {'created_by': None})
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-1'})
     container.settings.auth_master_resource_grants = {'user-1': [version['resource_id']]}
     before = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in container.storage.root.rglob('*') if p.is_file()}
     with make_client(master_auth) as api:
@@ -183,9 +215,216 @@ def test_master_viewer_search_and_source_file_grants(source_viewer, master_auth,
         path = '/api/v1/resource-versions/' + version['id'] + '/file'
         response = api.get(path)
         assert response.status_code == 200 and response.content.startswith(b'%PDF')
-        container.settings.auth_master_resource_grants = {}
+        with container.uow() as repo:
+            repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-2'})
         assert api.get(path).status_code == 401
         assert login(api, master_auth).status_code == 200
-        assert api.get(path).status_code == 403
+        assert api.get(path).status_code == 200  # Owner changed, but the complete file remains public.
     after = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in container.storage.root.rglob('*') if p.is_file()}
     assert after == before
+
+
+def test_master_owner_can_open_viewer_and_download_original(source_viewer, master_auth):
+    container, version, _, source_path = source_viewer
+    with container.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-1'})
+    with make_client(master_auth) as api:
+        assert login(api, master_auth).status_code == 200
+        resource_url = f'/api/v1/resources/{version["resource_id"]}'
+        file_url = f'/api/v1/resource-versions/{version["id"]}/file'
+        assert api.get(resource_url).status_code == 200
+        assert any(row['id'] == version['id'] for row in api.get(resource_url + '/versions').json())
+        readiness = api.get(file_url.replace('/file', '/index-status'))
+        assert readiness.status_code == 200
+        assert readiness.json()['processing_status'] == 'CONTENT_READY'
+        assert readiness.json()['index_status'] == 'READY'
+        assert api.get(file_url.replace('/file', '/source-info')).status_code == 200
+        preview = api.get(file_url + '?view=preview')
+        assert preview.status_code == 200 and preview.content.startswith(b'%PDF')
+        download = api.get(file_url + '?download=true')
+        assert download.status_code == 200 and download.content == source_path.read_bytes()
+        assert download.headers['content-disposition'].startswith('attachment')
+        assert api.get(file_url, headers={'Range': 'bytes=0-3'}).content == b'%PDF'
+        assert api.post(file_url.replace('/file', '/index'), headers=csrf(api), json={}).status_code == 403
+
+
+@pytest.mark.parametrize('searchable', [{'unreviewed': True}], indirect=True)
+def test_owner_can_search_and_view_unreviewed_file_without_publishing_it(source_viewer, master_auth):
+    container, version, _, source_path = source_viewer
+    with container.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-1'})
+    with make_client(master_auth) as api:
+        assert login(api, master_auth).status_code == 200
+        url = f'/api/v1/resource-versions/{version["id"]}/file'
+        assert api.get(url + '?view=preview').content == source_path.read_bytes()
+        assert api.get(url + '?download=true').status_code == 200
+        assert api.get(url.replace('/file', '/source-info')).status_code == 200
+        for method in ['bow', 'vector', 'hybrid']:
+            response = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method})
+            assert response.status_code == 200 and response.json()['total'] == 1
+            item = response.json()['items'][0]
+            assert item['can_view_file'] is True
+            assert api.get(item['context_url']).status_code == 200
+        with container.uow() as repo:
+            units = repo.find('content_units', {'resource_version_id': version['id']})
+            assert all(row['review_status'] == 'UNREVIEWED' and not row['retrieval_eligible'] for row in units)
+            repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-2'})
+        assert login(api, master_auth).status_code == 200
+        assert api.get(url).status_code == 403  # The owner exception cannot transfer to a public reader.
+        for method in ['bow', 'vector', 'hybrid']:
+            response = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method})
+            assert response.status_code == 200 and response.json()['total'] == 0
+        assert api.get(item['context_url']).status_code == 404
+
+
+def test_public_viewer_gets_only_readable_versions_and_no_management_rights(source_viewer, master_auth):
+    container, version, _, source_path = source_viewer
+    with container.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-2'})
+        repo.insert('resource_versions', {**version, 'id': 'private-later-version', 'mongo_id': None,
+            'version_number': version['version_number'] + 1, 'lifecycle_status': 'DRAFT'})
+    with make_client(master_auth) as api:
+        resource_url = f'/api/v1/resources/{version["resource_id"]}'
+        url = f'/api/v1/resource-versions/{version["id"]}/file'
+        assert api.get(url).status_code == 401
+        assert login(api, master_auth).status_code == 200
+        assert api.get(resource_url).status_code == 200
+        rows = api.get(resource_url + '/versions')
+        assert rows.status_code == 200 and [row['id'] for row in rows.json()] == [version['id']]
+        assert api.get(url + '?view=preview').content == source_path.read_bytes()
+        assert api.get(url + '?download=true').content == source_path.read_bytes()
+        assert api.get(url.replace('/file', '/source-info')).status_code == 200
+        assert api.get(url.replace('/file', '/index-status')).status_code == 200
+        for suffix in ['chunks', 'content-units', 'etl-status']:
+            assert api.get(url.replace('/file', '/' + suffix)).status_code == 403
+        for suffix in ['process', 'postprocess', 'index', 'reindex', 'ocr-jobs']:
+            assert api.post(url.replace('/file', '/' + suffix), headers=csrf(api), json={}).status_code == 403
+
+
+@pytest.mark.parametrize('searchable', [{'structured': True, 'rejected_leaf': True}], indirect=True)
+@pytest.mark.parametrize('owner_id', ['user-1', 'user-2'])
+def test_public_file_denied_when_any_unit_is_restricted(source_viewer, master_auth, owner_id):
+    container, version, _, _ = source_viewer
+    with container.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': owner_id})
+    with make_client(master_auth) as api:
+        assert login(api, master_auth).status_code == 200
+        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == (404 if owner_id == 'user-1' else 403)
+        results = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': 'bow'}).json()
+        assert all(item['can_view_file'] is False for item in results['items'])
+
+
+def test_version_listing_requires_principal_in_authenticated_mode(master_auth):
+    from types import SimpleNamespace
+
+    from data_sync_etl.api.routes import list_resource_versions
+
+    request = SimpleNamespace(state=SimpleNamespace(), app=SimpleNamespace(state=SimpleNamespace(container=master_auth[0])))
+    with pytest.raises(AuthError, match='AUTH_LOGIN_REQUIRED'):
+        list_resource_versions('resource-1', request)
+
+
+def test_master_ownership_isolates_list_details_files_and_search_context(source_viewer, master_auth):
+    container, version, _, _ = source_viewer
+    with container.uow() as repo:
+        resources = repo.find('master_learning_resources', {})
+        other_id = next(row['id'] for row in resources if row['id'] != version['resource_id'])
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-1'})
+        repo.update('master_learning_resources', other_id, {'created_by': 'user-2', 'is_active': True,
+            'publication_status': 'PUBLISHED', 'deleted_at': None, 'source_missing_at': None})
+        other_version = repo.insert('resource_versions', {**version, 'id': 'other-user-version',
+            'resource_id': other_id, 'mongo_id': None})
+        repo.update('master_users', 'user-2', {'email': 'other@etl.test', 'hashed_password': encoded(master_auth[1]),
+            'source_origin': 'POSTGRESQL', 'source_missing_at': None, 'is_active': True,
+            'deleted_at': None, 'email_verified_at': now(), 'role_is_active': True, 'role_deleted_at': None})
+    # A legacy manual grant must not allow user-1 to see user-2's document.
+    container.settings.auth_master_resource_grants = {'user-1': [other_id]}
+    with make_client(master_auth) as api:
+        assert login(api, master_auth).status_code == 200
+        result = api.get('/api/v1/resources?page=1&size=1&q=').json()
+        assert result['pagination']['total'] == 1 and result['items'][0]['id'] == version['resource_id']
+        assert api.get(f'/api/v1/resources/{version["resource_id"]}').status_code == 200
+        assert api.get(f'/api/v1/resources/{other_id}').status_code == 403
+        assert api.get(f'/api/v1/resources/{other_id}/versions').status_code == 403
+        for suffix in ['file', 'file?view=preview', 'file?view=text', 'source-info', 'chunks', 'content-units', 'index-status', 'etl-status']:
+            assert api.get(f'/api/v1/resource-versions/{other_version["id"]}/{suffix}').status_code == 403
+        result = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': 'bow'}).json()
+        assert result['total'] == 1
+        context = result['items'][0]['context_url']
+        assert api.get(context).status_code == 200
+        assert login(api, master_auth, email='other@etl.test').status_code == 200
+        result = api.get('/api/v1/resources?page=1&size=10&q=').json()
+        assert result['pagination']['total'] == 1 and result['items'][0]['id'] == other_id
+        assert api.get(f'/api/v1/resources/{version["resource_id"]}').status_code == 200
+        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == 200
+        assert api.get(context).status_code == 200  # Published shared search remains readable.
+        for method in ['bow', 'vector', 'hybrid']:
+            result = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method})
+            assert result.status_code == 200 and result.json()['total'] == 1
+        assert login(api, master_auth, email='admin@etl.test').status_code == 200
+        assert api.get('/api/v1/resources?page=1&size=100&q=').json()['pagination']['total'] > 1
+        assert api.get(f'/api/v1/resources/{version["resource_id"]}').status_code == 200
+
+
+def test_master_without_owner_has_no_access_even_with_manual_grant(source_viewer, master_auth):
+    container, version, _, _ = source_viewer
+    with container.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': None})
+    container.settings.auth_master_resource_grants = {'user-1': [version['resource_id']]}
+    with make_client(master_auth) as api:
+        assert login(api, master_auth).status_code == 200
+        assert api.get('/api/v1/resources?page=1&size=10&q=').json()['pagination']['total'] == 0
+        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == 200
+        assert api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': 'bow'}).json()['total'] == 1
+
+
+def test_live_owner_check_rejects_stale_or_expanded_resource_ids(source_viewer, master_auth):
+    from types import SimpleNamespace
+
+    from data_sync_etl.domain.search_access import SearchAccess
+    from data_sync_etl.security.auth import Principal
+    from data_sync_etl.security.authorization import authorize
+
+    container, version, _, _ = source_viewer
+    with container.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-2'})
+        resource = repo.get('master_learning_resources', version['resource_id'])
+        unit = repo.find('content_units', {'resource_version_id': version['id']})[0]
+        # Explicit ownership/grants must not authorize a now-private/draft file.
+        repo.update('master_learning_resources', version['resource_id'], {'publication_status': 'DRAFT'})
+    principal = Principal('master:user-1', 'VIEWER', 'master_users', 'master-readonly',
+        resource_ids=(version['resource_id'],))
+    request = SimpleNamespace(method='GET', app=SimpleNamespace(state=SimpleNamespace(container=container)))
+    for path in [f'/api/v1/resources/{version["resource_id"]}', f'/api/v1/resource-versions/{version["id"]}/file']:
+        request.url = SimpleNamespace(path=path)
+        with pytest.raises(AuthError):
+            authorize(request, principal)
+    access = SearchAccess('authenticated_user', frozenset([version['resource_id']]), principal.id, owner_id='user-1')
+    assert access.evaluate(resource, version, unit) == 'RESOURCE_NOT_OWNED'
+
+
+@pytest.mark.parametrize('restriction', ['draft', 'inactive', 'unreviewed', 'rejected', 'ineligible'])
+def test_shared_search_revokes_context_when_content_is_no_longer_public(source_viewer, master_auth, restriction):
+    container, version, _, _ = source_viewer
+    with container.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-2'})
+    with make_client(master_auth) as api:
+        assert login(api, master_auth).status_code == 200
+        result = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': 'bow'}).json()
+        assert result['total'] == 1
+        context = result['items'][0]['context_url']
+        assert api.get(context).status_code == 200
+        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == 200
+        with container.uow() as repo:
+            if restriction in ('draft', 'inactive'):
+                repo.update('master_learning_resources', version['resource_id'],
+                    {'publication_status': 'DRAFT'} if restriction == 'draft' else {'is_active': False})
+            else:
+                for unit in repo.find('content_units', {'resource_version_id': version['id']}):
+                    repo.update('content_units', unit['id'], {'retrieval_eligible': False} if restriction == 'ineligible'
+                        else {'review_status': 'UNREVIEWED' if restriction == 'unreviewed' else 'REJECTED'})
+        assert api.get(context).status_code == 404
+        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == 403
+        for method in ['bow', 'vector', 'hybrid']:
+            response = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method})
+            assert response.status_code == 200 and response.json()['total'] == 0

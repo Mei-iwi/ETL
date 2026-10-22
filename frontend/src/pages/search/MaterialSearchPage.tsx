@@ -10,6 +10,7 @@ import styles from './SearchPages.module.css'
 import { methods, readSearch, writeSearch } from './searchParams'
 import { SearchResults } from './SearchResultPage'
 import { useSearchModel } from './useSearchModel'
+import { canVisit, useAuth } from '../../auth/AuthProvider'
 
 export function MaterialSearchPage() {
     const [params] = useSearchParams()
@@ -21,6 +22,7 @@ export function MaterialSearchPage() {
 }
 
 function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnType<typeof useSearchModel> }) {
+    const { principal } = useAuth()
     const initial = readSearch(params)
     const navigate = useNavigate()
     const [query, setQuery] = useState(initial.query)
@@ -104,8 +106,8 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
             {!model.ready && <div role="status" className={model.state === 'FAILED' || model.state === 'STOPPED' ? styles.error : styles.pending}>
                 {model.error ? 'Chưa kiểm tra được trạng thái tìm kiếm. Có thể chọn BoW.' :
                     model.state === 'FAILED' || model.state === 'STOPPED' ? 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.' : 'Đang chuẩn bị tìm kiếm…'}
-                {' '}<button type="button" className={styles.textButton} onClick={model.state === 'FAILED' ? model.retry : model.refresh}>
-                    {model.state === 'FAILED' ? 'Thử lại' : 'Kiểm tra lại'}</button>
+                {(model.state !== 'FAILED' || canVisit('/library/indexing', principal)) && <>{' '}<button type="button" className={styles.textButton} onClick={model.state === 'FAILED' ? model.retry : model.refresh}>
+                    {model.state === 'FAILED' ? 'Thử lại' : 'Kiểm tra lại'}</button></>}
             </div>}
             {error && <p id="search-error" role="alert" className={styles.error}>{error}</p>}
         </form>
