@@ -14,6 +14,8 @@ case "$auth_profile" in
   legacy) ;;
   auth) compose+=(-f "$deploy_dir/compose.auth.yml") ;;
   auth-tls) compose+=(-f "$deploy_dir/compose.auth.yml" -f "$deploy_dir/compose.auth-tls.yml") ;;
+  db-auth) compose+=(-f "$deploy_dir/compose.db-auth.yml") ;;
+  db-auth-tls) compose+=(-f "$deploy_dir/compose.db-auth.yml" -f "$deploy_dir/compose.auth-tls.yml") ;;
   *) echo 'Invalid auth profile' >&2; exit 2 ;;
 esac
 case "$action" in

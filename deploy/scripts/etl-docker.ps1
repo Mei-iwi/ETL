@@ -8,7 +8,7 @@ param(
     [switch]$Workers,
     [switch]$Drive,
     [switch]$RemoteDatabase,
-    [ValidateSet('legacy','auth','auth-tls')][string]$AuthProfile = 'auth',
+    [ValidateSet('legacy','auth','auth-tls','db-auth','db-auth-tls')][string]$AuthProfile = 'auth',
     [switch]$AcceptModelLicense
 )
 $ErrorActionPreference = 'Stop'
@@ -17,8 +17,9 @@ if (-not $EnvFile) { $EnvFile = Join-Path $deployDir '.env.docker' }
 $composeArgs = @('compose','--env-file',$EnvFile,'-f',(Join-Path $deployDir 'compose.app.yml'))
 if ($Drive) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.drive.yml')) }
 if ($RemoteDatabase) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.remote-db.yml')) }
-if ($AuthProfile -ne 'legacy') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth.yml')) }
-if ($AuthProfile -eq 'auth-tls') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth-tls.yml')) }
+if ($AuthProfile -like 'db-auth*') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.db-auth.yml')) }
+elseif ($AuthProfile -ne 'legacy') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth.yml')) }
+if ($AuthProfile -in @('auth-tls','db-auth-tls')) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth-tls.yml')) }
 function Invoke-Docker([string[]]$Arguments) {
     & docker @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Docker operation failed; inspect sanitized service status.' }

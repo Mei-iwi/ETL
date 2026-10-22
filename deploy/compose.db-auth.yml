@@ -1,0 +1,34 @@
+# Opt-in only: use an operator-provisioned Auth DB on an existing PostgreSQL server.
+services:
+  api:
+    environment:
+      AUTH_MODE: db_users
+      APP_ENVIRONMENT: ${AUTH_APP_ENVIRONMENT:-production}
+      ADMIN_ENABLED: ${ADMIN_ENABLED:-true}
+      AUTH_DEV_ADMIN_BYPASS: ${AUTH_DEV_ADMIN_BYPASS:-false}
+      AUTH_PUBLIC_ENABLED: ${AUTH_PUBLIC_ENABLED:-false}
+      AUTH_DEPLOYMENT_PROFILE: ${AUTH_DEPLOYMENT_PROFILE:-localhost}
+      AUTH_ORIGIN: ${AUTH_ORIGIN:-http://127.0.0.1:8080}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      AUTH_DATABASE_URL_FILE: /run/secrets/auth_database_url
+      SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
+      AUTH_PROXY_KEY_FILE: /run/secrets/auth_proxy_key
+      AUTH_STATE_PATH: /var/lib/etl/auth/sessions.sqlite3
+    secrets:
+      - {source: auth_database_url, target: auth_database_url}
+      - {source: session_signing_key, target: session_signing_key}
+      - {source: auth_proxy_key, target: auth_proxy_key}
+    volumes: [auth-sessions:/var/lib/etl/auth]
+  frontend:
+    group_add: ["10001"]
+    environment:
+      AUTH_MODE: db_users
+      AUTH_ORIGIN: ${AUTH_ORIGIN:-http://127.0.0.1:8080}
+      AUTH_TLS: "false"
+    secrets: [{source: auth_proxy_key, target: auth_proxy_key}]
+volumes:
+  auth-sessions:
+secrets:
+  auth_database_url: {file: "${AUTH_DATABASE_URL_SECRET_FILE:?Set the external Auth DB URL file}"}
+  session_signing_key: {file: "${SESSION_SIGNING_KEY_SECRET_FILE:?Set SESSION_SIGNING_KEY_SECRET_FILE}"}
+  auth_proxy_key: {file: "${AUTH_PROXY_KEY_SECRET_FILE:?Set AUTH_PROXY_KEY_SECRET_FILE}"}

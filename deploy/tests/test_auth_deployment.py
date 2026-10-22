@@ -65,3 +65,48 @@ def test_lan_tls_and_bypass_rejected():
     web['AUTH_MODE'] = 'local_demo'
     with pytest.raises(ValueError, match='TLS_REQUIRED'):
         module.validate(doc)
+
+
+def database_fixture():
+    doc = fixture()
+    api = doc['services']['api']
+    api['environment'].update(AUTH_MODE='db_users', AUTH_DATABASE_URL_FILE='/run/secrets/auth_database_url')
+    api['secrets'] = ['auth_database_url', 'session_signing_key', 'auth_proxy_key']
+    doc['services']['frontend']['environment']['AUTH_MODE'] = 'db_users'
+    return doc
+
+
+def test_master_users_auth_and_bypass_boundary():
+    doc = fixture()
+    doc['services']['api']['environment']['AUTH_MODE'] = 'master_users'
+    doc['services']['frontend']['environment']['AUTH_MODE'] = 'master_users'
+    module.validate(doc)
+    doc['services']['api']['environment']['AUTH_DEV_ADMIN_BYPASS'] = 'true'
+    with pytest.raises(ValueError, match='BYPASS_FORBIDDEN'):
+        module.validate(doc)
+
+
+def test_database_auth_local_and_tls():
+    doc = database_fixture()
+    module.validate(doc)
+    env, web = doc['services']['api']['environment'], doc['services']['frontend']['environment']
+    env.update(AUTH_ORIGIN='https://etl.test:8443', AUTH_DEPLOYMENT_PROFILE='multi_machine',
+               AUTH_PUBLIC_ENABLED='true', AUTH_COOKIE_SECURE='true')
+    web.update(AUTH_ORIGIN=env['AUTH_ORIGIN'], AUTH_TLS='true')
+    doc['services']['frontend']['ports'][0].update(host_ip='0.0.0.0', published='8443', target=8443)
+    module.validate(doc)
+
+
+@pytest.mark.parametrize('change,code', [
+    (lambda d: d['services']['api']['environment'].update(AUTH_DEV_ADMIN_BYPASS='true'), 'BYPASS_FORBIDDEN'),
+    (lambda d: d['services']['api']['secrets'].append('admin_password_hash'), 'DATABASE_SECRET_SCOPE_INVALID'),
+    (lambda d: d['services']['api']['secrets'].remove('auth_database_url'), 'DATABASE_SECRET_SCOPE_INVALID'),
+    (lambda d: d['services']['frontend']['secrets'].append('auth_database_url'), 'SECRET_SCOPE_INVALID'),
+    (lambda d: d['services']['ocr-worker']['secrets'].append('auth_database_url'), 'SECRET_SCOPE_INVALID'),
+    (lambda d: d['services']['api']['environment'].update(AUTH_DATABASE_URL_FILE='/tmp/url'), 'DATABASE_SECRET_REQUIRED'),
+])
+def test_database_auth_secrets_and_bypass_fail_closed(change, code):
+    doc = database_fixture()
+    change(doc)
+    with pytest.raises(ValueError, match=code):
+        module.validate(doc)

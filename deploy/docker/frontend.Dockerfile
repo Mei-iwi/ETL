@@ -27,6 +27,9 @@ COPY --chmod=0555 deploy/docker/auth-entrypoint.sh /opt/etl/auth-entrypoint.sh
 COPY --chmod=0555 deploy/docker/web-health.sh /opt/etl/web-health.sh
 COPY --from=build /web/dist /usr/share/nginx/html
 COPY --from=api-docs /output /usr/share/nginx/html/api-docs
+USER root
+RUN sed -i 's/\r$//' /opt/etl/auth-entrypoint.sh /opt/etl/web-health.sh \
+    && chmod 0555 /opt/etl/auth-entrypoint.sh /opt/etl/web-health.sh
 USER 101:101
 EXPOSE 8080
 HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 CMD ["/opt/etl/web-health.sh"]

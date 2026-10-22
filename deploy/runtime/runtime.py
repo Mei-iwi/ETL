@@ -68,8 +68,11 @@ def verify_runtime(role):
     authenticated = role == 'api' and os.environ.get('AUTH_MODE', 'legacy_local') != 'legacy_local'
     if authenticated:
         from data_sync_etl.config import Settings
-        from data_sync_etl.security.auth import AuthService
-        AuthService(Settings(_env_file=None))
+        from data_sync_etl.security.auth import create_auth_service, validate_mode
+        if os.environ.get('AUTH_MODE') == 'master_users':
+            validate_mode(Settings(_env_file=None))
+            load_connections()
+        create_auth_service(Settings(_env_file=None))
     else:
         if os.environ.get('ETL_ACCESS_MODE', 'local-locked') != 'local-locked':
             raise ValueError('BLOCKED_AUTH_PUBLIC')
@@ -153,8 +156,11 @@ def main():
             return 0
         if action == 'check-auth':
             from data_sync_etl.config import Settings
-            from data_sync_etl.security.auth import AuthService
-            AuthService(Settings(_env_file=None))
+            from data_sync_etl.security.auth import create_auth_service, validate_mode
+            if os.environ.get('AUTH_MODE') == 'master_users':
+                validate_mode(Settings(_env_file=None))
+                load_connections()
+            create_auth_service(Settings(_env_file=None))
             print('{"status":"PASS","operation":"auth_configuration"}')
             return 0
         if action == 'api':

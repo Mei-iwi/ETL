@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 if [ "${AUTH_MODE:-legacy_local}" = legacy_local ]; then exec nginx -g 'daemon off;'; fi
-case "${AUTH_MODE:-}" in single_admin|local_demo) ;; *) echo AUTH_MODE_INVALID >&2; exit 1;; esac
+case "${AUTH_MODE:-}" in single_admin|db_users|master_users|local_demo) ;; *) echo AUTH_MODE_INVALID >&2; exit 1;; esac
 ETL_AUTH_ORIGIN="${AUTH_ORIGIN:?AUTH_ORIGIN_REQUIRED}"
 printf '%s' "$ETL_AUTH_ORIGIN" | grep -Eq '^https?://[a-zA-Z0-9.-]+(:[0-9]{1,5})?$' || { echo AUTH_ORIGIN_INVALID >&2; exit 1; }
 ETL_AUTH_HOST="${ETL_AUTH_ORIGIN#*://}"

@@ -9,7 +9,7 @@ def validate(document):
     api, frontend = services['api'], services['frontend']
     env, web = api['environment'], frontend['environment']
     mode = env.get('AUTH_MODE')
-    if mode not in ('single_admin', 'local_demo'):
+    if mode not in ('single_admin', 'local_demo', 'db_users', 'master_users'):
         raise ValueError('AUTH_MODE_REQUIRED')
     if api.get('ports') or api.get('network_mode') or frontend.get('network_mode'):
         raise ValueError('AUTH_API_MUST_BE_PRIVATE')
@@ -27,7 +27,7 @@ def validate(document):
         if env.get('AUTH_PUBLIC_ENABLED') != 'false' or web.get('AUTH_TLS') != 'false':
             raise ValueError('AUTH_LOCAL_PROFILE_INVALID')
     elif env.get('AUTH_DEPLOYMENT_PROFILE') == 'multi_machine':
-        if mode != 'single_admin' or origin.scheme != 'https' or env.get('AUTH_COOKIE_SECURE') != 'true' or web.get('AUTH_TLS') != 'true':
+        if mode not in ('single_admin', 'db_users', 'master_users') or origin.scheme != 'https' or env.get('AUTH_COOKIE_SECURE') != 'true' or web.get('AUTH_TLS') != 'true':
             raise ValueError('AUTH_TLS_REQUIRED')
     else:
         raise ValueError('AUTH_DEPLOYMENT_PROFILE_REQUIRED')
@@ -39,12 +39,18 @@ def validate(document):
         raise ValueError('AUTH_BYPASS_FORBIDDEN')
     for name, service in services.items():
         granted = {s['source'] if isinstance(s, dict) else s for s in service.get('secrets', [])}
-        if name != 'api' and granted & {'admin_password_hash', 'session_signing_key'}:
+        if name != 'api' and granted & {'admin_password_hash', 'session_signing_key', 'auth_database_url'}:
             raise ValueError('AUTH_ACCOUNT_SECRET_SCOPE_INVALID')
         if name not in ('api', 'frontend') and 'auth_proxy_key' in granted:
             raise ValueError('AUTH_PROXY_SECRET_SCOPE_INVALID')
     if any(not service.get('read_only') for name, service in services.items() if name in ('api', 'frontend')):
         raise ValueError('AUTH_READ_ONLY_REQUIRED')
+    if mode == 'db_users':
+        granted = {item['source'] if isinstance(item, dict) else item for item in api.get('secrets', [])}
+        if 'auth_database_url' not in granted or 'admin_password_hash' in granted:
+            raise ValueError('AUTH_DATABASE_SECRET_SCOPE_INVALID')
+        if env.get('AUTH_DATABASE_URL_FILE') != '/run/secrets/auth_database_url':
+            raise ValueError('AUTH_DATABASE_SECRET_REQUIRED')
 
 
 def main():

@@ -84,7 +84,7 @@ test(`${mode}: real authentication and responsive UI`, {
     assert.equal(await evaluate("document.querySelector('.etl-theme') === null"), true)
     assert.equal(await evaluate("!!document.querySelector('.etl-login-orbit')"), true)
     await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] })
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('#login-title')).color"), 'rgb(15, 23, 42)')
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('#login-title')).color"), 'rgb(248, 250, 252)')
     await screenshot('login-desktop-dark-preference')
     await call('Emulation.setDeviceMetricsOverride', { width: 320, height: 740, deviceScaleFactor: 1, mobile: true })
     assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true)
