@@ -49,7 +49,7 @@ test('local auth proxy preserves browser host and overwrites client proxy creden
         process.env.AUTH_PROXY_KEY_FILE = path
         const loaded = await loadConfigFromFile({ command: 'serve', mode: 'test' }, 'frontend/vite.config.ts')
         assert.equal(loaded.config.server.strictPort, true)
-        for (const route of ['/api', '/admin']) {
+        for (const route of ['/api', '/admin', '/docs', '/openapi.json']) {
             const config = loaded.config.server.proxy[route]
             assert.equal(config.changeOrigin, false)
             let handler
@@ -70,3 +70,15 @@ test('local auth proxy preserves browser host and overwrites client proxy creden
         rmdirSync(directory)
     }
 })
+
+for (const path of ['/docs', '/docs/', '/docs?view=1', '/docs/oauth2-redirect', '/openapi.json', '/openapi.json?refresh=1']) {
+    test('Swagger proxy retains loopback boundary: ' + path, () => {
+        for (const [peer, expected] of [['127.0.0.1', true], ['10.1.2.3', false]]) {
+            let next = false, status = 0
+            localProxyGuard({ url: path, socket: { remoteAddress: peer } },
+                { writeHead(code) { status = code }, end() {} }, () => { next = true })
+            assert.equal(next, expected)
+            assert.equal(status, expected ? 0 : 403)
+        }
+    })
+}
