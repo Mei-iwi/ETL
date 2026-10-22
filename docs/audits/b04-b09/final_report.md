@@ -77,7 +77,7 @@ Checkpoint trước regression mới: 1050 unit PASS (713.31s), 234 integration 
 
 Các trạng thái thiếu tài liệu và worktree D:/HK7/... dưới đây thuộc checkpoint cũ, không phản ánh checkout được người dùng phê duyệt cho lượt nghiệm thu trên.
 
-> Đây là checkpoint trước yêu cầu push tiếp theo. Trạng thái đồng bộ và xuất bản mới nhất xem [push_report.md](push_report.md).
+> Đây là checkpoint lịch sử; trạng thái nhánh và xuất bản cần đối chiếu trực tiếp với Git.
 
 ## Kết luận
 
