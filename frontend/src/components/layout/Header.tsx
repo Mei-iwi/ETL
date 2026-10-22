@@ -3,10 +3,11 @@ import logoBook from '../../assets/img/logoBook.png'
 import { NavLink } from 'react-router'
 import { useEffect, useRef, useState } from 'react'
 import { UserRound, LogOut, ChevronDown } from 'lucide-react'
-import { useAuth } from '../../auth/AuthProvider'
+import { canVisit, useAuth } from '../../auth/AuthProvider'
 import { navagationItems } from '../../config/navigation'
 
 export function Header() {
+    const auth = useAuth()
     type ConnectionState = 'checking' | 'online' | 'offline'
 
     const [connectionState, setConnectionState] = useState<ConnectionState>('checking')
@@ -70,7 +71,7 @@ export function Header() {
             </NavLink>
 
             <nav className='main-menu' aria-label='Menu chính'>
-                {navagationItems.map(({ to, label, icon: Icon, end }) => (
+                {navagationItems.filter(item => canVisit(item.to, auth.principal) || item.children.some(child => canVisit(child.to, auth.principal))).map(({ to, label, icon: Icon, end }) => (
                     <NavLink
                         key={to}
                         to={to}
@@ -131,14 +132,15 @@ function AccountMenu() {
     }
 
     return <details className="header-account" ref={menu}>
-        <summary className="header-account-trigger" aria-label="Tài khoản quản trị">
+        <summary className="header-account-trigger" aria-label="Tài khoản">
             <span className="header-account-avatar"><UserRound aria-hidden="true" /></span>
             <ChevronDown className="header-account-chevron" aria-hidden="true" />
         </summary>
         <div className="header-account-panel">
-            <p className="header-account-name">{auth.mode === 'local_demo' ? 'Quản trị thử nghiệm · localhost' : 'Quản trị viên'}</p>
+            <p className="header-account-name">{auth.principal.display_name || (auth.mode === 'local_demo' ? 'Quản trị thử nghiệm · localhost' : 'Quản trị viên')}</p>
+            {auth.mode === 'db_users' && <NavLink to="/account/password">Đổi mật khẩu</NavLink>}
             {!auth.principal.admin_feature_enabled && <p className="header-account-note">Chức năng quản trị đang tắt</p>}
-            {auth.mode === 'single_admin' && <button className="header-account-logout" type="button" disabled={busy} onClick={() => void logout()}>
+            {['single_admin', 'db_users', 'master_users'].includes(auth.mode) && <button className="header-account-logout" type="button" disabled={busy} onClick={() => void logout()}>
                 <LogOut aria-hidden="true" />{busy ? 'Đang đăng xuất…' : 'Đăng xuất'}
             </button>}
             {error && <p className="header-account-error" role="alert">{error}</p>}

@@ -1,0 +1,114 @@
+.account-page {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.account-form {
+    display: grid;
+    gap: 16px;
+    max-width: 620px;
+    padding: 24px;
+    margin: 20px 0;
+    border: 1px solid #dbe3ee;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.account-form h2 {
+    margin: 0;
+    font-size: 18px;
+    overflow-wrap: anywhere;
+}
+
+.account-form label {
+    display: grid;
+    gap: 6px;
+    font-size: 14px;
+}
+
+.account-form input:not([type=checkbox]),
+.account-form select,
+.account-form textarea {
+    width: 100%;
+    min-height: 40px;
+    padding: 8px 12px;
+    border: 1px solid #94a3b8;
+    border-radius: 8px;
+    font: inherit;
+    box-sizing: border-box;
+}
+
+.account-form fieldset {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+}
+
+.account-form fieldset label {
+    display: flex;
+    align-items: center;
+}
+
+.account-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.account-page button {
+    padding: 8px 12px;
+    min-height: 36px;
+    color: #fff;
+    background: #1e3a8a;
+    border: 0;
+    border-radius: 8px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.account-page button:disabled {
+    opacity: .55;
+    cursor: wait;
+}
+
+.account-page :focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 3px;
+}
+
+.account-error {
+    color: #b91c1c;
+}
+
+.account-table {
+    width: 100%;
+    overflow-x: auto;
+    margin: 20px 0;
+}
+
+.account-table table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+}
+
+.account-table th,
+.account-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #dbe3ee;
+    font-size: 13px;
+}
+
+.account-table td {
+    overflow-wrap: anywhere;
+}
+
+.header-account-panel a {
+    display: block;
+    margin: 0 0 12px;
+    font-size: 13px;
+}

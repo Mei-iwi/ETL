@@ -15,7 +15,7 @@ export function LoginPage() {
     const mounted = useRef(true)
     useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
     useEffect(() => { if (error) alert.current?.focus() }, [error])
-    if (auth.status === 'authenticated') return <SignedInRedirect to={safeReturnTo(params.get('returnTo'))} />
+    if (auth.status === 'authenticated') return <SignedInRedirect to={auth.principal?.must_change_password ? '/account/password' : safeReturnTo(params.get('returnTo'))} />
     async function submit(event: FormEvent) {
         event.preventDefault()
         if (busy || auth.status === 'unavailable' || auth.status === 'loading') return

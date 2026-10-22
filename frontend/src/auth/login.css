@@ -112,6 +112,10 @@
     font-size: 13px;
     box-shadow: 0 1px 2px #0f172a05;
 }
+.etl-login input::-ms-reveal,
+.etl-login input::-ms-clear {
+    display: none;
+}
 .etl-login input::placeholder { color: #94a3b8; opacity: 1; }
 .etl-login input:not([type=checkbox]):focus-visible {
     border-color: #818cf8;

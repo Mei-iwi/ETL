@@ -8,6 +8,7 @@ import {
 import './App.css'
 import { AuthGuard, AuthProvider } from './auth/AuthProvider'
 import { LoginPage } from './auth/LoginPage'
+import { AccountManagementPage, ChangePasswordPage } from './auth/AccountPages'
 
 import { AppLayout } from './components/layout/AppLayout'
 import { OverviewSummary } from './pages/overview/OverviewSummary'
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<AuthGuard />}>
         <Route path="/" element={<AppLayout />}>
+          <Route path="account/password" element={<ChangePasswordPage />} />
           <Route
             index
             element={<Navigate to="overview" replace />}
@@ -89,6 +91,7 @@ export default function App() {
           <Route path='systems'>
             <Route index element={<Navigate to='status' />} />
             <Route path='status' element={<SystemStatusPage />} />
+            <Route path='users' element={<AccountManagementPage />} />
             <Route path='master-data' element={<MasterDataPage />} />
             <Route path='capabilities' element={<SystemCapalitiesPage />} />
             <Route path='master-sync' element={<Navigate to='/library/source-sync' replace />} />

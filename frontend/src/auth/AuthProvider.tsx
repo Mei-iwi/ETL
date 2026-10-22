@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router'
 import { clearAuthRequests, setAuthMode } from './transport'
 
-type Principal = { role: 'ADMIN'; mode: string; admin_feature_enabled: boolean }
+export type Principal = { id?: string; role: 'ADMIN' | 'OPERATOR' | 'VIEWER'; mode: string; admin_feature_enabled: boolean;
+    roles?: string[]; display_name?: string; email?: string; must_change_password?: boolean; permissions?: string[]; resource_ids?: string[] }
 type Status = 'loading' | 'authenticated' | 'anonymous' | 'unavailable'
 type Auth = { status: Status; mode: string; principal?: Principal; refresh: () => Promise<void>; logout: () => Promise<void> }
 const Context = createContext<Auth | undefined>(undefined)
@@ -20,16 +21,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (!config.ok) throw new Error('Auth unavailable')
             const value = await config.json()
             if (expected !== revision.current) return
-            if (!['single_admin', 'local_demo', 'legacy_local'].includes(value.mode)) throw new Error('Invalid auth mode')
+            if (!['single_admin', 'db_users', 'master_users', 'local_demo', 'legacy_local'].includes(value.mode)) throw new Error('Invalid auth mode')
             setMode(value.mode); setAuthMode(value.mode)
             if (value.mode === 'legacy_local') { setPrincipal(undefined); setStatus('authenticated'); return }
             const response = await fetch('/api/v1/auth/me')
             if (expected !== revision.current) return
             if (response.status === 401) { expired(); return }
+            if (value.mode === 'master_users' && response.status === 503) {
+                const failure = await response.json().catch(() => null)
+                if (['AUTH_MASTER_STALE', 'AUTH_MASTER_UNAVAILABLE'].includes(failure?.detail?.code)) {
+                    if (expected === revision.current) expired()
+                    return
+                }
+            }
             if (!response.ok) throw new Error('Auth unavailable')
             const user = await response.json()
             if (expected !== revision.current) return
-            if (user.role !== 'ADMIN') throw new Error('Invalid principal')
+            if (!['ADMIN', 'OPERATOR', 'VIEWER'].includes(user.role)) throw new Error('Invalid principal')
+            if (['db_users', 'master_users'].includes(value.mode) && (!Array.isArray(user.roles) || user.roles.some((role: string) => !['admin', 'operator', 'viewer'].includes(role)))) throw new Error('Invalid roles')
             setPrincipal(user); setStatus('authenticated')
         } catch { if (expected === revision.current) { setPrincipal(undefined); setStatus('unavailable') } }
     }, [expired])
@@ -40,7 +49,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         channel.onmessage = event => { if (event.data === 'logout') expired() }
         const restored = (event: PageTransitionEvent) => { if (event.persisted) { expired(); void refresh() } }
         window.addEventListener('pageshow', restored)
-        return () => { window.removeEventListener('etl:session-expired', expired); window.removeEventListener('pageshow', restored); channel.close() }
+        const onFocus = () => { void refresh() }
+        window.addEventListener('focus', onFocus)
+        return () => { window.removeEventListener('etl:session-expired', expired); window.removeEventListener('pageshow', restored); window.removeEventListener('focus', onFocus); channel.close() }
     }, [refresh, expired])
     const logout = async () => {
         const response = await fetch('/api/v1/auth/logout', { method: 'POST' })
@@ -66,5 +77,25 @@ export function AuthGuard() {
     if (auth.status === 'loading') return <div role="status">Đang kiểm tra phiên đăng nhập…</div>
     if (auth.status === 'unavailable') return <div role="alert">Dịch vụ xác thực chưa khả dụng. <button onClick={() => void auth.refresh()}>Thử lại</button></div>
     if (auth.status === 'anonymous') return <Navigate to={`/login?returnTo=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />
+    if (auth.principal?.must_change_password && location.pathname !== '/account/password') return <Navigate to="/account/password" replace />
+    if (!canVisit(location.pathname, auth.principal)) return <Navigate to="/overview/summary" replace />
     return <Outlet />
+}
+
+export function canVisit(path: string, user?: Principal) {
+    if (path === '/systems/users') return user?.mode === 'db_users' && user.role === 'ADMIN' && !user.must_change_password
+    if (!user || !['db_users', 'master_users'].includes(user.mode)) return true
+    if (user.must_change_password) return path === '/account/password'
+    if (path === '/account/password' || path === '/' || path.startsWith('/overview') || path.startsWith('/search')) return true
+    if (user.role === 'ADMIN') return true
+    if (path === '/library' || path === '/library/list') return true
+    const resource = /^\/library\/([^/]+)(?:\/versions)?$/.exec(path)
+    if (resource && user.resource_ids?.includes(resource[1])) return true
+    if (user.role !== 'OPERATOR') return false
+    const permissions = user.permissions || []
+    if (path.startsWith('/library/source-')) return permissions.includes('sync')
+    if (path === '/library/indexing') return permissions.includes('index')
+    if (path === '/library/processing') return permissions.includes('process')
+    if (path.startsWith('/experiments')) return permissions.includes('evaluation')
+    return false
 }
