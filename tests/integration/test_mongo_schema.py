@@ -341,3 +341,27 @@ def test_legacy_auth_fields_not_returned(mongo_db):
     mongo_db.users.insert_one({**samples()["users"], "hashed_password": "PRIVATE"})
     doc = MongoMetadataStore(mongo_db).get_user("id-1").bson()
     assert "hashed_password" not in doc and "PRIVATE" not in repr(doc)
+
+
+def test_personal_profile_cas_preserves_subject_and_other_users(mongo_db):
+    from data_sync_etl.adapters.mongo.foundation_store import ProfileConflict, user_profile_revision
+
+    initialize(mongo_db, dimension=2, apply=True)
+    store = MongoMetadataStore(mongo_db)
+    stamp = now()
+    store.upsert_user(UserProfileDocument(_id='profile-owner', created_at=stamp, updated_at=stamp,
+        subject_id='subject-1', bio='Original'))
+    store.upsert_user(UserProfileDocument(_id='other-user', created_at=stamp, updated_at=stamp, bio='Other'))
+    original = store.get_user('profile-owner')
+    token = user_profile_revision(original)
+    updated = store.update_personal_profile('profile-owner', {'bio': 'Updated', 'address': None}, token)
+    assert updated.subject_id == 'subject-1' and updated.created_at == original.created_at
+    assert updated.bio == 'Updated' and store.get_user('other-user').bio == 'Other'
+    with pytest.raises(ProfileConflict):
+        store.update_personal_profile('profile-owner', {'bio': 'Lost update'}, token)
+    with pytest.raises(DomainError):
+        store.update_personal_profile('profile-owner', {'subject_id': 'other'}, user_profile_revision(updated))
+    created = store.update_personal_profile('explicitly-mapped-new', {'bio': 'New'}, 'missing')
+    assert created.bio == 'New'
+    with pytest.raises(ProfileConflict):
+        store.update_personal_profile('explicitly-mapped-new', {'bio': 'Overwrite'}, 'missing')

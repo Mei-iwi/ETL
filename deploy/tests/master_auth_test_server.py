@@ -18,7 +18,7 @@ with container.uow() as repo:
     repo.update('master_users', 'user-1', {
         'email': 'master@etl.test', 'hashed_password': f'pbkdf2_sha256$120000${salt}${digest}',
         'source_origin': 'POSTGRESQL', 'is_active': True, 'deleted_at': None, 'source_missing_at': None,
-        'role_is_active': True, 'role_deleted_at': None, 'email_verified_at': now(), 'role_code': 'ADMIN',
+        'role_is_active': True, 'role_deleted_at': None, 'email_verified_at': now(), 'role_code': 'USER',
     })
 class QAReader(MasterIdentityReader):
     def read(self, **kwargs):

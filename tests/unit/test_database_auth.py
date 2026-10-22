@@ -266,11 +266,16 @@ def test_granted_viewer_search_context_and_revocation(searchable, database_auth,
         database_auth[3].change(user['id'], {'resource_ids': []})
         assert api.get('/api/v1/chunks/' + context_id + '/context').status_code == 401
         assert login(api, database_auth[1], 'viewer@etl.test').status_code == 200
+        assert api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method}).json()['total'] == 1
+        assert api.get('/api/v1/chunks/' + context_id + '/context').status_code == 200
+        # Revoking a personal grant does not unpublish shared content. Unpublishing does.
+        with container.uow() as repo:
+            repo.update('master_learning_resources', version['resource_id'], {'publication_status': 'DRAFT'})
         assert api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method}).json()['total'] == 0
         assert api.get('/api/v1/chunks/' + context_id + '/context').status_code == 404
 
 
-def test_source_file_requires_explicit_grant_and_retains_reference_only(source_viewer, database_auth):
+def test_source_public_file_and_explicit_grant_retain_reference_only(source_viewer, database_auth):
     container, version, _, _ = source_viewer
     assert container is database_auth[0]
     user = make_user(database_auth)
@@ -281,7 +286,7 @@ def test_source_file_requires_explicit_grant_and_retains_reference_only(source_v
     path = '/api/v1/resource-versions/' + version['id'] + '/file'
     with client(database_auth) as api:
         assert login(api, database_auth[1], 'viewer@etl.test').status_code == 200
-        assert api.get(path).status_code == 403
+        assert api.get(path).status_code == 200  # Every unit in this fixture is reviewed and public.
         database_auth[3].change(user['id'], {'resource_ids': [version['resource_id']]})
         assert login(api, database_auth[1], 'viewer@etl.test').status_code == 200
         response = api.get(path)

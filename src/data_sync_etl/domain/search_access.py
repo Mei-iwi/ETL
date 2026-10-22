@@ -18,13 +18,18 @@ class SearchAccess:
     scope: str = 'public'
     resource_ids: frozenset[str] = frozenset()
     actor_id: str | None = None
+    owner_id: str | None = None
+    allow_public: bool = False
+    allow_owned_unreviewed: bool = False
 
     @property
     def internal(self):
         return self.scope in ('local_demo', 'authenticated_admin', 'authenticated_user')
 
     # Authenticated scope is created by the API's server-side session boundary,
-    # never from request JSON. Public rights remain unconfirmed.
+    # never from request JSON. Public whole-file reads additionally require every
+    # unit through file_version. Only the owner can search/preview their unreviewed
+    # file; this does not publish it or expose it to other users' shared search.
 
     def allows(self, resource, version, unit):
         return self.evaluate(resource, version, unit) in ('ALLOW_LOCAL_DEMO', 'ALLOW_AUTHENTICATED_ADMIN', 'ALLOW_AUTHENTICATED_USER')
@@ -46,8 +51,15 @@ class SearchAccess:
                 return 'CONTENT_RESTRICTED'
         review = unit.get('review_status')
         if self.scope == 'authenticated_user':
-            if resource['id'] not in self.resource_ids:
+            owned = (self.owner_id is not None and resource.get('created_by') == self.owner_id
+                     and resource['id'] in self.resource_ids)
+            if (self.allow_owned_unreviewed and owned and review == 'UNREVIEWED'
+                    and unit.get('retrieval_eligible') is False):
+                return 'ALLOW_AUTHENTICATED_USER'
+            if not self.allow_public and resource['id'] not in self.resource_ids:
                 return 'RESOURCE_NOT_GRANTED'
+            if not self.allow_public and self.owner_id is not None and resource.get('created_by') != self.owner_id:
+                return 'RESOURCE_NOT_OWNED'
             return ('ALLOW_AUTHENTICATED_USER' if review in ('APPROVED', 'REVIEWED')
                     and unit.get('retrieval_eligible') is True else 'RETRIEVAL_DENIED')
         if not self.internal:

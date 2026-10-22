@@ -632,7 +632,22 @@ def get_resource(id: ResourceId, request: Request) -> ResourceDetailResponse:
 )
 def list_resource_versions(id: ResourceId, request: Request) -> list[dict]:
     try:
-        return request.app.state.container.resource_versions.run(id)
+        container = request.app.state.container
+        principal = getattr(request.state, 'auth_principal', None)
+        if container.settings.auth_mode != 'legacy_local' and principal is None:
+            from data_sync_etl.security.auth import AuthError
+            raise AuthError('AUTH_LOGIN_REQUIRED', 401)
+        versions = container.resource_versions.run(id)
+        if principal and principal.mode in ('db_users', 'master_users') and principal.role != 'ADMIN':
+            from data_sync_etl.security.authorization import can_read_public_file, owns_resource
+            with container.uow() as repo:
+                resource = repo.get('master_learning_resources', id)
+            if id not in principal.resource_ids or not owns_resource(principal, resource):
+                versions = [row for row in versions if can_read_public_file(container, row['id'])]
+                readable_ids = {row['id'] for row in versions}
+                versions = [{**row, 'parent_version_id': row['parent_version_id']
+                             if row['parent_version_id'] in readable_ids else None} for row in versions]
+        return versions
     except ResourceNotFound:
         raise HTTPException(status_code=404, detail="Resource not found") from None
 

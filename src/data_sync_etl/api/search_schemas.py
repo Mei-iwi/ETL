@@ -65,6 +65,7 @@ class SearchItem(StrictDTO):
     content_unit_id: str
     context_id: str
     context_url: str
+    can_view_file: bool = False
 
 
 class SearchResponse(StrictDTO):
