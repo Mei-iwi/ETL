@@ -35,9 +35,11 @@ def strings(nullable=False):
     }
 
 
-def contracts(dimension: int) -> dict[str, dict]:
+def contracts(dimension: int, *, historical_dimensions=()) -> dict[str, dict]:
     if not 1 <= dimension <= 4096:
         raise DomainError("Invalid embedding dimension")
+    if any(type(value) is not int or not 1 <= value <= 4096 or value == dimension for value in historical_dimensions):
+        raise DomainError("Invalid historical embedding dimension")
     base = {
         "_id": string(maximum=30, minimum=1),
         "created_at": {"bsonType": "date"},
@@ -247,6 +249,16 @@ def contracts(dimension: int) -> dict[str, dict]:
             False,
         ]
     }
+    if historical_dimensions:
+        properties = validators['content_bags']['$jsonSchema']['properties']
+        vector = properties['embedding']
+        properties['embedding'] = {'oneOf': [
+            {**vector, 'minItems': size, 'maxItems': size}
+            for size in sorted({dimension, *historical_dimensions})]}
+        # Historical dimensions can be retained only as inactive documents.
+        # This remains inside the array type guard before evaluating $size.
+        validators['content_bags']['$expr']['$cond'][1]['$and'].append({'$or': [
+            {'$eq': [{'$size': '$embedding'}, dimension]}, {'$eq': ['$is_current', False]}]})
     return validators
 
 
@@ -346,11 +358,11 @@ def _index_spec(index):
                        "collation", "hidden", "expireAfterSeconds")}
 
 
-def check_schema(database, *, dimension, validation_level="strict", audit_documents=False):
+def check_schema(database, *, dimension, validation_level="strict", audit_documents=False, historical_dimensions=()):
     """Shared read-only guard. HTTP/worker checks never scan stored documents."""
     if validation_level not in ("strict", "moderate"):
         raise DomainError("Unsupported validation level")
-    validators = contracts(dimension)
+    validators = contracts(dimension, historical_dimensions=historical_dimensions)
     catalog = {row["name"]: row for row in database.list_collections()}
     report = {
         "database": database.name, "schema_version": SCHEMA_VERSION, "mode": "check",
@@ -419,13 +431,13 @@ def check_schema(database, *, dimension, validation_level="strict", audit_docume
     return report
 
 
-def initialize(database, *, dimension, apply=False, validation_level="strict") -> dict:
+def initialize(database, *, dimension, apply=False, validation_level="strict", historical_dimensions=()) -> dict:
     """Audit all collections before explicit additive DDL; never migrate incompatible schemas."""
     report = check_schema(database, dimension=dimension, validation_level=validation_level,
-                          audit_documents=True)
+                          audit_documents=True, historical_dimensions=historical_dimensions)
     if not apply:
         return report
-    validators = contracts(dimension)
+    validators = contracts(dimension, historical_dimensions=historical_dimensions)
     catalog = {row["name"]: row for row in database.list_collections()}
     # Preflight ALL collections and indexes before the first write.
     if report["incompatible_collections"]:
@@ -454,7 +466,7 @@ def initialize(database, *, dimension, apply=False, validation_level="strict") -
         idx = next(i for i in INDEXES[item["collection"]] if i.name == item["name"])
         database[item["collection"]].create_index(list(idx.keys), name=idx.name, unique=idx.unique)
     checked = check_schema(database, dimension=dimension, validation_level=validation_level,
-                           audit_documents=True)
+                           audit_documents=True, historical_dimensions=historical_dimensions)
     checked["mode"] = "apply"
     return checked
 
@@ -506,6 +518,7 @@ def main(argv=None) -> int:
             dimension=settings.index_embedding_dimension,
             apply=args.apply,
             validation_level=args.validation_level,
+            historical_dimensions=settings.index_historical_embedding_dimensions,
         )
         print(json.dumps(report, ensure_ascii=True))
         return 0 if report["ready"] else 1

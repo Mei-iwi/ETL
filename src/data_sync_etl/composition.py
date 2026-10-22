@@ -202,7 +202,8 @@ class Container:
             self.documents = MongoContentStore(mongo_database)
             self.metadata_documents = MongoMetadataStore(mongo_database)
             self.content_reader = MongoContentReader(mongo_database)
-            self.content_bags = MongoBagStore(mongo_database, self.settings.index_embedding_dimension)
+            self.content_bags = MongoBagStore(mongo_database, self.settings.index_embedding_dimension,
+                historical_dimensions=self.settings.index_historical_embedding_dimensions)
         else:
             self.documents = documents
 

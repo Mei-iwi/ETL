@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     index_embedding_model_id: str = Field(default="", max_length=255)
     index_embedding_model_version: str = Field(default="", max_length=128)
     index_embedding_dimension: int = Field(default=384, ge=1, le=4096)
+    index_historical_embedding_dimensions: list[int] = Field(default_factory=list, max_length=8)
     index_max_chunks: int = Field(default=10000, ge=1, le=50000)
     index_max_units: int = Field(default=10000, ge=1, le=50000)
     index_max_source_chars: int = Field(default=10000000, ge=1, le=50000000)

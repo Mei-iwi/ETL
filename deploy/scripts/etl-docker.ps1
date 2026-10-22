@@ -4,6 +4,9 @@ param(
     [string]$EnvFile,
     [string]$Archive,
     [string]$ModelDirectory,
+    [string]$ModelId = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+    [string]$ModelRevision = 'e8f8c211226b894fcb81acc59f3b34ba3efd5f42',
+    [int]$ModelDimension = 384,
     [string]$NetworkName = 'etl-data',
     [switch]$Workers,
     [switch]$Drive,
@@ -75,6 +78,6 @@ switch ($Action) {
         New-Item -ItemType Directory -Path $ModelDirectory -Force | Out-Null
         $resolved = (Resolve-Path -LiteralPath $ModelDirectory).Path
         $image = if ($env:ETL_MODEL_TOOL_IMAGE) { $env:ETL_MODEL_TOOL_IMAGE } else { 'etl-portable-backend:local' }
-        Invoke-Docker @('run','--rm','--tmpfs','/run/etl:rw,uid=10001,gid=10001,mode=0700','--mount',"type=bind,source=$resolved,target=/model",'--entrypoint','python',$image,'/opt/etl/model.py','prepare','--directory','/model','--manifest','/model/etl-model-manifest.json','--accept-model-license')
+        Invoke-Docker @('run','--rm','--tmpfs','/run/etl:rw,uid=10001,gid=10001,mode=0700','--mount',"type=bind,source=$resolved,target=/model",'--entrypoint','python',$image,'/opt/etl/model.py','prepare','--directory','/model','--manifest','/model/etl-model-manifest.json','--model-id',$ModelId,'--revision',$ModelRevision,'--dimension',"$ModelDimension",'--accept-model-license')
     }
 }

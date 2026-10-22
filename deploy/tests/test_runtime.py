@@ -179,6 +179,45 @@ def test_model_rejects_wrong_contract_before_loading(tmp_path):
         model.verify(tmp_path, manifest)
 
 
+@pytest.mark.parametrize('dimension', [384, 1024])
+def test_model_manifest_configured_contract_and_tamper_detection(tmp_path, monkeypatch, dimension):
+    model = load_runtime('model')
+    revision = 'a' * 40
+    monkeypatch.setenv('INDEX_EMBEDDING_MODEL_ID', 'BAAI/bge-m3' if dimension == 1024 else model.MODEL_ID)
+    monkeypatch.setenv('INDEX_EMBEDDING_MODEL_VERSION', revision)
+    monkeypatch.setenv('INDEX_EMBEDDING_DIMENSION', str(dimension))
+    (tmp_path / 'etl-model-revision.txt').write_text(revision)
+    (tmp_path / 'modules.json').write_text('[{"path":""}]')
+    weights = tmp_path / 'pytorch_model.bin'
+    weights.write_bytes(b'fixture only, never loaded')
+    document = tmp_path / 'etl-model-manifest.json'
+    document.write_text(json.dumps(model.manifest(tmp_path)))
+    assert model.verify(tmp_path, document)['dimension'] == dimension
+    data = json.loads(document.read_text())
+    data['files'].reverse()
+    document.write_text(json.dumps(data))
+    assert model.verify(tmp_path, document)['dimension'] == dimension
+    with pytest.raises(ValueError, match='CONTRACT_MISMATCH'):
+        model.verify(tmp_path, document, dimension=1024 if dimension == 384 else 384)
+    weights.write_bytes(b'tampered fixture')
+    with pytest.raises(ValueError, match='CHECKSUM_MISMATCH'):
+        model.verify(tmp_path, document)
+
+
+@pytest.mark.parametrize(('revision', 'dimension'), [('main', 1024), ('a' * 40, 0), ('a' * 40, 4097)])
+def test_model_contract_requires_pinned_revision_and_bounded_dimension(revision, dimension):
+    model = load_runtime('model')
+    with pytest.raises(ValueError, match='CONTRACT_INVALID'):
+        model.contract('BAAI/bge-m3', revision, dimension)
+
+
+def test_model_file_order_is_identical_on_windows_and_linux(tmp_path):
+    model = load_runtime('model')
+    for name in ['config.json', 'README.md', 'a.json', 'Z.json']:
+        (tmp_path / name).write_text('fixture')
+    assert [path.name for path in model.model_files(tmp_path)] == ['README.md', 'Z.json', 'a.json', 'config.json']
+
+
 def test_sigterm_stops_claims_and_restores_handlers(tmp_path, monkeypatch):
     from data_sync_etl.workers.lifecycle import tick, worker_lifecycle
     marker = tmp_path / 'heartbeat.json'
