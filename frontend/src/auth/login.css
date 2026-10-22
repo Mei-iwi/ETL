@@ -1,0 +1,200 @@
+.etl-login {
+    --surface: rgba(250, 253, 253, .97);
+    --ink: #0f172a;
+    --muted: #64748b;
+    --field: #fff;
+    color-scheme: light;
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: 76px 20px 48px;
+    background: radial-gradient(ellipse at 0 0, #eef9ff, transparent 55%),
+        radial-gradient(ellipse at 100% 100%, #e0e7ff, transparent 60%), #fff;
+    color: var(--ink);
+    font-family: Inter, Arial, sans-serif;
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+}
+
+.etl-login * { box-sizing: border-box; }
+
+.etl-login-orbit {
+    position: absolute;
+    width: 570px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: -1;
+    background: conic-gradient(from 0deg, transparent 15%, #38bdf8 40%, transparent 55%, #818cf8 80%, transparent);
+    padding: 2px;
+    opacity: .5;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    animation: etl-orbit-turn 24s linear infinite;
+}
+
+@keyframes etl-orbit-turn { to { transform: rotate(360deg); } }
+
+.etl-login-border {
+    position: relative;
+    padding: 1.5px;
+    border-radius: 22px;
+    background: linear-gradient(115deg, #b8bfff, #9ee4ff, #a0f0d3);
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 16px 32px -20px #6366f180, 0 5px 12px -8px #6366f166;
+}
+
+.etl-login-card {
+    border-radius: 20.5px;
+    background: var(--surface);
+    padding: 72px 30px 30px;
+    min-height: 414px;
+}
+
+.etl-login-mark {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    height: 100px;
+    width: 100px;
+    display: grid;
+    place-items: center;
+    background: white;
+    border: 2px solid #b8d9eb;
+    border-radius: 50%;
+    overflow: hidden;
+    box-shadow: 0 4px 12px #25638a1a;
+}
+.etl-login-mark img { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+.etl-login h1 {
+    color: var(--ink);
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -.6px;
+    text-align: center;
+    margin: 0 0 28px;
+}
+
+.etl-login form > label {
+    display: block;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    margin: 18px 0 6px;
+}
+.etl-login form > label:first-child { margin-top: 0; }
+.etl-field { position: relative; }
+.etl-field-icon {
+    position: absolute;
+    left: 11px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 14px;
+    height: 14px;
+    color: #94a3b8;
+    pointer-events: none;
+}
+.etl-login input:not([type=checkbox]) {
+    width: 100%;
+    height: 36px;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    background: var(--field);
+    color: var(--ink);
+    padding: 8px 36px 8px 32px;
+    font: inherit;
+    font-size: 13px;
+    box-shadow: 0 1px 2px #0f172a05;
+}
+.etl-login input::placeholder { color: #94a3b8; opacity: 1; }
+.etl-login input:not([type=checkbox]):focus-visible {
+    border-color: #818cf8;
+    outline: 2px solid #818cf833;
+    outline-offset: 0;
+}
+.etl-password button {
+    position: absolute;
+    right: 1px;
+    top: 1px;
+    width: 34px;
+    height: 34px;
+    background: transparent;
+    border: 0;
+    color: #94a3b8;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+}
+.etl-password button svg { width: 14px; height: 14px; }
+.etl-login button { cursor: pointer; font: inherit; }
+.etl-login button:disabled { cursor: wait; opacity: .75; }
+.etl-login :focus-visible { outline: 2px solid #818cf8; outline-offset: 3px; }
+.etl-login .etl-remember {
+    display: flex;
+    gap: 7px;
+    align-items: center;
+    color: var(--muted);
+    text-transform: none;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 18px;
+    margin: 18px 0;
+}
+.etl-remember input {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    accent-color: #4f46e5;
+    flex-shrink: 0;
+}
+.etl-login-submit {
+    width: 100%;
+    min-height: 38px;
+    border: 0;
+    border-radius: 9px;
+    background: linear-gradient(110deg, #6366f1, #4f46e5, #0ea5e9);
+    color: white;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 6px 12px #6366f133;
+    transition: background .3s, transform .3s;
+}
+.etl-login-success { background: linear-gradient(110deg, #059669, #0d9488); transform: scale(1.015); }
+.etl-login-status { font-size: 12px; text-align: center; margin-top: 10px; color: var(--muted); }
+.etl-login-status:empty { display: none; }
+.etl-login-error {
+    background: #fff1f2;
+    color: #9f1239;
+    border: 1px solid #fda4af;
+    border-radius: 9px;
+    padding: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 16px 0;
+    overflow-wrap: anywhere;
+}
+.etl-login-error button { color: inherit; }
+
+@media(max-width:480px) {
+    .etl-login { padding: 76px 16px 28px; }
+    .etl-login-orbit { width: 130vw; }
+    .etl-login-card { padding: 72px 22px 28px; }
+    .etl-login input:not([type=checkbox]) { height: 42px; font-size: 16px; }
+    .etl-password button { width: 40px; height: 40px; }
+    .etl-login-submit { min-height: 42px; }
+}
+
+@media(prefers-reduced-motion:reduce) {
+    .etl-login * { animation: none !important; transition: none !important; }
+    .etl-login-success { transform: none; }
+}

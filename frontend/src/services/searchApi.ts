@@ -17,7 +17,7 @@ const integer = (value: unknown, min = 0): value is number => typeof value === '
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const nullableText = (value: unknown) => value === null || typeof value === 'string'
 const pageNumber = (value: unknown) => value === null || integer(value)
-const scope = (value: Record<string, unknown>) => value.access_scope === undefined || value.access_scope === 'public' || value.access_scope === 'local_demo'
+const scope = (value: Record<string, unknown>) => value.access_scope === undefined || value.access_scope === 'public' || value.access_scope === 'local_demo' || value.access_scope === 'authenticated_admin'
 
 function validItem(value: unknown) {
     return record(value) && textFields(value, ['resource_id', 'resource_title', 'resource_version_id', 'resource_type_code',

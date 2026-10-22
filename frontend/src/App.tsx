@@ -6,6 +6,8 @@ import {
   useLocation,
 } from 'react-router'
 import './App.css'
+import { AuthGuard, AuthProvider } from './auth/AuthProvider'
+import { LoginPage } from './auth/LoginPage'
 
 import { AppLayout } from './components/layout/AppLayout'
 import { OverviewSummary } from './pages/overview/OverviewSummary'
@@ -36,7 +38,10 @@ import { LibraryUpdateVersion } from './pages/library/LibraryUpdateVersion'
 export default function App() {
   return (
     <BrowserRouter>
+      <AuthProvider>
       <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route element={<AuthGuard />}>
         <Route path="/" element={<AppLayout />}>
           <Route
             index
@@ -90,7 +95,9 @@ export default function App() {
           </Route>
         </Route>
 
+        </Route>
       </Routes >
+      </AuthProvider>
     </BrowserRouter >
   )
 }

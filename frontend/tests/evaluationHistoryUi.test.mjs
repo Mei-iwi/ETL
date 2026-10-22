@@ -9,7 +9,7 @@ import { extname, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 
 const browserPath = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
-const root = resolve('frontend/dist')
+const root = resolve(process.env.ETL_TEST_DIST || 'frontend/dist')
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 test('evaluation history pages, opens saved results, reruns and recovers malformed lists', {
     skip: !existsSync(browserPath) || !existsSync(join(root, 'index.html')), timeout: 60000,
@@ -25,6 +25,7 @@ test('evaluation history pages, opens saved results, reruns and recovers malform
         const json = value => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
         if (req.method === 'POST') posts++
         if (url.pathname === '/health') return json({ status: 'ok', database: 'ok' })
+        if (url.pathname === '/api/v1/auth/config') return json({ mode: 'legacy_local' })
         if (url.pathname === '/api/v1/evaluations/runs') {
             const page = Number(url.searchParams.get('page'))
             return json(malformed ? null : { items: rows.slice((page - 1) * 7, page * 7), page, size: 7, total: 8, total_pages: 2 })
