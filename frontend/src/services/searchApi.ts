@@ -60,6 +60,8 @@ const messages: Record<string, string> = {
     SEARCH_MODEL_WARMUP_TIMEOUT: 'Chuẩn bị tìm kiếm quá thời gian. Vui lòng thử lại hoặc chọn BoW.',
     BLOCKED_EMBEDDING_RUNTIME: 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.',
     INVALID_EMBEDDING: 'Tìm kiếm theo ngữ nghĩa chưa sẵn sàng. Có thể chọn BoW.',
+    BLOCKED_INDEX_SCHEMA: 'Chỉ mục tìm kiếm chưa tương thích với cấu hình hiện tại. Vui lòng liên hệ quản trị viên để kiểm tra và cập nhật chỉ mục.',
+    SEARCH_SCHEMA_UNAVAILABLE: 'Chưa kết nối được dữ liệu chỉ mục tìm kiếm. Vui lòng thử lại sau.',
     SEARCH_INDEX_STALE: 'Chỉ mục vừa thay đổi. Vui lòng tìm lại.',
     CONTEXT_STALE: 'Nội dung đã thay đổi. Vui lòng tìm lại.',
 }
