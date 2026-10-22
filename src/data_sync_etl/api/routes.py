@@ -346,7 +346,7 @@ def get_evaluation_run(id: str, request: Request, response: Response,
         service, access = evaluation_services(request)
         run = service.get_run(id, access)
         rows = run['observations']
-        return {**run, 'observations': rows[offset:offset + limit],
+        return {**{key: value for key, value in run.items() if key != 'auth_user_id'}, 'observations': rows[offset:offset + limit],
                 'pagination': {'offset': offset, 'limit': limit, 'total': len(rows)}}
     except Exception as exc:
         raise evaluation_error(exc) from None
@@ -594,6 +594,9 @@ def list_resources(
         str | None, Query(max_length=50)
     ] = None
 ) -> ResouceListResponse:
+    principal = getattr(request.state, 'auth_principal', None)
+    allowed = (frozenset(principal.resource_ids) if principal is not None
+               and principal.mode in ('db_users', 'master_users') and principal.role != 'ADMIN' else None)
     result = (
         request.app.state.container.resource_listing.run(
             page=page,
@@ -602,6 +605,7 @@ def list_resources(
             subject_id=subject_id,
             grade_level_id=grade_level_id,
             resource_type_code=resource_type_code,
+            **({'allowed_resource_ids': allowed} if allowed is not None else {}),
         )
     )
     return ResouceListResponse.model_validate(result)

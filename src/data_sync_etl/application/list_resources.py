@@ -15,6 +15,7 @@ class ListResources:
             subject_id: str | None = None,
             grade_level_id: str | None = None,
             resource_type_code: str | None = None,
+            allowed_resource_ids: frozenset[str] | None = None,
     ) -> dict:
 
         offset = (page - 1) * size
@@ -27,6 +28,7 @@ class ListResources:
                 resource_type_code = resource_type_code,
                 offset = offset,
                 limit = size,
+                **({'allowed_resource_ids': allowed_resource_ids} if allowed_resource_ids is not None else {}),
             )
             summaries = repo.resource_version_summaries([row['id'] for row in rows])
 

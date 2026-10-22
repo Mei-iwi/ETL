@@ -79,7 +79,7 @@ class SearchResponse(StrictDTO):
     representation_unit: Literal['content_bag']
     ready_bag_count: int
     message: Literal['OK', 'NO_READY_INDEX', 'NO_ACCESSIBLE_CONTENT', 'QUERY_NO_KEYWORDS', 'PUBLIC_ACCESS_UNCONFIRMED']
-    access_scope: Literal['public', 'local_demo', 'authenticated_admin'] = 'public'
+    access_scope: Literal['public', 'local_demo', 'authenticated_admin', 'authenticated_user'] = 'public'
 
 
 class ContextChunk(StrictDTO):
@@ -101,7 +101,7 @@ class Heading(StrictDTO):
 
 
 class ContextResponse(StrictDTO):
-    access_scope: Literal['public', 'local_demo', 'authenticated_admin'] = 'public'
+    access_scope: Literal['public', 'local_demo', 'authenticated_admin', 'authenticated_user'] = 'public'
     resource_id: str
     resource_title: str
     resource_version_id: str

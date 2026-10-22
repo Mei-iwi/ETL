@@ -23,6 +23,13 @@ def canonical_schema(value):
     if not isinstance(value, dict):
         return value
     result = {key: canonical_schema(item) for key, item in value.items()}
+    # Framework versions use either standard reason phrase for the same HTTP 422.
+    # Preserve the status, schema and all business descriptions exactly.
+    validation_response = result.get('422')
+    if isinstance(validation_response, dict) and validation_response.get('description') in (
+        'Unprocessable Entity', 'Unprocessable Content',
+    ):
+        validation_response['description'] = 'Unprocessable Content'
     if result.get('type') == 'object':
         result.setdefault('additionalProperties', True)
     if result.get('type') == 'string' and result.get('contentMediaType') == 'application/octet-stream':
@@ -87,11 +94,11 @@ def test_openapi_keep_routes_and_models_match_g0_baseline():
     assert set(compatible['schemas'].pop('RunListResponse')['properties']) == {'items', 'total', 'page', 'size', 'total_pages'}
     assert compatible['schemas'].pop('RunListItem')['properties']
     scope = compatible['schemas']['RunDetailResponse']['properties']['scope']
-    assert scope.pop('enum') == ['local_demo', 'authenticated_admin']
+    assert scope.pop('enum') == ['local_demo', 'authenticated_admin', 'authenticated_user']
     scope['const'] = 'local_demo'
     for name in ('SearchResponse', 'ContextResponse'):
         access = compatible['schemas'][name]['properties']['access_scope']
-        assert access['enum'] == ['public', 'local_demo', 'authenticated_admin']
+        assert access['enum'] == ['public', 'local_demo', 'authenticated_admin', 'authenticated_user']
         access['enum'] = ['public', 'local_demo']
     additions = compatible["schemas"].pop("CatalogMetadata")
     assert set(additions["properties"]) == {"identity_overlaps", "source_status", "completeness"}

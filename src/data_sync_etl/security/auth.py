@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import json
 import re
 import secrets
 import time
@@ -28,6 +29,13 @@ class Principal:
     role: str
     mode: str
     provenance: str
+    roles: tuple[str, ...] = ()
+    display_name: str = ''
+    email: str = ''
+    must_change_password: bool = False
+    permissions: tuple[str, ...] = ()
+    resource_ids: tuple[str, ...] = ()
+    auth_version: int = 0
 
 
 def origin_parts(value):
@@ -49,7 +57,7 @@ def validate_mode(settings):
         return
     origin = origin_parts(settings.auth_origin)
     local = origin[1] in ('127.0.0.1', 'localhost', '::1')
-    if mode == 'single_admin':
+    if mode in ('single_admin', 'db_users', 'master_users'):
         if settings.auth_dev_admin_bypass:
             raise ValueError('AUTH_BYPASS_FORBIDDEN')
         if settings.auth_deployment_profile == 'localhost':
@@ -94,7 +102,7 @@ class AuthService:
             raise ValueError('AUTH_SECRET_FORMAT_INVALID')
         self.password_hash = b''
         self.hasher = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
-        if settings.auth_mode == 'single_admin':
+        if settings.auth_mode == 'single_admin' or (settings.auth_mode == 'master_users' and settings.admin_enabled):
             self.password_hash = read_secret(settings.admin_password_hash_file, 'AUTH_PASSWORD_HASH_REQUIRED')
             try:
                 params = extract_parameters(self.password_hash.decode('ascii'))
@@ -107,7 +115,15 @@ class AuthService:
             if (not settings.admin_login_email or len(settings.admin_login_email) > 254
                     or '@' not in settings.admin_login_email or settings.admin_login_email.endswith('.invalid')):
                 raise ValueError('AUTH_ADMIN_EMAIL_REQUIRED')
-        epoch = self.digest(settings.admin_login_email.encode() + b':' + self.password_hash)
+        epoch = self.digest(b'db_users:v1' if settings.auth_mode == 'db_users'
+                            else settings.admin_login_email.encode() + b':' + self.password_hash)
+        if settings.auth_mode == 'master_users':
+            epoch = self.digest(('master_users:v1:' + epoch + json.dumps({
+                'salt': settings.auth_master_pbkdf2_salt_encoding,
+                'configured_admin_enabled': settings.admin_enabled,
+                'freshness': settings.auth_master_freshness_seconds,
+                'grants': settings.auth_master_resource_grants,
+            }, sort_keys=True)).encode())
         self.store = SessionStore(settings.auth_state_path, epoch)
         prefix = '__Host-' if settings.auth_cookie_secure else ''
         self.cookie_name = prefix + 'etl_session'
@@ -175,7 +191,7 @@ class AuthService:
             raise AuthError('AUTH_LOGIN_REQUIRED')
         if len(token) > 128 or not self.store.get(self.digest(token.encode()), self.clock(), touch):
             raise AuthError('AUTH_SESSION_EXPIRED')
-        return Principal('single-admin', 'ADMIN', 'single_admin', 'server-session')
+        return Principal('single-admin', 'ADMIN', self.settings.auth_mode, 'server-session')
 
     def live(self, request):
         try:
@@ -185,7 +201,7 @@ class AuthService:
             return False
 
     def login(self, request, email, password, remember=False):
-        if self.settings.auth_mode != 'single_admin':
+        if self.settings.auth_mode not in ('single_admin', 'master_users'):
             raise AuthError('AUTH_LOGIN_NOT_AVAILABLE', 403)
         if not self.store.active():
             raise AuthError('AUTH_STATE_RESTART_REQUIRED', 503)
@@ -204,15 +220,30 @@ class AuthService:
         if not password_ok or not identity_ok:
             event(stage='authentication', action='LOGIN_REJECTED')
             raise AuthError('AUTH_INVALID_CREDENTIALS')
+        return self.issue_session(request, remember)
+
+    def issue_session(self, request, remember=False, **binding):
+        """Issue a rotated server session after the caller verified credentials."""
+        now = self.clock()
         token = secrets.token_urlsafe(32)
         old = request.cookies.get(self.cookie_name)
         absolute = self.settings.auth_remember_seconds if remember else self.settings.auth_absolute_seconds
         idle = min(self.settings.auth_remember_idle_seconds, absolute) if remember else self.settings.auth_idle_seconds
         if not self.store.create(self.digest(token.encode()), now, absolute, idle,
-                                 self.digest(old.encode()) if old else None):
+                                 self.digest(old.encode()) if old else None, **binding):
             raise AuthError('AUTH_SESSION_CAPACITY', 503)
         event(stage='authentication', action='LOGIN_SUCCEEDED')
         return token, absolute
 
     def cookie_options(self):
         return {'httponly': True, 'secure': self.settings.auth_cookie_secure, 'samesite': 'strict', 'path': '/'}
+
+
+def create_auth_service(settings, **kwargs):
+    if settings.auth_mode == 'master_users':
+        from data_sync_etl.security.master_service import MasterAuthService
+        return MasterAuthService(settings, **kwargs)
+    if settings.auth_mode == 'db_users':
+        from data_sync_etl.security.database_service import DatabaseAuthService
+        return DatabaseAuthService(settings, **kwargs)
+    return AuthService(settings, **kwargs)

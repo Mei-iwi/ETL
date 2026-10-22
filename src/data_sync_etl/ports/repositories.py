@@ -49,6 +49,7 @@ class Repository(SearchMetadataReader, Protocol):
             resource_type_code: str | None,
             offset: int,
             limit: int,
+            allowed_resource_ids: frozenset[str] | None = None,
     ) -> tuple[list[dict], int]: ...
 
 

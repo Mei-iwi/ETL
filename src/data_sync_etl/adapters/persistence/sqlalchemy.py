@@ -458,7 +458,8 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             grade_level_id: str | None,
             resource_type_code: str | None,
             offset: int,
-            limit: int
+            limit: int,
+            allowed_resource_ids: frozenset[str] | None = None,
     ) -> tuple[list[dict], int]:
         resouce = MasterLearningResource
 
@@ -467,6 +468,8 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             resouce.deleted_at.is_(None),
             resouce.publication_status == 'PUBLISHED',
         ]
+        if allowed_resource_ids is not None:
+            conditions.append(resouce.id.in_(allowed_resource_ids))
 
         if keyword and keyword.strip():
             term = keyword.strip()

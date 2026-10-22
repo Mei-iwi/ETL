@@ -46,6 +46,9 @@ class AuthBoundary:
             if path not in AUTH_PUBLIC:
                 principal = await run_in_threadpool(auth.principal, request)
                 scope.setdefault('state', {})['auth_principal'] = principal
+                if principal.mode in ('db_users', 'master_users'):
+                    from data_sync_etl.security.authorization import authorize
+                    await run_in_threadpool(authorize, request, principal)
                 if (unsafe and path != '/api/v1/search' and not path.startswith('/api/v1/auth/')
                         and not self.settings.admin_enabled):
                     raise AuthError('AUTH_ADMIN_DISABLED', 403)
@@ -85,7 +88,7 @@ class AuthBoundary:
             nonlocal started, ended
             if ended:
                 return
-            if principal and message['type'] in ('http.response.start', 'http.response.body'):
+            if principal and not scope.get('state', {}).get('auth_change_completed') and message['type'] in ('http.response.start', 'http.response.body'):
                 if not await run_in_threadpool(auth.live, request):
                     if started:
                         await send({'type': 'http.response.body', 'body': b'', 'more_body': False})

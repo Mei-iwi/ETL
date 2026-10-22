@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from data_sync_etl.api.account_routes import router as account_router
 from data_sync_etl.api.admin_access import LocalAdminBoundary
 from data_sync_etl.api.auth_boundary import AuthBoundary, auth_error
 from data_sync_etl.api.auth_routes import router as auth_router
@@ -98,9 +99,9 @@ class UploadBodyLimitMiddleware:
 def create_app(container=None):
     @asynccontextmanager
     async def lifespan(app):
-        from data_sync_etl.security.auth import AuthService, validate_mode
+        from data_sync_etl.security.auth import create_auth_service, validate_mode
         validate_mode(configured)
-        app.state.auth = AuthService(configured) if configured.auth_mode != 'legacy_local' else None
+        app.state.auth = create_auth_service(configured) if configured.auth_mode != 'legacy_local' else None
         app.state.container = container or Container()
         configure(app.state.container.settings.log_level)
         embedding = getattr(getattr(app.state.container, 'indexing', None), 'embedding', None)
@@ -203,6 +204,7 @@ def create_app(container=None):
 
     app.include_router(router)
     app.include_router(auth_router)
+    app.include_router(account_router)
     app.add_middleware(
         UploadBodyLimitMiddleware,
         max_bytes=configured.upload_request_max_bytes,

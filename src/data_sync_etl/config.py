@@ -85,7 +85,11 @@ class Settings(BaseSettings):
     search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)
     search_query_embedding_cache_enabled: bool = False
     app_environment: Literal['local', 'development', 'test', 'staging', 'production'] | None = None
-    auth_mode: Literal['legacy_local', 'single_admin', 'local_demo'] = 'legacy_local'
+    auth_mode: Literal['legacy_local', 'single_admin', 'local_demo', 'db_users', 'master_users'] = 'legacy_local'
+    auth_master_freshness_seconds: int = Field(default=120, ge=30, le=3600)
+    auth_master_pbkdf2_salt_encoding: Literal['text', 'hex', 'auto'] = 'auto'
+    auth_master_resource_grants: dict[str, list[str]] = Field(default_factory=dict, repr=False)
+    auth_database_url_file: Path | None = Field(default=None, repr=False)
     auth_dev_admin_bypass: bool = False
     auth_public_enabled: bool = False
     auth_origin: str = 'http://127.0.0.1:8080'

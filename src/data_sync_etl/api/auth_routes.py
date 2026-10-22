@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from typing import Literal
 
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,6 +15,7 @@ class LoginInput(BaseModel):
     email: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=1024, repr=False)
     remember_me: bool = False
+    provider: Literal['admin', 'master'] | None = None
 
 
 def service(request):
@@ -27,9 +29,9 @@ def service(request):
 def config(request: Request, response: Response):
     response.headers['Cache-Control'] = 'private, no-store'
     settings = request.app.state.container.settings
-    return {'mode': settings.auth_mode, 'login_required': settings.auth_mode == 'single_admin',
+    return {'mode': settings.auth_mode, 'login_required': settings.auth_mode in ('single_admin', 'db_users', 'master_users'),
             'admin_feature_enabled': settings.admin_enabled,
-            'remember_supported': settings.auth_mode == 'single_admin'}
+            'remember_supported': settings.auth_mode in ('single_admin', 'db_users', 'master_users')}
 
 
 @router.get('/csrf')
@@ -44,17 +46,38 @@ def csrf(request: Request, response: Response):
 @router.post('/login')
 def login(body: LoginInput, request: Request, response: Response):
     auth = service(request)
-    token, absolute = auth.login(request, body.email, body.password, body.remember_me)
+    options = {'provider': body.provider} if auth.settings.auth_mode == 'master_users' else {}
+    token, absolute = auth.login(request, body.email, body.password, body.remember_me, **options)
     response.set_cookie(auth.cookie_name, token, max_age=absolute if body.remember_me else None, **auth.cookie_options())
     response.headers['Cache-Control'] = 'private, no-store'
-    return {'authenticated': True, 'role': 'ADMIN'}
+    return {'authenticated': True}
 
 
 @router.get('/me')
 def me(request: Request, response: Response):
     auth = service(request)
     response.headers['Cache-Control'] = 'private, no-store'
-    return {**asdict(auth.principal(request)), 'admin_feature_enabled': auth.settings.admin_enabled}
+    identity = asdict(auth.principal(request))
+    identity.pop('auth_version', None)
+    return {**identity, 'admin_feature_enabled': auth.settings.admin_enabled}
+
+
+class ChangePasswordInput(BaseModel):
+    model_config = ConfigDict(extra='forbid', hide_input_in_errors=True)
+    old_password: str = Field(min_length=1, max_length=1024, repr=False)
+    new_password: str = Field(min_length=15, max_length=1024, repr=False)
+
+
+@router.post('/change-password')
+def change_password(body: ChangePasswordInput, request: Request, response: Response):
+    auth = service(request)
+    if auth.settings.auth_mode != 'db_users':
+        raise AuthError('AUTH_LOGIN_NOT_AVAILABLE', 403)
+    auth.change_password(request, body.old_password, body.new_password)
+    for name in (auth.cookie_name, auth.csrf_cookie):
+        response.delete_cookie(name, **auth.cookie_options())
+    response.headers['Cache-Control'] = 'private, no-store'
+    return {'changed': True, 'reauthenticate': True}
 
 
 @router.post('/logout', status_code=204)
