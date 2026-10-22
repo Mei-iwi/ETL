@@ -34,6 +34,7 @@ export type SearchItem = {
     content_unit_id: string
     context_id: string
     context_url: string
+    can_view_file?: boolean
 }
 export type SearchResponse = {
     query: string

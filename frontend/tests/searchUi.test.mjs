@@ -21,6 +21,8 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     let postCount = 0, contextCount = 0, catalogCount = 0, mode = 'results', fileKind = 'image'
     let resultCount = 8
     let modelState = 'LOADING'
+    let authRole = null
+    let canViewFile = true
     let releaseSearch
     const bodies = [], responses = []
     const server = createServer(async (req, res) => {
@@ -31,7 +33,10 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(wire)
         }
         if (url.pathname === '/health') return json({ status: 'ok', database: 'ok' })
-        if (url.pathname === '/api/v1/auth/config') return json({ mode: 'legacy_local', login_required: false })
+        if (url.pathname === '/api/v1/auth/config') return json({ mode: authRole ? 'master_users' : 'legacy_local', login_required: !!authRole })
+        if (url.pathname === '/api/v1/auth/me') return json({ id: 'master:search-reader', mode: 'master_users',
+            role: authRole, roles: [authRole === 'ADMIN' ? 'admin' : 'viewer'], resource_ids: [], admin_feature_enabled: true })
+        if (url.pathname === '/api/v1/auth/csrf') return json({ csrf_token: 'search-fixture-csrf' })
         if (url.pathname === '/api/v1/search/model-status') return json({ state: modelState, ready: modelState === 'READY' })
         if (url.pathname === '/api/v1/search/model-retry') {
             assert.equal(req.method, 'POST')
@@ -66,6 +71,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             if (mode === 'public') return json({ ...body, access_scope: 'public', items: [], total: 0, total_pages: 0, message: 'PUBLIC_ACCESS_UNCONFIRMED', ranking_algorithm: 'rrf-v1' })
             return json({ ...body, access_scope: 'local_demo', total: resultCount, total_pages: Math.ceil(resultCount / body.size), message: 'OK', ranking_algorithm: 'rrf-v1', items: Array.from({ length: Math.max(0, Math.min(body.size, resultCount - (body.page - 1) * body.size)) }, (_, offset) => ({
                 resource_id: `r${(body.page - 1) * 5 + offset + 1}`, resource_title: `Học liệu ${(body.page - 1) * 5 + offset + 1}`, resource_version_id: 'v1', version_number: 1,
+                can_view_file: canViewFile,
                 provider_name: 'Nhà cung cấp', resource_type_code: 'DOC', bag_id: 'b1', bag_title: null, unit_type: 'SECTION', representation_mode: 'fallback',
                 score: .03, score_components: { bow: .5, vector: .7 }, matched_bag_count: 1, matched_keywords: ['toán'],
                 snippet: 'Văn bản <script>không được thực thi</script>', page_from: 2, page_to: 2, content_unit_id: 'unit-1', context_id: 'token-1', context_url: '/api/v1/chunks/token-1/context',
@@ -73,8 +79,9 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         }
         if (url.pathname === '/api/v1/chunks/token-1/context') {
             contextCount++
-            return json({ resource_id: 'r1', resource_version_id: 'v1', content_unit_id: 'unit-1',
-                heading_path: [{ title: 'Chương kiểm thử', unit_type: 'CHAPTER' }],
+            return json({ resource_id: 'r1', resource_title: 'Học liệu 1', resource_version_id: 'v1', content_unit_id: 'unit-1',
+                bag_id: 'b1', version_number: 1, context_id: 'token-1', neighbors: 1,
+                heading_path: [{ content_unit_id: 'unit-1', title: 'Chương kiểm thử', unit_type: 'CHAPTER' }],
                 chunks: [{ id: 'c1', content_unit_id: 'unit-1', unit_chunk_sequence: 1, char_start: 0,
                     char_end: 20, page_from: 2, page_to: 2, selected: true, text: 'Nội dung ngữ cảnh được chọn' }] })
         }
@@ -204,7 +211,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("document.querySelector('article details').open"), true)
         assert.ok(await evaluate("document.querySelector('article dl').getBoundingClientRect().height > 0"))
         await evaluate("document.querySelector('article details summary').click()")
-        assert.equal(await evaluate("!!document.querySelector('article button')"), false)
+        assert.equal(await evaluate("document.querySelector('article button')?.textContent"), 'Ngữ cảnh')
         async function assertFixedSearch() {
             const top = await evaluate("document.querySelector('form').getBoundingClientRect().top")
             await evaluate("document.querySelector('section[aria-label=\"Kết quả tìm kiếm\"]').scrollTop = 10000")
@@ -379,6 +386,31 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             await click('Thử lại')
             await waitFor(() => evaluate("document.querySelectorAll('article').length === 5"))
         }
+
+        authRole = 'VIEWER'
+        await open('/search/query-methods?q=public&method=bow')
+        await waitFor(() => evaluate("document.querySelectorAll('article').length === 5"))
+        assert.equal(await evaluate("!!document.querySelector('article h2 a')"), true,
+            'Authenticated viewers can open whole-file eligible public results')
+        await evaluate("document.querySelector('article h2 a').click()")
+        await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Xem tệp')?.disabled === false"))
+        await click('Xem tệp')
+        await waitFor(() => evaluate("!!document.querySelector('iframe[title=\"Xem tệp PDF\"]')"))
+        assert.equal(await evaluate("!!document.querySelector('a[download]')"), true)
+        await open('/search/query-methods?q=public&method=bow')
+        await waitFor(() => evaluate("document.querySelectorAll('article').length === 5"))
+        await evaluate("document.querySelector('article button').click()")
+        await waitFor(() => evaluate("document.querySelector('article').textContent.includes('Nội dung ngữ cảnh được chọn')"))
+        assert.equal(contextCount, 1)
+        canViewFile = false
+        await open('/search/query-methods?q=partial&method=bow')
+        await waitFor(() => evaluate("document.querySelectorAll('article').length === 5"))
+        assert.equal(await evaluate("!!document.querySelector('article h2 a')"), false,
+            'A public snippet must not imply permission to read restricted parts of the whole file')
+        canViewFile = true
+        authRole = 'ADMIN'
+        await open('/search/query-methods?q=public&method=bow')
+        await waitFor(() => evaluate("!!document.querySelector('article h2 a')"))
 
     } finally {
         releaseSearch?.()

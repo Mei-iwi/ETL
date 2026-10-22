@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
+import { canVisit, useAuth } from '../../auth/AuthProvider'
 import styles from './LibraryVersionHistoryPage.module.css'
 
 type ResourceDetail = {
@@ -22,6 +23,7 @@ type ResourceVersion = {
 }
 
 export function LibraryVersionHistoryPage() {
+    const { principal } = useAuth()
     const { resourceId } = useParams<{ resourceId: string }>()
 
     const [resource, setResource] = useState<ResourceDetail | null>(null)
@@ -171,7 +173,7 @@ export function LibraryVersionHistoryPage() {
                                         </dd>
                                     </div>
                                 </dl>
-                                <Link className={styles.actionButton} to={`/library/indexing?${new URLSearchParams({ resourceId: resourceId ?? '', versionId: version.id })}`}>Phân đoạn / chỉ mục</Link>
+                                {canVisit('/library/indexing', principal) && <Link className={styles.actionButton} to={`/library/indexing?${new URLSearchParams({ resourceId: resourceId ?? '', versionId: version.id })}`}>Phân đoạn / chỉ mục</Link>}
                             </li>
                         ))}
                     </ol>

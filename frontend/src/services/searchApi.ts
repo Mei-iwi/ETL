@@ -23,6 +23,7 @@ function validItem(value: unknown) {
     return record(value) && textFields(value, ['resource_id', 'resource_title', 'resource_version_id', 'resource_type_code',
         'bag_id', 'unit_type', 'snippet', 'content_unit_id', 'context_id', 'context_url'])
         && integer(value.version_number, 1) && nullableText(value.provider_name) && nullableText(value.bag_title)
+        && (value.can_view_file === undefined || typeof value.can_view_file === 'boolean')
         && ['structured', 'fallback'].includes(value.representation_mode as string)
         && Array.isArray(value.matched_keywords) && value.matched_keywords.every(word => typeof word === 'string')
         && integer(value.matched_bag_count, 1) && finite(value.score) && record(value.score_components)

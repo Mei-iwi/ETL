@@ -8,11 +8,15 @@ export type Principal = { id?: string; role: 'ADMIN' | 'OPERATOR' | 'VIEWER'; mo
 type Status = 'loading' | 'authenticated' | 'anonymous' | 'unavailable'
 type Auth = { status: Status; mode: string; principal?: Principal; refresh: () => Promise<void>; logout: () => Promise<void> }
 const Context = createContext<Auth | undefined>(undefined)
+function identityScope(mode: string, user?: Principal) {
+    return JSON.stringify([mode, user?.id, user?.role, user?.roles, user?.permissions, user?.resource_ids, user?.must_change_password])
+}
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [status, setStatus] = useState<Status>('loading')
     const [mode, setMode] = useState('pending')
     const [principal, setPrincipal] = useState<Principal>()
     const revision = useRef(0)
+    const currentScope = useRef('')
     const expired = useCallback(() => { revision.current++; clearAuthRequests(); setPrincipal(undefined); setStatus('anonymous') }, [])
     const refresh = useCallback(async () => {
         const expected = ++revision.current
@@ -39,6 +43,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (expected !== revision.current) return
             if (!['ADMIN', 'OPERATOR', 'VIEWER'].includes(user.role)) throw new Error('Invalid principal')
             if (['db_users', 'master_users'].includes(value.mode) && (!Array.isArray(user.roles) || user.roles.some((role: string) => !['admin', 'operator', 'viewer'].includes(role)))) throw new Error('Invalid roles')
+            const nextScope = identityScope(value.mode, user)
+            if (currentScope.current && currentScope.current !== nextScope) clearAuthRequests()
+            currentScope.current = nextScope
             setPrincipal(user); setStatus('authenticated')
         } catch { if (expected === revision.current) { setPrincipal(undefined); setStatus('unavailable') } }
     }, [expired])
@@ -79,18 +86,21 @@ export function AuthGuard() {
     if (auth.status === 'anonymous') return <Navigate to={`/login?returnTo=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />
     if (auth.principal?.must_change_password && location.pathname !== '/account/password') return <Navigate to="/account/password" replace />
     if (!canVisit(location.pathname, auth.principal)) return <Navigate to="/overview/summary" replace />
-    return <Outlet />
+    return <Outlet key={identityScope(auth.mode, auth.principal)} />
 }
 
 export function canVisit(path: string, user?: Principal) {
     if (path === '/systems/users') return user?.mode === 'db_users' && user.role === 'ADMIN' && !user.must_change_password
     if (!user || !['db_users', 'master_users'].includes(user.mode)) return true
     if (user.must_change_password) return path === '/account/password'
-    if (path === '/account/password' || path === '/' || path.startsWith('/overview') || path.startsWith('/search')) return true
+    if (path === '/account/password' || path === '/account/profile' || path === '/' || path.startsWith('/overview') || path.startsWith('/search')) return true
     if (user.role === 'ADMIN') return true
     if (path === '/library' || path === '/library/list') return true
     const resource = /^\/library\/([^/]+)(?:\/versions)?$/.exec(path)
-    if (resource && user.resource_ids?.includes(resource[1])) return true
+    // Detail URLs are read-only candidates. Backend checks public file rights;
+    // management route names must never be treated as resource IDs.
+    if (resource && !['add', 'processing', 'indexing', 'source-sync', 'source-files',
+        'source-sync-errors', 'source-sync-blocked'].includes(resource[1])) return true
     if (user.role !== 'OPERATOR') return false
     const permissions = user.permissions || []
     if (path.startsWith('/library/source-')) return permissions.includes('sync')

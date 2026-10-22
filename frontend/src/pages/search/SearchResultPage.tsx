@@ -6,8 +6,11 @@ import type { SearchResponse } from '../../types/search'
 import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
 import { readSearch, writeSearch } from './searchParams'
+import { canVisit, useAuth } from '../../auth/AuthProvider'
+import { SearchContext } from './SearchContext'
 
 export function SearchResults({ params, onBusyChange }: { params: URLSearchParams; onBusyChange?: (busy: boolean) => void }) {
+    const { principal } = useAuth()
     const criteria = readSearch(params)
     const [, setParams] = useSearchParams()
     const [result, setResult] = useState<SearchResponse | null>(null)
@@ -58,9 +61,12 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                     </div>}
                     {result.items.map((item, index) => <article key={item.resource_id} className={styles.searchResult}>
                         <div className={styles.resultTopline}><span className={styles.documentType}><FileText size={15} aria-hidden="true" /> Học liệu</span><span className={styles.source}>{item.provider_name || item.resource_type_code} · Phiên bản {item.version_number}</span></div>
-                        <div className={styles.resultHeader}><h2><Link to={`/library/${encodeURIComponent(item.resource_id)}?${new URLSearchParams({ versionId: item.resource_version_id, contextId: item.context_id, returnTo: `/search/query-methods?${params}` })}`}>{item.resource_title}<ArrowUpRight size={18} aria-hidden="true" /></Link></h2></div>
+                        <div className={styles.resultHeader}><h2>{item.can_view_file !== false && canVisit(`/library/${encodeURIComponent(item.resource_id)}`, principal)
+                            ? <Link to={`/library/${encodeURIComponent(item.resource_id)}?${new URLSearchParams({ versionId: item.resource_version_id, contextId: item.context_id, returnTo: `/search/query-methods?${params}` })}`}>{item.resource_title}<ArrowUpRight size={18} aria-hidden="true" /></Link>
+                            : item.resource_title}</h2></div>
                         {item.bag_title && <p className={styles.sectionTitle}>{item.bag_title}</p>}
                         {item.snippet && <p className={styles.snippet}>{item.snippet}</p>}
+                        <SearchContext id={item.context_id} />
                         {item.page_from != null && <p className={styles.metadata}>Nội dung liên quan tại trang {item.page_from}{item.page_to != null && item.page_to !== item.page_from ? `–${item.page_to}` : ''}</p>}
                         {item.matched_keywords.length > 0 && <div className={styles.keywords}><span>Từ khóa liên quan</span>{item.matched_keywords.map(keyword =>
                             <span className={styles.keyword} key={keyword}>{keyword}</span>)}</div>}

@@ -9,6 +9,7 @@ import './App.css'
 import { AuthGuard, AuthProvider } from './auth/AuthProvider'
 import { LoginPage } from './auth/LoginPage'
 import { AccountManagementPage, ChangePasswordPage } from './auth/AccountPages'
+import { PersonalProfilePage } from './auth/PersonalProfilePage'
 
 import { AppLayout } from './components/layout/AppLayout'
 import { OverviewSummary } from './pages/overview/OverviewSummary'
@@ -45,6 +46,7 @@ export default function App() {
         <Route element={<AuthGuard />}>
         <Route path="/" element={<AppLayout />}>
           <Route path="account/password" element={<ChangePasswordPage />} />
+          <Route path="account/profile" element={<PersonalProfilePage />} />
           <Route
             index
             element={<Navigate to="overview" replace />}

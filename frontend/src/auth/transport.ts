@@ -28,7 +28,7 @@ window.fetch = async (input, init) => {
     const url = new URL(request.url)
     if (url.origin !== location.origin || !url.pathname.startsWith('/api/')) return nativeFetch(request)
     const headers = new Headers(request.headers)
-    const authRoute = url.pathname.startsWith('/api/v1/auth/')
+    const authRoute = url.pathname.startsWith('/api/v1/auth/') && url.pathname !== '/api/v1/auth/profile'
     if (mode !== 'legacy_local' && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) headers.set('X-CSRF-Token', await csrfToken())
     const boundary = sessionRequests
     const signal = authRoute ? request.signal : AbortSignal.any([request.signal, boundary.signal])

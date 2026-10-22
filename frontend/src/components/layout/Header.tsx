@@ -2,7 +2,8 @@ import logoBook from '../../assets/img/logoBook.png'
 
 import { NavLink } from 'react-router'
 import { useEffect, useRef, useState } from 'react'
-import { UserRound, LogOut, ChevronDown } from 'lucide-react'
+import { LogOut, ChevronDown } from 'lucide-react'
+import defaultAvatar from '../../assets/img/default-avatar.svg'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
 import { navagationItems } from '../../config/navigation'
 
@@ -133,11 +134,12 @@ function AccountMenu() {
 
     return <details className="header-account" ref={menu}>
         <summary className="header-account-trigger" aria-label="Tài khoản">
-            <span className="header-account-avatar"><UserRound aria-hidden="true" /></span>
+            <span className="header-account-avatar"><img src={defaultAvatar} alt="" /></span>
             <ChevronDown className="header-account-chevron" aria-hidden="true" />
         </summary>
         <div className="header-account-panel">
-            <p className="header-account-name">{auth.principal.display_name || (auth.mode === 'local_demo' ? 'Quản trị thử nghiệm · localhost' : 'Quản trị viên')}</p>
+            <p className="header-account-name">{auth.principal.display_name || (auth.mode === 'local_demo' ? 'Quản trị thử nghiệm · localhost' : auth.principal.role === 'ADMIN' ? 'Quản trị viên' : 'Người dùng')}</p>
+            <NavLink className="header-account-profile" to="/account/profile" onClick={() => { if (menu.current) menu.current.open = false }}>Thông tin cá nhân</NavLink>
             {auth.mode === 'db_users' && <NavLink to="/account/password">Đổi mật khẩu</NavLink>}
             {!auth.principal.admin_feature_enabled && <p className="header-account-note">Chức năng quản trị đang tắt</p>}
             {['single_admin', 'db_users', 'master_users'].includes(auth.mode) && <button className="header-account-logout" type="button" disabled={busy} onClick={() => void logout()}>
