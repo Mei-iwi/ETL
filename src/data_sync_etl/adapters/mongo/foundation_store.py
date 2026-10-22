@@ -348,11 +348,12 @@ class MongoBagStore:
         return [checked(ContentBagDocument, data) for data in
                 self.database.content_bags.find(selector, fields).sort('_id', 1).limit(limit).max_time_ms(5000)]
 
-    def __init__(self, database, dimension: int):
+    def __init__(self, database, dimension: int, *, historical_dimensions=()):
         if type(dimension) is not int or not 1 <= dimension <= 4096:
             raise DomainError("Invalid embedding dimension")
         self.database = utc_database(database)
         self.dimension = dimension
+        self.historical_dimensions = tuple(historical_dimensions)
         self.reader = MongoContentReader(database)
 
     def invalidate_other_roots(self, version_id, root_ids, generation):
@@ -366,7 +367,8 @@ class MongoBagStore:
         from data_sync_etl.adapters.mongo.schema import check_schema
         from data_sync_etl.domain.indexing import IndexingError
 
-        if not check_schema(self.database, dimension=self.dimension)['schema_ready']:
+        if not check_schema(self.database, dimension=self.dimension,
+                            historical_dimensions=self.historical_dimensions)['schema_ready']:
             raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
 
     def _current(self, document):

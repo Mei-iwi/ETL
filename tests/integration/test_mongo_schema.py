@@ -23,6 +23,32 @@ from data_sync_etl.domain.mongo_documents import (
 )
 
 
+def test_model_transition_keeps_legacy_vectors_inactive_and_rejects_wrong_sizes(mongo_db):
+    from data_sync_etl.adapters.mongo.schema import check_schema
+    from scripts.transition_embedding_model import transition_validator
+
+    initialize(mongo_db, dimension=384, apply=True)
+    old = {**samples()['content_bags'], 'embedding': [0.1] * 384}
+    mongo_db.content_bags.insert_one(old)
+    archive = {**old, '_id': 'archived-old-bag', 'is_current': False}
+    mongo_db.content_bags.insert_one(archive)
+    transition_validator(mongo_db, 1024)
+    assert mongo_db.content_bags.find_one({'_id': old['_id']})['is_current'] is False
+    current = {**old, '_id': 'new-bge-bag', 'embedding': [0.1] * 1024}
+    mongo_db.content_bags.insert_one(current)
+    for invalid in [
+        {**old, '_id': 'bad-current-legacy'},
+        {**current, '_id': 'bad-size', 'embedding': [0.1] * 700},
+        {**old, '_id': 'bad-history-size', 'is_current': False, 'embedding': [0.1] * 700},
+        {**old, '_id': 'bad-scalar', 'embedding': None},
+    ]:
+        with pytest.raises(WriteError):
+            mongo_db.content_bags.insert_one(invalid)
+    report = check_schema(mongo_db, dimension=1024, historical_dimensions=[384], audit_documents=True)
+    assert report['schema_ready']
+    assert mongo_db.content_bags.find_one({'_id': archive['_id']})['embedding'] == old['embedding']
+
+
 @pytest.fixture
 def mongo_db(mongo_test_database):
     client = MongoClient(

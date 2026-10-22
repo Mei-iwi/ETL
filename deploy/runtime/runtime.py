@@ -84,10 +84,7 @@ def verify_runtime(role):
         raise ValueError('LEGACY_SEARCH_GRANT_FORBIDDEN_IN_CONTAINER')
     load_connections()
     if role in ('api', 'ocr'):
-        from model import DIMENSION, MODEL_ID, REVISION, verify
-        if (os.environ.get('INDEX_EMBEDDING_MODEL_ID'), os.environ.get('INDEX_EMBEDDING_MODEL_VERSION'),
-                os.environ.get('INDEX_EMBEDDING_DIMENSION')) != (MODEL_ID, REVISION, str(DIMENSION)):
-            raise ValueError('MODEL_CONTRACT_MISMATCH')
+        from model import verify
         verify(Path(os.environ['INDEX_EMBEDDING_MODEL_PATH']), Path('/opt/model-manifest.json'))
     if role == 'source-file' and any(os.environ.get(key, '').lower() != 'true' for key in ('SOURCE_REFERENCE_ENABLED', 'SOURCE_TEMPORARY_FILES_ENABLED')):
         raise ValueError('SOURCE_REFERENCE_POLICY_BLOCKED')
@@ -136,7 +133,9 @@ def check_database():
             check_postgres_connection(connection, 'MASTER' if key == 'DATABASE_URL' else 'SOURCE', expected)
     with MongoClient(os.environ['MONGO_URI'], serverSelectionTimeoutMS=5000) as client:
         client.admin.command('ping')
-        if not check_schema(client[os.environ['MONGO_DATABASE']], dimension=384)['schema_ready']:
+        if not check_schema(client[os.environ['MONGO_DATABASE']],
+                            dimension=int(os.environ.get('INDEX_EMBEDDING_DIMENSION', '384')),
+                            historical_dimensions=json.loads(os.environ.get('INDEX_HISTORICAL_EMBEDDING_DIMENSIONS', '[]')))['schema_ready']:
             raise ValueError('MONGO_SCHEMA_NOT_READY')
 
 

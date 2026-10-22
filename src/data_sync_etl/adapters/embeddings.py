@@ -108,7 +108,7 @@ class LocalSentenceEmbedding:
             manifest = root / "etl-model-revision.txt"
             modules = json.loads((root / "modules.json").read_text(encoding="utf-8"))
             return (manifest.read_text(encoding="utf-8").strip() == self.version
-                    and bool(modules) and any(root.rglob("*.safetensors"))
+                    and bool(modules) and (any(root.rglob("*.safetensors")) or (root / "pytorch_model.bin").is_file())
                     and all((root / module.get("path", "")).resolve().is_relative_to(root) for module in modules))
         except (OSError, ValueError, TypeError, AttributeError):
             return False

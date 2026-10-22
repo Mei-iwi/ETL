@@ -31,6 +31,16 @@ export default defineConfig({
         changeOrigin: false,
         configure: configureAuthProxy,
       },
+      '/docs': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: false,
+        configure: configureAuthProxy,
+      },
+      '/openapi.json': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: false,
+        configure: configureAuthProxy,
+      },
     },
   },
 })

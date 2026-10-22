@@ -4,6 +4,19 @@ import { SearchApiError, getChunkContext, searchMaterials } from '../src/service
 import { readSearch, writeSearch } from '../src/pages/search/searchParams.ts'
 import { searchResponse, contextResponse } from './helpers/searchResponses.mjs'
 
+for (const code of ['BLOCKED_INDEX_SCHEMA', 'SEARCH_SCHEMA_UNAVAILABLE']) {
+    test('search schema errors display safe actionable text: ' + code, async () => {
+        const old = globalThis.fetch
+        try {
+            globalThis.fetch = async () => Response.json({ detail: { code, message: 'PRIVATE_INTERNAL' } }, { status: 503 })
+            await assert.rejects(searchMaterials({ query: 'x', method: 'bow', filters: {}, page: 1, size: 10 }),
+                error => error instanceof SearchApiError && error.status === 503 && error.code === code
+                    && error.message.includes('chỉ mục') && !error.message.includes('PRIVATE_INTERNAL')
+                    && !error.message.includes('HTTP 503'))
+        } finally { globalThis.fetch = old }
+    })
+}
+
 test('search sends exactly one POST with JSON criteria and encoded URL state', async () => {
     const request = { query: 'định luật', method: 'hybrid', filters: { subject_id: 's/1' }, page: 2, size: 10 }
     const old = globalThis.fetch

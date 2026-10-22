@@ -77,7 +77,7 @@ case "$action" in
     image="${ETL_MODEL_TOOL_IMAGE:-etl-portable-backend:local}"
     docker run --rm --user "$(id -u):$(id -g)" --tmpfs /run/etl:rw,mode=1777 \
       --mount "type=bind,source=$directory,target=/model" --entrypoint python "$image" \
-      /opt/etl/model.py prepare --directory /model --manifest /model/etl-model-manifest.json --accept-model-license
+      /opt/etl/model.py prepare --directory /model --manifest /model/etl-model-manifest.json --accept-model-license "${@:3}"
     ;;
   *) echo 'Actions: build network check start [--workers] status logs stop down db-start db-stop export import prepare-model verify-model' >&2; exit 2 ;;
 esac

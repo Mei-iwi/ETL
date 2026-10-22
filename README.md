@@ -217,6 +217,86 @@ python deploy/runtime/model.py encode --directory D:/etl/models/minilm \
 
 Danh sách OCR cần `vie`/`eng`; `encode` kiểm tra offline/384D. Đã có model/revision nhưng thiếu JSON manifest: dùng action `manifest` thay `prepare`, rồi `encode`, không tải lại. Model/token không đi kèm khi pull code. Linux cài các gói `tesseract-ocr tesseract-ocr-eng tesseract-ocr-vie libreoffice-writer libreoffice-impress`, chỉnh executable theo máy.
 
+#### Chọn BGE-M3 thay MiniLM
+
+BGE-M3 dùng **dense vector1024 chiều**; MiniLM dùng384 chiều. Adapter hiện tại dùng dense embedding, chưa dùng sparse/ColBERT của BGE-M3. Chỉ đổi đường dẫn là chưa đủ: ID, revision, dimension và manifest phải khớp nhau.
+
+**Local:** sửa các key hiện có trong `.env` gốc repo, ví dụ dùng thư mục `Models/bge-m3` trong repo:
+
+```dotenv
+INDEX_EMBEDDING_MODEL_PATH=./Models/bge-m3
+INDEX_EMBEDDING_MODEL_ID=BAAI/bge-m3
+INDEX_EMBEDDING_MODEL_VERSION=5617a9f61b028005a4858fdac845db406aefb181
+INDEX_EMBEDDING_DIMENSION=1024
+INDEX_AUTO_ENABLED=false
+SEARCH_MODEL_WARMUP_TIMEOUT_SECONDS=120
+```
+
+Nếu chưa tải model, lệnh sau tải đúng revision và tạo cả `etl-model-revision.txt`, `etl-model-manifest.json` chứa checksum. Cần Internet/license; chỉ chuẩn bị một lần. Dùng Python trực tiếp nếu `.venv` đã chuyển đường dẫn và launcher `hf.exe` bị lỗi:
+
+```bash
+./.venv/Scripts/python.exe deploy/runtime/model.py prepare \
+  --directory ./Models/bge-m3 --manifest ./Models/bge-m3/etl-model-manifest.json \
+  --model-id BAAI/bge-m3 --revision 5617a9f61b028005a4858fdac845db406aefb181 \
+  --dimension 1024 --accept-model-license
+```
+
+Đã chuẩn bị đủ model/manifest thì chỉ kiểm tra offline:
+
+```bash
+./.venv/Scripts/python.exe deploy/runtime/model.py encode \
+  --directory ./Models/bge-m3 --manifest ./Models/bge-m3/etl-model-manifest.json \
+  --model-id BAAI/bge-m3 --revision 5617a9f61b028005a4858fdac845db406aefb181 \
+  --dimension 1024
+```
+
+Kết quả cần có `"status": "PASS"` và `"dimension": 1024`. Công cụ model đọc tham số CLI hoặc biến môi trường tiến trình, không tự đọc `.env`, nên các lệnh trên truyền rõ model/revision/dimension. `.bin` được nạp qua Transformers/PyTorch đã cài; không bật remote code hoặc tắt kiểm tra an toàn để nạp model.
+
+**Docker:** trong `D:/etl/private/app.env`, đổi các key hiện có (thay đường dẫn bằng vị trí thực tế trên máy):
+
+```dotenv
+MODEL_DIR=D:/StudyMaterials/HK7/Final_Project/ETL/Models/bge-m3
+MODEL_MANIFEST_FILE=D:/StudyMaterials/HK7/Final_Project/ETL/Models/bge-m3/etl-model-manifest.json
+INDEX_EMBEDDING_MODEL_ID=BAAI/bge-m3
+INDEX_EMBEDDING_MODEL_VERSION=5617a9f61b028005a4858fdac845db406aefb181
+INDEX_EMBEDDING_DIMENSION=1024
+INDEX_AUTO_ENABLED=false
+API_MEMORY_LIMIT=6g
+OCR_MEMORY_LIMIT=6g
+```
+
+6g là mức cấu hình khởi đầu cho mỗi container có model, cần đo theo tải thực tế và RAM Docker; không phải kết quả benchmark. API và OCR worker nạp model riêng. Compose giữ tên mount trong container `/opt/models/minilm` để tương thích, nhưng nội dung mount được chọn bởi `MODEL_DIR` và contract trên.
+
+Build lại Backend theo mục2.2 để có runtime mới. Nếu dùng model local đã chuẩn bị thì bỏ PrepareModel. Nếu chỉ có Docker, dùng lệnh PrepareModel của mục2.2 và thêm `-ModelId BAAI/bge-m3 -ModelRevision 5617a9f61b028005a4858fdac845db406aefb181 -ModelDimension 1024`, đổi `-ModelDirectory` sang thư mục BGE-M3. Linux: thêm `--model-id BAAI/bge-m3 --revision 5617a9f61b028005a4858fdac845db406aefb181 --dimension 1024` sau `--accept-model-license` của action `prepare-model`.
+
+**Chuyển dữ liệu trước khi sử dụng Search:** dừng các worker có thể ghi index theo quy trình vận hành; giữ `INDEX_AUTO_ENABLED=false`. Mongo validator và embedding cũ384 chiều không tương thích1024 chiều. Cần kế hoạch backup, cập nhật validator được chủ DB phê duyệt và xây lại embedding/ContentBag/chỉ mục bằng cùng model. Không cắt/nối vector cũ để đổi chiều và không xóa dữ liệu lịch sử. Đổi ENV không thực hiện migration hoặc reindex. Check có thể trả `MONGO_SCHEMA_NOT_READY` cho đến khi hoàn tất bước này. Chỉ restart/chuyển các dịch vụ sang BGE-M3 và bật lại auto indexing sau khi xác minh schema/index; query và index phải cùng ID/revision/dimension.
+
+**Chuyển dữ liệu MiniLM local đã có sang BGE-M3:** công cụ [transition_embedding_model.py](scripts/transition_embedding_model.py) chỉ chấp nhận MASTER/MongoDB loopback và schema gốc384 hợp lệ. Đây là maintenance có ghi dữ liệu, không chạy tự động ở startup và không dùng cho Dev dùng chung/Production. Cần phê duyệt backup/validator/reindex trước khi chạy.
+
+1. Chuẩn bị và kiểm tra model1024 theo lệnh trên. Dừng API/worker local và các worker Docker cùng dùng DB; đợi OCR/index đang chạy hoàn tất. Không để hai phiên bản model cùng ghi index.
+2. Trong `.env`, giữ `INDEX_AUTO_ENABLED=false`, thêm `INDEX_HISTORICAL_EMBEDDING_DIMENSIONS=[384]`. Đặt cùng giá trị trong `app.env` khi Docker dùng database đã chuyển. Database BGE mới/trống không có lịch sử thì giữ `[]`.
+3. Chạy kế hoạch chỉ đọc từ gốc repo:
+
+```bash
+./.venv/Scripts/python.exe scripts/transition_embedding_model.py
+```
+
+4. Sau khi kiểm tra số phiên bản/bag trong kế hoạch, chạy maintenance với **thư mục backup mới, ngoài Git**:
+
+```bash
+./.venv/Scripts/python.exe scripts/transition_embedding_model.py \
+  --apply --confirm-local-maintenance \
+  --backup-directory D:/etl/private/model-transition-backups/bge-run001
+```
+
+Công cụ sao lưu BSON của5 collection, validator gốc và lịch sử `etl_stage_runs`; kiểm tra checksum/đọc lại backup trước khi ghi. Mỗi ContentBag cũ được giữ thêm một bản lịch sử với ID mới, `is_current=false`, kèm `archive-map.json` trong backup để truy ngược ID gốc. Chỉ đổi validator embedding: vector hiện tại phải1024 chiều, vector384 chỉ được lưu khi inactive. Không thêm collection/field nghiệp vụ, không đổi SOURCE/PostgreSQL schema, không đọc lại file SOURCE hoặc chạy OCR. Reindex dùng ContentUnit hiện có, tạo INDEX_BUILD run mới; giữ nguyên run cũ. Báo cáo trong `transition-report.json`, kiểm tra cả BoW/Vector/Hybrid bằng pipeline tìm kiếm nội bộ có SearchAccess.
+
+5. Chỉ khởi động lại dịch vụ khi báo cáo `COMPLETE`, không có run thất bại và schema hợp lệ. Docker cần build image có code/schema guard mới rồi Start với đúng overlays; không dùng image MiniLM cũ. Giữ `INDEX_AUTO_ENABLED=false` cho đến khi quyết định bật tự động sau nghiệm thu. Đăng nhập admin và thử tìm kiếm qua giao diện để xác minh phiên/quyền thực tế.
+
+Công cụ chuyển một lần từ schema384; không chạy lại trên schema đã chuyển. Nếu dừng giữa chừng, giữ nguyên backup và `transition-report.json`, kiểm tra phase trước khi phục hồi; không xóa dữ liệu hoặc cố chạy lại toàn bộ. Backup chứa dữ liệu học liệu/tài khoản, giữ ngoài Git và giới hạn quyền truy cập.
+
+**Rollback sau khi đã chuyển:** không chỉ sửa ENV về MiniLM vì validator và bag hiện tại đã đổi. Cần cửa sổ maintenance riêng để khôi phục validator/bag/index-run tương ứng từ backup, đồng thời giữ bản BGE mới. Không tự xóa model/vector hoặc restore đè database đang chạy.
+
 ### 1.6. Khởi động hằng ngày
 
 DB đã khởi tạo: `docker compose up -d postgres source-postgres mongo` (không chạy lại migration). Mở **5 terminal** ở repo; mỗi terminal Python kích hoạt `.venv`:
@@ -230,6 +310,8 @@ DB đã khởi tạo: `docker compose up -d postgres source-postgres mongo` (kh�
 | OCR/ContentUnit/ContentBag/Index | `etl run-ocr-worker --worker-id ocr-1` |
 
 Mở **http://127.0.0.1:3000/login**. Dùng đúng `127.0.0.1` theo `AUTH_ORIGIN`; Backend cổng 8000, Vite proxy qua 3000. Sau khi đổi `.env`, restart API/worker; đổi proxy key thì restart cả Vite. Kiểm tra Database tại **Hệ thống → Trạng thái** sau đăng nhập; `/health` trong auth mode chỉ kiểm tra API.
+
+**Swagger local:** đăng nhập bằng admin riêng tại3000, sau đó mở **http://127.0.0.1:3000/docs**. Vite proxy cả `/docs` và `/openapi.json` qua cơ chế xác thực hiện có. Không mở trực tiếp `http://127.0.0.1:8000/docs` trong auth mode: trang có thể tải nhưng schema bị403 vì thiếu proxy credential. User MASTER Viewer không được xem toàn bộ API definition. Nếu vừa cập nhật cấu hình Vite, restart `npm.cmd --prefix frontend run dev`.
 
 Nguồn cần metadata, tham chiếu, SHA-256 và trạng thái `APPROVED` hợp lệ. Đồng bộ metadata → đợi `CONTENT_READY` → xây chỉ mục tới `READY` → tìm kiếm. Có thể bật `INDEX_AUTO_ENABLED=true` sau khi kiểm tra model/schema; không tự backfill lịch sử. Dừng terminal bằng Ctrl+C, DB bằng `docker compose stop`.
 
