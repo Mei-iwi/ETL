@@ -1,5 +1,12 @@
 # Docker portable ETL
 
+Dùng tài khoản MASTER hiện có và admin riêng: [AUTH_MASTER_USERS_SETUP.md](AUTH_MASTER_USERS_SETUP.md), mode `master_users`, profile `auth`.
+
+Đăng nhập nhiều tài khoản với Auth DB PostgreSQL riêng: xem
+[AUTH_DATABASE_SETUP.md](AUTH_DATABASE_SETUP.md). Chế độ `db_users` dùng profile
+`db-auth` (localhost) hoặc `db-auth-tls` (HTTPS); startup không tự tạo bảng hay tài khoản.
+Giữ `auth`/`single_admin` nếu chưa thực hiện chuyển đổi có kiểm soát.
+
 Frontend React/Nginx, FastAPI và ba worker dùng container riêng. PostgreSQL
 SOURCE/Master và MongoDB dùng Compose riêng; app không tự chạy migration.
 

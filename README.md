@@ -1,5 +1,7 @@
 # ETL — Kho học liệu số
 
+Đăng nhập đồng thời user MASTER và admin riêng: [hướng dẫn master_users](deploy/AUTH_MASTER_USERS_SETUP.md).
+
 Đồng bộ metadata SOURCE → Master, OCR/trích xuất → ContentUnit/ContentBag → tìm kiếm BoW/Vector/Hybrid. Hỗ trợ PDF, DOCX, PPTX, XLSX, CSV, TXT, PNG/JPG/JPEG. Word/PPT xem dạng PDF, bảng tính xem dạng lưới; tải xuống giữ định dạng gốc.
 
 **SOURCE chỉ lưu tham chiếu**, đọc Local/Drive khi xử lý, xem hoặc tải; chỉ dùng file tạm theo tác vụ. File **LOCAL do Master sở hữu** vẫn lưu trong `STORAGE_ROOT`.
@@ -92,14 +94,44 @@ Trong `psql`: chạy `\password etl_source_reader`, nhập mật khẩu reader r
 
 ### 1.4. Đăng nhập local
 
+Làm lần lượt các bước dưới đây sau khi cài dependencies và cấu hình DB. Nếu chỉ cần chạy thử với DB trống, chọn `single_admin`; nếu muốn dùng cả user đang có trong MASTER và admin riêng, chọn `master_users` ở bước4.
+
+**Bước1 — Chọn chế độ đăng nhập.**
+
+Chọn **một** chế độ cho `AUTH_MODE`; form đăng nhập chỉ có email/mật khẩu, không chọn loại tài khoản:
+
+| Chế độ | Tài khoản dùng để đăng nhập | Khi nào dùng |
+|---|---|---|
+| `single_admin` | Một admin với email cấu hình và mật khẩu do bạn tạo bên dưới | Cài mới, chưa có người dùng MASTER. |
+| `master_users` | User MASTER và admin riêng nếu `ADMIN_ENABLED=true` | Đã có người dùng được đồng bộ SOURCE → MASTER. Không cần Auth DB mới. |
+| `db_users` | Tài khoản và RBAC trong PostgreSQL Auth DB riêng | Cần quản lý tài khoản độc lập; làm theo [Auth Database setup](deploy/AUTH_DATABASE_SETUP.md). |
+
+**Bước2 — Tạo secret và đặt mật khẩu admin.** Kích hoạt `.venv`, chạy từ gốc repo. Nếu đã có đủ ba file secret thì dùng lại, không chạy `init` lần nữa:
+
 ```bash
 python -m data_sync_etl.security.cli init --directory D:/etl/private/auth
 ```
 
-Nhập/xác nhận mật khẩu **ít nhất 15 ký tự**; terminal không hiện ký tự. CLI tạo hash Argon2id và hai khóa, không ghi đè file đã có. Bổ sung vào `.env`, thay `YOUR_EMAIL` bằng email đăng nhập:
+Nhập/xác nhận mật khẩu **ít nhất 15 ký tự**; terminal không hiện ký tự. Ghi nhớ mật khẩu bạn vừa nhập để đăng nhập. CLI tạo hash Argon2id và hai khóa, không ghi đè file đã có. Kết quả mong đợi: `PASS: auth secret files created; password not displayed.` và có ba file sau:
+
+```text
+D:/etl/private/auth/
+├── admin_password_hash
+├── session_signing_key
+└── auth_proxy_key
+```
+
+**Bước3 — Điền cấu hình admin vào `.env`.** Mở file tại **gốc repo**:
+
+```bash
+notepad.exe .env
+```
+
+Cập nhật các key đã có hoặc thêm key còn thiếu, không chép thêm dòng trùng. Sao chép khối dưới đây, thay `YOUR_EMAIL` bằng email admin bạn muốn dùng. Các đường dẫn giữ nguyên nếu đã tạo secret đúng bước2:
 
 ```dotenv
 AUTH_MODE=single_admin
+ADMIN_ENABLED=true
 AUTH_DEV_ADMIN_BYPASS=false
 AUTH_PUBLIC_ENABLED=false
 AUTH_DEPLOYMENT_PROFILE=localhost
@@ -112,7 +144,52 @@ AUTH_PROXY_KEY_FILE=D:/etl/private/auth/auth_proxy_key
 AUTH_STATE_PATH=D:/etl/private/auth/sessions.sqlite3
 ```
 
-`ADMIN_ENABLED=true` chỉ bật chức năng, không bỏ login. Vite đọc proxy key từ Backend `.env` ở phía server; không đưa secret vào `VITE_*`. Hiện xác thực một admin cấu hình sẵn, chưa dùng tài khoản trong bảng `users` của SOURCE/Master.
+| Giá trị | Lấy ở đâu / cách nhập |
+|---|---|
+| `ADMIN_LOGIN_EMAIL` | Email admin do bạn chọn, ví dụ `admin@example.com`; thay `YOUR_EMAIL`, không nhập mật khẩu ở đây. Không cần có bản ghi MASTER tương ứng. |
+| Mật khẩu admin | Chính mật khẩu nhập hai lần khi chạy CLI; không có mật khẩu mặc định. CLI chỉ lưu hash, không lưu bản gốc để xem lại. |
+| `ADMIN_PASSWORD_HASH_FILE` | File `admin_password_hash` vừa tạo, chứa hash Argon2id. Đây là đường dẫn file, không phải nội dung hash. |
+| `SESSION_SIGNING_KEY_FILE` | File khóa ký session do CLI tạo; giữ ổn định giữa các lần chạy. |
+| `AUTH_PROXY_KEY_FILE` | File khóa giữa Vite/reverse proxy và Backend do CLI tạo; không nhập vào form login. |
+| `AUTH_STATE_PATH` | File SQLite session riêng; thư mục cha phải ghi được. Không dùng DB nghiệp vụ để lưu phiên. |
+| `AUTH_ORIGIN` | Địa chỉ trình duyệt thực sự mở: local mặc định `http://127.0.0.1:3000`. Đổi cổng/hostname thì sửa tương ứng. |
+
+`ADMIN_ENABLED=true` bật tính năng quản trị, vẫn yêu cầu đăng nhập. Trong `master_users`, `false` chặn admin riêng; các route thuộc LocalAdminBoundary vẫn có thể trả403 khi cờ tắt. Vite đọc proxy key từ Backend `.env` ở phía server; không đưa secret vào `VITE_*`. `AUTH_COOKIE_SECURE=false` chỉ dành cho HTTP localhost trong ví dụ này; LAN/Production cần HTTPS và cấu hình TLS phù hợp.
+
+**Bước4 — Bật tài khoản MASTER nếu cần.** Nếu chỉ dùng admin thì bỏ qua bước này. Nếu dùng cả hai, giữ nguyên email/secret ở bước3, **đổi dòng `AUTH_MODE` hiện có** và thêm các key MASTER trong **`.env` gốc repo**:
+
+```dotenv
+AUTH_MODE=master_users
+ADMIN_ENABLED=true
+AUTH_MASTER_FRESHNESS_SECONDS=120
+AUTH_MASTER_PBKDF2_SALT_ENCODING=auto
+AUTH_MASTER_RESOURCE_GRANTS={}
+```
+
+- User nhập email và mật khẩu hiện có ở SOURCE, sau khi đồng bộ sang MASTER. Không dùng mật khẩu PostgreSQL hoặc mật khẩu admin riêng. DB mới, trống chưa có user để đăng nhập; cần dữ liệu SOURCE và worker đồng bộ users thành công.
+- Backend đọc `master_users` qua `DATABASE_URL` bằng transaction READ ONLY; không cần thêm URL Auth DB. User phải active, email verified, role active, chưa deleted/source_missing, có nguồn POSTGRESQL và email chuẩn hóa không trùng.
+- Trong120 giây gần nhất phải có users sync_run COMPLETED; chạy Master Sync Worker ở mục1.6. Nếu dữ liệu cũ, Backend từ chối đăng nhập/session MASTER. Admin riêng vẫn dùng được khi cờ bật và secret hợp lệ.
+- User MASTER nhận **Viewer**, kể cả role SOURCE là ADMIN. Họ chỉ đọc học liệu PUBLISHED do mình tạo và resource được cấp thêm; không tự có quyền Sync/Index/Admin. Cấp thêm bằng `AUTH_MASTER_RESOURCE_GRANTS={"MASTER_USER_ID":["RESOURCE_ID"]}`, dùng ID thật, không dùng email.
+- `auto` xác minh PBKDF2 theo cả salt text và hex của định dạng được hỗ trợ; không đổi hash trong DB. Nếu trùng email với admin, chỉ mật khẩu admin khớp secret mới cấp admin; mật khẩu MASTER khác vẫn là Viewer.
+
+**Bước5 — Khởi động và thử đăng nhập.** Hoàn tất model/OCR ở mục1.5 rồi chạy Backend, Frontend và các worker theo mục1.6. Nếu các tiến trình đang chạy thì restart Backend; đổi proxy key thì restart cả Vite. Mở **http://127.0.0.1:3000/login**:
+
+| Muốn đăng nhập | Nhập email | Nhập mật khẩu |
+|---|---|---|
+| Admin riêng | Giá trị `ADMIN_LOGIN_EMAIL` ở bước3 | Mật khẩu đã nhập ở bước2, không phải nội dung file hash. |
+| Người dùng MASTER | Email tài khoản đã đồng bộ từ SOURCE | Mật khẩu của chính tài khoản đó tại SOURCE. |
+
+Form không có dropdown. Admin riêng cần `ADMIN_ENABLED=true`; user MASTER cần `AUTH_MODE=master_users`. Không nhập mật khẩu DB PostgreSQL vào form. Hướng dẫn quyền và đồng bộ: [MASTER users](deploy/AUTH_MASTER_USERS_SETUP.md).
+
+Kiểm tra cấu hình công khai qua Frontend sau khi chạy:
+
+```bash
+curl -s http://127.0.0.1:3000/api/v1/auth/config
+```
+
+Với chế độ MASTER + admin ở trên, kết quả phải có `"mode":"master_users"`, `"login_required":true`, `"admin_feature_enabled":true`. Nếu vẫn hiện mode cũ, kiểm tra đúng file `.env` và restart Backend.
+
+**Nhiều tài khoản/RBAC:** có thể chọn `AUTH_MODE=db_users` với PostgreSQL Auth DB riêng, giữ nguyên SOURCE/Master/Mongo. Làm theo [Auth Database setup](deploy/AUTH_DATABASE_SETUP.md) để provision, migration riêng, bootstrap admin và chuyển mode sau kiểm thử; không tự đồng bộ tài khoản SOURCE thành admin. `single_admin` vẫn là mặc định/rollback có kiểm soát.
 
 ### 1.5. OCR, Office và model — chuẩn bị một lần
 
@@ -197,6 +274,10 @@ Sửa `D:/etl/private/connections.json`: đúng **bốn key** theo [mẫu](deplo
 
 ### 2.2. Build, chuẩn bị model và auth
 
+Thực hiện theo thứ tự: **build image → chuẩn bị model → tạo secret → điền app.env → Check/Start**. Nếu đã có model/secret hợp lệ thì bỏ qua bước tạo tương ứng. Các ví dụ dưới dùng tag `:local`; nếu đổi tag trong `app.env`, sửa cả tham số `-Image` và lệnh Docker tương ứng. `PrepareModel` mặc định dùng `etl-portable-backend:local`; nếu đổi tag, đặt `ETL_MODEL_TOOL_IMAGE` tương ứng.
+
+**Bước1 — Build và chuẩn bị model.**
+
 ```bash
 # legacy CHỈ để build trước khi có auth secret; không chạy app bỏ login.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
@@ -205,13 +286,25 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docke
 # Bỏ prepare nếu đã có model/manifest ở mục local; cần Internet/license khi tải.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
   -Action PrepareModel -AuthProfile legacy -ModelDirectory D:/etl/models/minilm -AcceptModelLicense
+```
 
+**Bước2 — Tạo secret và mật khẩu admin.** Chỉ cần Docker, không cần Python trên host. Nếu đã có ba file ở mục1.4 thì dùng lại và bỏ qua lệnh này:
+
+```bash
 # Chỉ khi chưa có ba file secret; thay YOUR_EMAIL bằng email admin thực.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/setup-auth.ps1 \
   -Directory D:/etl/private/auth -AdminEmail YOUR_EMAIL -Image etl-portable-backend:local
 ```
 
-`PrepareModel` mặc định dùng `etl-portable-backend:local`; nếu đổi tag, đặt `ETL_MODEL_TOOL_IMAGE` tương ứng. Nhập mật khẩu ít nhất 15 ký tự. Đã tạo secret ở local thì dùng lại, **không init lại**. Thêm vào `app.env`, thay email và giữ nguyên DB/model:
+Nhập/xác nhận mật khẩu ít nhất15 ký tự; không thấy ký tự khi gõ là bình thường. Email ở `-AdminEmail` là email admin bạn chọn, không cần có trong MASTER. Lệnh tạo ba file trong `D:/etl/private/auth` và in cấu hình mẫu, **không tự sửa `app.env`**.
+
+**Bước3 — Điền cấu hình vào file Docker.** Mở đúng file sau, không sửa `.env` local để cấu hình container:
+
+```bash
+notepad.exe D:/etl/private/app.env
+```
+
+Thay các key đã có hoặc bổ sung key còn thiếu theo khối dưới; thay `YOUR_EMAIL` bằng cùng email ở bước2, giữ nguyên cấu hình DB/model đã làm ở mục2.1:
 
 ```dotenv
 AUTH_MODE=single_admin
@@ -227,6 +320,46 @@ ADMIN_PASSWORD_HASH_SECRET_FILE=D:/etl/private/auth/admin_password_hash
 SESSION_SIGNING_KEY_SECRET_FILE=D:/etl/private/auth/session_signing_key
 AUTH_PROXY_KEY_SECRET_FILE=D:/etl/private/auth/auth_proxy_key
 ```
+
+**Bước4 — Bật user MASTER nếu cần.** Nếu chỉ dùng admin, bỏ qua. Muốn dùng cả user MASTER và admin riêng, trong chính `D:/etl/private/app.env` đổi dòng `AUTH_MODE` hiện có và bổ sung:
+
+```dotenv
+AUTH_MODE=master_users
+AUTH_MASTER_FRESHNESS_SECONDS=120
+AUTH_MASTER_PBKDF2_SALT_ENCODING=auto
+AUTH_MASTER_RESOURCE_GRANTS={}
+```
+
+Giữ `ADMIN_ENABLED=true` nếu cần admin riêng. Điều kiện tài khoản/quyền giống mục1.4. MASTER được đọc qua URL trong `connections.json`; không lấy `DATABASE_URL` của `.env` local để kết nối từ container. Dùng `-AuthProfile auth` cho cả `single_admin` và `master_users`; `db_users` cần cấu hình riêng theo [hướng dẫn Auth DB](deploy/AUTH_DATABASE_SETUP.md).
+
+| Local: `.env` gốc repo | Docker: `D:/etl/private/app.env` |
+|---|---|
+| `AUTH_ORIGIN=http://127.0.0.1:3000` | `AUTH_ORIGIN=http://127.0.0.1:8080` |
+| `ADMIN_PASSWORD_HASH_FILE` | `ADMIN_PASSWORD_HASH_SECRET_FILE` |
+| `SESSION_SIGNING_KEY_FILE` | `SESSION_SIGNING_KEY_SECRET_FILE` |
+| `AUTH_PROXY_KEY_FILE` | `AUTH_PROXY_KEY_SECRET_FILE` |
+| `AUTH_STATE_PATH` trỏ SQLite trên host | Giữ storage session theo Compose auth, không chép đường dẫn SQLite host vào container. |
+
+Ba biến Docker `*_SECRET_FILE` trỏ tới **file trên host** đã tạo, Compose mount chúng vào container. Có thể dùng cùng bộ secret với local; không chép nội dung hash/key vào `app.env`, image hoặc Git. `setup-auth.ps1` in ra mẫu `single_admin`; muốn dùng MASTER phải sửa mode như trên. Sau khi sửa cấu hình, chạy Check → Start ở mục2.3; giữ `-Drive` nếu stack đang dùng Drive. Không cần build lại chỉ vì đổi ENV; nếu image chưa có code xác thực mới thì Build trước.
+
+**Bước5 — Chạy và xác nhận.** Chạy hai lệnh Check → Start ở mục2.3, sau đó mở **http://127.0.0.1:8080/login**. Admin dùng email ở bước3 và mật khẩu bước2; user MASTER dùng email/mật khẩu SOURCE đã đồng bộ. Kiểm tra mode bằng:
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/auth/config
+```
+
+Nếu đã chọn MASTER + admin, cần thấy `"mode":"master_users"`, `"login_required":true`, `"admin_feature_enabled":true`. Nếu sai, kiểm tra `-EnvFile` đúng đường dẫn và chạy Start lại với cùng profile/overlay. Nếu gặp401/403/503, xem bảng lỗi ở mục3; không tạo lại toàn bộ secret hoặc DB để chữa lỗi.
+
+**Đổi/quên mật khẩu admin khi chỉ có Docker:** chạy từ Git Bash, dùng tag Backend khớp `BACKEND_IMAGE` trong `app.env`:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -it --user 10001:10001 \
+  --mount "type=bind,source=D:/etl/private/auth,target=/output" \
+  --entrypoint python etl-portable-backend:local \
+  -m data_sync_etl.security.cli hash --output /output/admin_password_hash_v2
+```
+
+Nhập/xác nhận mật khẩu mới ít nhất15 ký tự. File đích phải chưa tồn tại; nếu đã có `_v2`, dùng tên mới. Sửa `ADMIN_PASSWORD_HASH_SECRET_FILE=D:/etl/private/auth/admin_password_hash_v2` trong `app.env`, rồi Start lại API. Local dùng lệnh `python -m data_sync_etl.security.cli hash --output D:/etl/private/auth/admin_password_hash_v2` và sửa `ADMIN_PASSWORD_HASH_FILE` trong `.env`. Giữ nguyên hai khóa còn lại; phiên cũ cần đăng nhập lại. Mật khẩu **user MASTER** phải đổi tại SOURCE rồi chờ đồng bộ, không dùng CLI admin này.
 
 ### 2.3. Kiểm tra, chạy và cập nhật
 
@@ -256,13 +389,16 @@ Linux dùng script Bash; xuất/nhập `.tar`, TLS và vận hành: [deploy/READ
 
 - Local: dừng API/worker, kích hoạt `.venv`, chạy lại `pip install -e ".[dev,embeddings,google-drive]"` và `npm.cmd --prefix frontend ci`, đối chiếu biến mới; không chép đè `.env`. Dùng lại model/token hợp lệ.
 - Docker: giữ DB/model/secrets, **Build → Start**. `docker image load` archive cũ không cập nhật source mới. Chỉ đổi config runtime thì Start để recreate.
-- Đặt lại mật khẩu: `python -m data_sync_etl.security.cli hash --output D:/etl/private/auth/admin_password_hash_v2`, nhập hai lần, sửa đường dẫn hash trong `.env` hoặc `app.env`, restart Backend/recreate API. File đích phải chưa tồn tại; session cũ bị thu hồi khi API khởi động lại.
+- Đặt lại mật khẩu **admin riêng**: dùng lệnh local/Docker ở mục2.2; mật khẩu user MASTER đổi tại SOURCE rồi đồng bộ. Không thể lấy mật khẩu gốc từ hash.
 - Schema cũ cần chủ DB duyệt migration riêng. Pull/build không đồng nghĩa được phép migration DB dùng chung. Không commit `.env`, token/hash/key, dữ liệu hoặc model.
 
 | Lỗi | Kiểm tra/sửa |
 |---|---|
 | `No module named argon2` | Đúng `.venv`, cài lại `python -m pip install -e ".[dev,embeddings,google-drive]"`. |
 | Login trắng/auth 404 | Đúng Backend/Frontend; Docker build/recreate image mới, Ctrl+F5. |
+| Login401 | Kiểm tra `AUTH_MODE`, email/mật khẩu đúng nguồn; admin riêng cần cờ bật. MASTER xem log `MASTER_LOGIN_PASSWORD_MISMATCH`, `MASTER_LOGIN_STATE_REJECTED`, `MASTER_LOGIN_IDENTITY_NOT_FOUND`. Không gửi hash/password vào chat. |
+| `AUTH_MASTER_STALE` / `AUTH_MASTER_UNAVAILABLE` | Kiểm tra MASTER connection, Master Sync Worker và users sync_run COMPLETED trong freshness120s; không nới quyền hoặc bỏ kiểm tra freshness để chữa lỗi. |
+| Login được nhưng403 | Kiểm tra quyền Viewer, ownership/grants và LocalAdminBoundary; role SOURCE ADMIN không tự thành admin ETL. |
 | `SOURCE_REFERENCE_POLICY_BLOCKED` | Bật cả hai cờ reference/temp trong **app.env**, mount nguồn đúng; Drive cần `-Drive`. |
 | `DATABASE_SCHEMA_NOT_READY` | Đúng DB: 15 bảng SOURCE/18 bảng Master/5 collection Mongo. DB mới theo guide, DB cũ cần owner duyệt. |
 | SOURCE role bị chặn | Reader không superuser, chỉ SELECT, không quyền ghi/kế thừa quyền ghi. |
