@@ -3,6 +3,7 @@ from time import monotonic
 from typing import Any, Callable
 
 from data_sync_etl.logging import event, flow
+from data_sync_etl.workers.lifecycle import tick, worker_lifecycle
 
 
 class OCRWorker:
@@ -97,11 +98,11 @@ class OCRWorker:
         if once:
             return self.once(worker_id)
 
-        stop = Event()
-
-        try:
-            while True:
-                if not self.once(worker_id):
-                    stop.wait(1)
-        except KeyboardInterrupt:
-            return None
+        with worker_lifecycle() as stop:
+            try:
+                while not stop.is_set():
+                    tick()
+                    if not self.once(worker_id):
+                        stop.wait(1)
+            except KeyboardInterrupt:
+                return None

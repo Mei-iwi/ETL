@@ -1,0 +1,14 @@
+# DB network/TLS only; this does NOT enable public application access.
+services:
+  api: &tls
+    environment: {ETL_DATABASE_MODE: remote}
+    secrets:
+      - source: database-ca
+        target: database-ca.pem
+  master-sync-worker: *tls
+  source-file-worker: *tls
+  ocr-worker: *tls
+  preflight: *tls
+secrets:
+  database-ca:
+    file: ${DATABASE_CA_FILE:?Set external CA file for authenticated remote DB TLS}

@@ -1,0 +1,6 @@
+{
+  "DATABASE_URL": "postgresql+psycopg://etl_master_owner:CHANGE_ME@master-postgres:5432/etl_master",
+  "SOURCE_MIGRATION_DATABASE_URL": "postgresql+psycopg://etl_source_owner:CHANGE_ME@source-postgres:5432/etl_source",
+  "MONGO_URI": "mongodb://etl_mongo_owner:CHANGE_ME@mongo:27017/?authSource=admin",
+  "MONGO_DATABASE": "etl_content"
+}

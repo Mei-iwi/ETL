@@ -1,0 +1,23 @@
+# Manual owner maintenance ONLY. No job starts with the app/database stack.
+services:
+  ops:
+    image: ${BACKEND_IMAGE:-etl-portable-backend:local}
+    profiles: [ops]
+    entrypoint: [python, /opt/etl/ops.py]
+    command: [approval-required]
+    restart: "no"
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      ETL_MAINTENANCE_APPROVAL: ${ETL_MAINTENANCE_APPROVAL:-NOT_APPROVED}
+      INDEX_EMBEDDING_DIMENSION: "384"
+    secrets: [ops-connections]
+    networks: [data]
+    healthcheck: {disable: true}
+    tmpfs: ["/run/etl:rw,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=67108864"]
+networks:
+  data: {external: true, name: "${ETL_DATA_NETWORK:-etl-data}"}
+secrets:
+  ops-connections: {file: "${OPS_CONNECTIONS_FILE:?Set a separate OWNER credential file}"}

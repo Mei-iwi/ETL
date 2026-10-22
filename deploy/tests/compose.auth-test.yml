@@ -1,0 +1,55 @@
+name: etl-auth-acceptance
+services:
+  api:
+    image: etl-portable-qa:auth-20261022
+    entrypoint: ["/usr/bin/tini", "-g", "--", "uvicorn", "deploy.tests.auth_test_server:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/run/etl:rw,uid=10001,gid=10001,mode=0700", "/tmp:rw,uid=10001,gid=10001,mode=0700"]
+    environment:
+      AUTH_MODE: ${AUTH_MODE:-single_admin}
+      APP_ENVIRONMENT: ${AUTH_APP_ENVIRONMENT:-production}
+      AUTH_DEPLOYMENT_PROFILE: localhost
+      AUTH_DEV_ADMIN_BYPASS: ${AUTH_DEV_ADMIN_BYPASS:-false}
+      AUTH_PUBLIC_ENABLED: "false"
+      AUTH_COOKIE_SECURE: "false"
+      AUTH_ORIGIN: ${AUTH_TEST_ORIGIN:-http://127.0.0.1:18088}
+      ADMIN_ENABLED: "true"
+      ADMIN_LOGIN_EMAIL: admin@etl.test
+      ADMIN_PASSWORD_HASH_FILE: /run/secrets/admin_password_hash
+      SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
+      AUTH_PROXY_KEY_FILE: /run/secrets/auth_proxy_key
+      AUTH_STATE_PATH: /var/lib/etl/auth/sessions.sqlite3
+    secrets: [admin_password_hash, session_signing_key, auth_proxy_key]
+    volumes: ["auth-test-sessions:/var/lib/etl/auth"]
+    networks: [auth-test]
+  frontend:
+    group_add: ["10001"]
+    image: etl-portable-frontend:auth-20261022
+    user: "101:101"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:rw,uid=101,gid=101,mode=0700"]
+    ports: ["127.0.0.1:18088:8080"]
+    environment:
+      AUTH_MODE: ${AUTH_MODE:-single_admin}
+      AUTH_ORIGIN: ${AUTH_TEST_ORIGIN:-http://127.0.0.1:18088}
+      AUTH_TLS: "false"
+    secrets: [auth_proxy_key]
+    networks: [auth-edge, auth-test]
+    depends_on: [api]
+networks:
+  auth-edge: {}
+  auth-test: {internal: true}
+volumes:
+  auth-test-sessions:
+secrets:
+  admin_password_hash:
+    file: ${AUTH_TEST_SECRET_DIR:?Set AUTH_TEST_SECRET_DIR}/admin_password_hash
+  session_signing_key:
+    file: ${AUTH_TEST_SECRET_DIR:?Set AUTH_TEST_SECRET_DIR}/session_signing_key
+  auth_proxy_key:
+    file: ${AUTH_TEST_SECRET_DIR:?Set AUTH_TEST_SECRET_DIR}/auth_proxy_key

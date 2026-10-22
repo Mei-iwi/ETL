@@ -1,0 +1,59 @@
+# Separate DB project. No published ports, migrations, seeds or application jobs.
+name: ${DB_PROJECT:-etl-databases}
+services:
+  master-postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${MASTER_DB_NAME:-etl_master}
+      POSTGRES_USER: ${MASTER_DB_ADMIN:-etl_master_owner}
+      POSTGRES_PASSWORD_FILE: /run/secrets/master-password
+    secrets: [master-password]
+    volumes: [master-data:/var/lib/postgresql/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  source-postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${SOURCE_DB_NAME:-etl_source}
+      POSTGRES_USER: ${SOURCE_DB_ADMIN:-etl_source_owner}
+      POSTGRES_PASSWORD_FILE: /run/secrets/source-password
+    secrets: [source-password]
+    volumes: [source-data:/var/lib/postgresql/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_DB_ADMIN:-etl_mongo_owner}
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo-password
+    secrets: [mongo-password]
+    volumes: [mongo-data:/data/db]
+    networks: [data]
+    healthcheck:
+      test: [CMD, mongosh, --quiet, --eval, "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+networks:
+  data:
+    external: true
+    name: ${ETL_DATA_NETWORK:-etl-data}
+volumes:
+  master-data:
+  source-data:
+  mongo-data:
+secrets:
+  master-password: {file: "${MASTER_PASSWORD_FILE:?Set external MASTER_PASSWORD_FILE}"}
+  source-password: {file: "${SOURCE_PASSWORD_FILE:?Set external SOURCE_PASSWORD_FILE}"}
+  mongo-password: {file: "${MONGO_PASSWORD_FILE:?Set external MONGO_PASSWORD_FILE}"}

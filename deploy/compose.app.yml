@@ -1,0 +1,184 @@
+name: ${APP_PROJECT:-etl-app}
+
+x-backend: &backend
+  labels: {etl.portable.owner: docker-portable-20261021}
+  image: ${BACKEND_IMAGE:-etl-portable-backend:local}
+  build:
+    context: ..
+    dockerfile: deploy/docker/backend.Dockerfile
+    target: runtime
+  user: "10001:10001"
+  init: false
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+  stop_grace_period: 420s
+  tmpfs:
+    - /run/etl:rw,noexec,nosuid,nodev,size=1073741824,uid=10001,gid=10001,mode=0700
+    - /tmp:rw,noexec,nosuid,nodev,size=67108864,uid=10001,gid=10001,mode=0700
+  secrets:
+    - source: connections
+      target: connections.json
+  networks: [backend, data]
+  environment: &environment
+    ETL_CONNECTIONS_FILE: /run/secrets/connections.json
+    ETL_ACCESS_MODE: local-locked
+    ETL_DATABASE_MODE: ${DATABASE_MODE:-same-host}
+    APP_ENVIRONMENT: production
+    AUTH_MODE: legacy_local
+    ADMIN_ENABLED: "false"
+    SEARCH_INTERNAL_DEV_ENABLED: "false"
+    SOURCE_ADAPTER: postgresql
+    SOURCE_REFERENCE_ENABLED: ${SOURCE_REFERENCE_ENABLED:-false}
+    SOURCE_TEMPORARY_FILES_ENABLED: ${SOURCE_TEMPORARY_FILES_ENABLED:-false}
+    SOURCE_FILE_STORAGE_ROOT: /mnt/source
+    SOURCE_TEMP_ROOT: /run/etl/source
+    STORAGE_ROOT: /var/lib/etl/local
+    OCR_ENGINE: tesseract
+    TESSERACT_PATH: /usr/bin/tesseract
+    TESSERACT_LANGUAGES: vie+eng
+    OFFICE_PDF_EXECUTABLE: /usr/bin/libreoffice
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    INDEX_EMBEDDING_MODEL_ID: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    INDEX_EMBEDDING_MODEL_VERSION: e8f8c211226b894fcb81acc59f3b34ba3efd5f42
+    INDEX_EMBEDDING_DIMENSION: "384"
+    INDEX_AUTO_ENABLED: ${INDEX_AUTO_ENABLED:-false}
+    MONGO_METADATA_MODE: shared
+    SOURCE_MONGO_ENABLED: "false"
+    MASTER_MONGO_IDENTITY_BOOTSTRAP: "false"
+    MASTER_MONGO_IDENTITY_PROJECTION: "false"
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+services:
+  api:
+    <<: *backend
+    command: [api]
+    mem_limit: ${API_MEMORY_LIMIT:-3g}
+    cpus: ${API_CPUS:-2}
+    environment:
+      <<: *environment
+      INDEX_EMBEDDING_MODEL_PATH: /opt/models/minilm
+    volumes:
+      - local-storage:/var/lib/etl/local
+      - evaluations:/var/lib/etl/local/evaluations
+      - type: bind
+        source: ${MODEL_DIR:?Set MODEL_DIR to a prepared local model}
+        target: /opt/models/minilm
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MODEL_MANIFEST_FILE:?Set MODEL_MANIFEST_FILE}
+        target: /opt/model-manifest.json
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${SOURCE_LOCAL_DIR:?Set SOURCE_LOCAL_DIR (empty directory permitted for Drive-only)}
+        target: /mnt/source
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD, python, /opt/etl/runtime.py, health-api]
+      start_period: 120s
+      interval: 30s
+      timeout: 6s
+      retries: 3
+  master-sync-worker:
+    <<: *backend
+    profiles: [workers]
+    command: [worker, run-master-sync-worker]
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      <<: *environment
+      ETL_SERVICE_ROLE: master-sync
+    healthcheck: &worker-health
+      test: [CMD, python, /opt/etl/runtime.py, health-worker]
+      start_period: 30s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  source-file-worker:
+    <<: *backend
+    profiles: [workers]
+    command: [worker, run-source-file-worker]
+    mem_limit: 1536m
+    cpus: 1
+    environment:
+      <<: *environment
+      ETL_SERVICE_ROLE: source-file
+    volumes:
+      - type: bind
+        source: ${SOURCE_LOCAL_DIR:?Set SOURCE_LOCAL_DIR}
+        target: /mnt/source
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck: *worker-health
+  ocr-worker:
+    <<: *backend
+    profiles: [workers]
+    command: [worker, run-ocr-worker]
+    mem_limit: ${OCR_MEMORY_LIMIT:-3g}
+    cpus: ${OCR_CPUS:-2}
+    environment:
+      <<: *environment
+      ETL_SERVICE_ROLE: ocr
+      INDEX_EMBEDDING_MODEL_PATH: /opt/models/minilm
+    volumes:
+      - local-storage:/var/lib/etl/local
+      - type: bind
+        source: ${MODEL_DIR:?Set MODEL_DIR}
+        target: /opt/models/minilm
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MODEL_MANIFEST_FILE:?Set MODEL_MANIFEST_FILE}
+        target: /opt/model-manifest.json
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${SOURCE_LOCAL_DIR:?Set SOURCE_LOCAL_DIR}
+        target: /mnt/source
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck: *worker-health
+  frontend:
+    labels: {etl.portable.owner: docker-portable-20261021}
+    image: ${FRONTEND_IMAGE:-etl-portable-frontend:local}
+    build:
+      context: ..
+      dockerfile: deploy/docker/frontend.Dockerfile
+    user: "101:101"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 1
+    ports: ["127.0.0.1:${WEB_PORT:-8080}:8080"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=67108864,uid=101,gid=101,mode=0700"]
+    networks: [edge, backend]
+    depends_on:
+      api: {condition: service_healthy}
+  preflight:
+    <<: *backend
+    profiles: [ops]
+    command: [check-db]
+    restart: "no"
+    healthcheck: {disable: true}
+
+networks:
+  edge: {}
+  backend: {internal: true}
+  data:
+    external: true
+    name: ${ETL_DATA_NETWORK:-etl-data}
+volumes:
+  local-storage:
+  evaluations:
+secrets:
+  connections:
+    file: ${CONNECTIONS_FILE:?Set CONNECTIONS_FILE to an external connections JSON secret}

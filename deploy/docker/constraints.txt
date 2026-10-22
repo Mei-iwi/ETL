@@ -1,0 +1,6 @@
+# Pin the embedding toolchain tested by this deployment. Other core dependencies
+# retain pyproject ranges; the image's dependencies.txt records exact resolution.
+torch==2.14.1+cpu
+sentence-transformers==5.7.0
+transformers==5.19.0
+huggingface-hub==2.2.0

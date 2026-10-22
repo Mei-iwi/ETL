@@ -18,3 +18,17 @@ dist
 migration_preview.sql
 
 .test-tmp
+frontend/node_modules
+frontend/dist
+Models
+ETL_Secrets
+local_data
+volumes
+**/secrets
+**/credentials
+**/tokens*.json
+**/credentials*.json
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx

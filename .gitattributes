@@ -1,0 +1,6 @@
+# Deployment scripts must remain executable by bash after Windows checkouts.
+deploy/**/*.sh text eol=lf
+deploy/**/*.py text eol=lf
+deploy/**/*.yml text eol=lf
+deploy/**/*.Dockerfile text eol=lf
+deploy/**/*.dockerignore text eol=lf

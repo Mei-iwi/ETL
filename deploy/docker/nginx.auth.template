@@ -1,0 +1,60 @@
+worker_processes auto;
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 1024; }
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    server_tokens off;
+    log_format safe '$remote_addr $request_method $uri $status $body_bytes_sent';
+    access_log /dev/stdout safe;
+    client_body_temp_path /tmp/client_body;
+    proxy_temp_path /tmp/proxy;
+    fastcgi_temp_path /tmp/fastcgi;
+    uwsgi_temp_path /tmp/uwsgi;
+    scgi_temp_path /tmp/scgi;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    upstream etl_api { zone etl_api 64k; server api:8000 resolve; }
+    map $http_origin $bad_origin { default 1; "" 0; "${ETL_AUTH_ORIGIN}" 0; }
+    map "$http_forwarded$http_x_forwarded_for$http_x_forwarded_host$http_x_forwarded_proto$http_x_real_ip$http_x_etl_proxy_key" $spoofed_proxy { default 1; "" 0; }
+    server {
+        ${ETL_LISTEN}
+        ${ETL_TLS}
+        server_name _;
+        root /usr/share/nginx/html;
+        if ($http_host != "${ETL_AUTH_HOST}") { return 403; }
+        if ($bad_origin) { return 403; }
+        if ($spoofed_proxy) { return 403; }
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header Referrer-Policy same-origin always;
+        add_header Cache-Control "no-store" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'" always;
+        location = /web-health { access_log off; return 200 'ok'; }
+        location = /docs { default_type text/html; try_files /api-docs/index.html =404; }
+        location = /docs/ { return 308 /docs; }
+        location /api-docs/ { try_files $uri =404; }
+        location ~ ^/(api/|admin(?:/|$)|openapi\.json$|health$) {
+            client_max_body_size 501m;
+            proxy_pass http://etl_api;
+            proxy_http_version 1.1;
+            proxy_set_header Host $http_host;
+            proxy_set_header Connection "";
+            proxy_set_header Forwarded "";
+            proxy_set_header X-Forwarded-For "";
+            proxy_set_header X-Forwarded-Host "";
+            proxy_set_header X-Forwarded-Proto "";
+            proxy_set_header X-Forwarded-Port "";
+            proxy_set_header X-Forwarded-Server "";
+            proxy_set_header X-Real-IP "";
+            proxy_set_header X-ETL-Proxy-Key "${ETL_PROXY_KEY}";
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_cache off;
+            proxy_read_timeout 240s;
+            proxy_send_timeout 240s;
+        }
+        location /assets/ { try_files $uri =404; }
+        location / { try_files $uri $uri/ /index.html; }
+    }
+}
