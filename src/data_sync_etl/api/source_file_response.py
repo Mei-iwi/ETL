@@ -10,6 +10,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from data_sync_etl.domain.core import SourceFileError
 from data_sync_etl.domain.search import SearchError
 from data_sync_etl.logging import event
+from data_sync_etl.security.auth import AuthError
 
 
 def source_file_error(error):
@@ -75,6 +76,10 @@ class SourceFileResponse(Response):
             except SearchError as exc:
                 await JSONResponse({'detail': {'code': exc.code, 'message': 'Không thể truy xuất tệp.'}},
                                    status_code=exc.status)(scope, receive, send)
+                return
+            except AuthError as exc:
+                from data_sync_etl.api.auth_boundary import auth_error
+                await auth_error(exc)(scope, receive, send)
                 return
             mime = {'.pdf': 'application/pdf', '.json': 'application/json'}.get(path.suffix.lower(), self.reference.mime) if self.preview else self.reference.mime
             response = FileResponse(path, media_type=mime,

@@ -1,4 +1,4 @@
-"""Shared retrieval policy; local demo is NOT an authenticated/public grant."""
+"""Shared eligibility checks for public, verified local and authenticated access."""
 
 from dataclasses import dataclass
 
@@ -17,11 +17,15 @@ def denied(record):
 class SearchAccess:
     scope: str = 'public'
 
-    # Future authenticated principals belong at this server-side policy boundary,
-    # never in request JSON. No trustworthy public-rights source exists today.
+    @property
+    def internal(self):
+        return self.scope in ('local_demo', 'authenticated_admin')
+
+    # Authenticated scope is created by the API's server-side session boundary,
+    # never from request JSON. Public rights remain unconfirmed.
 
     def allows(self, resource, version, unit):
-        return self.evaluate(resource, version, unit) == 'ALLOW_LOCAL_DEMO'
+        return self.evaluate(resource, version, unit) in ('ALLOW_LOCAL_DEMO', 'ALLOW_AUTHENTICATED_ADMIN')
 
     def evaluate(self, resource, version, unit):
         """Internal decision code, never serialized with private metadata."""
@@ -39,11 +43,12 @@ class SearchAccess:
             if denied(record):
                 return 'CONTENT_RESTRICTED'
         review = unit.get('review_status')
-        if self.scope != 'local_demo':
+        if not self.internal:
             return 'PUBLIC_RIGHTS_UNCONFIRMED'
+        allowed = 'ALLOW_AUTHENTICATED_ADMIN' if self.scope == 'authenticated_admin' else 'ALLOW_LOCAL_DEMO'
         if review in ('APPROVED', 'REVIEWED'):
-            return 'ALLOW_LOCAL_DEMO' if unit.get('retrieval_eligible') is True else 'RETRIEVAL_DENIED'
+            return allowed if unit.get('retrieval_eligible') is True else 'RETRIEVAL_DENIED'
         # Only the explicit postprocess default can be read without review locally.
         # REJECTED, REVOKED, BLOCKED and all unknown statuses remain denied.
-        return ('ALLOW_LOCAL_DEMO' if review == 'UNREVIEWED' and unit.get('retrieval_eligible') is False
+        return (allowed if review == 'UNREVIEWED' and unit.get('retrieval_eligible') is False
                 else 'RETRIEVAL_DENIED')

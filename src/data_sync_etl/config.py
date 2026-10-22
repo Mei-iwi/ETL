@@ -84,7 +84,24 @@ class Settings(BaseSettings):
     search_timeout_seconds: int = Field(default=15, ge=1, le=120)
     search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)
     search_query_embedding_cache_enabled: bool = False
-    app_environment: Literal['development', 'test', 'staging', 'production'] | None = None
+    app_environment: Literal['local', 'development', 'test', 'staging', 'production'] | None = None
+    auth_mode: Literal['legacy_local', 'single_admin', 'local_demo'] = 'legacy_local'
+    auth_dev_admin_bypass: bool = False
+    auth_public_enabled: bool = False
+    auth_origin: str = 'http://127.0.0.1:8080'
+    auth_cookie_secure: bool = False
+    auth_deployment_profile: Literal['none', 'localhost', 'multi_machine'] = 'none'
+    auth_state_path: Path = Field(default=Path('/var/lib/etl/auth/sessions.sqlite3'), repr=False)
+    admin_login_email: str = 'admin@example.invalid'
+    admin_password_hash_file: Path | None = Field(default=None, repr=False)
+    session_signing_key_file: Path | None = Field(default=None, repr=False)
+    auth_proxy_key_file: Path | None = Field(default=None, repr=False)
+    auth_idle_seconds: int = Field(default=1800, ge=60, le=86400)
+    auth_absolute_seconds: int = Field(default=28800, ge=300, le=86400)
+    auth_remember_seconds: int = Field(default=604800, ge=300, le=2592000)
+    auth_remember_idle_seconds: int = Field(default=86400, ge=60, le=604800)
+    auth_login_limit: int = Field(default=6, ge=2, le=30)
+    auth_login_window_seconds: int = Field(default=60, ge=10, le=900)
     search_internal_dev_enabled: bool = False
     evaluation_max_queries: int = Field(default=20, ge=1, le=100)
     evaluation_max_corpus_versions: int = Field(default=100, ge=1, le=500)

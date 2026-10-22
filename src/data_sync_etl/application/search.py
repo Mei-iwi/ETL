@@ -70,7 +70,7 @@ class SearchService:
             with self.runtime_admission(method, access=access or SearchAccess()):
                 return self.search_http(query, method, filters, page, size, access=access)
         CURRENT_SEARCH.get().check()
-        if method != 'bow' and access is not None and access.scope == 'local_demo':
+        if method != 'bow' and access is not None and access.internal:
             ready = getattr(self.indexing.embedding, 'require_search_ready', None)
             if ready is not None:
                 ready()
@@ -83,7 +83,7 @@ class SearchService:
                 cache.clear()
                 cache.count('bypass_disabled')
             return self.search(**criteria)
-        if (type(access) is not SearchAccess or access.scope != 'local_demo'
+        if (type(access) is not SearchAccess or not access.internal
                 or self.settings.app_environment != 'development' or not self.settings.admin_enabled
                 or not self.settings.search_internal_dev_enabled):
             cache.clear()
@@ -111,7 +111,7 @@ class SearchService:
             call.finish()
 
     def new_http_call(self, method, *, access, authorize=None):
-        capacity = (self._http_heavy_calls if method != 'bow' and access.scope == 'local_demo'
+        capacity = (self._http_heavy_calls if method != 'bow' and access.internal
                     else self._http_light_calls)
         if not capacity.acquire(blocking=False):
             raise SearchError('SEARCH_RUNTIME_BUSY', 503)
@@ -234,7 +234,7 @@ class SearchService:
 
     @staticmethod
     def _metadata(repo, filters, access, limit):
-        if access.scope != 'local_demo':
+        if not access.internal:
             return []  # No existing contract can prove public full-text rights.
         return repo.search_versions(filters, limit=limit)
 
@@ -260,7 +260,7 @@ class SearchService:
         access = access or SearchAccess()
         started, filters = monotonic(), filters or {}
         query = normalize_query(query)
-        if access.scope != 'local_demo':
+        if not access.internal:
             return {'query': query, 'method': method, 'page': page, 'size': size,
                     'total': 0, 'total_pages': 0, 'items': [], 'ready_bag_count': 0,
                     'representation_unit': 'content_bag', 'access_scope': 'public',
@@ -419,7 +419,7 @@ class SearchService:
         This does not weaken the existing file-viewer INDEX READY gate.
         """
         access = access or SearchAccess()
-        if access.scope != 'local_demo':
+        if not access.internal:
             raise SearchError('FILE_NOT_FOUND', 404)
         with self.indexing.uow() as repo:
             try:
@@ -439,7 +439,7 @@ class SearchService:
     def file_version(self, version_id, *, access=None, include_text=False):
         """A whole file requires permission for every unit, including parents."""
         access = access or SearchAccess()
-        if access.scope != 'local_demo':
+        if not access.internal:
             raise SearchError('FILE_NOT_FOUND', 404)
         with self.indexing.uow() as repo:
             snapshot = self._ready_snapshot(repo, version_id)
@@ -469,7 +469,7 @@ class SearchService:
         access = access or SearchAccess()
         started = monotonic()
         version_id, unit_id, ordinal, fingerprint = decode_context(token)
-        if access.scope != 'local_demo':
+        if not access.internal:
             raise SearchError('CONTEXT_NOT_FOUND', 404)
         if self.bags is None:
             raise SearchError('SEARCH_SCHEMA_UNAVAILABLE')

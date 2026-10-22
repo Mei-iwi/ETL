@@ -122,7 +122,7 @@ class RunDetailResponse(StrictDTO):
     dataset_name: str
     dataset_hash: str
     schema_version: Literal[1]
-    scope: Literal['local_demo']
+    scope: Literal['local_demo', 'authenticated_admin']
     status: Literal['RUNNING', 'COMPLETED', 'FAILED', 'PARTIAL', 'NOT_COMPARABLE']
     created_at: str
     finished_at: str | None

@@ -7,6 +7,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from data_sync_etl.api.admin_access import LocalAdminBoundary
+from data_sync_etl.api.auth_boundary import AuthBoundary, auth_error
+from data_sync_etl.api.auth_routes import router as auth_router
 from data_sync_etl.api.routes import router
 from data_sync_etl.composition import Container
 from data_sync_etl.config import Settings
@@ -36,7 +38,9 @@ class UploadBodyLimitMiddleware:
                 loopback = host is not None and ip_address(host).is_loopback
             except ValueError:
                 loopback = False
-            if not self.local_admin_settings.admin_enabled or not loopback:
+            authenticated = (getattr(self.local_admin_settings, 'auth_mode', 'legacy_local') != 'legacy_local'
+                             and getattr(scope.get('state', {}).get('auth_principal'), 'role', None) == 'ADMIN')
+            if not self.local_admin_settings.admin_enabled or not (loopback or authenticated):
                 await JSONResponse(status_code=403, content={"detail": "Local admin upload only"})(
                     scope, receive, send
                 )
@@ -94,13 +98,16 @@ class UploadBodyLimitMiddleware:
 def create_app(container=None):
     @asynccontextmanager
     async def lifespan(app):
+        from data_sync_etl.security.auth import AuthService, validate_mode
+        validate_mode(configured)
+        app.state.auth = AuthService(configured) if configured.auth_mode != 'legacy_local' else None
         app.state.container = container or Container()
         configure(app.state.container.settings.log_level)
         embedding = getattr(getattr(app.state.container, 'indexing', None), 'embedding', None)
         preload = getattr(embedding, 'start_preload', None)
         if preload is not None:
             preload()
-        if app.state.container.settings.admin_enabled:
+        if app.state.container.settings.admin_enabled and configured.auth_mode == 'legacy_local':
             logging.getLogger("etl").warning(
                 "Admin API enabled without authentication; bind only to 127.0.0.1 for local development"
             )
@@ -116,6 +123,12 @@ def create_app(container=None):
 
     app = FastAPI(title="Data Sync + ETL (local admin/dev)", lifespan=lifespan)
     configured = container.settings if container is not None else Settings()
+
+    from data_sync_etl.security.auth import AuthError
+
+    @app.exception_handler(AuthError)
+    async def authentication_error(request, exc):
+        return auth_error(exc)
 
     @app.middleware("http")
     async def correlation(request: Request, call_next):
@@ -189,12 +202,14 @@ def create_app(container=None):
         )
 
     app.include_router(router)
+    app.include_router(auth_router)
     app.add_middleware(
         UploadBodyLimitMiddleware,
         max_bytes=configured.upload_request_max_bytes,
         local_admin_settings=configured,
     )
     app.add_middleware(LocalAdminBoundary, settings=configured)
+    app.add_middleware(AuthBoundary, settings=configured)
     return app
 
 

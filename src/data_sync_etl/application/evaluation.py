@@ -29,7 +29,7 @@ class EvaluationService:
 
     @staticmethod
     def authorized(access):
-        if access.scope != 'local_demo':
+        if not access.internal:
             raise EvaluationError('EVALUATION_FORBIDDEN', 403)
 
     def corpus(self, filters, access):
