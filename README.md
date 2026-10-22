@@ -1,89 +1,79 @@
-# ETL — Đồng bộ và xử lý học liệu
+# ETL — Kho học liệu số
 
-Đồng bộ metadata PostgreSQL nguồn → PostgreSQL Master, nhập file Local/Google Drive → trích xuất/OCR → chuẩn hóa → phân đoạn, ContentBag và embedding → tìm kiếm BoW/Vector/Hybrid → thực nghiệm đánh giá.
+Đăng nhập đồng thời user MASTER và admin riêng: [hướng dẫn master_users](deploy/AUTH_MASTER_USERS_SETUP.md).
 
-Hỗ trợ **PDF, DOCX, XLSX, TXT, CSV, PPTX, PNG, JPG, JPEG**; không hỗ trợ MP3/MP4.
+Đồng bộ metadata SOURCE → Master, OCR/trích xuất → ContentUnit/ContentBag → tìm kiếm BoW/Vector/Hybrid. Hỗ trợ PDF, DOCX, PPTX, XLSX, CSV, TXT, PNG/JPG/JPEG. Word/PPT xem dạng PDF, bảng tính xem dạng lưới; tải xuống giữ định dạng gốc.
 
-Hướng dẫn dành cho **Windows + Git Bash, môi trường Development**. Docker chạy database; API, giao diện và worker chạy trên máy. Cài mới theo mục 1–7; lần sau xem mục 9. Google Drive là tùy chọn, không cần nếu chỉ dùng Local.
+**SOURCE chỉ lưu tham chiếu**, đọc Local/Drive khi xử lý, xem hoặc tải; chỉ dùng file tạm theo tác vụ. File **LOCAL do Master sở hữu** vẫn lưu trong `STORAGE_ROOT`.
 
-## 1. Cài môi trường và dependencies
+Các lệnh chạy từ **gốc repo trong Git Bash trên Windows**. Có thể giữ nguyên tên/cổng/đường dẫn mẫu; chỉ thay email, mật khẩu và thông tin nguồn của bạn. Không có tài khoản/mật khẩu demo mặc định.
 
-Cài Git, Python **3.12+**, Node.js **22.12+** và Docker Desktop. Mở Docker Desktop, sau đó mở Git Bash tại thư mục repository có `pyproject.toml`.
+## 1. Chạy local
+
+API, React và ba worker chạy trên host; Docker chỉ chạy database. Cần Git, **Python 3.12**, **Node.js 22.12+**, Docker Desktop (Linux containers), Tesseract `vie+eng` và LibreOffice để OCR ảnh/xem trước Office.
+
+### 1.1. Cài dependencies
 
 ```bash
-python --version
-node --version
-docker compose version
-
-# Chỉ tạo môi trường ở lần cài đầu
 python -m venv .venv
 source .venv/Scripts/activate
-python -X utf8 -m pip install --upgrade pip
-python -X utf8 -m pip install -e ".[dev,embeddings]"
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev,embeddings,google-drive]"
 npm.cmd --prefix frontend ci
-
-# Không ghi đè cấu hình cá nhân đã có
 test -f .env || cp .env.example .env
+mkdir -p /d/etl/private/auth /d/etl/source /d/etl/storage /d/etl/models/minilm
 ```
 
-PowerShell kích hoạt bằng `.\.venv\Scripts\Activate.ps1`; các đoạn `python - <<'PY'` bên dưới phải chạy bằng **Git Bash**. Extra `embeddings` cài runtime, chưa tải model.
+Chỉ dùng Local thì có thể bỏ extra `google-drive`. Linux: dùng `source .venv/bin/activate`, `npm` thay `npm.cmd` và đổi `D:/etl/...` thành đường dẫn tuyệt đối của máy. `.env` không hỗ trợ đường dẫn `~` như shell.
 
-## 2. Cấu hình `.env`
+### 1.2. Sửa `.env` ở gốc repo
 
-Sửa các giá trị sau trong `.env`; giữ các nhóm còn lại theo `.env.example`. Đường dẫn chỉ là ví dụ, thay theo máy của bạn.
+Giữ các nhóm còn lại theo [.env.example](.env.example); cập nhật key đã có, tránh trùng. Thay ba `YOUR_*_PASSWORD` bằng mật khẩu riêng; ký tự đặc biệt trong URI phải percent-encode. File này không commit.
 
 ```dotenv
 APP_ENVIRONMENT=development
 ADMIN_ENABLED=true
-
-# PostgreSQL Master
 POSTGRES_USER=etl
 POSTGRES_DB=etl
-POSTGRES_PASSWORD=your-master-password
-DATABASE_URL=postgresql+psycopg://etl:your-master-password@127.0.0.1:5432/etl
-
-# PostgreSQL nguồn: owner chạy migration, reader chỉ đọc
+POSTGRES_PASSWORD=YOUR_MASTER_PASSWORD
+DATABASE_URL=postgresql+psycopg://etl:YOUR_MASTER_PASSWORD@127.0.0.1:5432/etl
 SOURCE_ADAPTER=postgresql
 SOURCE_POSTGRES_USER=etl_source_admin
 SOURCE_POSTGRES_DB=etl_source
-SOURCE_POSTGRES_PASSWORD=your-source-owner-password
-SOURCE_MIGRATION_DATABASE_URL=postgresql+psycopg://etl_source_admin:your-source-owner-password@127.0.0.1:5433/etl_source
-SOURCE_DATABASE_URL=postgresql+psycopg://etl_source_reader:your-source-reader-password@127.0.0.1:5433/etl_source
-
-# Kho file nguồn và kho ETL tách biệt
-SOURCE_FILE_STORAGE_ROOT=D:/SourceLearningFiles
-STORAGE_ROOT=D:/ETLStorage
-SOURCE_FILE_ALLOWED_STATUSES=["APPROVED"]
-
-# MongoDB dùng chung, đúng 5 collection
+SOURCE_POSTGRES_PASSWORD=YOUR_SOURCE_OWNER_PASSWORD
+SOURCE_MIGRATION_DATABASE_URL=postgresql+psycopg://etl_source_admin:YOUR_SOURCE_OWNER_PASSWORD@127.0.0.1:5433/etl_source
+SOURCE_DATABASE_URL=postgresql+psycopg://etl_source_reader:YOUR_SOURCE_READER_PASSWORD@127.0.0.1:5433/etl_source
 MONGO_URI=mongodb://127.0.0.1:27018
 MONGO_DATABASE=etl_content
 MONGO_METADATA_MODE=shared
 SOURCE_MONGO_ENABLED=false
 MASTER_MONGO_IDENTITY_BOOTSTRAP=false
-
-# Chỉ bật sau khi kiểm tra schema/model
-INDEX_AUTO_ENABLED=false
-INDEX_EMBEDDING_DIMENSION=384
-
-# Local không cần Drive
+MASTER_MONGO_IDENTITY_PROJECTION=false
+SOURCE_REFERENCE_ENABLED=true
+SOURCE_TEMPORARY_FILES_ENABLED=true
+SOURCE_FILE_STORAGE_ROOT=D:/etl/source
+SOURCE_TEMP_ROOT=D:/etl/source-temp
+STORAGE_ROOT=D:/etl/storage
 SOURCE_DRIVE_ENABLED=false
 SOURCE_DRIVE_BUCKETS={}
 SEARCH_INTERNAL_DEV_ENABLED=false
+INDEX_AUTO_ENABLED=false
 ```
 
-```bash
-mkdir -p /d/SourceLearningFiles /d/ETLStorage
-```
+| Cấu hình | Ý nghĩa/cách điền |
+|---|---|
+| `DATABASE_URL` | Master; role được ghi dữ liệu ứng dụng. |
+| `SOURCE_DATABASE_URL` | SOURCE; **reader chỉ SELECT**, không owner/superuser. |
+| `SOURCE_MIGRATION_DATABASE_URL` | Owner chỉ dùng khi chủ DB duyệt khởi tạo/migration; không truyền vào Docker app. |
+| `SOURCE_FILE_STORAGE_ROOT` | Kho nguồn có sẵn; đọc `<root>/<storage_bucket>/<storage_object_key>`, không tự quét folder tạo học liệu. |
+| `STORAGE_ROOT`, `SOURCE_TEMP_ROOT` | Kho LOCAL và thư mục tạm; ba thư mục này và kho nguồn không trùng/lồng nhau. |
+| Hai cờ SOURCE reference/temp | Cho phép đọc nguồn/file tạm; không sao chép SOURCE lâu dài. |
 
-- Thay cả ba mật khẩu mẫu; mật khẩu trong URL phải khớp role tương ứng. Dùng mật khẩu dài gồm chữ/số/gạch ngang để dễ cấu hình; ký tự đặc biệt trong URL cần percent-encode và lưu ý nội suy của Compose.
-- Database đã tồn tại: sửa `.env` **không đổi mật khẩu PostgreSQL**. Dùng thông tin thực tế, không xóa volume để đặt lại.
-- File Local được đọc từ `<SOURCE_FILE_STORAGE_ROOT>/<storage_bucket>/<storage_object_key>`. Hai kho nguồn/ETL không được trùng hoặc lồng nhau.
-- `ADMIN_ENABLED` không thay thế xác thực quản trị; chỉ bật trên máy Dev được kiểm soát. Không đưa `.env`, credential, token, model hoặc học liệu vào Git.
+DB có sẵn: dùng thông tin thực do chủ DB cấp và **bỏ bước khởi tạo**. Đổi `.env` không đổi mật khẩu role đã tồn tại.
 
-## 3. Khởi tạo database
+### 1.3. Database mới, trống — khởi tạo một lần
 
-Chỉ chạy trên database Dev đã xác nhận. Với database có dữ liệu, sao lưu và duyệt migration trước khi cập nhật.
+[docker-compose.yml](docker-compose.yml) ở gốc có migration/bootstrap: chỉ chạy khi xác nhận DB local mới của bạn, không trỏ vào Dev dùng chung/Production.
 
 ```bash
 docker compose up --build -d
@@ -92,382 +82,338 @@ docker compose logs master-migrate source-migrate mongo-init
 python -m data_sync_etl.adapters.mongo.schema --check
 ```
 
-| Database | Địa chỉ trên máy |
-| --- | --- |
-| PostgreSQL Master | `127.0.0.1:5432/etl` |
-| PostgreSQL nguồn | `127.0.0.1:5433/etl_source` |
-| MongoDB | `127.0.0.1:27018/etl_content` |
-
-Ba tiến trình khởi tạo `master-migrate`, `source-migrate`, `mongo-init` cần kết thúc mã **0**. MongoDB cần `schema_ready=true`, đủ `users`, `learning_resources`, `ocr_pages`, `mongo_content_units`, `content_bags` và 6 index nghiệp vụ; embedding 384 chiều.
-
-Database mới trống được tạo schema tự động, **không tự có học liệu mẫu**. Database cũ sai schema sẽ bị chặn, không tự sửa. Không chạy `--apply` khi chưa backup/phê duyệt; không dùng `docker compose down -v` để chữa lỗi.
-
-### Tạo reader nguồn — một lần khi cài mới
-
-Sau khi `source-migrate` thành công, chạy với tên database/user như mục 2:
+Ba job khởi tạo phải kết thúc mã 0; Mongo cần `schema_ready=true`, embedding 384D. DB trống chưa có học liệu mẫu. Tạo SOURCE reader và đặt mật khẩu khớp `.env`:
 
 ```bash
-docker compose exec -T source-postgres psql -v ON_ERROR_STOP=1 -U etl_source_admin -d etl_source < scripts/sql/source_reader.sql
+docker compose exec -T source-postgres psql -v ON_ERROR_STOP=1 \
+  -U etl_source_admin -d etl_source < scripts/sql/source_reader.sql
 docker compose exec source-postgres psql -U etl_source_admin -d etl_source
 ```
 
-Trong `psql`, nhập:
+Trong `psql`: chạy `\password etl_source_reader`, nhập mật khẩu reader rồi `\q`. Nếu đổi tên DB/user mẫu, sửa cả lệnh và `GRANT CONNECT` trong SQL.
 
-```text
-\password etl_source_reader
-\q
-```
+### 1.4. Đăng nhập local
 
-Nhập mật khẩu reader theo yêu cầu, khớp `SOURCE_DATABASE_URL`. Nếu đổi tên database, đối chiếu cả `GRANT CONNECT` trong script.
+Làm lần lượt các bước dưới đây sau khi cài dependencies và cấu hình DB. Nếu chỉ cần chạy thử với DB trống, chọn `single_admin`; nếu muốn dùng cả user đang có trong MASTER và admin riêng, chọn `master_users` ở bước4.
 
-## 4. Cài Tesseract OCR
+**Bước1 — Chọn chế độ đăng nhập.**
 
-Cần cho ảnh và PDF scan; `pip install` không cài phần mềm này.
+Chọn **một** chế độ cho `AUTH_MODE`; form đăng nhập chỉ có email/mật khẩu, không chọn loại tài khoản:
 
-1. Mở [hướng dẫn Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html), theo liên kết bản Windows của UB Mannheim và cài đặt.
-2. Chọn dữ liệu ngôn ngữ **English + Vietnamese**. Nếu thiếu, tải `eng.traineddata`, `vie.traineddata` từ [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast), chép vào thư mục `tessdata` của bản cài.
-3. Kiểm tra đường dẫn thực tế, ví dụ:
+| Chế độ | Tài khoản dùng để đăng nhập | Khi nào dùng |
+|---|---|---|
+| `single_admin` | Một admin với email cấu hình và mật khẩu do bạn tạo bên dưới | Cài mới, chưa có người dùng MASTER. |
+| `master_users` | User MASTER và admin riêng nếu `ADMIN_ENABLED=true` | Đã có người dùng được đồng bộ SOURCE → MASTER. Không cần Auth DB mới. |
+| `db_users` | Tài khoản và RBAC trong PostgreSQL Auth DB riêng | Cần quản lý tài khoản độc lập; làm theo [Auth Database setup](deploy/AUTH_DATABASE_SETUP.md). |
+
+**Bước2 — Tạo secret và đặt mật khẩu admin.** Kích hoạt `.venv`, chạy từ gốc repo. Nếu đã có đủ ba file secret thì dùng lại, không chạy `init` lần nữa:
 
 ```bash
-"/c/Program Files/Tesseract-OCR/tesseract.exe" --version
-"/c/Program Files/Tesseract-OCR/tesseract.exe" --list-langs
+python -m data_sync_etl.security.cli init --directory D:/etl/private/auth
 ```
 
-Danh sách cần có `eng` và `vie`. Cấu hình `.env`:
+Nhập/xác nhận mật khẩu **ít nhất 15 ký tự**; terminal không hiện ký tự. Ghi nhớ mật khẩu bạn vừa nhập để đăng nhập. CLI tạo hash Argon2id và hai khóa, không ghi đè file đã có. Kết quả mong đợi: `PASS: auth secret files created; password not displayed.` và có ba file sau:
+
+```text
+D:/etl/private/auth/
+├── admin_password_hash
+├── session_signing_key
+└── auth_proxy_key
+```
+
+**Bước3 — Điền cấu hình admin vào `.env`.** Mở file tại **gốc repo**:
+
+```bash
+notepad.exe .env
+```
+
+Cập nhật các key đã có hoặc thêm key còn thiếu, không chép thêm dòng trùng. Sao chép khối dưới đây, thay `YOUR_EMAIL` bằng email admin bạn muốn dùng. Các đường dẫn giữ nguyên nếu đã tạo secret đúng bước2:
+
+```dotenv
+AUTH_MODE=single_admin
+ADMIN_ENABLED=true
+AUTH_DEV_ADMIN_BYPASS=false
+AUTH_PUBLIC_ENABLED=false
+AUTH_DEPLOYMENT_PROFILE=localhost
+AUTH_COOKIE_SECURE=false
+AUTH_ORIGIN=http://127.0.0.1:3000
+ADMIN_LOGIN_EMAIL=YOUR_EMAIL
+ADMIN_PASSWORD_HASH_FILE=D:/etl/private/auth/admin_password_hash
+SESSION_SIGNING_KEY_FILE=D:/etl/private/auth/session_signing_key
+AUTH_PROXY_KEY_FILE=D:/etl/private/auth/auth_proxy_key
+AUTH_STATE_PATH=D:/etl/private/auth/sessions.sqlite3
+```
+
+| Giá trị | Lấy ở đâu / cách nhập |
+|---|---|
+| `ADMIN_LOGIN_EMAIL` | Email admin do bạn chọn, ví dụ `admin@example.com`; thay `YOUR_EMAIL`, không nhập mật khẩu ở đây. Không cần có bản ghi MASTER tương ứng. |
+| Mật khẩu admin | Chính mật khẩu nhập hai lần khi chạy CLI; không có mật khẩu mặc định. CLI chỉ lưu hash, không lưu bản gốc để xem lại. |
+| `ADMIN_PASSWORD_HASH_FILE` | File `admin_password_hash` vừa tạo, chứa hash Argon2id. Đây là đường dẫn file, không phải nội dung hash. |
+| `SESSION_SIGNING_KEY_FILE` | File khóa ký session do CLI tạo; giữ ổn định giữa các lần chạy. |
+| `AUTH_PROXY_KEY_FILE` | File khóa giữa Vite/reverse proxy và Backend do CLI tạo; không nhập vào form login. |
+| `AUTH_STATE_PATH` | File SQLite session riêng; thư mục cha phải ghi được. Không dùng DB nghiệp vụ để lưu phiên. |
+| `AUTH_ORIGIN` | Địa chỉ trình duyệt thực sự mở: local mặc định `http://127.0.0.1:3000`. Đổi cổng/hostname thì sửa tương ứng. |
+
+`ADMIN_ENABLED=true` bật tính năng quản trị, vẫn yêu cầu đăng nhập. Trong `master_users`, `false` chặn admin riêng; các route thuộc LocalAdminBoundary vẫn có thể trả403 khi cờ tắt. Vite đọc proxy key từ Backend `.env` ở phía server; không đưa secret vào `VITE_*`. `AUTH_COOKIE_SECURE=false` chỉ dành cho HTTP localhost trong ví dụ này; LAN/Production cần HTTPS và cấu hình TLS phù hợp.
+
+**Bước4 — Bật tài khoản MASTER nếu cần.** Nếu chỉ dùng admin thì bỏ qua bước này. Nếu dùng cả hai, giữ nguyên email/secret ở bước3, **đổi dòng `AUTH_MODE` hiện có** và thêm các key MASTER trong **`.env` gốc repo**:
+
+```dotenv
+AUTH_MODE=master_users
+ADMIN_ENABLED=true
+AUTH_MASTER_FRESHNESS_SECONDS=120
+AUTH_MASTER_PBKDF2_SALT_ENCODING=auto
+AUTH_MASTER_RESOURCE_GRANTS={}
+```
+
+- User nhập email và mật khẩu hiện có ở SOURCE, sau khi đồng bộ sang MASTER. Không dùng mật khẩu PostgreSQL hoặc mật khẩu admin riêng. DB mới, trống chưa có user để đăng nhập; cần dữ liệu SOURCE và worker đồng bộ users thành công.
+- Backend đọc `master_users` qua `DATABASE_URL` bằng transaction READ ONLY; không cần thêm URL Auth DB. User phải active, email verified, role active, chưa deleted/source_missing, có nguồn POSTGRESQL và email chuẩn hóa không trùng.
+- Trong120 giây gần nhất phải có users sync_run COMPLETED; chạy Master Sync Worker ở mục1.6. Nếu dữ liệu cũ, Backend từ chối đăng nhập/session MASTER. Admin riêng vẫn dùng được khi cờ bật và secret hợp lệ.
+- User MASTER nhận **Viewer**, kể cả role SOURCE là ADMIN. Họ chỉ đọc học liệu PUBLISHED do mình tạo và resource được cấp thêm; không tự có quyền Sync/Index/Admin. Cấp thêm bằng `AUTH_MASTER_RESOURCE_GRANTS={"MASTER_USER_ID":["RESOURCE_ID"]}`, dùng ID thật, không dùng email.
+- `auto` xác minh PBKDF2 theo cả salt text và hex của định dạng được hỗ trợ; không đổi hash trong DB. Nếu trùng email với admin, chỉ mật khẩu admin khớp secret mới cấp admin; mật khẩu MASTER khác vẫn là Viewer.
+
+**Bước5 — Khởi động và thử đăng nhập.** Hoàn tất model/OCR ở mục1.5 rồi chạy Backend, Frontend và các worker theo mục1.6. Nếu các tiến trình đang chạy thì restart Backend; đổi proxy key thì restart cả Vite. Mở **http://127.0.0.1:3000/login**:
+
+| Muốn đăng nhập | Nhập email | Nhập mật khẩu |
+|---|---|---|
+| Admin riêng | Giá trị `ADMIN_LOGIN_EMAIL` ở bước3 | Mật khẩu đã nhập ở bước2, không phải nội dung file hash. |
+| Người dùng MASTER | Email tài khoản đã đồng bộ từ SOURCE | Mật khẩu của chính tài khoản đó tại SOURCE. |
+
+Form không có dropdown. Admin riêng cần `ADMIN_ENABLED=true`; user MASTER cần `AUTH_MODE=master_users`. Không nhập mật khẩu DB PostgreSQL vào form. Hướng dẫn quyền và đồng bộ: [MASTER users](deploy/AUTH_MASTER_USERS_SETUP.md).
+
+Kiểm tra cấu hình công khai qua Frontend sau khi chạy:
+
+```bash
+curl -s http://127.0.0.1:3000/api/v1/auth/config
+```
+
+Với chế độ MASTER + admin ở trên, kết quả phải có `"mode":"master_users"`, `"login_required":true`, `"admin_feature_enabled":true`. Nếu vẫn hiện mode cũ, kiểm tra đúng file `.env` và restart Backend.
+
+**Nhiều tài khoản/RBAC:** có thể chọn `AUTH_MODE=db_users` với PostgreSQL Auth DB riêng, giữ nguyên SOURCE/Master/Mongo. Làm theo [Auth Database setup](deploy/AUTH_DATABASE_SETUP.md) để provision, migration riêng, bootstrap admin và chuyển mode sau kiểm thử; không tự đồng bộ tài khoản SOURCE thành admin. `single_admin` vẫn là mặc định/rollback có kiểm soát.
+
+### 1.5. OCR, Office và model — chuẩn bị một lần
+
+Cài [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html) có English/Vietnamese và LibreOffice. Kiểm tra đường dẫn cài thực tế rồi sửa `.env`:
 
 ```dotenv
 OCR_ENGINE=tesseract
 TESSERACT_PATH="C:/Program Files/Tesseract-OCR/tesseract.exe"
 TESSERACT_LANGUAGES=vie+eng
-OCR_TIMEOUT_SECONDS=60
-```
-
-Kiểm tra runtime theo cấu hình Backend:
-
-```bash
-python - <<'PY'
-from data_sync_etl.config import Settings
-from data_sync_etl.adapters.ocr.engines import TesseractOCREngine
-s = Settings()
-TesseractOCREngine(s.tesseract_path, s.tesseract_languages, s.ocr_timeout_seconds).check_runtime()
-print("PASS: Tesseract va ngon ngu da san sang")
-PY
-```
-
-`OCR_ENGINE=native` chỉ đọc text có sẵn, không OCR ảnh/PDF scan. Không dùng `fake` cho dữ liệu thật.
-
-## 5. Tải và cấu hình model embedding
-
-Dùng [paraphrase-multilingual-MiniLM-L12-v2](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2), hỗ trợ đa ngôn ngữ, **384 chiều**, chạy CPU. Model dùng cho chỉ mục/tìm kiếm, không thay thế Tesseract.
-
-### Tải một lần, lưu ngoài repository
-
-Chạy trong Git Bash đã kích hoạt `.venv`, có Internet. Nếu đã có đúng model/revision thì bỏ qua bước tải.
-
-```bash
-unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE
-python - <<'PY'
-from pathlib import Path
-from huggingface_hub import snapshot_download
-
-model_id = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-revision = "e8f8c211226b894fcb81acc59f3b34ba3efd5f42"
-target = Path("D:/Models/paraphrase-multilingual-MiniLM-L12-v2")
-snapshot_download(
-    repo_id=model_id, revision=revision, local_dir=str(target),
-    allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model"],
-    ignore_patterns=["onnx/*", "openvino/*"],
-)
-(target / "etl-model-revision.txt").write_text(revision + "\n", encoding="utf-8")
-print("Da tai model:", target)
-PY
-```
-
-Giữ đủ tokenizer, trọng số và các module như `1_Pooling`. Tải gián đoạn có thể chạy lại cùng lệnh. Không dùng chung thư mục với model khác.
-
-### Khai báo trong `.env` và kiểm tra
-
-```dotenv
-INDEX_EMBEDDING_MODEL_PATH=D:/Models/paraphrase-multilingual-MiniLM-L12-v2
+OFFICE_PDF_EXECUTABLE="C:/Program Files/LibreOffice/program/soffice.exe"
+INDEX_EMBEDDING_MODEL_PATH=D:/etl/models/minilm
 INDEX_EMBEDDING_MODEL_ID=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 INDEX_EMBEDDING_MODEL_VERSION=e8f8c211226b894fcb81acc59f3b34ba3efd5f42
 INDEX_EMBEDDING_DIMENSION=384
 ```
 
-Đường dẫn phải chứa `modules.json`; version phải khớp manifest `etl-model-revision.txt`. Không tự đổi version/dimension để bỏ kiểm tra. Biến cũ `VECTOR_DIMENSION` không quyết định dimension ContentBag.
-
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python - <<'PY'
-import math
-from data_sync_etl.config import Settings
-from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
-s = Settings()
-model = LocalSentenceEmbedding(
-    s.index_embedding_model_path, s.index_embedding_model_id,
-    s.index_embedding_model_version, s.index_embedding_dimension,
-)
-vector = model.embed("Học liệu tiếng Việt về phân số.")
-assert len(vector) == s.index_embedding_dimension == 384
-assert all(math.isfinite(value) for value in vector) and any(vector)
-print("PASS: embedding tieng Viet 384 chieu")
-PY
+"/c/Program Files/Tesseract-OCR/tesseract.exe" --list-langs
+# prepare cần Internet và chấp nhận license; bỏ qua nếu đã có đúng model.
+python deploy/runtime/model.py prepare --directory D:/etl/models/minilm \
+  --manifest D:/etl/models/minilm/etl-model-manifest.json --accept-model-license
+python deploy/runtime/model.py encode --directory D:/etl/models/minilm \
+  --manifest D:/etl/models/minilm/etl-model-manifest.json
 ```
 
-Backend/worker dùng model local, không tự tải model khi chạy. Lần nạp đầu có thể lâu hơn.
+Danh sách OCR cần `vie`/`eng`; `encode` kiểm tra offline/384D. Đã có model/revision nhưng thiếu JSON manifest: dùng action `manifest` thay `prepare`, rồi `encode`, không tải lại. Model/token không đi kèm khi pull code. Linux cài các gói `tesseract-ocr tesseract-ocr-eng tesseract-ocr-vie libreoffice-writer libreoffice-impress`, chỉnh executable theo máy.
 
-## 6. Google Drive — dành cho người mới pull code
+### 1.6. Khởi động hằng ngày
 
-**Pull code không mang theo quyền Drive, OAuth token hoặc cấu hình cá nhân.** Mỗi người tự đăng nhập bằng tài khoản có quyền đọc thư mục; không dùng token của người khác. Chỉ dùng Local thì bỏ qua mục này.
+DB đã khởi tạo: `docker compose up -d postgres source-postgres mongo` (không chạy lại migration). Mở **5 terminal** ở repo; mỗi terminal Python kích hoạt `.venv`:
 
-### 6.1. Chuẩn bị Google Cloud và thư mục Drive
-
-1. Tạo/chọn project trong [Google Cloud Console](https://console.cloud.google.com/), bật **Google Drive API**.
-2. Cấu hình **Google Auth platform**: Branding, Audience và Data Access. Với tài khoản cá nhân, dùng External; khi ứng dụng ở Testing, thêm email đăng nhập vào **Test users**.
-3. Chỉ yêu cầu scope `https://www.googleapis.com/auth/drive.readonly`: đọc metadata và tải file, không sửa/xóa. Scope này có thể đọc các file tài khoản được phép truy cập; ETL giới hạn thêm bằng folder mapping, không phải quyền OAuth giới hạn riêng thư mục.
-4. Trong **Clients**, tạo OAuth client loại **Desktop app**, tải JSON và lưu ngoài Git, ví dụ `D:/ETL_Secrets/desktop-client.json`.
-5. Nhờ chủ thư mục Drive chia sẻ quyền **Reader** cho email của bạn. Nếu dùng OAuth project của nhóm, chủ project cũng cần thêm email vào Test users; chỉ chia sẻ client JSON qua kênh riêng được phép, không chia sẻ token.
-
-Tham khảo [hướng dẫn OAuth Desktop của Google](https://developers.google.com/workspace/drive/api/quickstart/python). Không cần tạo API key hoặc bật chia sẻ công khai thư mục.
-
-### 6.2. Cài extra và đăng nhập OAuth
-
-Dừng API/worker trước khi cập nhật dependencies. Chạy từ repository, đã kích hoạt `.venv`:
-
-```bash
-python -X utf8 -m pip install -e ".[dev,embeddings,google-drive]"
-mkdir -p /d/ETL_Secrets
-python scripts/authorize_drive_readonly.py \
-  --client-file "D:/ETL_Secrets/desktop-client.json" \
-  --token-file "D:/ETL_Secrets/drive-authorized-user.json"
-```
-
-Tự đăng nhập và cấp quyền đọc trên trình duyệt. Chỉ tiếp tục khi terminal báo `OAUTH_SUCCESS`. Script tạo credential **authorized_user**, không in token và không ghi database. Đây là đăng nhập Google cho ETL, không phải đăng nhập WebApp.
-
-Token đích phải là file **chưa tồn tại**, thư mục cha đã có và nằm ngoài repository. Nếu cần xác thực lại, chọn tên token mới rồi cập nhật đường dẫn; không ghi đè hoặc gửi nội dung JSON qua chat/Git/log.
-
-### 6.3. Khai báo folder và kiểm tra chỉ đọc
-
-Lấy `FOLDER_ID` từ link `https://drive.google.com/drive/folders/FOLDER_ID`, không lấy ID của một file. Sửa `.env`:
-
-```dotenv
-SOURCE_DRIVE_ENABLED=true
-SOURCE_DRIVE_AUTH_TYPE=authorized_user
-SOURCE_DRIVE_CREDENTIALS_FILE=D:/ETL_Secrets/drive-authorized-user.json
-SOURCE_DRIVE_BUCKETS={"COURSE_DRIVE":"YOUR_FOLDER_ID"}
-```
-
-Ý nghĩa các biến Drive trong `.env`:
-
-| Biến | Cách cấu hình |
-| --- | --- |
-| `SOURCE_DRIVE_ENABLED` | `true` để đọc Drive; `false` để tắt. |
-| `SOURCE_DRIVE_AUTH_TYPE` | `authorized_user` khi đăng nhập OAuth cá nhân theo mục 6.2. |
-| `SOURCE_DRIVE_CREDENTIALS_FILE` | Đường dẫn tuyệt đối tới token riêng trên máy, lưu ngoài repository. |
-| `SOURCE_DRIVE_BUCKETS` | JSON ánh xạ bucket nguồn sang folder ID, ví dụ `{"COURSE_DRIVE":"YOUR_FOLDER_ID"}`. |
-
-Drive hiện **chỉ là nguồn đọc**, chưa hỗ trợ lưu đầu ra lên Drive; file nhập vẫn lưu tại `STORAGE_ROOT`. Sau khi sửa `.env`, khởi động lại Backend và worker nhập file để nhận cấu hình mới.
-
-`SOURCE_DRIVE_CREDENTIALS_FILE` trỏ tới **token vừa tạo**, không phải Desktop client JSON. Giữ nguyên `SOURCE_FILE_STORAGE_ROOT` và `STORAGE_ROOT`; Local vẫn hoạt động song song.
-
-```bash
-python - <<'PY'
-from data_sync_etl.config import Settings
-from data_sync_etl.adapters.storage.source_google_drive import SourceGoogleDriveFileReader
-SourceGoogleDriveFileReader(Settings()).check()
-print("PASS: truy cap thu muc Drive chi doc")
-PY
-```
-
-Lệnh trên chỉ kiểm tra truy cập thư mục, chưa nhập file hoặc ghi PostgreSQL/MongoDB. API/worker cần chạy bằng tài khoản máy có quyền đọc token. Chỉ khởi động worker nhập file sau khi kiểm tra thành công.
-
-### 6.4. Điều kiện để đồng bộ file Drive
-
-Không tự quét folder rồi tạo học liệu. File phải có tham chiếu hợp lệ trong `resource_versions` của PostgreSQL nguồn:
-
-| Trường nguồn | Giá trị |
-| --- | --- |
-| `storage_bucket` | `COURSE_DRIVE` — khớp key trong mapping |
-| `storage_object_key` | `files/FILE_ID/ten-file-goc.pdf` — đúng tên và đuôi file |
-| `source_hash` | SHA-256 thực tế của nội dung file |
-| `lifecycle_status` | `APPROVED` theo cấu hình cho phép |
-
-File phải nằm trong folder đã cấu hình và được phép tải. Dùng file PDF/Office/ảnh thực; Google Docs/Sheets/Slides native và shortcut chưa được hỗ trợ. ETL tải snapshot về `STORAGE_ROOT` rồi dùng pipeline hiện có.
-
-Tham chiếu file và hash cần được xác nhận tại PostgreSQL nguồn theo bảng trên. Không đổi hàng loạt đường dẫn nguồn chỉ để thử Drive. Khi tắt Drive, đặt `SOURCE_DRIVE_ENABLED=false` nhưng **giữ bucket mapping** để không định tuyến nhầm sang Local.
-
-Nếu dùng service account thay OAuth cá nhân: cấu hình `SOURCE_DRIVE_AUTH_TYPE=service_account`, trỏ tới credential service account ngoài Git và chia sẻ folder cho email service account với quyền Reader; không chạy script OAuth Desktop.
-
-### 6.5. Đường dẫn Windows và Docker
-
-Khi API/worker chạy trên Windows, dùng đường dẫn tuyệt đối: `SOURCE_FILE_STORAGE_ROOT=D:/SourceLearningFiles`, `STORAGE_ROOT=D:/ETLStorage`, token tại `D:/ETL_Secrets/drive-authorized-user.json`. Thư mục nguồn và đích phải riêng biệt; bucket Drive không thay đổi thư mục Local.
-
-Compose hiện tại chỉ chạy database và migration, **không chạy API/worker hoặc tự mount thư mục nguồn/token**. Nếu tự đóng gói worker vào container, cần mount nguồn và token **read-only**, mount kho đích riêng có quyền ghi, rồi cấu hình đường dẫn bên trong container. Kết nối database trong mạng Compose dùng `postgres:5432`, `source-postgres:5432`, `mongo:27017`; `127.0.0.1` trong container không phải máy Windows. Không đưa token vào image hoặc Git.
-
-### 6.6. Phân biệt trạng thái đồng bộ và xem tệp
-
-Metadata đồng bộ thành công không có nghĩa file đã được nhập. Worker nhập file đọc Local/Drive, kiểm tra định dạng và SHA-256, lưu vào `STORAGE_ROOT`, rồi mới gửi yêu cầu xử lý. `CONTENT_READY` là đã chuẩn hóa; `INDEX READY` là đã có chỉ mục, không phải cùng một trạng thái.
-
-Xem/tải tệp chỉ đọc bản đã nhập trong kho đích, không mở trực tiếp Local/Drive. Giao diện vẫn giữ kiểm tra quyền và chỉ mục hiện có: HTTP 409 nghĩa tệp chưa sẵn sàng, cần kiểm tra xử lý/chỉ mục; HTTP 404 nghĩa không tìm thấy tệp hoặc không có quyền. Học liệu nguồn chưa có phiên bản nhập sẽ hiển thị “Chưa nhập tệp từ nguồn”.
-
-## 7. Khởi động hệ thống
-
-### 7.1. Bật database trước
-
-Mở Docker Desktop, vào thư mục gốc repository và chạy:
-
-```bash
-source .venv/Scripts/activate
-docker compose up --build -d
-docker compose ps -a
-python -m data_sync_etl.adapters.mongo.schema --check
-```
-
-Chỉ tiếp tục khi database sẵn sàng, các bước migration/init thành công và schema PASS. Lần cài mới cần hoàn thành tài khoản reader, Tesseract và model ở các mục trên.
-
-### 7.2. Nếu dùng Google Drive
-
-Hoàn thành OAuth và cấu hình `.env` tại mục 6 trước khi chạy worker. Token còn hợp lệ thì **không cần đăng nhập Google lại mỗi lần start**.
-
-Nếu chưa cài extra Drive, chạy một lần khi API/worker đang dừng:
-
-```bash
-python -X utf8 -m pip install -e ".[dev,embeddings,google-drive]"
-```
-
-Kiểm tra folder Drive bằng cấu hình hiện tại, không ghi database:
-
-```bash
-python -c "from data_sync_etl.config import Settings; from data_sync_etl.adapters.storage.source_google_drive import SourceGoogleDriveFileReader; SourceGoogleDriveFileReader(Settings()).check(); print('PASS: Drive read-only')"
-```
-
-Nếu chỉ dùng Local, bỏ qua bước này. Drive dùng **chung worker nhập file nguồn**, không có lệnh start Drive riêng và không cần worker thứ sáu. Kiểm tra Drive thất bại thì sửa credential/quyền/folder trước khi nhập file Drive.
-
-### 7.3. Mở API, giao diện và các worker
-
-Mở **5 terminal riêng** tại repository. Mỗi terminal Python cần chạy `source .venv/Scripts/activate` trước.
-
-| Terminal | Lệnh |
-| --- | --- |
+| Tiến trình | Lệnh |
+|---|---|
 | Backend | `python -m uvicorn data_sync_etl.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers` |
-| Frontend | `npm.cmd --prefix frontend run dev -- --host 127.0.0.1 --strictPort` |
+| Frontend | `npm.cmd --prefix frontend run dev` |
 | Đồng bộ metadata | `etl run-master-sync-worker --worker-id master-sync-1` |
-| Nhập file nguồn Local + Drive (nếu bật) | `etl run-source-file-worker --worker-id source-file-1` |
-| OCR, chuẩn hóa, Index/Reindex | `etl run-ocr-worker --worker-id ocr-1` |
+| File nguồn | `etl run-source-file-worker --worker-id source-file-1` |
+| OCR/ContentUnit/ContentBag/Index | `etl run-ocr-worker --worker-id ocr-1` |
 
-Mở [giao diện](http://127.0.0.1:3000), [Swagger](http://127.0.0.1:8000/docs), [Health](http://127.0.0.1:8000/health). Frontend proxy tới Backend **8000**. Compose không chạy thay các terminal này, không cài model/Tesseract trên máy.
+Mở **http://127.0.0.1:3000/login**. Dùng đúng `127.0.0.1` theo `AUTH_ORIGIN`; Backend cổng 8000, Vite proxy qua 3000. Sau khi đổi `.env`, restart API/worker; đổi proxy key thì restart cả Vite. Kiểm tra Database tại **Hệ thống → Trạng thái** sau đăng nhập; `/health` trong auth mode chỉ kiểm tra API.
 
-Sau khi đổi `.env`, khởi động lại API và worker liên quan; không chỉ chờ `--reload`.
+Nguồn cần metadata, tham chiếu, SHA-256 và trạng thái `APPROVED` hợp lệ. Đồng bộ metadata → đợi `CONTENT_READY` → xây chỉ mục tới `READY` → tìm kiếm. Có thể bật `INDEX_AUTO_ENABLED=true` sau khi kiểm tra model/schema; không tự backfill lịch sử. Dừng terminal bằng Ctrl+C, DB bằng `docker compose stop`.
 
-API quản trị chỉ dùng trên **Dev local**: `APP_ENVIRONMENT=development`, `ADMIN_ENABLED=true`,
-Backend chạy đúng lệnh loopback `--no-proxy-headers` ở trên. Frontend cũng phải truy cập từ máy local;
-request qua proxy công khai, Host/Origin bên ngoài hoặc header Forwarded bị từ chối.
-Đây không phải đăng nhập/RBAC Production; không mở cổng quản trị ra mạng.
-Không truyền `uploaded_by`/`triggered_by` để tự nhận danh tính; học liệu SOURCE/UNKNOWN không được sửa/tạo phiên bản thủ công.
+**Drive tùy chọn:** làm theo [Drive setup](deploy/DRIVE_SETUP.md); mỗi người tự có token và quyền Reader. Chỉ Local thì bỏ qua. Mặc định nên giữ `single_admin` và cổng mẫu. Bỏ login chỉ cho Dev localhost cô lập: `AUTH_MODE=local_demo`, `APP_ENVIRONMENT=local`, `AUTH_DEV_ADMIN_BYPASS=true`, vẫn đủ khóa và profile localhost; `SEARCH_INTERNAL_DEV_ENABLED=false`. LAN/production với bypass bị chặn.
 
-## 8. Kiểm tra chức năng
+## 2. Build và chạy toàn bộ bằng Docker
 
-API nghiệp vụ dùng tiền tố `/api/v1`. Ingest nằm tại `/api/v1/resources/{id}/versions/ingest`;
-OCR jobs, postprocess, etl-status và content-units nằm dưới `/api/v1/resource-versions/{id}/`.
-Các URL `/admin/...` cũ chỉ giữ làm alias tương thích, không hiển thị trong Swagger;
-đổi tiền tố không bỏ kiểm tra quyền Dev local. `status_url` trả về dùng URL `/api/v1`.
+Host chỉ cần Git và Docker Desktop/Engine + Compose v2; không cần cài Python, Node, OCR/Office/embedding runtime. Model mount read-only, không nằm trong image, không tải khi startup. API, frontend và ba worker riêng; worker dùng chung Backend image; Database có Compose riêng.
 
-1. Nguồn PostgreSQL có dữ liệu: chạy `etl source-file-precheck` để kiểm tra cấu hình/nguồn (có thể tải file để xác minh, không phải lệnh đồng bộ). Sau đó chạy Full lần đầu từ giao diện hoặc `etl sync-master --stream all --full`.
-2. Bật tự đồng bộ các nhóm cần dùng. Mặc định lịch metadata/đối soát file là 300 giây, không phải realtime. Nguồn cần đúng trạng thái cho phép, tham chiếu và hash.
-3. Thêm học liệu trên giao diện hoặc chờ worker nhập file nguồn; đợi `CONTENT_READY`. Metadata đồng bộ thành công chưa có nghĩa OCR/Index đã hoàn tất.
-4. Mở **Phân đoạn và chỉ mục**, chọn phiên bản, nhấn **Xây dựng chỉ mục** hoặc **Tái lập chỉ mục**. Đợi `PENDING → RUNNING → READY`, xác nhận ContentBag/vector sẵn sàng.
-5. Sau khi schema, model và luồng thủ công PASS, có thể đặt `INDEX_AUTO_ENABLED=true`, khởi động lại API/OCR worker và thử học liệu mới. Không tự backfill toàn bộ dữ liệu cũ.
+### 2.1. Cấu hình ngoài Git
 
-### Tìm kiếm và thực nghiệm trên Dev
+```bash
+mkdir -p /d/etl/private /d/etl/source /d/etl/models/minilm
+test -f /d/etl/private/app.env || cp deploy/.env.docker.example /d/etl/private/app.env
+test -f /d/etl/private/connections.json || cp deploy/config/connections.example.json /d/etl/private/connections.json
+notepad.exe D:/etl/private/app.env
+```
 
-Search công khai mặc định bị chặn khi chưa có bằng chứng quyền truy xuất; **PUBLISHED không đồng nghĩa được công khai toàn văn**. Chỉ khi đã xác nhận corpus thử nghiệm được phép sử dụng trên Dev local, bật:
+Trong `app.env`, cập nhật các key sau; giữ nhóm còn lại theo mẫu:
 
 ```dotenv
-APP_ENVIRONMENT=development
+BACKEND_IMAGE=etl-portable-backend:local
+FRONTEND_IMAGE=etl-portable-frontend:local
+ETL_DATA_NETWORK=etl-data
+WEB_PORT=8080
+MODEL_DIR=D:/etl/models/minilm
+MODEL_MANIFEST_FILE=D:/etl/models/minilm/etl-model-manifest.json
+SOURCE_LOCAL_DIR=D:/etl/source
+CONNECTIONS_FILE=D:/etl/private/connections.json
+DATABASE_MODE=same-host
+SOURCE_REFERENCE_ENABLED=true
+SOURCE_TEMPORARY_FILES_ENABLED=true
+```
+
+`app.env` là cấu hình Compose, khác `.env` local. `SOURCE_LOCAL_DIR` là thư mục host, container đọc tại `/mnt/source`. Local auth dùng biến `*_FILE`, Docker dùng `*_SECRET_FILE`.
+
+Sửa `D:/etl/private/connections.json`: đúng **bốn key** theo [mẫu](deploy/config/connections.example.json), thay `CHANGE_ME` bằng credentials thực. Host phải truy cập được **từ container**, không dùng `127.0.0.1`/`localhost`. SOURCE dùng reader chỉ đọc; Mongo runtime không dùng root.
+
+- **DB Docker đã có:** dùng network/hostname service hiện có (`docker network ls`). Ví dụ DB mục 1: `ETL_DATA_NETWORK=etl-master-data_default`, host `postgres:5432`, `source-postgres:5432`, `mongo:27017`, tên DB và role theo `.env`. Không tạo DB trống khác thay DB đang dùng.
+- **DB Docker mới hoàn toàn:** xem [khởi tạo Database riêng](deploy/DATABASE_SETUP.md), gồm secrets, schema và runtime roles. `DbStart` chỉ khởi động server, chưa có schema ứng dụng.
+- **DB khác máy:** cấu hình DNS/TLS, `DATABASE_MODE=remote`, thêm `-RemoteDatabase`; xem [Docker chi tiết](deploy/README.md). Không mở quyền/cổng để bỏ guard.
+
+### 2.2. Build, chuẩn bị model và auth
+
+Thực hiện theo thứ tự: **build image → chuẩn bị model → tạo secret → điền app.env → Check/Start**. Nếu đã có model/secret hợp lệ thì bỏ qua bước tạo tương ứng. Các ví dụ dưới dùng tag `:local`; nếu đổi tag trong `app.env`, sửa cả tham số `-Image` và lệnh Docker tương ứng. `PrepareModel` mặc định dùng `etl-portable-backend:local`; nếu đổi tag, đặt `ETL_MODEL_TOOL_IMAGE` tương ứng.
+
+**Bước1 — Build và chuẩn bị model.**
+
+```bash
+# legacy CHỈ để build trước khi có auth secret; không chạy app bỏ login.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
+  -Action Build -AuthProfile legacy -EnvFile D:/etl/private/app.env
+
+# Bỏ prepare nếu đã có model/manifest ở mục local; cần Internet/license khi tải.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
+  -Action PrepareModel -AuthProfile legacy -ModelDirectory D:/etl/models/minilm -AcceptModelLicense
+```
+
+**Bước2 — Tạo secret và mật khẩu admin.** Chỉ cần Docker, không cần Python trên host. Nếu đã có ba file ở mục1.4 thì dùng lại và bỏ qua lệnh này:
+
+```bash
+# Chỉ khi chưa có ba file secret; thay YOUR_EMAIL bằng email admin thực.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/setup-auth.ps1 \
+  -Directory D:/etl/private/auth -AdminEmail YOUR_EMAIL -Image etl-portable-backend:local
+```
+
+Nhập/xác nhận mật khẩu ít nhất15 ký tự; không thấy ký tự khi gõ là bình thường. Email ở `-AdminEmail` là email admin bạn chọn, không cần có trong MASTER. Lệnh tạo ba file trong `D:/etl/private/auth` và in cấu hình mẫu, **không tự sửa `app.env`**.
+
+**Bước3 — Điền cấu hình vào file Docker.** Mở đúng file sau, không sửa `.env` local để cấu hình container:
+
+```bash
+notepad.exe D:/etl/private/app.env
+```
+
+Thay các key đã có hoặc bổ sung key còn thiếu theo khối dưới; thay `YOUR_EMAIL` bằng cùng email ở bước2, giữ nguyên cấu hình DB/model đã làm ở mục2.1:
+
+```dotenv
+AUTH_MODE=single_admin
+AUTH_APP_ENVIRONMENT=production
 ADMIN_ENABLED=true
-SEARCH_INTERNAL_DEV_ENABLED=true
+AUTH_DEV_ADMIN_BYPASS=false
+AUTH_PUBLIC_ENABLED=false
+AUTH_DEPLOYMENT_PROFILE=localhost
+AUTH_COOKIE_SECURE=false
+AUTH_ORIGIN=http://127.0.0.1:8080
+ADMIN_LOGIN_EMAIL=YOUR_EMAIL
+ADMIN_PASSWORD_HASH_SECRET_FILE=D:/etl/private/auth/admin_password_hash
+SESSION_SIGNING_KEY_SECRET_FILE=D:/etl/private/auth/session_signing_key
+AUTH_PROXY_KEY_SECRET_FILE=D:/etl/private/auth/auth_proxy_key
 ```
 
-Khởi động lại Backend trên loopback theo mục 7, không public proxy. Chế độ này không phải xác thực Production; vẫn chặn nội dung REJECTED/hạn chế và dữ liệu chưa đủ điều kiện READY.
+**Bước4 — Bật user MASTER nếu cần.** Nếu chỉ dùng admin, bỏ qua. Muốn dùng cả user MASTER và admin riêng, trong chính `D:/etl/private/app.env` đổi dòng `AUTH_MODE` hiện có và bổ sung:
 
-- **Truy vấn:** thử BoW, Vector, Hybrid; mở nguồn tham chiếu và nội dung liên quan.
-- **Thực nghiệm:** Dữ liệu đánh giá → Chạy thực nghiệm → Kết quả và báo cáo. Import JSON hoặc chấm nhãn `resource_id:grade` (0–3), không dùng điểm Search làm nhãn chuẩn.
-- Chạy cùng dataset/k cho ba phương pháp; xem tiến độ %, Precision/Recall/MRR/nDCG và xuất CSV/JSON. Chưa có Ground Truth được con người xác nhận thì chưa nghiệm thu chất lượng tìm kiếm.
-- Kết quả lưu dưới `STORAGE_ROOT/evaluations`. Giới hạn chạy `EVALUATION_RUN_TIMEOUT_SECONDS=300`; không tự tăng vượt giới hạn hoặc gửi lại POST khi chưa rõ trạng thái lần chạy cũ.
-
-## 9. Những lần pull/chạy sau
-
-Dừng API/worker trước khi cập nhật dependencies. Sau khi pull code vào worktree phù hợp:
-
-```bash
-source .venv/Scripts/activate
-python -X utf8 -m pip install -e ".[dev,embeddings]"
-# Nếu dùng Drive, dùng dòng này thay dòng pip ở trên:
-# python -X utf8 -m pip install -e ".[dev,embeddings,google-drive]"
-npm.cmd --prefix frontend ci
-docker compose up --build -d
-python -m data_sync_etl.adapters.mongo.schema --check
+```dotenv
+AUTH_MODE=master_users
+AUTH_MASTER_FRESHNESS_SECONDS=120
+AUTH_MASTER_PBKDF2_SALT_ENCODING=auto
+AUTH_MASTER_RESOURCE_GRANTS={}
 ```
 
-Đối chiếu biến mới trong `.env.example`, không chép đè `.env`. Giữ model/token hợp lệ; không cần tải/đăng nhập lại mỗi lần pull. Chạy lại 5 terminal theo mục 7.
+Giữ `ADMIN_ENABLED=true` nếu cần admin riêng. Điều kiện tài khoản/quyền giống mục1.4. MASTER được đọc qua URL trong `connections.json`; không lấy `DATABASE_URL` của `.env` local để kết nối từ container. Dùng `-AuthProfile auth` cho cả `single_admin` và `master_users`; `db_users` cần cấu hình riêng theo [hướng dẫn Auth DB](deploy/AUTH_DATABASE_SETUP.md).
 
-Dừng từng tiến trình bằng **Ctrl+C**; dừng database và giữ dữ liệu bằng `docker compose stop`.
+| Local: `.env` gốc repo | Docker: `D:/etl/private/app.env` |
+|---|---|
+| `AUTH_ORIGIN=http://127.0.0.1:3000` | `AUTH_ORIGIN=http://127.0.0.1:8080` |
+| `ADMIN_PASSWORD_HASH_FILE` | `ADMIN_PASSWORD_HASH_SECRET_FILE` |
+| `SESSION_SIGNING_KEY_FILE` | `SESSION_SIGNING_KEY_SECRET_FILE` |
+| `AUTH_PROXY_KEY_FILE` | `AUTH_PROXY_KEY_SECRET_FILE` |
+| `AUTH_STATE_PATH` trỏ SQLite trên host | Giữ storage session theo Compose auth, không chép đường dẫn SQLite host vào container. |
 
-Kiểm tra mã nguồn:
+Ba biến Docker `*_SECRET_FILE` trỏ tới **file trên host** đã tạo, Compose mount chúng vào container. Có thể dùng cùng bộ secret với local; không chép nội dung hash/key vào `app.env`, image hoặc Git. `setup-auth.ps1` in ra mẫu `single_admin`; muốn dùng MASTER phải sửa mode như trên. Sau khi sửa cấu hình, chạy Check → Start ở mục2.3; giữ `-Drive` nếu stack đang dùng Drive. Không cần build lại chỉ vì đổi ENV; nếu image chưa có code xác thực mới thì Build trước.
+
+**Bước5 — Chạy và xác nhận.** Chạy hai lệnh Check → Start ở mục2.3, sau đó mở **http://127.0.0.1:8080/login**. Admin dùng email ở bước3 và mật khẩu bước2; user MASTER dùng email/mật khẩu SOURCE đã đồng bộ. Kiểm tra mode bằng:
 
 ```bash
-python -m pytest tests/unit -q
-python -m ruff check .
+curl -s http://127.0.0.1:8080/api/v1/auth/config
+```
+
+Nếu đã chọn MASTER + admin, cần thấy `"mode":"master_users"`, `"login_required":true`, `"admin_feature_enabled":true`. Nếu sai, kiểm tra `-EnvFile` đúng đường dẫn và chạy Start lại với cùng profile/overlay. Nếu gặp401/403/503, xem bảng lỗi ở mục3; không tạo lại toàn bộ secret hoặc DB để chữa lỗi.
+
+**Đổi/quên mật khẩu admin khi chỉ có Docker:** chạy từ Git Bash, dùng tag Backend khớp `BACKEND_IMAGE` trong `app.env`:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -it --user 10001:10001 \
+  --mount "type=bind,source=D:/etl/private/auth,target=/output" \
+  --entrypoint python etl-portable-backend:local \
+  -m data_sync_etl.security.cli hash --output /output/admin_password_hash_v2
+```
+
+Nhập/xác nhận mật khẩu mới ít nhất15 ký tự. File đích phải chưa tồn tại; nếu đã có `_v2`, dùng tên mới. Sửa `ADMIN_PASSWORD_HASH_SECRET_FILE=D:/etl/private/auth/admin_password_hash_v2` trong `app.env`, rồi Start lại API. Local dùng lệnh `python -m data_sync_etl.security.cli hash --output D:/etl/private/auth/admin_password_hash_v2` và sửa `ADMIN_PASSWORD_HASH_FILE` trong `.env`. Giữ nguyên hai khóa còn lại; phiên cũ cần đăng nhập lại. Mật khẩu **user MASTER** phải đổi tại SOURCE rồi chờ đồng bộ, không dùng CLI admin này.
+
+### 2.3. Kiểm tra, chạy và cập nhật
+
+DB/schema/roles/network phải sẵn sàng. Network mới: tạo một lần bằng script `-Action Network -NetworkName etl-data`; bỏ nếu dùng network có sẵn.
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
+  -Action Check -AuthProfile auth -EnvFile D:/etl/private/app.env
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
+  -Action Start -AuthProfile auth -EnvFile D:/etl/private/app.env -Workers
+```
+
+Mở **http://127.0.0.1:8080/login**, Swagger **http://127.0.0.1:8080/docs** sau login. API 8000 không publish ra host. Start kiểm tra auth/model/DB, không migration; bỏ `-Workers` thì chỉ khởi động API/frontend.
+
+**Có Drive:** cấu hình theo [Docker Drive](deploy/DRIVE_SETUP.md#5-docker), thêm `-Drive` vào Check/Start/Status/Logs/Stop; chỉ bật `.env` local không đủ. Giữ cùng overlay khi recreate.
+
+```bash
+# Đổi Status thành Logs để xem log, Stop để dừng và giữ dữ liệu.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
+  -Action Status -AuthProfile auth -EnvFile D:/etl/private/app.env
+# Đổi source: Build rồi Start với cùng env/profile/overlay.
+```
+
+Linux dùng script Bash; xuất/nhập `.tar`, TLS và vận hành: [deploy/README.md](deploy/README.md). Archive không kèm model, secret, database hoặc học liệu. Không dùng `down -v`/prune để chữa lỗi.
+
+## 3. Pull lại code, đổi mật khẩu và kiểm tra
+
+- Local: dừng API/worker, kích hoạt `.venv`, chạy lại `pip install -e ".[dev,embeddings,google-drive]"` và `npm.cmd --prefix frontend ci`, đối chiếu biến mới; không chép đè `.env`. Dùng lại model/token hợp lệ.
+- Docker: giữ DB/model/secrets, **Build → Start**. `docker image load` archive cũ không cập nhật source mới. Chỉ đổi config runtime thì Start để recreate.
+- Đặt lại mật khẩu **admin riêng**: dùng lệnh local/Docker ở mục2.2; mật khẩu user MASTER đổi tại SOURCE rồi đồng bộ. Không thể lấy mật khẩu gốc từ hash.
+- Schema cũ cần chủ DB duyệt migration riêng. Pull/build không đồng nghĩa được phép migration DB dùng chung. Không commit `.env`, token/hash/key, dữ liệu hoặc model.
+
+| Lỗi | Kiểm tra/sửa |
+|---|---|
+| `No module named argon2` | Đúng `.venv`, cài lại `python -m pip install -e ".[dev,embeddings,google-drive]"`. |
+| Login trắng/auth 404 | Đúng Backend/Frontend; Docker build/recreate image mới, Ctrl+F5. |
+| Login401 | Kiểm tra `AUTH_MODE`, email/mật khẩu đúng nguồn; admin riêng cần cờ bật. MASTER xem log `MASTER_LOGIN_PASSWORD_MISMATCH`, `MASTER_LOGIN_STATE_REJECTED`, `MASTER_LOGIN_IDENTITY_NOT_FOUND`. Không gửi hash/password vào chat. |
+| `AUTH_MASTER_STALE` / `AUTH_MASTER_UNAVAILABLE` | Kiểm tra MASTER connection, Master Sync Worker và users sync_run COMPLETED trong freshness120s; không nới quyền hoặc bỏ kiểm tra freshness để chữa lỗi. |
+| Login được nhưng403 | Kiểm tra quyền Viewer, ownership/grants và LocalAdminBoundary; role SOURCE ADMIN không tự thành admin ETL. |
+| `SOURCE_REFERENCE_POLICY_BLOCKED` | Bật cả hai cờ reference/temp trong **app.env**, mount nguồn đúng; Drive cần `-Drive`. |
+| `DATABASE_SCHEMA_NOT_READY` | Đúng DB: 15 bảng SOURCE/18 bảng Master/5 collection Mongo. DB mới theo guide, DB cũ cần owner duyệt. |
+| SOURCE role bị chặn | Reader không superuser, chỉ SELECT, không quyền ghi/kế thừa quyền ghi. |
+| `CONNECTIONS_SECRET_VALUES_INVALID` | JSON đủ bốn key, không còn `CHANGE_ME`, URI/role/password đúng. |
+| Index/OCR lỗi | Model/revision/384D, Tesseract `vie+eng`, LibreOffice path và worker. |
+| `/health` OK, DB chưa xác định | Đăng nhập và kiểm tra trên giao diện; `/api/v1/system/health` kiểm tra Master và cần quyền admin. |
+
+Kiểm thử source dùng fixture cô lập, không DB Dev/Production:
+
+```bash
+python -m pytest tests/unit deploy/tests -q
+python -m ruff check src tests deploy
 node --experimental-strip-types --test frontend/tests/*.test.mjs
 npm.cmd --prefix frontend run build
-npm.cmd --prefix frontend run lint
 git diff --check
 ```
 
-Integration tests cần fixture/database kiểm thử cô lập theo từng bài test và các biến `TEST_*` tương ứng; không trỏ chúng vào database Dev/Production chứa học liệu.
-
-Các lệnh kiểm tra/vận hành bổ sung:
-
-```bash
-etl --help
-etl sync-master --stream all --incremental
-etl reconcile-master --stream all --dry-run
-etl sync-mongo-metadata --stream all --full --dry-run
-python -m data_sync_etl.adapters.mongo.schema --inventory
-```
-
-Metadata Master → MongoDB mặc định shared chỉ đối chiếu. `MASTER_MONGO_IDENTITY_PROJECTION=false` giữ nguyên chế độ này; identity projection cần bật riêng trên Development/Test với nguồn PostgreSQL, không tự tạo description/tags/bio. CLI mặc định dry-run; chỉ dùng `--apply` sau khi được phê duyệt ghi dữ liệu.
-
-## 10. Lỗi thường gặp
-
-Tài liệu hiện có: [báo cáo kiểm thử và giới hạn](docs/audits/api-hardening/final_report.md),
-[danh sách API](docs/audits/api-hardening/api_inventory.md),
-[chính sách truy cập](docs/audits/api-hardening/security_after.md),
-[baseline schema](docs/audits/erd-contract/contract_snapshot.json),
-[quyết định còn chờ duyệt](docs/audits/master-migration/decisions.json).
-Các báo cáo Prompt01–05 bị xóa ở nhánh nền chưa được khôi phục; không coi các liên kết lịch sử đó là tài liệu hiện có.
-
-[Mẫu 18 truy vấn](fixtures/evaluation/manual-ground-truth-template.json) chỉ để chuẩn bị gán nhãn;
-thay ID mẫu bằng học liệu thử nghiệm được phép, chấm relevance 0–3 thủ công, rồi mới xác nhận Ground Truth.
-Không lấy điểm/thứ hạng Search làm nhãn. Google Drive OAuth thật chưa được nghiệm thu trong đợt hardening này;
-các bước chỉ đọc ở mục 6 cần được người vận hành cho phép và tự cung cấp credential ngoài Git.
-
-Hệ thống → Master Data chỉ đọc danh mục; provider/type là snapshot đã đồng bộ, không toàn bộ SOURCE.
-Chi tiết học liệu chỉ bật Xem/Tải khi nội dung và chỉ mục sẵn sàng; API vẫn kiểm quyền/tệp đích.
-Preview giới hạn 30 MiB theo số byte thực tải (Office text 1 MiB); tệp lớn dùng thao tác tải tệp trong giới hạn định dạng hiện có.
-Chưa sửa lineage SOURCE dạng nhánh/out-of-order (B04), chưa mở toàn bộ danh mục SOURCE (B09).
-
-| Hiện tượng | Cách kiểm tra |
-| --- | --- |
-| HTTP 503 / `BLOCKED_INDEX_SCHEMA` | Chạy `python -m data_sync_etl.adapters.mongo.schema --check`, xem log `mongo-init`. Schema cũ cần backup và phê duyệt sửa, không xóa volume hoặc bỏ guard. |
-| Index/Vector báo thiếu runtime | Đúng `.venv`, extra embeddings, đường dẫn model, manifest/revision và 384 chiều; chạy kiểm tra mục 5. |
-| OCR ảnh lỗi | Kiểm tra đường dẫn Tesseract, `eng`/`vie` và mục 4; khởi động lại worker sau khi sửa. |
-| Worker không xử lý | Kiểm tra đúng worker đang chạy, cờ tự động, trạng thái nguồn và file/hash; xem log terminal. |
-| Drive OAuth bị chặn | Đúng Desktop client, Drive API đã bật, email thuộc Test users và có quyền folder. Không dùng token của người khác. |
-| Drive 403/404 hoặc token hết hiệu lực | Đúng tài khoản/folder mapping, file được phép tải; xác thực lại bằng script với tên token mới nếu token bị thu hồi/hết hiệu lực. |
-| Drive `TOKEN_TARGET_NOT_NEW` | Token đích đã tồn tại; dùng token hợp lệ đang có hoặc chọn tên mới để xác thực lại. |
-| Sai mật khẩu PostgreSQL | Đối chiếu role thực tế với URL; đổi `.env` không đổi mật khẩu role đã tồn tại. |
-| Search rỗng / Thực nghiệm 403 | Kiểm tra quyền, local Dev và cấu hình mục 8; không tự mở dữ liệu thật cho công khai. |
-| `etl.exe` bị khóa khi pip install | Ctrl+C API/worker đang dùng `.venv`, sau đó chạy lại pip; không cần xóa dữ liệu. |
-| Giao diện không gọi được API | Kiểm tra Backend cổng 8000, Frontend cổng 3000 và Health; tránh chạy nhầm API cũ. |
-| API quản trị trả 403 | Kiểm tra Dev local, `ADMIN_ENABLED`, lệnh loopback không proxy; không giả header/actor để bỏ chặn. Production cần mô hình xác thực được phê duyệt riêng. |
-| Preview trả 413 | Tệp vượt ngân sách xem trước hoặc giới hạn định dạng; không bỏ kiểm tra quyền/kích thước để tải. |
+Chỉ báo PASS cho phép thử đã chạy thực tế. Mặc định localhost; LAN/Production cần HTTPS, `auth-tls`, mạng và phê duyệt quyền phù hợp.

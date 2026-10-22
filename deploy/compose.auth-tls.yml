@@ -1,0 +1,22 @@
+services:
+  api:
+    environment:
+      AUTH_DEPLOYMENT_PROFILE: multi_machine
+      AUTH_PUBLIC_ENABLED: "true"
+      AUTH_COOKIE_SECURE: "true"
+      APP_ENVIRONMENT: production
+  frontend:
+    ports: !override ["${AUTH_BIND_IP:-0.0.0.0}:${WEB_TLS_PORT:-8443}:8443"]
+    environment:
+      AUTH_TLS: "true"
+    volumes:
+      - type: bind
+        source: ${AUTH_TLS_CERT_FILE:?Set AUTH_TLS_CERT_FILE}
+        target: /run/tls/server.crt
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${AUTH_TLS_KEY_FILE:?Set AUTH_TLS_KEY_FILE}
+        target: /run/tls/server.key
+        read_only: true
+        bind: {create_host_path: false}

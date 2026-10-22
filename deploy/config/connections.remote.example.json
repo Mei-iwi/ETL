@@ -1,0 +1,6 @@
+{
+  "DATABASE_URL": "postgresql+psycopg://etl_master_runtime:CHANGE_ME@master-db.example.internal:5432/etl_master?sslmode=verify-full&sslrootcert=/run/secrets/database-ca.pem",
+  "SOURCE_DATABASE_URL": "postgresql+psycopg://etl_source_reader:CHANGE_ME@source-db.example.internal:5432/etl_source?sslmode=verify-full&sslrootcert=/run/secrets/database-ca.pem",
+  "MONGO_URI": "mongodb://etl_runtime:CHANGE_ME@mongo-db.example.internal:27017/etl_content?authSource=etl_content&tls=true&tlsCAFile=/run/secrets/database-ca.pem",
+  "MONGO_DATABASE": "etl_content"
+}

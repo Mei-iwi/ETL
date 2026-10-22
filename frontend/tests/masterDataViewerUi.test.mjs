@@ -36,6 +36,7 @@ test('Master Data read-only and file readiness/errors in real browser', {
         const json = (body, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
         if (req.method !== 'GET') { writes++; return json({}, 403) }
         if (path === '/health') return json({ status: 'ok', database: 'ok' })
+        if (path === '/api/v1/auth/config') return json({ mode: 'legacy_local' })
         if (path === '/api/v1/master-data/sync/status') return json({
             file_sync_supported: true, file_sync_error: null, file_worker_healthy: true,
             auto_supported: true, auto_enabled: false, interval_seconds: 300, worker_healthy: true,

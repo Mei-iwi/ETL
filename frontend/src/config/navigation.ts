@@ -120,7 +120,8 @@ export const navagationItems: NavigationGroup[] = [
                 label: 'Khả năng xử lý',
                 end: true,
             },
-            { to: '/systems/master-data', label: 'Danh mục học liệu', end: true }
+            { to: '/systems/master-data', label: 'Danh mục học liệu', end: true },
+            { to: '/systems/users', label: 'Tài khoản', end: true }
         ]
     }
 ]

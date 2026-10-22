@@ -29,7 +29,7 @@ class EvaluationService:
 
     @staticmethod
     def authorized(access):
-        if access.scope != 'local_demo':
+        if not access.internal:
             raise EvaluationError('EVALUATION_FORBIDDEN', 403)
 
     def corpus(self, filters, access):
@@ -88,7 +88,7 @@ class EvaluationService:
             raise EvaluationError('EVALUATION_QRELS_DENIED', 403)
         dataset = {**command, 'id': new_id(), 'version': 1, 'created_at': now().isoformat(),
                    'relevance_threshold': 1, 'scope': access.scope, 'corpus_snapshot': snapshot,
-                   'corpus_fingerprint': fingerprint, 'dataset_hash': checksum(command)}
+                   'corpus_fingerprint': fingerprint, 'dataset_hash': checksum(command), 'auth_user_id': access.actor_id}
         self.store.put('datasets', dataset)
         positives = sum(label['grade'] >= 1 for query in command['queries'] for label in query['relevance'])
         return {'dataset_id': dataset['id'], 'version': 1, 'name': dataset['name'],
@@ -123,14 +123,14 @@ class EvaluationService:
                 raise EvaluationError('EVALUATION_SIZE_LIMIT')
             marker = self.corpus_marker(dataset['filters'], access)
             snapshot, fingerprint = self.corpus(dataset['filters'], access)
-            if dataset['scope'] != access.scope:
+            if dataset['scope'] != access.scope or dataset.get('auth_user_id') != access.actor_id:
                 raise EvaluationError('EVALUATION_FORBIDDEN', 403)
             if fingerprint != dataset['corpus_fingerprint']:
                 raise EvaluationError('EVALUATION_DATASET_STALE', 409)
             self.check_marker(dataset, access, marker)
             run = {'id': new_id(), 'dataset_id': dataset['id'], 'dataset_name': dataset['name'],
                    'dataset_hash': dataset['dataset_hash'], 'schema_version': 1, 'scope': access.scope,
-                   'status': 'RUNNING', 'created_at': now().isoformat(), 'finished_at': None,
+                   'status': 'RUNNING', 'created_at': now().isoformat(), 'finished_at': None, 'auth_user_id': access.actor_id,
                    'params': command, 'snapshot': snapshot, 'corpus_fingerprint': fingerprint,
                    'queries': dataset['queries'], 'relevance_unit': 'resource', 'relevance_threshold': 1,
                    'warnings': self.warnings(dataset), 'observations': [], 'summary': {},
@@ -260,7 +260,7 @@ class EvaluationService:
         self.authorized(access)
         snapshots, rows = {}, []
         for run in self.store.list_runs():
-            if run['scope'] != access.scope:
+            if run['scope'] != access.scope or run.get('auth_user_id') != access.actor_id:
                 continue
             filters = run['snapshot']['filters']
             key = checksum(filters)
@@ -287,7 +287,7 @@ class EvaluationService:
 
     @staticmethod
     def check_run_access(run, access, snapshot):
-        if run['scope'] != access.scope:
+        if run['scope'] != access.scope or run.get('auth_user_id') != access.actor_id:
             raise EvaluationError('EVALUATION_FORBIDDEN', 403)
         allowed = {row['resource_id'] for row in snapshot['versions']}
         referenced = {label['item_id'] for query in run['queries'] for label in query['relevance']}
@@ -298,7 +298,7 @@ class EvaluationService:
     def get_run(self, identifier, access):
         self.authorized(access)
         run = self.store.get('runs', identifier)
-        if run['scope'] != access.scope:
+        if run['scope'] != access.scope or run.get('auth_user_id') != access.actor_id:
             raise EvaluationError('EVALUATION_FORBIDDEN', 403)
         # GET never runs Search or embeds a query. Recheck current read permissions.
         snapshot, _ = self.corpus(run['snapshot']['filters'], access)
@@ -310,7 +310,7 @@ class EvaluationService:
         if run['status'] != 'COMPLETED':
             raise EvaluationError('EVALUATION_REPORT_INCOMPLETE', 409)
         if format == 'json':
-            return run
+            return {key: value for key, value in run.items() if key != 'auth_user_id'}
         stream = io.StringIO(newline='')
         writer = csv.writer(stream)
         writer.writerow(['run_id', 'dataset_id', 'dataset_name', 'dataset_hash', 'created_at', 'method', 'k',

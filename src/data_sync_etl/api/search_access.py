@@ -46,6 +46,18 @@ def verified_local_launch():
 
 def search_access(request):
     settings = request.app.state.container.settings
+    if getattr(settings, 'auth_mode', 'legacy_local') != 'legacy_local':
+        from data_sync_etl.security.auth import AuthError
+        auth = getattr(request.app.state, 'auth', None)
+        if auth is None:
+            raise AuthError('AUTH_NOT_CONFIGURED', 503)
+        principal = auth.principal(request)
+        if principal.mode in ('db_users', 'master_users'):
+            from data_sync_etl.security.authorization import authorize
+            authorize(request, principal)
+            return SearchAccess('authenticated_admin' if principal.role == 'ADMIN' else 'authenticated_user',
+                                frozenset(principal.resource_ids), principal.id)
+        return SearchAccess('authenticated_admin' if principal.mode == 'single_admin' else 'local_demo')
     if not settings.search_internal_dev_enabled:
         return SearchAccess()
     # Fail closed when deployed elsewhere or accessed via a reverse proxy. Launch

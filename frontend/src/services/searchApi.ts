@@ -17,7 +17,7 @@ const integer = (value: unknown, min = 0): value is number => typeof value === '
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const nullableText = (value: unknown) => value === null || typeof value === 'string'
 const pageNumber = (value: unknown) => value === null || integer(value)
-const scope = (value: Record<string, unknown>) => value.access_scope === undefined || value.access_scope === 'public' || value.access_scope === 'local_demo'
+const scope = (value: Record<string, unknown>) => value.access_scope === undefined || value.access_scope === 'public' || value.access_scope === 'local_demo' || value.access_scope === 'authenticated_admin' || value.access_scope === 'authenticated_user'
 
 function validItem(value: unknown) {
     return record(value) && textFields(value, ['resource_id', 'resource_title', 'resource_version_id', 'resource_type_code',
@@ -71,8 +71,8 @@ export function getSearchModelStatus(signal?: AbortSignal): Promise<SearchModelS
 }
 
 const validModelStatus = (value: unknown): value is SearchModelStatus => record(value)
-        && ['UNINITIALIZED', 'LOADING', 'READY', 'FAILED', 'STOPPED'].includes(value.state as string)
-        && typeof value.ready === 'boolean' && value.ready === (value.state === 'READY')
+    && ['UNINITIALIZED', 'LOADING', 'READY', 'FAILED', 'STOPPED'].includes(value.state as string)
+    && typeof value.ready === 'boolean' && value.ready === (value.state === 'READY')
 
 export function retrySearchModel(signal?: AbortSignal): Promise<SearchModelStatus> {
     return request('/api/v1/search/model-retry', validModelStatus, signal, undefined, 'POST')
@@ -106,10 +106,10 @@ async function request<T>(path: string, validate: (value: unknown) => value is T
             // Only local, allowlisted text is displayed; never show adapter/proxy details.
             const message = Object.hasOwn(messages, code) ? messages[code] : response.status === 401 ? 'Yêu cầu xác thực để truy cập nội dung này.'
                 : response.status === 403 ? 'Truy cập tìm kiếm bị hạn chế.'
-                : response.status === 404 ? 'Không tìm thấy nội dung hoặc không có quyền truy cập.'
-                : response.status === 409 ? 'Nội dung vừa thay đổi. Vui lòng tìm lại.'
-                : response.status === 422 ? 'Truy vấn hoặc bộ lọc chưa hợp lệ.'
-                : `Không thể tải dữ liệu tìm kiếm (HTTP ${response.status}).`
+                    : response.status === 404 ? 'Không tìm thấy nội dung hoặc không có quyền truy cập.'
+                        : response.status === 409 ? 'Nội dung vừa thay đổi. Vui lòng tìm lại.'
+                            : response.status === 422 ? 'Truy vấn hoặc bộ lọc chưa hợp lệ.'
+                                : `Không thể tải dữ liệu tìm kiếm (HTTP ${response.status}).`
             throw new SearchApiError(response.status, code, message)
         }
         if (!validate(body)) throw invalidResponse()

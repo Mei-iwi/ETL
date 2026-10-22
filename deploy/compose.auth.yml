@@ -1,0 +1,43 @@
+# Opt-in auth; workers receive neither account nor session secrets.
+services:
+  api:
+    environment:
+      AUTH_MODE: ${AUTH_MODE:-single_admin}
+      AUTH_MASTER_FRESHNESS_SECONDS: ${AUTH_MASTER_FRESHNESS_SECONDS:-120}
+      AUTH_MASTER_PBKDF2_SALT_ENCODING: ${AUTH_MASTER_PBKDF2_SALT_ENCODING:-auto}
+      AUTH_MASTER_RESOURCE_GRANTS: ${AUTH_MASTER_RESOURCE_GRANTS:-{}}
+      APP_ENVIRONMENT: ${AUTH_APP_ENVIRONMENT:-production}
+      ADMIN_ENABLED: ${ADMIN_ENABLED:-true}
+      AUTH_DEV_ADMIN_BYPASS: ${AUTH_DEV_ADMIN_BYPASS:-false}
+      AUTH_PUBLIC_ENABLED: ${AUTH_PUBLIC_ENABLED:-false}
+      AUTH_DEPLOYMENT_PROFILE: ${AUTH_DEPLOYMENT_PROFILE:-localhost}
+      AUTH_ORIGIN: ${AUTH_ORIGIN:-http://127.0.0.1:8080}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      ADMIN_LOGIN_EMAIL: ${ADMIN_LOGIN_EMAIL:?Set ADMIN_LOGIN_EMAIL}
+      ADMIN_PASSWORD_HASH_FILE: /run/secrets/admin_password_hash
+      SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
+      AUTH_PROXY_KEY_FILE: /run/secrets/auth_proxy_key
+      AUTH_STATE_PATH: /var/lib/etl/auth/sessions.sqlite3
+    secrets:
+      - {source: admin_password_hash, target: admin_password_hash}
+      - {source: session_signing_key, target: session_signing_key}
+      - {source: auth_proxy_key, target: auth_proxy_key}
+    volumes:
+      - auth-sessions:/var/lib/etl/auth
+  frontend:
+    group_add: ["10001"]
+    environment:
+      AUTH_MODE: ${AUTH_MODE:-single_admin}
+      AUTH_ORIGIN: ${AUTH_ORIGIN:-http://127.0.0.1:8080}
+      AUTH_TLS: "false"
+    secrets:
+      - {source: auth_proxy_key, target: auth_proxy_key}
+volumes:
+  auth-sessions:
+secrets:
+  admin_password_hash:
+    file: ${ADMIN_PASSWORD_HASH_SECRET_FILE:?Set ADMIN_PASSWORD_HASH_SECRET_FILE}
+  session_signing_key:
+    file: ${SESSION_SIGNING_KEY_SECRET_FILE:?Set SESSION_SIGNING_KEY_SECRET_FILE}
+  auth_proxy_key:
+    file: ${AUTH_PROXY_KEY_SECRET_FILE:?Set AUTH_PROXY_KEY_SECRET_FILE}

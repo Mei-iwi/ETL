@@ -13,6 +13,18 @@ def local_admin_allowed(request):
     if container is None:
         return False
     settings = container.settings
+    if getattr(settings, 'auth_mode', 'legacy_local') != 'legacy_local':
+        from data_sync_etl.security.auth import Principal
+        principal = getattr(request.state, 'auth_principal', None)
+        if isinstance(principal, Principal) and principal.mode in ('db_users', 'master_users'):
+            from data_sync_etl.security.auth import AuthError
+            from data_sync_etl.security.authorization import authorize
+            try:
+                authorize(request, principal)
+                return settings.admin_enabled
+            except AuthError:
+                return False
+        return bool(settings.admin_enabled and isinstance(principal, Principal) and principal.role == 'ADMIN')
     peer = (request.scope.get("client") or (None,))[0]
     server = (request.scope.get("server") or (None,))[0]
     origin = request.headers.get("origin")
@@ -35,6 +47,19 @@ def local_admin_allowed(request):
 
 
 def require_local_admin(request):
+    settings = request.app.state.container.settings
+    if getattr(settings, 'auth_mode', 'legacy_local') != 'legacy_local':
+        from data_sync_etl.security.auth import AuthError
+        auth = getattr(request.app.state, 'auth', None)
+        if auth is None:
+            raise AuthError('AUTH_NOT_CONFIGURED', 503)
+        principal = auth.principal(request)
+        if principal.mode in ('db_users', 'master_users'):
+            from data_sync_etl.security.authorization import authorize
+            authorize(request, principal)
+        if not settings.admin_enabled:
+            raise AuthError('AUTH_ADMIN_DISABLED', 403)
+        return request.app.state.container
     if not local_admin_allowed(request):
         raise HTTPException(403, "Verified local Development admin interface required")
     return request.app.state.container
@@ -62,7 +87,9 @@ class LocalAdminBoundary:
         self.app, self.settings = app, settings
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and protected(scope["path"], scope["method"]):
+        auth_endpoint = (getattr(self.settings, 'auth_mode', 'legacy_local') != 'legacy_local'
+                         and scope.get('path', '').startswith('/api/v1/auth/'))
+        if scope["type"] == "http" and not auth_endpoint and protected(scope["path"], scope["method"]):
             request = Request(scope)
             # Lifespan container is set before requests. Never read request body.
             if not local_admin_allowed(request):

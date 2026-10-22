@@ -1,6 +1,7 @@
 from threading import Event, Thread
 
 from data_sync_etl.logging import event, flow
+from data_sync_etl.workers.lifecycle import tick, worker_lifecycle
 
 
 class SourceFileImportWorker:
@@ -50,12 +51,13 @@ class SourceFileImportWorker:
                 return self.once(worker_id)
             finally:
                 self.service.worker_stopped(worker_id)
-        stop = Event()
-        try:
-            while True:
-                self.once(worker_id)
-                stop.wait(self.poll_seconds)
-        except KeyboardInterrupt:
-            return None
-        finally:
-            self.service.worker_stopped(worker_id)
+        with worker_lifecycle() as stop:
+            try:
+                while not stop.is_set():
+                    tick()
+                    self.once(worker_id)
+                    stop.wait(self.poll_seconds)
+            except KeyboardInterrupt:
+                return None
+            finally:
+                self.service.worker_stopped(worker_id)

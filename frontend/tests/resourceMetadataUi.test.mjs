@@ -9,7 +9,7 @@ import { dirname, extname, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const root = process.env.ETL_TEST_DIST ? dirname(resolve(process.env.ETL_TEST_DIST)) : resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const executable = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -22,6 +22,7 @@ test('SOURCE/legacy are read-only, LOCAL saves and server ownership races remain
         const url = new URL(req.url, 'http://localhost')
         const json = (value, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
         if (url.pathname === '/health') return json({ status: 'ok', database: 'ok' })
+        if (url.pathname === '/api/v1/auth/config') return json({ mode: 'legacy_local' })
         const catalogs = { '/api/v1/resource-types': [{ code: 'DOC', name: 'Tài liệu' }],
             '/api/v1/providers': [{ id: 'p1', name: 'Provider', provider_type: 'INTERNAL' }],
             '/api/v1/grade-levels': [], '/api/v1/subjects': [] }

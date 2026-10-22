@@ -1,0 +1,76 @@
+# ONLY for disposable, newly-created test project. No host DB ports or data volumes.
+services:
+  master-test:
+    image: postgres:16-bookworm
+    labels: {etl.portable.owner: docker-portable-20261021}
+    environment: {POSTGRES_USER: etl_test_owner, POSTGRES_PASSWORD: "${TEST_PG_PASSWORD:?}", POSTGRES_DB: etl_test_portable_master}
+    tmpfs: ["/var/lib/postgresql/data:rw,size=536870912"]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U etl_test_owner -d etl_test_portable_master]
+      interval: 3s
+      timeout: 3s
+      retries: 25
+  source-test:
+    image: postgres:16-bookworm
+    labels: {etl.portable.owner: docker-portable-20261021}
+    environment: {POSTGRES_USER: etl_test_source_owner, POSTGRES_PASSWORD: "${TEST_PG_PASSWORD:?}", POSTGRES_DB: etl_test_portable_source}
+    tmpfs: ["/var/lib/postgresql/data:rw,size=536870912"]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U etl_test_source_owner -d etl_test_portable_source]
+      interval: 3s
+      timeout: 3s
+      retries: 25
+  mongo-test:
+    image: mongo:8.0
+    command: [mongod, --wiredTigerCacheSizeGB, "0.25"]
+    mem_limit: 1g
+    labels: {etl.portable.owner: docker-portable-20261021}
+    environment: {MONGO_INITDB_ROOT_USERNAME: etl_test_owner, MONGO_INITDB_ROOT_PASSWORD: "${TEST_MONGO_PASSWORD:?}"}
+    tmpfs: ["/data/db:rw,size=2147483648", "/data/configdb:rw,size=67108864"]
+    healthcheck:
+      test: [CMD, mongosh, --quiet, --eval, "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 3s
+      timeout: 3s
+      retries: 25
+  qa:
+    image: ${QA_IMAGE:-etl-portable-qa:local}
+    build: {context: .., dockerfile: deploy/docker/backend.Dockerfile, target: qa}
+    labels: {etl.portable.owner: docker-portable-20261021}
+    environment:
+      APP_ENVIRONMENT: test
+      ADMIN_ENABLED: "false"
+      SEARCH_INTERNAL_DEV_ENABLED: "false"
+      TEST_DATABASE_URL: postgresql+psycopg://etl_test_owner:${TEST_PG_PASSWORD}@master-test:5432/etl_test_portable_master
+      TEST_SOURCE_DATABASE_URL: postgresql+psycopg://etl_test_source_owner:${TEST_PG_PASSWORD}@source-test:5432/etl_test_portable_source
+      TEST_MONGO_URI: mongodb://etl_test_owner:${TEST_MONGO_PASSWORD}@mongo-test:27017/?authSource=admin
+      TEST_RUNTIME_PASSWORD: ${TEST_RUNTIME_PASSWORD:?}
+      ETL_TEST_DB_ALLOW_REMOTE: "true"
+      ETL_REQUIRE_POSTGRES: "1"
+      ETL_TEST_REAL_EMBEDDING: "1"
+      INDEX_EMBEDDING_MODEL_PATH: /opt/models/minilm
+      INDEX_EMBEDDING_MODEL_ID: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+      INDEX_EMBEDDING_MODEL_VERSION: e8f8c211226b894fcb81acc59f3b34ba3efd5f42
+      INDEX_EMBEDDING_DIMENSION: "384"
+      ETL_TEST_OFFICE_PDF_EXECUTABLE: /usr/bin/libreoffice
+    volumes:
+      - type: bind
+        source: ${MODEL_DIR:?}
+        target: /opt/models/minilm
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MODEL_MANIFEST_FILE:?}
+        target: /opt/model-manifest.json
+        read_only: true
+        bind: {create_host_path: false}
+    tmpfs: ["/run/etl:rw,noexec,nosuid,size=1073741824,uid=10001,gid=10001,mode=0700"]
+    depends_on:
+      master-test: {condition: service_healthy}
+      source-test: {condition: service_healthy}
+      mongo-test: {condition: service_healthy}
+    mem_limit: 3g
+    cpus: 2
+networks:
+  default:
+    internal: true
+    labels: {etl.portable.owner: docker-portable-20261021}

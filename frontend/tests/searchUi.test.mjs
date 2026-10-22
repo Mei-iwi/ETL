@@ -31,6 +31,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(wire)
         }
         if (url.pathname === '/health') return json({ status: 'ok', database: 'ok' })
+        if (url.pathname === '/api/v1/auth/config') return json({ mode: 'legacy_local', login_required: false })
         if (url.pathname === '/api/v1/search/model-status') return json({ state: modelState, ready: modelState === 'READY' })
         if (url.pathname === '/api/v1/search/model-retry') {
             assert.equal(req.method, 'POST')
@@ -82,6 +83,10 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         if (url.pathname === '/api/v1/resources/r1/versions') return json([{ id: 'v1', version_number: 1, created_at: '2026-10-16' }])
         if (url.pathname === '/api/v1/resource-versions/v1/index-status') return json({ processing_status: 'CONTENT_READY', index_status: 'READY' })
         if (url.pathname === '/api/v1/resource-versions/v1/file') {
+            if (fileKind === 'office' && url.searchParams.get('view') === 'preview') {
+                res.writeHead(200, { 'Content-Type': 'application/pdf' })
+                return res.end('%PDF-1.4\n% Isolated preview response; conversion is tested in backend tests.\n%%EOF')
+            }
             if (url.searchParams.get('view') === 'text') {
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
                 return res.end('Nội dung Word thử nghiệm')
@@ -309,7 +314,9 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await click('Đóng tệp')
         fileKind = 'office'
         await click('Xem tệp')
-        await waitFor(() => evaluate("document.querySelector('pre')?.textContent.includes('Nội dung Word thử nghiệm')"))
+        await waitFor(() => evaluate("document.querySelector('iframe[title=\"Xem tệp PDF\"]')?.src.startsWith('blob:')"))
+        assert.equal(await evaluate("document.querySelector('pre')"), null)
+        assert.ok(await evaluate("document.querySelector('a[download]').href.endsWith('/api/v1/resource-versions/v1/file?download=true')"))
         await click('← Quay lại kết quả tìm kiếm')
         await waitFor(() => evaluate("!!document.querySelector('article')"))
         mode = 'error'

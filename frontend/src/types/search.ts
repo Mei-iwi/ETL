@@ -47,11 +47,11 @@ export type SearchResponse = {
     representation_unit: 'content_bag'
     ready_bag_count: number
     message: 'OK' | 'NO_READY_INDEX' | 'NO_ACCESSIBLE_CONTENT' | 'QUERY_NO_KEYWORDS' | 'PUBLIC_ACCESS_UNCONFIRMED'
-    access_scope?: 'public' | 'local_demo'
+    access_scope?: 'public' | 'local_demo' | 'authenticated_admin' | 'authenticated_user'
 }
 
 export type ChunkContext = {
-    access_scope?: 'public' | 'local_demo'
+    access_scope?: 'public' | 'local_demo' | 'authenticated_admin' | 'authenticated_user'
     resource_id: string
     resource_title: string
     resource_version_id: string

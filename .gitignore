@@ -2,10 +2,12 @@
 __pycache__/
 *.egg-info/
 .pytest_cache/
+/auth-pytest-cache/
 .ruff_cache/
 .env
 .env.*
 !.env.example
+!deploy/.env.docker.example
 *.py[cod]
 storage/
 !src/data_sync_etl/adapters/storage/
@@ -22,6 +24,7 @@ frontend/dist/
 artifacts/
 src/package-lock.json
 package-lock.json
+!deploy/docker/api-docs/package-lock.json
 *.pem
 *.key
 *.p12
@@ -37,4 +40,6 @@ local_data/
 Models/
 ETL_Secrets/
 TAI_LIEU_DOI_CHIEU/
-docs/
+# Local documentation and generated reports.
+/docs/
+!deploy/.env.auth.example

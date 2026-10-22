@@ -53,10 +53,14 @@ def sample(extension):
     elif extension in {'.png', '.jpg', '.jpeg'}:
         from PIL import Image, ImageDraw, ImageFont
         image = Image.new('RGB', (1000, 200), 'white')
-        try:
-            font = ImageFont.truetype('arial.ttf', 40)
-        except OSError:
-            font = ImageFont.load_default(size=40)
+        font = None
+        for candidate in ('arial.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'):
+            try:
+                font = ImageFont.truetype(candidate, 40)
+                break
+            except OSError:
+                pass
+        font = font or ImageFont.load_default(size=40)
         ImageDraw.Draw(image).text((25, 60), 'Bài học phân số', font=font, fill='black')
         image.save(output, format='PNG' if extension == '.png' else 'JPEG')
     elif extension == '.txt':

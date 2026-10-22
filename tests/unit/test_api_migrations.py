@@ -137,7 +137,7 @@ def test_system_capabilities(container):
     assert data['representations']['bag_of_words'] is True
     assert data['representations']['vector']['enabled'] is False
     assert data['representations']['vector']['semantic'] is False
-    assert data['retrieval']['modes'] == []
+    assert data['retrieval']['modes'] == ['bow', 'vector', 'hybrid']
     assert data['storage']['mongodb_enabled'] is False
     assert 'database_url' not in response.text
 

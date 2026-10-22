@@ -1,0 +1,8 @@
+{
+  "name": "etl-local-api-docs",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "swagger-ui-dist": "5.34.0"
+  }
+}

@@ -1,0 +1,13 @@
+services:
+  api:
+    environment:
+      AUTH_DEPLOYMENT_PROFILE: multi_machine
+      AUTH_PUBLIC_ENABLED: "true"
+      AUTH_COOKIE_SECURE: "true"
+  frontend:
+    ports: !override ["127.0.0.1:18443:8443"]
+    environment:
+      AUTH_TLS: "true"
+    volumes:
+      - ${AUTH_TEST_TLS_DIR:?}/server.crt:/run/tls/server.crt:ro
+      - ${AUTH_TEST_TLS_DIR:?}/server.key:/run/tls/server.key:ro

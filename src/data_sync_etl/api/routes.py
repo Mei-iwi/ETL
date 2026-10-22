@@ -16,7 +16,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import FileResponse, PlainTextResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from data_sync_etl.api.admin_access import require_local_admin
 from data_sync_etl.api.evaluation_schemas import (
@@ -141,6 +141,8 @@ def services(request):
 
 def source_file_admin(request):
     container = services(request)
+    if container.settings.auth_mode != 'legacy_local':
+        return container
     try:
         local = request.client is not None and ip_address(request.client.host).is_loopback
     except ValueError:
@@ -152,12 +154,27 @@ def source_file_admin(request):
 
 @router.get("/health", tags=[TAG_SYSTEM])
 def health(request: Request):
+    if request.app.state.container.settings.auth_mode != 'legacy_local':
+        return {'status': 'ok'}
     try:
         with request.app.state.container.uow() as repo:
             repo.health()
         return {"status": "ok", "database": "ok"}
     except Exception:
         raise HTTPException(503, "Database unavailable") from None
+
+
+@router.get('/api/v1/system/health', tags=[TAG_SYSTEM])
+def system_health(request: Request, response: Response):
+    container = services(request)
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        with container.uow() as repo:
+            repo.health()
+    except Exception:
+        return JSONResponse({'status': 'ok', 'database': 'unavailable'}, status_code=503,
+                            headers={'Cache-Control': 'private, no-store'})
+    return {'status': 'ok', 'database': 'ok'}
 
 
 @router.get('/api/v1/search/model-status', tags=[TAG_SEARCH])
@@ -172,7 +189,7 @@ async def search_model_status(request: Request, response: Response):
 @router.post('/api/v1/search/model-retry', tags=[TAG_SEARCH])
 async def retry_search_model(request: Request, response: Response):
     try:
-        if search_access(request).scope != 'local_demo':
+        if not search_access(request).internal:
             raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
         embedding = request.app.state.container.indexing.embedding
         retry = getattr(embedding, 'retry_preload', None)
@@ -329,7 +346,7 @@ def get_evaluation_run(id: str, request: Request, response: Response,
         service, access = evaluation_services(request)
         run = service.get_run(id, access)
         rows = run['observations']
-        return {**run, 'observations': rows[offset:offset + limit],
+        return {**{key: value for key, value in run.items() if key != 'auth_user_id'}, 'observations': rows[offset:offset + limit],
                 'pagination': {'offset': offset, 'limit': limit, 'total': len(rows)}}
     except Exception as exc:
         raise evaluation_error(exc) from None
@@ -389,9 +406,8 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
     except SourceFileError as exc:
         return source_file_error(exc)
     if reference.ownership == 'SOURCE_BACKED' or (view == 'preview' and not download):
-        access = search_access(request)
         return SourceFileResponse(container.source_resolver, reference,
-                                  lambda: container.search.file_version(id, access=access), download=download,
+                                  lambda: container.search.file_version(id, access=search_access(request)), download=download,
                                   preview=container.file_previews if view == 'preview' and not download else None)
     suffix = PurePosixPath(version['storage_object_key']).suffix.lower()
     media_types = {'.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -578,6 +594,9 @@ def list_resources(
         str | None, Query(max_length=50)
     ] = None
 ) -> ResouceListResponse:
+    principal = getattr(request.state, 'auth_principal', None)
+    allowed = (frozenset(principal.resource_ids) if principal is not None
+               and principal.mode in ('db_users', 'master_users') and principal.role != 'ADMIN' else None)
     result = (
         request.app.state.container.resource_listing.run(
             page=page,
@@ -586,6 +605,7 @@ def list_resources(
             subject_id=subject_id,
             grade_level_id=grade_level_id,
             resource_type_code=resource_type_code,
+            **({'allowed_resource_ids': allowed} if allowed is not None else {}),
         )
     )
     return ResouceListResponse.model_validate(result)
