@@ -1,4 +1,4 @@
-"""Deterministic unigram frequency keywords, not Vietnamese word segmentation/TF-IDF."""
+"""Top-five display keywords and legacy dense input; lexical search uses lexical.py."""
 
 import re
 import unicodedata

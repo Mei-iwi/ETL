@@ -15,11 +15,12 @@ type Version = { id: string; version_number: number; created_at: string }
 
 type FilePanelProps = {
     resourceId: string; versionId: string | null; contextId: string | null; sourceOwned?: boolean
+    contextEvidence?: string | null
 }
 export function ResourceFilePanel(props: FilePanelProps) {
     return <VersionFilePanel key={JSON.stringify([props.resourceId, props.versionId])} {...props} />
 }
-function VersionFilePanel({ resourceId, versionId, contextId, sourceOwned = false }: FilePanelProps) {
+function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, sourceOwned = false }: FilePanelProps) {
     const [versions, setVersions] = useState<Version[]>([])
     const [selected, setSelected] = useState(versionId || '')
     const [error, setError] = useState('')
@@ -128,7 +129,7 @@ function VersionFilePanel({ resourceId, versionId, contextId, sourceOwned = fals
         {sourceOwned && valid && !(ready && original) && <p id="external-source-link-status" className={styles.message}>{externalLinkReason}</p>}
         {sourceError?.id === selected && <p role="alert" className={styles.error}>{sourceError.message}</p>}
         {open && ready && <FilePreview key={selected} url={url} />}
-        {contextId && selected === versionId && <div className={styles.fileContext}><SearchContext id={contextId} /></div>}
+        {contextId && selected === versionId && <div className={styles.fileContext}><SearchContext id={contextId} evidence={contextEvidence} /></div>}
     </section>
 }
 

@@ -1,0 +1,917 @@
+{
+  "k": 5,
+  "documents": 24,
+  "queries": 22,
+  "positive_queries": 20,
+  "repeats": 5,
+  "corpus_sha256": "6b0f16938acc5fb8c8f21f30831b56e5f748c93551a7baacbc873fbe967bf5d5",
+  "analyzer": "underthesea-8.3.0-nfc-surface-compound-alnum-v2",
+  "ranking": "bm25-concept-dismax-v3",
+  "dictionary_fingerprint": "7663cecd2f9b9ed2a46a7efbcea6cdb36d2e9dbe8a1a65070255503243f59608",
+  "scope": "Offline ranking on the same full corpus; excludes HTTP, DB, authorization and cold startup.",
+  "limitations": [
+    "Small hand-labelled development fixture, not a production quality estimate. No tuning split; default weights were not fitted to these labels.",
+    "Latency is repeated warm microbenchmark data, not production p95.",
+    "Macro relevance metrics exclude queries with no relevant documents; report their abstention separately.",
+    "Precision divides by k, including unfilled ranks. Default weights are initial values, not tuned."
+  ],
+  "summary": {
+    "bm25": {
+      "precision": 0.19,
+      "recall": 0.5,
+      "ndcg": 0.5905177542123667,
+      "expansion_count_mean": 0,
+      "latency_p50_ms": 1.0996999917551875,
+      "latency_p95_ms": 1.553900001454167,
+      "latency_samples": 110,
+      "negative_queries_correct": 2
+    },
+    "equivalents": {
+      "precision": 0.31,
+      "recall": 0.8,
+      "ndcg": 0.8226294385530917,
+      "expansion_count_mean": 4.681818181818182,
+      "latency_p50_ms": 3.173899996909313,
+      "latency_p95_ms": 3.860900003928691,
+      "latency_samples": 110,
+      "negative_queries_correct": 2
+    },
+    "contextual": {
+      "precision": 0.38,
+      "recall": 1.0,
+      "ndcg": 1.0,
+      "expansion_count_mean": 5.681818181818182,
+      "latency_p50_ms": 3.425000002607703,
+      "latency_p95_ms": 4.932099996949546,
+      "latency_samples": 110,
+      "negative_queries_correct": 2
+    }
+  },
+  "comparisons": {
+    "equivalents_vs_bm25": {
+      "improved": [
+        "literal",
+        "synonym",
+        "vi_en",
+        "database_vi",
+        "database_en",
+        "nlp_vi",
+        "nlp_en",
+        "network",
+        "neural",
+        "supervised",
+        "unsupervised",
+        "unsupervised_vi"
+      ],
+      "regressed": []
+    },
+    "contextual_vs_equivalents": {
+      "improved": [
+        "finance_context",
+        "river_context",
+        "bank_domain",
+        "ml_context",
+        "ml_statistics",
+        "nlp_context"
+      ],
+      "regressed": []
+    }
+  },
+  "per_query": [
+    {
+      "query_id": "literal",
+      "kind": "direct",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "ml_en",
+            "noise",
+            "supervised_en",
+            "deep",
+            "unsupervised_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "ml_en",
+            "ml_vi"
+          ],
+          "expansion_count": 10
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "ml_en",
+            "ml_vi"
+          ],
+          "expansion_count": 10
+        }
+      }
+    },
+    {
+      "query_id": "synonym",
+      "kind": "synonym",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "ml_vi",
+            "network_vi",
+            "supervised_vi",
+            "unsupervised_vi"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "ml_vi",
+            "ml_en"
+          ],
+          "expansion_count": 10
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "ml_vi",
+            "ml_en"
+          ],
+          "expansion_count": 10
+        }
+      }
+    },
+    {
+      "query_id": "vi_en",
+      "kind": "translation",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "ml_vi",
+            "network_vi",
+            "supervised_vi",
+            "unsupervised_vi"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "ml_vi",
+            "ml_en"
+          ],
+          "expansion_count": 10
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "ml_vi",
+            "ml_en"
+          ],
+          "expansion_count": 10
+        }
+      }
+    },
+    {
+      "query_id": "database_vi",
+      "kind": "translation",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "db_vi",
+            "supervised_vi",
+            "ml_vi"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "db_vi",
+            "db_en"
+          ],
+          "expansion_count": 10
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "db_vi",
+            "db_en"
+          ],
+          "expansion_count": 10
+        }
+      }
+    },
+    {
+      "query_id": "database_en",
+      "kind": "translation",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "db_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "db_en",
+            "db_vi"
+          ],
+          "expansion_count": 10
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "db_en",
+            "db_vi"
+          ],
+          "expansion_count": 10
+        }
+      }
+    },
+    {
+      "query_id": "nlp_vi",
+      "kind": "translation",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "nlp_vi",
+            "finance_vi"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "nlp_vi",
+            "nlp_en"
+          ],
+          "expansion_count": 7
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "nlp_vi",
+            "nlp_en"
+          ],
+          "expansion_count": 7
+        }
+      }
+    },
+    {
+      "query_id": "nlp_en",
+      "kind": "translation",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "nlp_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "nlp_en",
+            "nlp_vi"
+          ],
+          "expansion_count": 7
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "nlp_en",
+            "nlp_vi"
+          ],
+          "expansion_count": 7
+        }
+      }
+    },
+    {
+      "query_id": "finance_context",
+      "kind": "polysemy",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "finance_en",
+            "river_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "finance_en",
+            "river_en"
+          ],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "finance_en",
+            "finance_vi"
+          ],
+          "expansion_count": 1
+        }
+      }
+    },
+    {
+      "query_id": "river_context",
+      "kind": "polysemy",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "river_en",
+            "finance_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "river_en",
+            "finance_en"
+          ],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "river_en",
+            "river_vi"
+          ],
+          "expansion_count": 1
+        }
+      }
+    },
+    {
+      "query_id": "bank_ambiguous",
+      "kind": "ambiguous_abstention",
+      "methods": {
+        "bm25": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "finance_en",
+            "river_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "finance_en",
+            "river_en"
+          ],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "finance_en",
+            "river_en"
+          ],
+          "expansion_count": 0
+        }
+      }
+    },
+    {
+      "query_id": "bank_domain",
+      "kind": "domain",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "finance_en",
+            "river_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "finance_en",
+            "river_en"
+          ],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "finance_en",
+            "finance_vi"
+          ],
+          "expansion_count": 1
+        }
+      }
+    },
+    {
+      "query_id": "network",
+      "kind": "qualified_phrase",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "network_en",
+            "neural_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "network_en",
+            "network_vi"
+          ],
+          "expansion_count": 9
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "network_en",
+            "network_vi"
+          ],
+          "expansion_count": 9
+        }
+      }
+    },
+    {
+      "query_id": "neural",
+      "kind": "qualified_phrase",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "neural_en",
+            "network_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "neural_en",
+            "neural_vi"
+          ],
+          "expansion_count": 9
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "neural_en",
+            "neural_vi"
+          ],
+          "expansion_count": 9
+        }
+      }
+    },
+    {
+      "query_id": "supervised",
+      "kind": "negation",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "supervised_en",
+            "deep",
+            "unsupervised_en",
+            "ml_en",
+            "noise"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "supervised_en",
+            "supervised_vi"
+          ],
+          "expansion_count": 7
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "supervised_en",
+            "supervised_vi"
+          ],
+          "expansion_count": 7
+        }
+      }
+    },
+    {
+      "query_id": "unsupervised",
+      "kind": "negation",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "unsupervised_en",
+            "supervised_en",
+            "deep",
+            "ml_en",
+            "noise"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "unsupervised_en",
+            "unsupervised_vi"
+          ],
+          "expansion_count": 7
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "unsupervised_en",
+            "unsupervised_vi"
+          ],
+          "expansion_count": 7
+        }
+      }
+    },
+    {
+      "query_id": "unsupervised_vi",
+      "kind": "negation",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "unsupervised_vi",
+            "supervised_vi",
+            "ml_vi"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "unsupervised_vi",
+            "unsupervised_en"
+          ],
+          "expansion_count": 7
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "unsupervised_vi",
+            "unsupervised_en"
+          ],
+          "expansion_count": 7
+        }
+      }
+    },
+    {
+      "query_id": "ml_context",
+      "kind": "abbreviation",
+      "methods": {
+        "bm25": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": null,
+          "top_k": [],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": null,
+          "top_k": [],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "ml_en",
+            "ml_vi"
+          ],
+          "expansion_count": 10
+        }
+      }
+    },
+    {
+      "query_id": "ml_statistics",
+      "kind": "abbreviation_domain",
+      "methods": {
+        "bm25": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": null,
+          "top_k": [],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": null,
+          "top_k": [],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.2,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "stats"
+          ],
+          "expansion_count": 2
+        }
+      }
+    },
+    {
+      "query_id": "nlp_context",
+      "kind": "abbreviation",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "nlp_en"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.2,
+          "recall": 0.5,
+          "ndcg": 0.6131471927654584,
+          "negative_correct": null,
+          "top_k": [
+            "nlp_en"
+          ],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.4,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "nlp_en",
+            "nlp_vi"
+          ],
+          "expansion_count": 7
+        }
+      }
+    },
+    {
+      "query_id": "ml_ambiguous",
+      "kind": "ambiguous_abstention",
+      "methods": {
+        "bm25": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": true,
+          "top_k": [],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": true,
+          "top_k": [],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": true,
+          "top_k": [],
+          "expansion_count": 0
+        }
+      }
+    },
+    {
+      "query_id": "technical",
+      "kind": "technical_symbols",
+      "methods": {
+        "bm25": {
+          "precision": 0.2,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "tech"
+          ],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.2,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "tech"
+          ],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.2,
+          "recall": 1.0,
+          "ndcg": 1.0,
+          "negative_correct": null,
+          "top_k": [
+            "tech"
+          ],
+          "expansion_count": 0
+        }
+      }
+    },
+    {
+      "query_id": "unrelated",
+      "kind": "negative",
+      "methods": {
+        "bm25": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": true,
+          "top_k": [],
+          "expansion_count": 0
+        },
+        "equivalents": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": true,
+          "top_k": [],
+          "expansion_count": 0
+        },
+        "contextual": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "ndcg": 0.0,
+          "negative_correct": true,
+          "top_k": [],
+          "expansion_count": 0
+        }
+      }
+    }
+  ]
+}

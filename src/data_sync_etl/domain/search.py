@@ -1,4 +1,7 @@
-"""Read-only Bag ranking; binary keywords, cosine and reciprocal rank fusion."""
+"""Dense cosine/RRF and the legacy binary scorer retained for comparisons.
+
+Production lexical ranking lives in domain.lexical (BM25).
+"""
 
 import math
 import unicodedata

@@ -5,6 +5,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SyncStream = Literal["all", "resources", "users", "grades", "subjects"]
 
+SYNC_ERRORS = {
+    'BLOCKED_SOURCE_IDENTITY': (409, 'SOURCE và MASTER có cùng ID nhưng khác thời điểm tạo. Cần đối soát nguồn đã được tạo lại trước khi đồng bộ.'),
+    'BLOCKED_SOURCE_OWNERSHIP': (409, 'Bản ghi MASTER không thuộc nguồn PostgreSQL hiện tại. Cần đối soát nguồn sở hữu trước khi đồng bộ.'),
+    'BLOCKED_LOCAL_SOURCE_CHANGE': (409, 'Bản ghi nguồn trong MASTER đã bị sửa cục bộ. Cần đối soát thay đổi trước khi đồng bộ.'),
+    'BLOCKED_MONGO_ID_MAPPING': (409, 'Ánh xạ MongoDB của bản ghi nguồn không nhất quán. Cần đối soát ID trước khi đồng bộ.'),
+    'BLOCKED_SOURCE_MAPPING': (503, 'Không đọc được SOURCE. Kiểm tra kết nối, chứng thư SSL, quyền đọc và schema nguồn.'),
+}
+
 
 class MasterSyncRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)

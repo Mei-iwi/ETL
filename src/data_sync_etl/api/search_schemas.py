@@ -15,6 +15,7 @@ class StrictDTO(BaseModel):
 
 
 class SearchFilters(StrictDTO):
+    domain: Annotated[str, Field(min_length=1, max_length=80)] | None = None
     subject_id: Identifier | None = None
     grade_level_id: Identifier | None = None
     resource_type_code: Annotated[str, Field(min_length=1, max_length=50)] | None = None
@@ -66,9 +67,15 @@ class SearchItem(StrictDTO):
     context_id: str
     context_url: str
     can_view_file: bool = False
+    context_evidence: Literal['lexical', 'semantic', 'bag'] | None = None
+    meaning_variants: list[str] = Field(default_factory=list)
+    lexical_evidence: list[dict] = Field(default_factory=list)
 
 
 class SearchResponse(StrictDTO):
+    query_expansion: dict | None = None
+    search_fingerprint: str | None = None
+    readiness: dict[str, int | bool] | None = None
     query: str
     method: Method
     page: int
@@ -132,6 +139,7 @@ SEARCH_ERROR_RESPONSES = {status: {'model': SearchErrorResponse} for status in (
 
 
 MESSAGES = {
+    'BLOCKED_LEXICAL_ANALYZER': 'Underthesea chưa sẵn sàng. Cần cài đúng phiên bản analyzer.',
     'SEARCH_MODEL_LOADING': 'Đang chuẩn bị tìm kiếm. Có thể chọn BoW.',
     'SEARCH_RUNTIME_BUSY': 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
     'SEARCH_ACCESS_RESTRICTED': 'Truy cập tìm kiếm nội bộ bị hạn chế.',

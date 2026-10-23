@@ -1,0 +1,3517 @@
+{
+  "version": "etl-concepts-2026-10-v1",
+  "concepts": [
+    {
+      "concept_id": "etl:machine_learning",
+      "preferred_labels": {
+        "en": "machine learning",
+        "vi": "học máy",
+        "fr": "apprentissage automatique",
+        "de": "maschinelles lernen",
+        "es": "aprendizaje automático",
+        "zh": "机器学习",
+        "ja": "機械学習",
+        "ko": "머신러닝"
+      },
+      "definition": "Algorithms that learn patterns from data; distinct from AI as a whole and deep learning as a subtype.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "machine learning",
+          "normalized": "machine learning",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "học máy",
+          "normalized": "học máy",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "máy học",
+          "normalized": "máy học",
+          "language": "vi",
+          "kind": "synonym",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "apprentissage automatique",
+          "normalized": "apprentissage automatique",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "maschinelles lernen",
+          "normalized": "maschinelles lernen",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "aprendizaje automático",
+          "normalized": "aprendizaje automático",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "机器学习",
+          "normalized": "机器学习",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "機器學習",
+          "normalized": "機器學習",
+          "language": "zh",
+          "kind": "synonym",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "機械学習",
+          "normalized": "機械学習",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "머신러닝",
+          "normalized": "머신러닝",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "ML",
+          "normalized": "ml",
+          "language": "en",
+          "kind": "abbreviation",
+          "concept_id": "etl:machine_learning",
+          "domain": "computing",
+          "context_hints": [
+            "training",
+            "model",
+            "algorithm",
+            "dữ liệu"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [
+        {
+          "source_id": "etl:machine_learning",
+          "target_id": "etl:artificial_intelligence",
+          "kind": "broader",
+          "direction": "outgoing",
+          "confidence": 1.0,
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "review_status": "approved",
+          "allow_expansion": true
+        },
+        {
+          "source_id": "etl:machine_learning",
+          "target_id": "etl:deep_learning",
+          "kind": "narrower",
+          "direction": "outgoing",
+          "confidence": 1.0,
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "review_status": "approved",
+          "allow_expansion": true
+        }
+      ],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:deep_learning",
+      "preferred_labels": {
+        "en": "deep learning",
+        "vi": "học sâu",
+        "fr": "apprentissage profond",
+        "de": "tiefes lernen",
+        "es": "aprendizaje profundo",
+        "zh": "深度学习",
+        "ja": "深層学習",
+        "ko": "딥러닝"
+      },
+      "definition": "deep learning: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "deep learning",
+          "normalized": "deep learning",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:deep_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "học sâu",
+          "normalized": "học sâu",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:deep_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "apprentissage profond",
+          "normalized": "apprentissage profond",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:deep_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "tiefes lernen",
+          "normalized": "tiefes lernen",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:deep_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "aprendizaje profundo",
+          "normalized": "aprendizaje profundo",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:deep_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "深度学习",
+          "normalized": "深度学习",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:deep_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "深度學習",
+          "normalized": "深度學習",
+          "language": "zh",
+          "kind": "synonym",
+          "concept_id": "etl:deep_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "深層学習",
+          "normalized": "深層学習",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:deep_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "딥러닝",
+          "normalized": "딥러닝",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:deep_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:supervised_learning",
+      "preferred_labels": {
+        "en": "supervised learning",
+        "vi": "học có giám sát",
+        "fr": "apprentissage supervisé",
+        "es": "aprendizaje supervisado",
+        "zh": "监督学习",
+        "ja": "教師あり学習",
+        "ko": "지도 학습"
+      },
+      "definition": "Learning from labelled examples.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "supervised learning",
+          "normalized": "supervised learning",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:supervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "học có giám sát",
+          "normalized": "học có giám sát",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:supervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "apprentissage supervisé",
+          "normalized": "apprentissage supervisé",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:supervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "aprendizaje supervisado",
+          "normalized": "aprendizaje supervisado",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:supervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "监督学习",
+          "normalized": "监督学习",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:supervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "監督式學習",
+          "normalized": "監督式學習",
+          "language": "zh",
+          "kind": "synonym",
+          "concept_id": "etl:supervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "教師あり学習",
+          "normalized": "教師あり学習",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:supervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "지도 학습",
+          "normalized": "지도 학습",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:supervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:unsupervised_learning",
+      "preferred_labels": {
+        "en": "unsupervised learning",
+        "vi": "học không giám sát",
+        "fr": "apprentissage non supervisé",
+        "es": "aprendizaje no supervisado",
+        "zh": "无监督学习",
+        "ja": "教師なし学習",
+        "ko": "비지도 학습"
+      },
+      "definition": "Learning structure without target labels.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "unsupervised learning",
+          "normalized": "unsupervised learning",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:unsupervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "học không giám sát",
+          "normalized": "học không giám sát",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:unsupervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "apprentissage non supervisé",
+          "normalized": "apprentissage non supervisé",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:unsupervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "aprendizaje no supervisado",
+          "normalized": "aprendizaje no supervisado",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:unsupervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "无监督学习",
+          "normalized": "无监督学习",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:unsupervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "非監督式學習",
+          "normalized": "非監督式學習",
+          "language": "zh",
+          "kind": "synonym",
+          "concept_id": "etl:unsupervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "教師なし学習",
+          "normalized": "教師なし学習",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:unsupervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "비지도 학습",
+          "normalized": "비지도 학습",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:unsupervised_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:reinforcement_learning",
+      "preferred_labels": {
+        "en": "reinforcement learning",
+        "vi": "học tăng cường",
+        "fr": "apprentissage par renforcement",
+        "es": "aprendizaje por refuerzo",
+        "zh": "强化学习",
+        "ko": "강화 학습"
+      },
+      "definition": "reinforcement learning: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "reinforcement learning",
+          "normalized": "reinforcement learning",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:reinforcement_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "học tăng cường",
+          "normalized": "học tăng cường",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:reinforcement_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "apprentissage par renforcement",
+          "normalized": "apprentissage par renforcement",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:reinforcement_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "aprendizaje por refuerzo",
+          "normalized": "aprendizaje por refuerzo",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:reinforcement_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "强化学习",
+          "normalized": "强化学习",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:reinforcement_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "強化学習",
+          "normalized": "強化学習",
+          "language": "zh",
+          "kind": "synonym",
+          "concept_id": "etl:reinforcement_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "강화 학습",
+          "normalized": "강화 학습",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:reinforcement_learning",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:artificial_intelligence",
+      "preferred_labels": {
+        "en": "artificial intelligence",
+        "vi": "trí tuệ nhân tạo",
+        "fr": "intelligence artificielle",
+        "de": "künstliche intelligenz",
+        "es": "inteligencia artificial",
+        "zh": "人工智能",
+        "ja": "人工知能",
+        "ko": "인공지능"
+      },
+      "definition": "artificial intelligence: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "artificial intelligence",
+          "normalized": "artificial intelligence",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:artificial_intelligence",
+          "domain": "computing",
+          "context_hints": [
+            "model",
+            "algorithm"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "trí tuệ nhân tạo",
+          "normalized": "trí tuệ nhân tạo",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:artificial_intelligence",
+          "domain": "computing",
+          "context_hints": [
+            "model",
+            "algorithm"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "intelligence artificielle",
+          "normalized": "intelligence artificielle",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:artificial_intelligence",
+          "domain": "computing",
+          "context_hints": [
+            "model",
+            "algorithm"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "künstliche intelligenz",
+          "normalized": "künstliche intelligenz",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:artificial_intelligence",
+          "domain": "computing",
+          "context_hints": [
+            "model",
+            "algorithm"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "inteligencia artificial",
+          "normalized": "inteligencia artificial",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:artificial_intelligence",
+          "domain": "computing",
+          "context_hints": [
+            "model",
+            "algorithm"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "人工智能",
+          "normalized": "人工智能",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:artificial_intelligence",
+          "domain": "computing",
+          "context_hints": [
+            "model",
+            "algorithm"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "人工知能",
+          "normalized": "人工知能",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:artificial_intelligence",
+          "domain": "computing",
+          "context_hints": [
+            "model",
+            "algorithm"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "인공지능",
+          "normalized": "인공지능",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:artificial_intelligence",
+          "domain": "computing",
+          "context_hints": [
+            "model",
+            "algorithm"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "AI",
+          "normalized": "ai",
+          "language": "en",
+          "kind": "abbreviation",
+          "concept_id": "etl:artificial_intelligence",
+          "domain": "computing",
+          "context_hints": [
+            "model",
+            "algorithm"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:neural_network",
+      "preferred_labels": {
+        "en": "neural network",
+        "vi": "mạng nơ ron",
+        "fr": "réseau de neurones",
+        "es": "red neuronal",
+        "zh": "神经网络",
+        "ja": "ニューラルネットワーク",
+        "ko": "신경망"
+      },
+      "definition": "neural network: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "neural network",
+          "normalized": "neural network",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "neural networks",
+          "normalized": "neural networks",
+          "language": "en",
+          "kind": "synonym",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "mạng nơ ron",
+          "normalized": "mạng nơ ron",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "mạng nơ-ron",
+          "normalized": "mạng nơ ron",
+          "language": "vi",
+          "kind": "synonym",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "mạng nơron",
+          "normalized": "mạng nơron",
+          "language": "vi",
+          "kind": "synonym",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "réseau de neurones",
+          "normalized": "réseau de neurones",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "red neuronal",
+          "normalized": "red neuronal",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "神经网络",
+          "normalized": "神经网络",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "神經網路",
+          "normalized": "神經網路",
+          "language": "zh",
+          "kind": "synonym",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "ニューラルネットワーク",
+          "normalized": "ニューラルネットワーク",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "신경망",
+          "normalized": "신경망",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:neural_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:database",
+      "preferred_labels": {
+        "en": "database",
+        "vi": "cơ sở dữ liệu",
+        "fr": "base de données",
+        "de": "datenbank",
+        "es": "base de datos",
+        "zh": "数据库",
+        "ja": "データベース",
+        "ko": "데이터베이스"
+      },
+      "definition": "database: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "database",
+          "normalized": "database",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "databases",
+          "normalized": "databases",
+          "language": "en",
+          "kind": "synonym",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "cơ sở dữ liệu",
+          "normalized": "cơ sở dữ liệu",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "base de données",
+          "normalized": "base de données",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "bases de données",
+          "normalized": "bases de données",
+          "language": "fr",
+          "kind": "synonym",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "datenbank",
+          "normalized": "datenbank",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "base de datos",
+          "normalized": "base de datos",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "数据库",
+          "normalized": "数据库",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "資料庫",
+          "normalized": "資料庫",
+          "language": "zh",
+          "kind": "synonym",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "データベース",
+          "normalized": "データベース",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "데이터베이스",
+          "normalized": "데이터베이스",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:relational_database",
+      "preferred_labels": {
+        "en": "relational database",
+        "vi": "cơ sở dữ liệu quan hệ",
+        "fr": "base de données relationnelle",
+        "es": "base de datos relacional",
+        "zh": "关系数据库",
+        "ja": "関係データベース"
+      },
+      "definition": "relational database: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "relational database",
+          "normalized": "relational database",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:relational_database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "relational databases",
+          "normalized": "relational databases",
+          "language": "en",
+          "kind": "synonym",
+          "concept_id": "etl:relational_database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "cơ sở dữ liệu quan hệ",
+          "normalized": "cơ sở dữ liệu quan hệ",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:relational_database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "base de données relationnelle",
+          "normalized": "base de données relationnelle",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:relational_database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "base de datos relacional",
+          "normalized": "base de datos relacional",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:relational_database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "关系数据库",
+          "normalized": "关系数据库",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:relational_database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "関係データベース",
+          "normalized": "関係データベース",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:relational_database",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:computer_network",
+      "preferred_labels": {
+        "en": "computer network",
+        "vi": "mạng máy tính",
+        "fr": "réseau informatique",
+        "de": "rechnernetz",
+        "es": "red de computadoras",
+        "zh": "计算机网络",
+        "ja": "コンピュータネットワーク",
+        "ko": "컴퓨터 네트워크"
+      },
+      "definition": "computer network: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "computer network",
+          "normalized": "computer network",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "computer networks",
+          "normalized": "computer networks",
+          "language": "en",
+          "kind": "synonym",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "mạng máy tính",
+          "normalized": "mạng máy tính",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "réseau informatique",
+          "normalized": "réseau informatique",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "rechnernetz",
+          "normalized": "rechnernetz",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "red de computadoras",
+          "normalized": "red de computadoras",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "计算机网络",
+          "normalized": "计算机网络",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "電腦網路",
+          "normalized": "電腦網路",
+          "language": "zh",
+          "kind": "synonym",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "コンピュータネットワーク",
+          "normalized": "コンピュータネットワーク",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "컴퓨터 네트워크",
+          "normalized": "컴퓨터 네트워크",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:computer_network",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:binary_search",
+      "preferred_labels": {
+        "en": "binary search",
+        "vi": "tìm kiếm nhị phân",
+        "fr": "recherche dichotomique",
+        "de": "binäre suche",
+        "es": "búsqueda binaria",
+        "zh": "二分查找",
+        "ja": "二分探索",
+        "ko": "이진 탐색"
+      },
+      "definition": "binary search: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "binary search",
+          "normalized": "binary search",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:binary_search",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "tìm kiếm nhị phân",
+          "normalized": "tìm kiếm nhị phân",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:binary_search",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "recherche dichotomique",
+          "normalized": "recherche dichotomique",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:binary_search",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "binäre suche",
+          "normalized": "binäre suche",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:binary_search",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "búsqueda binaria",
+          "normalized": "búsqueda binaria",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:binary_search",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "二分查找",
+          "normalized": "二分查找",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:binary_search",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "二分探索",
+          "normalized": "二分探索",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:binary_search",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "이진 탐색",
+          "normalized": "이진 탐색",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:binary_search",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:data_structure",
+      "preferred_labels": {
+        "en": "data structure",
+        "vi": "cấu trúc dữ liệu",
+        "fr": "structure de données",
+        "de": "datenstruktur",
+        "es": "estructura de datos",
+        "zh": "数据结构",
+        "ja": "データ構造",
+        "ko": "자료 구조"
+      },
+      "definition": "data structure: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "data structure",
+          "normalized": "data structure",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:data_structure",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "data structures",
+          "normalized": "data structures",
+          "language": "en",
+          "kind": "synonym",
+          "concept_id": "etl:data_structure",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "cấu trúc dữ liệu",
+          "normalized": "cấu trúc dữ liệu",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:data_structure",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "structure de données",
+          "normalized": "structure de données",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:data_structure",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "datenstruktur",
+          "normalized": "datenstruktur",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:data_structure",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "estructura de datos",
+          "normalized": "estructura de datos",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:data_structure",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "数据结构",
+          "normalized": "数据结构",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:data_structure",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "データ構造",
+          "normalized": "データ構造",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:data_structure",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "자료 구조",
+          "normalized": "자료 구조",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:data_structure",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:operating_system",
+      "preferred_labels": {
+        "en": "operating system",
+        "vi": "hệ điều hành",
+        "fr": "système d’exploitation",
+        "de": "betriebssystem",
+        "es": "sistema operativo",
+        "zh": "操作系统",
+        "ko": "운영 체제"
+      },
+      "definition": "operating system: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "operating system",
+          "normalized": "operating system",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "operating systems",
+          "normalized": "operating systems",
+          "language": "en",
+          "kind": "synonym",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "hệ điều hành",
+          "normalized": "hệ điều hành",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "système d’exploitation",
+          "normalized": "système d exploitation",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "système d exploitation",
+          "normalized": "système d exploitation",
+          "language": "fr",
+          "kind": "synonym",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "betriebssystem",
+          "normalized": "betriebssystem",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "sistema operativo",
+          "normalized": "sistema operativo",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "操作系统",
+          "normalized": "操作系统",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "作業系統",
+          "normalized": "作業系統",
+          "language": "zh",
+          "kind": "synonym",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "운영 체제",
+          "normalized": "운영 체제",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:operating_system",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:authentication",
+      "preferred_labels": {
+        "en": "authentication",
+        "vi": "xác thực",
+        "fr": "authentification",
+        "de": "authentifizierung",
+        "es": "autenticación",
+        "zh": "身份验证",
+        "ja": "認証",
+        "ko": "인증"
+      },
+      "definition": "authentication: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "authentication",
+          "normalized": "authentication",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:authentication",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "xác thực",
+          "normalized": "xác thực",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:authentication",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "authentification",
+          "normalized": "authentification",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:authentication",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "authentifizierung",
+          "normalized": "authentifizierung",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:authentication",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "autenticación",
+          "normalized": "autenticación",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:authentication",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "身份验证",
+          "normalized": "身份验证",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:authentication",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "認証",
+          "normalized": "認証",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:authentication",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "인증",
+          "normalized": "인증",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:authentication",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:authorization",
+      "preferred_labels": {
+        "en": "authorization",
+        "vi": "phân quyền",
+        "fr": "autorisation",
+        "de": "autorisierung",
+        "es": "autorización",
+        "zh": "授权",
+        "ja": "認可",
+        "ko": "권한 부여"
+      },
+      "definition": "authorization: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "authorization",
+          "normalized": "authorization",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:authorization",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "authorisation",
+          "normalized": "authorisation",
+          "language": "en",
+          "kind": "synonym",
+          "concept_id": "etl:authorization",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "phân quyền",
+          "normalized": "phân quyền",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:authorization",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "autorisation",
+          "normalized": "autorisation",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:authorization",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "autorisierung",
+          "normalized": "autorisierung",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:authorization",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "autorización",
+          "normalized": "autorización",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:authorization",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "授权",
+          "normalized": "授权",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:authorization",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "認可",
+          "normalized": "認可",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:authorization",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "권한 부여",
+          "normalized": "권한 부여",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:authorization",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:encryption",
+      "preferred_labels": {
+        "en": "encryption",
+        "vi": "mã hóa",
+        "fr": "chiffrement",
+        "de": "verschlüsselung",
+        "es": "cifrado",
+        "zh": "加密",
+        "ja": "暗号化",
+        "ko": "암호화"
+      },
+      "definition": "encryption: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "encryption",
+          "normalized": "encryption",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:encryption",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "mã hóa",
+          "normalized": "mã hóa",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:encryption",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "mã hoá",
+          "normalized": "mã hoá",
+          "language": "vi",
+          "kind": "synonym",
+          "concept_id": "etl:encryption",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "chiffrement",
+          "normalized": "chiffrement",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:encryption",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "verschlüsselung",
+          "normalized": "verschlüsselung",
+          "language": "de",
+          "kind": "preferred",
+          "concept_id": "etl:encryption",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "cifrado",
+          "normalized": "cifrado",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:encryption",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "加密",
+          "normalized": "加密",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:encryption",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "暗号化",
+          "normalized": "暗号化",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:encryption",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "암호화",
+          "normalized": "암호화",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:encryption",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:natural_language_processing",
+      "preferred_labels": {
+        "en": "natural language processing",
+        "vi": "xử lý ngôn ngữ tự nhiên",
+        "fr": "traitement automatique du langage naturel",
+        "es": "procesamiento del lenguaje natural",
+        "zh": "自然语言处理",
+        "ja": "自然言語処理",
+        "ko": "자연어 처리"
+      },
+      "definition": "natural language processing: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "natural language processing",
+          "normalized": "natural language processing",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:natural_language_processing",
+          "domain": "computing",
+          "context_hints": [
+            "language",
+            "text",
+            "ngôn ngữ"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "xử lý ngôn ngữ tự nhiên",
+          "normalized": "xử lý ngôn ngữ tự nhiên",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:natural_language_processing",
+          "domain": "computing",
+          "context_hints": [
+            "language",
+            "text",
+            "ngôn ngữ"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "traitement automatique du langage naturel",
+          "normalized": "traitement automatique du langage naturel",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:natural_language_processing",
+          "domain": "computing",
+          "context_hints": [
+            "language",
+            "text",
+            "ngôn ngữ"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "procesamiento del lenguaje natural",
+          "normalized": "procesamiento del lenguaje natural",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:natural_language_processing",
+          "domain": "computing",
+          "context_hints": [
+            "language",
+            "text",
+            "ngôn ngữ"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "自然语言处理",
+          "normalized": "自然语言处理",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:natural_language_processing",
+          "domain": "computing",
+          "context_hints": [
+            "language",
+            "text",
+            "ngôn ngữ"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "自然言語処理",
+          "normalized": "自然言語処理",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:natural_language_processing",
+          "domain": "computing",
+          "context_hints": [
+            "language",
+            "text",
+            "ngôn ngữ"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "자연어 처리",
+          "normalized": "자연어 처리",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:natural_language_processing",
+          "domain": "computing",
+          "context_hints": [
+            "language",
+            "text",
+            "ngôn ngữ"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "NLP",
+          "normalized": "nlp",
+          "language": "en",
+          "kind": "abbreviation",
+          "concept_id": "etl:natural_language_processing",
+          "domain": "computing",
+          "context_hints": [
+            "language",
+            "text",
+            "ngôn ngữ"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:computer_vision",
+      "preferred_labels": {
+        "en": "computer vision",
+        "vi": "thị giác máy tính",
+        "fr": "vision par ordinateur",
+        "es": "visión por computadora",
+        "zh": "计算机视觉",
+        "ja": "コンピュータビジョン",
+        "ko": "컴퓨터 비전"
+      },
+      "definition": "computer vision: reviewed equivalent technical terminology.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "computer vision",
+          "normalized": "computer vision",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:computer_vision",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "thị giác máy tính",
+          "normalized": "thị giác máy tính",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:computer_vision",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "vision par ordinateur",
+          "normalized": "vision par ordinateur",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "etl:computer_vision",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "visión por computadora",
+          "normalized": "visión por computadora",
+          "language": "es",
+          "kind": "preferred",
+          "concept_id": "etl:computer_vision",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "计算机视觉",
+          "normalized": "计算机视觉",
+          "language": "zh",
+          "kind": "preferred",
+          "concept_id": "etl:computer_vision",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "コンピュータビジョン",
+          "normalized": "コンピュータビジョン",
+          "language": "ja",
+          "kind": "preferred",
+          "concept_id": "etl:computer_vision",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "컴퓨터 비전",
+          "normalized": "컴퓨터 비전",
+          "language": "ko",
+          "kind": "preferred",
+          "concept_id": "etl:computer_vision",
+          "domain": "computing",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:bank_finance",
+      "preferred_labels": {
+        "en": "bank",
+        "vi": "ngân hàng"
+      },
+      "definition": "Financial institution that holds deposits and provides loans.",
+      "domain": "finance",
+      "terms": [
+        {
+          "text": "bank",
+          "normalized": "bank",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:bank_finance",
+          "domain": "finance",
+          "context_hints": [
+            "account",
+            "deposit",
+            "loan",
+            "money"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "ngân hàng",
+          "normalized": "ngân hàng",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:bank_finance",
+          "domain": "finance",
+          "context_hints": [
+            "account",
+            "deposit",
+            "loan",
+            "money"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:river_bank",
+      "preferred_labels": {
+        "en": "bank",
+        "vi": "bờ sông"
+      },
+      "definition": "Land along the edge of a river.",
+      "domain": "geography",
+      "terms": [
+        {
+          "text": "bank",
+          "normalized": "bank",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:river_bank",
+          "domain": "geography",
+          "context_hints": [
+            "river",
+            "water",
+            "erosion"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "bờ sông",
+          "normalized": "bờ sông",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:river_bank",
+          "domain": "geography",
+          "context_hints": [
+            "river",
+            "water",
+            "erosion"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    },
+    {
+      "concept_id": "etl:maximum_likelihood",
+      "preferred_labels": {
+        "en": "maximum likelihood",
+        "vi": "hợp lý cực đại"
+      },
+      "definition": "Parameter estimation by maximizing the likelihood.",
+      "domain": "statistics",
+      "terms": [
+        {
+          "text": "maximum likelihood",
+          "normalized": "maximum likelihood",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "etl:maximum_likelihood",
+          "domain": "statistics",
+          "context_hints": [
+            "likelihood",
+            "estimation"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "hợp lý cực đại",
+          "normalized": "hợp lý cực đại",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "etl:maximum_likelihood",
+          "domain": "statistics",
+          "context_hints": [
+            "likelihood",
+            "estimation"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        },
+        {
+          "text": "ML",
+          "normalized": "ml",
+          "language": "en",
+          "kind": "abbreviation",
+          "concept_id": "etl:maximum_likelihood",
+          "domain": "statistics",
+          "context_hints": [
+            "likelihood",
+            "estimation"
+          ],
+          "sources": [
+            {
+              "name": "curated",
+              "identifier": "etl-concepts-2026-10-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "approved"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "curated",
+          "identifier": "etl-concepts-2026-10-v1"
+        }
+      ],
+      "review_status": "approved",
+      "version": "1"
+    }
+  ]
+}
