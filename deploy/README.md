@@ -12,7 +12,7 @@ SOURCE/Master và MongoDB dùng Compose riêng; app không tự chạy migration
 
 Người mới bắt đầu tại [README gốc](../README.md), theo thứ tự local → Docker.
 DB Docker mới/trống: [DATABASE_SETUP.md](DATABASE_SETUP.md). Nguồn Drive:
-[DRIVE_SETUP.md](DRIVE_SETUP.md). File riêng không có sau pull: app.env, connections,
+[DRIVE_SETUP.md](DRIVE_SETUP.md). File riêng không có sau pull: docker.env, connections,
 auth secrets, model/manifest và token. Không cần tải lại tài nguyên hợp lệ khi đổi code.
 
 Launcher mặc định chọn `auth`, runtime image dùng single_admin. ADMIN_ENABLED chỉ
@@ -21,7 +21,7 @@ trong container. Với stack cũ chưa cấu hình auth, chọn legacy tường 
 
 ## Windows / Git Bash
 
-Tạo app.env ngoài Git theo [.env.docker.example](.env.docker.example), giữ cấu hình
+Tạo `docker.env` ở gốc repo theo [docker.env.example](docker.env.example); file này được Git ignore. Giữ cấu hình
 model/manifest/source/connection secret và network database đúng máy.
 Chọn tag image mới, ví dụ:
 
@@ -36,7 +36,7 @@ Chạy từ thư mục gốc repo:
 # Build trước khi có secret: legacy chỉ dùng cho bước build.
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File deploy/scripts/etl-docker.ps1 -Action Build -AuthProfile legacy \
-  -EnvFile D:/etl/private/app.env
+  -EnvFile ./docker.env
 
 # Chỉ tạo secret khi chưa có; thay YOUR_EMAIL bằng email admin thực.
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
@@ -46,17 +46,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 
 Nhập mật khẩu ít nhất 15 ký tự rồi xác nhận; màn hình không hiện ký tự khi nhập.
 Script từ chối ghi đè secret đã có. Bổ sung/cập nhật các dòng cấu hình được in ra
-vào app.env, giữ các đường dẫn model/DB, tránh trùng key. Không ghi mật khẩu vào .env.
+vào docker.env, giữ các đường dẫn model/DB, tránh trùng key. Không ghi mật khẩu vào .env.
 Tham khảo [.env.auth.example](.env.auth.example).
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File deploy/scripts/etl-docker.ps1 -Action Check \
-  -EnvFile D:/etl/private/app.env -AuthProfile auth
+  -EnvFile ./docker.env -AuthProfile auth
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File deploy/scripts/etl-docker.ps1 -Action Start \
-  -EnvFile D:/etl/private/app.env -AuthProfile auth -Workers
+  -EnvFile ./docker.env -AuthProfile auth -Workers
 ```
 
 Login tại `http://127.0.0.1:8080/login` nếu WEB_PORT=8080 và AUTH_ORIGIN tương ứng.
@@ -69,16 +69,16 @@ không cập nhật source mới. Archive image không chứa model, secret ho�
 
 ## Linux
 
-Chuẩn bị app.env ngoài Git trước, sau đó:
+Chuẩn bị `docker.env` ở gốc repo trước, sau đó:
 
 ```bash
-export ETL_DOCKER_ENV_FILE="$HOME/etl-private/app.env"
+export ETL_DOCKER_ENV_FILE="$(pwd)/docker.env"
 ETL_AUTH_PROFILE=legacy bash deploy/scripts/etl-docker.sh build
 sudo install -d -o 10001 -g 10001 -m 0700 "$HOME/etl-private/auth"
-# Tag phải khớp BACKEND_IMAGE trong app.env (ví dụ dùng :local).
+# Tag phải khớp BACKEND_IMAGE trong docker.env (ví dụ dùng :local).
 export ETL_AUTH_SETUP_IMAGE=etl-portable-backend:local
 bash deploy/scripts/setup-auth.sh "$HOME/etl-private/auth" YOUR_EMAIL
-# Bổ sung cấu hình được in ra vào app.env trước khi check/start.
+# Bổ sung cấu hình được in ra vào docker.env trước khi check/start.
 # Dùng root cho launcher nếu thư mục secret thuộc UID10001 và host user không đọc được.
 sudo env ETL_DOCKER_ENV_FILE="$ETL_DOCKER_ENV_FILE" ETL_AUTH_PROFILE=auth bash deploy/scripts/etl-docker.sh check
 sudo env ETL_DOCKER_ENV_FILE="$ETL_DOCKER_ENV_FILE" ETL_AUTH_PROFILE=auth bash deploy/scripts/etl-docker.sh start --workers
@@ -108,11 +108,11 @@ Nếu đổi tag model-tool, đặt biến môi trường `ETL_MODEL_TOOL_IMAGE`
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
-  -Action Export -AuthProfile auth -EnvFile D:/etl/private/app.env -Archive D:/etl/etl-images.tar
-# Máy nhận: copy app.env phù hợp máy, model/manifest và cấp secret riêng qua kênh bảo mật.
+  -Action Export -AuthProfile auth -EnvFile ./docker.env -Archive D:/etl/etl-images.tar
+# Máy nhận: copy docker.env phù hợp máy, model/manifest và cấp secret riêng qua kênh bảo mật.
 # Chuyển cả archive .tar và .tar.sha256; output Export phải là tên chưa tồn tại.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
-  -Action Import -AuthProfile auth -EnvFile D:/etl/private/app.env -Archive D:/etl/etl-images.tar
+  -Action Import -AuthProfile auth -EnvFile ./docker.env -Archive D:/etl/etl-images.tar
 ```
 
 Image cùng kiến trúc CPU (bộ hiện tại Linux/amd64). Máy nhận vẫn cần DB/schema/network,
@@ -129,6 +129,58 @@ DB remote dùng [connections.remote.example.json](config/connections.remote.exam
 `DATABASE_MODE=remote`, `DATABASE_CA_FILE=/absolute/private/database-ca.pem` và `-RemoteDatabase`
 (Linux `ETL_REMOTE_DB=true`). PostgreSQL cần `sslmode=verify-full`/CA, Mongo `tls=true`/CA;
 chứng chỉ phải khớp hostname, không bật insecure. Network ngoài DB vẫn phải tồn tại theo Compose.
+
+<a id="source-neon"></a>
+
+### SOURCE Neon, MASTER/MongoDB local
+
+Đặt `DATABASE_MODE=source-neon` trong `docker.env`; script PowerShell/Bash tự chọn
+`compose.source-neon.yml`. Các cờ cũ vẫn hỗ trợ, không dùng chung với
+`-RemoteDatabase`/`ETL_REMOTE_DB=true`. MASTER chỉ được trỏ service `postgres` hoặc
+`master-postgres`, MongoDB chỉ trỏ `mongo`; SOURCE phải là hostname `*.neon.tech`.
+Không đổi schema hoặc tự chạy migration.
+
+1. Giữ URL MASTER/Mongo trong `connections.json`; thay SOURCE theo
+   [mẫu này](config/connections.source-neon.example.json). Dùng role SOURCE chỉ đọc,
+   không dùng `neondb_owner`. Trên Neon lấy hostname của đúng database SOURCE
+   (`Learning_Resources` hoặc tên thực tế); ưu tiên kết nối trực tiếp cho worker.
+2. SOURCE bắt buộc `sslmode=verify-full`, `channel_binding=require` và
+   `sslrootcert=/run/secrets/source-database-ca.pem`. Trong `docker.env` đặt:
+
+   ```dotenv
+   DATABASE_MODE=source-neon
+   SOURCE_DATABASE_CA_FILE=D:/etl/private/neon-ca.pem
+   ```
+
+   CA phải là trust bundle hợp lệ, không phải certificate/key tùy ý. Nếu host không
+   cài Python, có thể xuất CA công khai từ Backend image đã build bằng Git Bash/Linux
+   (thay tag bằng `BACKEND_IMAGE` của bạn):
+
+   ```bash
+   MSYS_NO_PATHCONV=1 docker run --rm --network none --read-only \
+     --entrypoint cat etl-portable-backend:local /etc/ssl/certs/ca-certificates.crt \
+     > /d/etl/private/neon-ca.pem
+   ```
+
+3. Build image chứa runtime mới, rồi Check/Start với cùng overlay:
+
+   ```bash
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
+     -Action Build -EnvFile ./docker.env -AuthProfile auth
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
+     -Action Check -EnvFile ./docker.env -AuthProfile auth
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
+     -Action Start -EnvFile ./docker.env -AuthProfile auth -Workers
+   ```
+
+   Linux/Git Bash: `bash deploy/scripts/etl-docker.sh start --workers`.
+   Status/Logs/Stop cũng tự đọc mode từ env; thêm Drive nếu stack dùng Drive.
+   Check/Start có kết nối và kiểm tra quyền/schema DB; chỉ chạy khi được phép truy xuất nguồn.
+
+Local dùng `.env` riêng: URL SOURCE có cùng hostname/database/reader nhưng `sslrootcert`
+trỏ file CA trên host (ví dụ `D:/etl/private/neon-ca.pem`), không dùng đường dẫn container.
+Giữ MASTER/Mongo local; giữ cổng `SOURCE_POSTGRES_PORT=5433` nếu còn container SOURCE cũ.
+Không cần `SOURCE_MIGRATION_DATABASE_URL` để chạy ETL; restart API và ba worker sau khi đổi `.env`.
 
 `local_demo` chỉ dùng với APP_ENVIRONMENT=local, bypass=true, public=false, origin
 loopback và profile localhost được preflight xác minh. LAN dùng `auth-tls`, HTTPS,
