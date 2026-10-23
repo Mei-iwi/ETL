@@ -1,5 +1,6 @@
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -191,6 +192,8 @@ class ResourceVersion(Base):
     storage_bucket = Column(String(255), nullable=False)
     storage_object_key = Column(String(500), nullable=False)
     source_hash = Column(String(64), nullable=False)
+    source_file_size = Column(BigInteger, nullable=True)
+    storage_file_size = Column(BigInteger, nullable=True)
     uploaded_by = Column(String(30), nullable=True)
     assigned_by = Column(String(30), nullable=True)
     assigned_reviewer_id = Column(String(30), nullable=True)
@@ -407,6 +410,8 @@ class SourceFileImport(Base):
     storage_bucket = Column(String(255), nullable=False)
     storage_object_key = Column(String(500), nullable=False)
     source_hash = Column(String(64), nullable=False)
+    source_file_size = Column(BigInteger, nullable=True)
+    storage_file_size = Column(BigInteger, nullable=True)
     status = Column(String(30), nullable=False, default="PENDING")
     attempts = Column(Integer, nullable=False, default=0)
     manual_retries = Column(Integer, nullable=False, default=0)
@@ -419,6 +424,50 @@ class SourceFileImport(Base):
     processing_job_id = Column(String(30), ForeignKey("ocr_jobs.id", ondelete="RESTRICT"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class SyncReconciliationRun(Base):
+    __tablename__ = "sync_reconciliation_runs"
+    __table_args__ = (
+        Index("ix_reconcile_runs_stream_started", "stream_name", text("started_at DESC")),
+    )
+    run_id = Column(String(36), primary_key=True, default=new_id)
+    stream_name = Column(String(50), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(30), nullable=False, default="RUNNING")
+    source_count = Column(Integer, nullable=False, default=0)
+    target_count = Column(Integer, nullable=False, default=0)
+    matched_count = Column(Integer, nullable=False, default=0)
+    mismatched_count = Column(Integer, nullable=False, default=0)
+    source_total_bytes = Column(BigInteger, nullable=True, default=0)
+    target_total_bytes = Column(BigInteger, nullable=True, default=0)
+    source_table_hash = Column(String(64), nullable=True)
+    target_table_hash = Column(String(64), nullable=True)
+    summary_meta = Column(JSON_TYPE, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class SyncReconciliationDiscrepancy(Base):
+    __tablename__ = "sync_reconciliation_discrepancies"
+    __table_args__ = (
+        Index("ix_reconcile_discrepancies_run_flag", "run_id", "discrepancy_flag"),
+        Index("ix_reconcile_discrepancies_stream_status", "stream_name", "resolution_status"),
+        Index("ix_reconcile_discrepancies_record", "record_id"),
+    )
+    id = Column(String(36), primary_key=True, default=new_id)
+    run_id = Column(
+        String(36),
+        ForeignKey("sync_reconciliation_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    record_id = Column(String(100), nullable=False)
+    stream_name = Column(String(50), nullable=False)
+    discrepancy_flag = Column(String(50), nullable=False)
+    source_value = Column(JSON_TYPE, nullable=True)
+    target_value = Column(JSON_TYPE, nullable=True)
+    detected_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    resolution_status = Column(String(30), nullable=False, default="UNRESOLVED")
 
 
 MODELS = {
@@ -442,5 +491,7 @@ MODELS = {
         EtlStageRun,
         ContentUnitText,
         SourceFileImport,
+        SyncReconciliationRun,
+        SyncReconciliationDiscrepancy,
     ]
 }

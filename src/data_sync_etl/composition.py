@@ -52,6 +52,7 @@ from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.reconcile_master import ReconcileMaster
+from data_sync_etl.application.reconciliation_engine import ReconciliationEngine
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
 from data_sync_etl.application.semantic import SemanticService
@@ -155,6 +156,13 @@ class Container:
         self.reconcile_master = ReconcileMaster(self.source, self.uow,
             batch_size=min(1000, self.settings.sync_batch_size),
             max_affected=self.settings.reconcile_max_affected, max_ratio=self.settings.reconcile_max_ratio)
+        self.reconciliation_engine = ReconciliationEngine(
+            self.uow,
+            source_adapter=self.source,
+            storage_root=self.settings.storage_root,
+            max_ratio=self.settings.reconcile_max_ratio,
+            batch_size=min(1000, self.settings.sync_batch_size),
+        )
         self.auto_sync = AutoSyncCoordinator(
             self.uow,
             environment_supported=(
