@@ -126,16 +126,18 @@ class ReconciliationEngine:
         bind = getattr(session_or_conn, "bind", None) or session_or_conn
         dialect_name = getattr(getattr(bind, "dialect", None), "name", "postgresql")
 
+        updated_col = "grade_updated_at" if table_name == "master_grade_levels" else "updated_at"
+
         if dialect_name == "postgresql":
             sql = f"""
             SELECT
                 count(*)::integer AS total_count,
                 coalesce(min(id::text), '') AS min_id,
                 coalesce(max(id::text), '') AS max_id,
-                max(updated_at) AS max_updated_at,
+                max({updated_col}) AS max_updated_at,
                 coalesce(
                     md5(string_agg(
-                        md5(id::text || ':' || coalesce(to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), '')),
+                        md5(id::text || ':' || coalesce(to_char({updated_col} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), '')),
                         '' ORDER BY id::text
                     )),
                     ''
@@ -167,11 +169,11 @@ class ReconciliationEngine:
             }
         else:
             # Fallback tương thích môi trường SQLite unit test
-            sql = f"SELECT count(*), min(id), max(id), max(updated_at) FROM {table_name}"
+            sql = f"SELECT count(*), min(id), max(id), max({updated_col}) FROM {table_name}"
             row = session_or_conn.execute(text(sql)).one()
             count, min_id, max_id, max_updated = row[0], row[1] or "", row[2] or "", row[3]
 
-            rows_sql = f"SELECT id, updated_at FROM {table_name} ORDER BY id"
+            rows_sql = f"SELECT id, {updated_col} FROM {table_name} ORDER BY id"
             items = session_or_conn.execute(text(rows_sql)).all()
             agg = hashlib.md5()
             for r_id, r_up in items:
@@ -209,8 +211,32 @@ class ReconciliationEngine:
         results: list[dict[str, Any]] = []
 
         for ver in versions:
-            # Xác định vị trí tệp trên kho lưu trữ
-            blob_path = root / ver.storage_bucket / ver.storage_object_key
+            # Kiến trúc SOURCE Reference Only: tệp lưu tại Nguồn (Google Drive / local mount),
+            # KHÔNG sao chép vào ./storage. Chỉ kiểm tra blob vật lý cho tệp LOCAL_OWNED
+            # (storage_bucket là None hoặc 'learning-resources').
+            bucket = ver.storage_bucket or ""
+            is_source_reference = bucket not in ("", "learning-resources")
+            if is_source_reference:
+                # Bỏ qua kiểm tra blob vật lý — tham chiếu Nguồn hợp lệ trong DB = SYNCED
+                results.append({
+                    "record_id": ver.id,
+                    "discrepancy_flag": FLAG_SYNCED,
+                    "source_value": {
+                        "version_number": ver.version_number,
+                        "storage_bucket": bucket,
+                        "storage_object_key": ver.storage_object_key,
+                        "source_file_size": ver.source_file_size,
+                    },
+                    "target_value": {
+                        "storage_file_size": ver.storage_file_size,
+                        "note": "SOURCE_REFERENCE_ONLY — blob không lưu trong storage local",
+                    },
+                    "message": f"SOURCE_REFERENCE_ONLY bucket='{bucket}': bỏ qua kiểm tra blob vật lý",
+                })
+                continue
+
+            # Xác định vị trí tệp LOCAL_OWNED trên kho lưu trữ
+            blob_path = root / bucket / ver.storage_object_key if bucket else root / ver.storage_object_key
             if not blob_path.is_file():
                 # Thử đường dẫn không có bucket nếu object_key đã chứa đầy đủ
                 alt_path = root / ver.storage_object_key
@@ -445,14 +471,17 @@ class ReconciliationEngine:
                                 "target_value": t_val,
                             })
                         elif s_val and t_val:
-                            # Cả 2 bên đều có: kiểm tra xem có lệch metadata hay không
-                            s_hash = state_hash(s_val) if s_val else None
-                            t_hash = t_val.get("source_state_hash") or state_hash(t_val)
-                            if s_hash and t_hash and s_hash != t_hash:
+                            # Cả 2 bên đều có: phát hiện Master bị sửa ngầm downstream.
+                            # Logic: so sánh source_state_hash lưu trong Master với hash thực tế
+                            # của bản ghi Master (state_hash tự loại source_origin/source_state_hash/source_missing_at).
+                            # Nếu khác → Master bị sửa ngoài luồng ETL (MUTATED_DOWNSTREAM).
+                            db_hash = t_val.get("source_state_hash")
+                            actual_hash = state_hash(t_val)
+                            if db_hash and db_hash != actual_hash:
                                 discrepancies.append({
                                     "record_id": rec_id,
                                     "stream_name": stream,
-                                    "discrepancy_flag": FLAG_DESYNC_METADATA,
+                                    "discrepancy_flag": FLAG_MUTATED_DOWNSTREAM,
                                     "source_value": s_val,
                                     "target_value": t_val,
                                 })

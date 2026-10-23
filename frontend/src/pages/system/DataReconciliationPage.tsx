@@ -97,19 +97,41 @@ export function DataReconciliationPage() {
         setLoading(true)
         setError('')
         try {
-            const [latest, list] = await Promise.all([
-                getLatestReconciliationReport(selectedStream),
-                getDiscrepancies({
-                    stream: selectedStream,
-                    flag: selectedFlag,
-                    page,
-                    pageSize,
-                }),
-            ])
+            // Lấy báo cáo mới nhất trước để lấy run_id của từng stream
+            const latest = await getLatestReconciliationReport(selectedStream)
             setReport(latest)
-            setDiscrepancies(list.items)
-            setTotal(list.total)
-            setTotalPages(list.total_pages)
+
+            // Thu thập run_id của các stream trong báo cáo mới nhất
+            const latestRunIds = latest.stream_reports
+                ?.map((r) => r.run_id)
+                .filter((id): id is string => Boolean(id))
+
+            // Chỉ lấy discrepancies thuộc các lần chạy mới nhất (lọc theo run_id)
+            if (latestRunIds && latestRunIds.length > 0) {
+                const results = await Promise.all(
+                    latestRunIds.map((runId) =>
+                        getDiscrepancies({
+                            runId,
+                            stream: selectedStream,
+                            flag: selectedFlag,
+                            page: 1,
+                            pageSize: 100,
+                        }),
+                    ),
+                )
+                // Gộp kết quả và phân trang phía client
+                const allItems = results.flatMap((r) => r.items)
+                const totalCount = allItems.length
+                const start = (page - 1) * pageSize
+                const pageItems = allItems.slice(start, start + pageSize)
+                setDiscrepancies(pageItems)
+                setTotal(totalCount)
+                setTotalPages(Math.ceil(totalCount / pageSize) || 0)
+            } else {
+                setDiscrepancies([])
+                setTotal(0)
+                setTotalPages(0)
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Không thể tải báo cáo đối soát')
         } finally {

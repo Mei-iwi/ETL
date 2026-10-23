@@ -146,7 +146,7 @@ def list_discrepancies(
     stream: str | None = Query(None, description="Lọc theo luồng dữ liệu (resources, files, subjects...)"),
     discrepancy_flag: str | None = Query(None, description="Lọc theo cờ hiệu (DESYNC_BLOB_SIZE, DESYNC_CHECKSUM, ORPHAN_SOURCE...)"),
     page: int = Query(1, ge=1, description="Số trang hiển thị (bắt đầu từ 1)"),
-    page_size: int = Query(20, ge=1, le=100, description="Số bản ghi trên mỗi trang"),
+    page_size: int = Query(20, ge=1, le=1000, description="Số bản ghi trên mỗi trang"),
 ) -> dict[str, Any]:
     """Lấy danh sách chi tiết các bản ghi bị lệch để hiển thị bảng so sánh đối soát song song (Side-by-side reconciliation view)."""
     container = request.app.state.container
