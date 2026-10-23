@@ -2,14 +2,14 @@
 set -euo pipefail
 directory="$(realpath -m -- "${1:?Provide a private directory outside Git}")"
 email="${2:?Provide the admin email}"
-image="${ETL_AUTH_SETUP_IMAGE:-etl-portable-backend:auth-20261022}"
+image="${ETL_AUTH_SETUP_IMAGE:-etl-portable-backend:local}"
 repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ "$directory" != "$repo" && "$directory" != "$repo/"* ]] || { echo 'Keep secrets outside Git workspace' >&2; exit 1; }
 [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ && "$email" != *.invalid ]] || { echo 'A real admin email is required' >&2; exit 1; }
 [[ -d "$directory" && "$(stat -c %u "$directory")" == 10001 ]] || { echo 'Prepare the private directory with owner 10001:10001 and mode 0700 (sudo install -d -o 10001 -g 10001 -m 0700 PATH).' >&2; exit 1; }
 docker run --rm -it --user 10001:10001 --mount "type=bind,source=$directory,target=/output" --entrypoint python "$image" -m data_sync_etl.security.cli init --directory /output
 cat <<EOF
-# Add these non-secret settings to your external app.env alongside deployment paths.
+# Add these non-secret settings to docker.env alongside deployment paths.
 AUTH_MODE=single_admin
 AUTH_APP_ENVIRONMENT=production
 ADMIN_ENABLED=true
