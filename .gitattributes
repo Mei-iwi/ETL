@@ -4,3 +4,6 @@ deploy/**/*.py text eol=lf
 deploy/**/*.yml text eol=lf
 deploy/**/*.Dockerfile text eol=lf
 deploy/**/*.dockerignore text eol=lf
+
+# Preserve verbatim whitespace in captured failing-test evidence.
+research/semantic-quality/correctness-before.xml -whitespace

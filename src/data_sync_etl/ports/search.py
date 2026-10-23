@@ -15,6 +15,7 @@ class SearchBagReader(Protocol):
 
 class SearchMetadataReader(Protocol):
     def search_versions(self, filters: dict, *, limit: int) -> list[dict]: ...
+    def semantic_metadata(self, resource_id: str) -> dict: ...
 
 
 class SearchTextReader(Protocol):

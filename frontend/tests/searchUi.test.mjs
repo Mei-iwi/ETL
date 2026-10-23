@@ -324,7 +324,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await waitFor(() => evaluate("document.querySelector('iframe[title=\"Xem tệp PDF\"]')?.src.startsWith('blob:')"))
         assert.equal(await evaluate("document.querySelector('pre')"), null)
         assert.ok(await evaluate("document.querySelector('a[download]').href.endsWith('/api/v1/resource-versions/v1/file?download=true')"))
-        await click('← Quay lại kết quả tìm kiếm')
+        await click('Quay lại kết quả tìm kiếm')
         await waitFor(() => evaluate("!!document.querySelector('article')"))
         mode = 'error'
         await open('/search/result?q=toán&method=vector')

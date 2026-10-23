@@ -6,10 +6,15 @@ WORKDIR /build
 RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 COPY deploy/docker/constraints.txt /build/constraints.txt
+COPY deploy/docker/constraints.semantic.txt /build/constraints.semantic.txt
 RUN pip install --upgrade pip && pip install 'torch==2.14.1+cpu' --index-url https://download.pytorch.org/whl/cpu
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install -c constraints.txt '.[embeddings,google-drive]' && pip check && pip freeze > /opt/venv/dependencies.txt
+ARG INSTALL_SEMANTIC=false
+RUN if [ "$INSTALL_SEMANTIC" = "true" ]; then \
+      pip install -c constraints.semantic.txt '.[embeddings,semantic,google-drive]'; \
+    else pip install -c constraints.txt '.[embeddings,google-drive]'; fi && \
+    pip check && pip freeze > /opt/venv/dependencies.txt
 
 FROM ${PYTHON_IMAGE} AS runtime
 ENV PATH=/opt/venv/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \

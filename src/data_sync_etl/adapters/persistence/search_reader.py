@@ -21,6 +21,23 @@ SEARCH_TEXT_BATCH_SIZE = 500
 
 
 class SearchRepositoryMixin:
+    def semantic_metadata(self, resource_id):
+        """Verified human-readable curriculum labels; no identifiers in model input."""
+        title = self.session.scalar(select(MasterLearningResource.title).where(MasterLearningResource.id == resource_id))
+        subjects = list(self.session.scalars(select(Subject.subject_name).join(
+            ResourceSubject, ResourceSubject.subject_id == Subject.id).where(
+                ResourceSubject.resource_id == resource_id, Subject.is_active.is_(True),
+                Subject.deleted_at.is_(None)).order_by(Subject.subject_name).limit(33)))
+        grades = list(self.session.scalars(select(MasterGradeLevel.grade_name_vi).join(
+            ResourceGradeLevel, ResourceGradeLevel.grade_level_id == MasterGradeLevel.id).where(
+                ResourceGradeLevel.resource_id == resource_id,
+                MasterGradeLevel.grade_is_active.is_(True), MasterGradeLevel.grade_deleted_at.is_(None),
+                MasterGradeLevel.education_is_active.is_(True), MasterGradeLevel.education_deleted_at.is_(None)
+                ).order_by(MasterGradeLevel.grade_name_vi).limit(33)))
+        if len(subjects) > 32 or len(grades) > 32:
+            raise IndexingError('SEMANTIC_METADATA_LIMIT', 422)
+        return {'title': title, 'subjects': sorted(set(subjects)), 'grades': sorted(set(grades))}
+
     def search_unit_texts(self, unit_ids):
         """Bounded request/phase-local hydration, using this repository's session.
 

@@ -49,8 +49,10 @@ class QueryEmbeddingContext:
 
 
 class SearchService:
-    def __init__(self, indexing, settings, bags: SearchBagReader | None, *, query_cache_runtime=None):
+    def __init__(self, indexing, settings, bags: SearchBagReader | None, *, query_cache_runtime=None,
+                 semantic=None):
         self.indexing, self.settings, self.bags = indexing, settings, bags
+        self.semantic = semantic
         self._http_inference = SearchInferenceQueue()
         # Retain worker leases after HTTP timeout: repeated cancellations cannot
         # spawn unbounded abandoned model/driver threads. BoW has separate room.
@@ -70,7 +72,7 @@ class SearchService:
             with self.runtime_admission(method, access=access or SearchAccess()):
                 return self.search_http(query, method, filters, page, size, access=access)
         CURRENT_SEARCH.get().check()
-        if method != 'bow' and access is not None and access.internal:
+        if method != 'bow' and access is not None and access.internal and not self.settings.semantic_enabled:
             ready = getattr(self.indexing.embedding, 'require_search_ready', None)
             if ready is not None:
                 ready()
@@ -78,6 +80,9 @@ class SearchService:
         # Initial and final snapshots always hydrate independently.
         criteria = dict(query=query, method=method, filters=filters, page=page, size=size, access=access,
                         _batch_texts=True, _batch_bags=True)
+        if self.settings.semantic_enabled and method != 'bow':
+            # Legacy query cache is model-specific; never reuse its bag query vectors.
+            return self.search(**criteria)
         if not self.settings.search_query_embedding_cache_enabled or method == 'bow' or cache is None:
             if cache is not None and not self.settings.search_query_embedding_cache_enabled:
                 cache.clear()
@@ -127,7 +132,7 @@ class SearchService:
         with self._http_inference.slot(call):
             call.reauthorize()
             ready = getattr(self.indexing.embedding, 'require_search_ready', None)
-            if ready is not None:
+            if ready is not None and not self.settings.semantic_enabled:
                 ready()
             yield
 
@@ -273,8 +278,18 @@ class SearchService:
         self.bags.ensure_ready()
         self._deadline(started)
         vector = None
+        use_semantic = self.settings.semantic_enabled and method in ('vector', 'hybrid')
+        semantic_budget = [0]
         if method in ('vector', 'hybrid'):
-            vector, started = self._query_vector(query, _query_context, started)
+            if use_semantic:
+                if self.semantic is None:
+                    raise SearchError('SEMANTIC_SCHEMA_NOT_READY', 503)
+                self.semantic.embedding.require_search_ready()
+                with self._inference():
+                    vector = self.semantic.query(query)
+                self._deadline(started)
+            else:
+                vector, started = self._query_vector(query, _query_context, started)
         with self.indexing.uow() as repo:
             metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
         if len(metadata) > self.settings.search_max_bags:
@@ -286,12 +301,14 @@ class SearchService:
         if len(candidates) > self.settings.search_max_bags:
             raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
         by_bag, bow, semantic, snapshots, ready_count, source_chars = {}, {}, {}, {}, 0, 0
-        excluded = set()
+        excluded, semantic_metadata = set(), {}
         for version_id in sorted({bag.resource_version_id for bag in candidates}):
             self._deadline(started)
             with self.indexing.uow() as repo:
                 snapshot = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts, batch_bags=_batch_bags)
                 allowed = self._allowed_units(repo, snapshot, access) if snapshot else set()
+                if snapshot and use_semantic:
+                    semantic_metadata[version_id] = repo.semantic_metadata(snapshot[0]['resource_id'])
             if snapshot is None:
                 continue
             source_chars += sum(len(unit['text']) for unit in snapshot[2])
@@ -299,6 +316,9 @@ class SearchService:
                 raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
             snapshots[version_id] = snapshot
             roots, snippets = self._snippets(snapshot, keywords, started, allowed)
+            semantic_hits = (self.semantic.scores(snapshot, semantic_metadata[version_id],
+                roots, allowed, vector, lambda: self._deadline(started), semantic_budget)
+                if use_semantic else {})
             version_bags = [bag for bag in candidates if bag.resource_version_id == version_id]
             reader = getattr(self.bags, 'search_bags', None) if _batch_bags else None
             current_bags = (reader([bag.id for bag in version_bags], version_id=version_id, generation=snapshot[1])
@@ -322,12 +342,16 @@ class SearchService:
                 if score > 0:
                     bow[bag.id] = score
                 if vector is not None:
-                    value = cosine(vector, bag.embedding)
+                    value = (semantic_hits[bag.id][0] if bag.id in semantic_hits else 0.) if use_semantic else cosine(vector, bag.embedding)
                     if value > 0:
                         semantic[bag.id] = value
-                chunk = snippets[bag.id][1]
+                chunk = semantic_hits[bag.id][1] if bag.id in semantic_hits else snippets[bag.id][1]
                 by_bag[bag.id] = (bag, chunk, matched,
                     representation_mode(snapshot[2], {bag.id: roots[bag.id]}))
+
+        if use_semantic and self.settings.semantic_rerank_enabled:
+            with self._inference():
+                semantic = self.semantic.rerank(query, semantic, by_bag, lambda: self._deadline(started))
 
         def discard_versions():
             nonlocal by_bag, bow, semantic, snapshots, ready_count
@@ -389,6 +413,16 @@ class SearchService:
                         raise SearchError('SEARCH_INDEX_STALE', 409)
                     if _batch_texts and fresh_by_version[version_id] != by_version[version_id]:
                         raise SearchError('SEARCH_INDEX_STALE', 409)
+                    if use_semantic:
+                        if fresh_by_version[version_id] != by_version[version_id]:
+                            raise SearchError('SEARCH_INDEX_STALE', 409)
+                        fresh_metadata = repo.semantic_metadata(fresh[0]['resource_id'])
+                        if fresh_metadata != semantic_metadata[version_id]:
+                            raise SearchError('SEMANTIC_INDEX_STALE', 409)
+                        plan, _ = self.semantic.plan(fresh, fresh_metadata)
+                        manifest = self.semantic.store.manifest(plan['_id'])
+                        if not manifest or manifest['status'] != 'READY':
+                            raise SearchError('SEMANTIC_INDEX_STALE', 409)
                     allowed = self._allowed_units(repo, fresh, access)
                     whole_file_access[version_id] = bool(fresh[2]) and {unit['id'] for unit in fresh[2]} <= allowed
                     if any(not set(bag_structure(fresh[2])[item['bag_id']]) <= allowed
@@ -406,10 +440,21 @@ class SearchService:
             item['matched_bag_count'] = matches[item['resource_id']]
             item['can_view_file'] = whole_file_access.get(item['resource_version_id'], False)
         total, offset = len(items), (page - 1) * size
+        vector_info = {}
+        if use_semantic:
+            selected_versions = {item['resource_version_id'] for item in items[offset:offset+size]}
+            vector_info['vector_index'] = {
+                **self.semantic.embedding.model_identity(), 'strategy': self.settings.semantic_strategy,
+                'rerank_enabled': self.settings.semantic_rerank_enabled,
+                'index_ids': sorted(self.semantic.plan(snapshots[key], semantic_metadata[key])[0]['_id']
+                                    for key in selected_versions)}
         return {'query': query, 'method': method, 'page': page, 'size': size, 'total': total,
+                **vector_info,
                 'total_pages': (total + size - 1) // size, 'items': items[offset:offset+size],
-                'ranking_algorithm': {'bow': 'binary-keyword-cosine-v1', 'vector': 'bag-cosine-v1',
-                                      'hybrid': 'rrf-v1'}[method],
+                'ranking_algorithm': (('bge-m3-chunk-' + self.settings.semantic_strategy +
+                    ('-colbert-v1' if self.settings.semantic_rerank_enabled else '-cosine-v1') +
+                    ('+rrf-v1' if method == 'hybrid' else '')) if use_semantic else
+                    {'bow': 'binary-keyword-cosine-v1', 'vector': 'bag-cosine-v1', 'hybrid': 'rrf-v1'}[method]),
                 'representation_unit': 'content_bag', 'ready_bag_count': ready_count, 'access_scope': access.scope,
                 'message': 'QUERY_NO_KEYWORDS' if not keywords and method == 'bow' else
                            'NO_READY_INDEX' if metadata and not snapshots else

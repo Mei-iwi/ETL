@@ -2,6 +2,7 @@ from dataclasses import replace
 
 from pymongo import MongoClient
 
+from data_sync_etl.adapters.bge_m3 import BgeM3Embedding
 from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
 from data_sync_etl.adapters.extraction import NativeDocumentExtractor
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
@@ -10,6 +11,7 @@ from data_sync_etl.adapters.mongo.foundation_store import (
     MongoContentReader,
     MongoMetadataStore,
 )
+from data_sync_etl.adapters.mongo.semantic import MongoSemanticStore
 from data_sync_etl.adapters.ocr.engines import (
     FakeOCREngine,
     PyMuPDFPDFProcessor,
@@ -52,6 +54,7 @@ from data_sync_etl.application.recommend_subjects_use_case import RecommendSubje
 from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
+from data_sync_etl.application.semantic import SemanticService
 from data_sync_etl.application.source_file_import import SourceFileImportService
 from data_sync_etl.application.source_file_resolver import SourceFileResolver
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
@@ -272,9 +275,20 @@ class Container:
             bags=self.content_bags,
         )
         self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
+        self.semantic = None
+        if self.mongo_client is not None:
+            self.semantic = SemanticService(self.indexing, BgeM3Embedding(
+                self.settings.semantic_model_path or self.settings.index_embedding_model_path,
+                self.settings.semantic_model_revision, device=self.settings.semantic_device,
+                batch_size=self.settings.semantic_batch_size,
+                max_tokens=self.settings.semantic_max_tokens,
+                timeout_seconds=self.settings.index_timeout_seconds),
+                MongoSemanticStore(mongo_database), self.settings)
         # Attest only the fixed LocalSentenceEmbedding used by HTTP Search.
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
-                                    query_cache_runtime=self.indexing.embedding)
+                                    query_cache_runtime=self.indexing.embedding, semantic=self.semantic)
+        if self.settings.semantic_enabled and self.semantic is not None:
+            self.capabilities = replace(self.capabilities, embedding_runtime=self.semantic.embedding)
         self.evaluations = EvaluationService(self.search, EvaluationFileStore(
             self.settings.storage_root, max_files=self.settings.evaluation_max_stored_files,
             max_bytes=self.settings.evaluation_max_file_bytes), self.settings)

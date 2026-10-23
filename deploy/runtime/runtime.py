@@ -196,6 +196,11 @@ def main():
         if action == 'api':
             verify_runtime('api')
             os.execvp('uvicorn', ['uvicorn', 'data_sync_etl.main:app', '--host', '0.0.0.0', '--port', '8000', '--no-proxy-headers'])
+        if action in ('semantic-schema', 'semantic-index', 'semantic-status'):
+            # Operator-only CLI inside the container, not a new HTTP admin route.
+            # Runtime secrets still pass through the existing network/TLS checks.
+            load_connections()
+            os.execvp('python', ['python', '-m', 'data_sync_etl.cli.main', *sys.argv[1:]])
         if action == 'worker' and len(sys.argv) == 3 and sys.argv[2] in WORKERS:
             command = sys.argv[2]
             role = WORKERS[command]

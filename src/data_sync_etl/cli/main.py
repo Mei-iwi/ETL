@@ -62,6 +62,17 @@ def parser():
     file_worker.add_argument("--once", action="store_true")
     commands.add_parser("source-file-precheck")
     commands.add_parser("recover-stale-ocr-tasks")
+    semantic_schema = commands.add_parser('semantic-schema', help='Check additive chunk index; no legacy schema changes')
+    semantic_schema.add_argument('--apply', action='store_true', help='Explicit additive installation only')
+    semantic_status = commands.add_parser('semantic-status', help='Read-only chunk coverage and index status')
+    semantic_status.add_argument('--resource-version-id', required=True)
+    semantic = commands.add_parser('semantic-index', help='One CONTENT_READY version; dry-run by default, repeat to resume')
+    selection = semantic.add_mutually_exclusive_group(required=True)
+    selection.add_argument('--resource-version-id', action='append')
+    selection.add_argument('--full', action='store_true', help='Bounded published-version batch, never automatic')
+    semantic.add_argument('--limit', type=int, default=20)
+    semantic.add_argument('--after-resource-id', default='')
+    semantic.add_argument('--apply', action='store_true')
     demo = commands.add_parser("demo-run")
     demo.add_argument("--fixture-resource-id", default="resource-1")
     return root
@@ -96,6 +107,45 @@ def demo_run(container, resource_id):
 
 
 def dispatch(container, args):
+    if args.command in ('semantic-schema', 'semantic-index', 'semantic-status'):
+        if container.semantic is None:
+            raise DomainError('SEMANTIC_SCHEMA_NOT_READY')
+        if args.command == 'semantic-schema':
+            if args.apply:
+                from data_sync_etl.adapters.mongo.semantic import install
+                install(container.semantic.store.database)
+            else:
+                container.semantic.store.ensure_ready()
+            return {'status': 'PASS', 'operation': 'semantic-schema'}
+        if args.command == 'semantic-status':
+            return container.semantic.status(args.resource_version_id)
+        if not 1 <= args.limit <= 100:
+            raise DomainError('SEMANTIC_BATCH_LIMIT')
+        versions, next_cursor = args.resource_version_id or [], None
+        if args.full:
+            with container.uow() as repo:
+                rows = repo.search_versions({}, limit=container.settings.search_max_bags + 1)
+            if len(rows) > container.settings.search_max_bags:
+                raise DomainError('SEMANTIC_CANDIDATE_LIMIT')
+            rows = sorted((row for row in rows if row['resource_id'] > args.after_resource_id),
+                          key=lambda row: row['resource_id'])
+            selected = rows[:args.limit]
+            versions = [row['version_id'] for row in selected]
+            if len(rows) > len(selected):
+                next_cursor = selected[-1]['resource_id']
+        if len(versions) > args.limit or len(set(versions)) != len(versions):
+            raise DomainError('SEMANTIC_BATCH_LIMIT')
+        results = []
+        for version_id in versions:
+            try:
+                results.append({'resource_version_id': version_id,
+                    **container.semantic.build(version_id, apply=args.apply)})
+            except Exception as exc:
+                results.append({'resource_version_id': version_id, 'status': 'FAILED',
+                    'code': (getattr(exc, 'code', 'SEMANTIC_INDEX_FAILED')
+                             if isinstance(exc, DomainError) else 'SEMANTIC_STORAGE_UNAVAILABLE')})
+        return {'status': 'PARTIAL' if any(row['status'] == 'FAILED' for row in results) else 'PASS',
+                'items': results, 'next_after_resource_id': next_cursor}
     if (args.command in ('project-master-mongo', 'sync-mongo-metadata') and args.apply
             and container.settings.app_environment not in ('development', 'test')):
         raise DomainError('MONGO_METADATA_APPLY_REQUIRES_DEV')
@@ -143,6 +193,8 @@ def main():
         with flow():
             result = dispatch(container, args)
         print(json.dumps(result, default=str, ensure_ascii=True, indent=2))
+        if args.command == 'semantic-index' and result['status'] != 'PASS':
+            return 1
         if args.command == 'reconcile-master' and result['status'] == 'BLOCKED':
             return 1
         if args.command in ('project-master-mongo', 'sync-mongo-metadata') and any(

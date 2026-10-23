@@ -81,6 +81,18 @@ class Settings(BaseSettings):
     index_max_units: int = Field(default=10000, ge=1, le=50000)
     index_max_source_chars: int = Field(default=10000000, ge=1, le=50000000)
     index_timeout_seconds: int = Field(default=300, ge=1, le=3600)
+    # Opt-in parallel index. Legacy bag vectors/BoW remain the default.
+    semantic_enabled: bool = False
+    semantic_strategy: Literal['raw', 'contextual'] = 'contextual'
+    semantic_model_path: Path | None = Field(default=None, repr=False)
+    semantic_model_revision: str = Field(default='', max_length=40)
+    semantic_device: str = Field(default='cpu', pattern=r'^(cpu|cuda:\d+)$')
+    semantic_batch_size: int = Field(default=2, ge=1, le=16)
+    semantic_max_tokens: int = Field(default=1024, ge=64, le=8192)
+    semantic_max_candidates: int = Field(default=10000, ge=1, le=50000)
+    semantic_min_score: float = Field(default=0., ge=0., le=1., allow_inf_nan=False)
+    semantic_rerank_enabled: bool = False
+    semantic_rerank_top_k: int = Field(default=20, ge=1, le=50)
     search_max_bags: int = Field(default=2000, ge=1, le=10000)
     search_timeout_seconds: int = Field(default=15, ge=1, le=120)
     search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)

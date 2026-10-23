@@ -182,6 +182,8 @@ async def search_model_status(request: Request, response: Response):
     # This process alone reports its resident model, never another worker's.
     response.headers['Cache-Control'] = 'private, no-store'
     embedding = request.app.state.container.indexing.embedding
+    if request.app.state.container.settings.semantic_enabled and request.app.state.container.semantic is not None:
+        embedding = request.app.state.container.semantic.embedding
     status = getattr(embedding, 'search_status', None)
     return status() if status is not None else {'state': 'FAILED', 'ready': False}
 
@@ -192,6 +194,8 @@ async def retry_search_model(request: Request, response: Response):
         if not search_access(request).internal:
             raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
         embedding = request.app.state.container.indexing.embedding
+        if request.app.state.container.settings.semantic_enabled and request.app.state.container.semantic is not None:
+            embedding = request.app.state.container.semantic.embedding
         retry = getattr(embedding, 'retry_preload', None)
         if retry is None or not retry():
             raise SearchError('BLOCKED_EMBEDDING_RUNTIME')

@@ -1,0 +1,860 @@
+{
+  "label_status": "AGENT_REVIEWED_DRAFT_REQUIRES_DOMAIN_REVIEW",
+  "corpus_checksum": "9f96ed218bae04555e3bae7b357ffdf3aa25b795ac6134fa4431ab37b75e87bf",
+  "specification_checksum": "71ea35f35261f842ef5068783e0909fad781cfa1e8f66daf11519a51a1e5fd49",
+  "queries": [
+    {
+      "query_id": "V31",
+      "query": "Vì sao xác thực hai lớp không đủ để tin một đường link?",
+      "language": "vi",
+      "category": "negation",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R017": 3,
+        "HL26_XDRV_R005": 3
+      },
+      "chunk_qrels": {
+        "2ebebd1f28170768f03632f625504c": 3,
+        "a83db86b16780a3a5541aa87831676": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R017",
+          "resource_version_id": "01M5KXJSV2XEF11KSDBGSPKP48",
+          "chunk_id": "2ebebd1f28170768f03632f625504c",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R005",
+          "resource_version_id": "01M5KYKBRTVVE5SCA0HVPNMSYP",
+          "chunk_id": "a83db86b16780a3a5541aa87831676",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V32",
+      "query": "Should I share a one-time code with someone claiming to be an administrator?",
+      "language": "en",
+      "category": "paraphrase",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R017": 3,
+        "HL26_XDRV_R005": 3
+      },
+      "chunk_qrels": {
+        "ea50c61a2b67bfd55e67438afdd0f6": 3,
+        "3e6b5dfdcddad5150b457448f3f6f4": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R017",
+          "resource_version_id": "01M5KXJSV2XEF11KSDBGSPKP48",
+          "chunk_id": "ea50c61a2b67bfd55e67438afdd0f6",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R005",
+          "resource_version_id": "01M5KYKBRTVVE5SCA0HVPNMSYP",
+          "chunk_id": "3e6b5dfdcddad5150b457448f3f6f4",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V33",
+      "query": "Cát không tan trong nước thì chọn cách tách nào?",
+      "language": "vi",
+      "category": "explanation",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R014": 3,
+        "HL26_XDRV_R002": 3
+      },
+      "chunk_qrels": {
+        "f46bf17fb1379150b45c690e21e58b": 3,
+        "b15c252c6f85feeb8ab4344835d8e2": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R014",
+          "resource_version_id": "01M5KXBAHX0WSA9MCB83DW8AGV",
+          "chunk_id": "f46bf17fb1379150b45c690e21e58b",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R002",
+          "resource_version_id": "01M5KYBZNVRQ6MVHW8MJ8E0V92",
+          "chunk_id": "b15c252c6f85feeb8ab4344835d8e2",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V34",
+      "query": "Why can evaporation recover salt from a solution?",
+      "language": "en",
+      "category": "explanation",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R014": 3,
+        "HL26_XDRV_R002": 3
+      },
+      "chunk_qrels": {
+        "f51ac24d510710b907501999505f3d": 3,
+        "a2b206fa0d8fa2e5d76eaec8e2413b": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R014",
+          "resource_version_id": "01M5KXBAHX0WSA9MCB83DW8AGV",
+          "chunk_id": "f51ac24d510710b907501999505f3d",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R002",
+          "resource_version_id": "01M5KYBZNVRQ6MVHW8MJ8E0V92",
+          "chunk_id": "a2b206fa0d8fa2e5d76eaec8e2413b",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V35",
+      "query": "Lá có cấu tạo nào giúp nhận light và trao đổi khí?",
+      "language": "mixed",
+      "category": "multi_intent",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R022": 3,
+        "HL26_XDRV_R010": 3
+      },
+      "chunk_qrels": {
+        "4166f76c6b774727fb9ff9e390e10b": 3,
+        "b0e60fec89591e08eb70854560c70d": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R022",
+          "resource_version_id": "01M5KXZ1GDN3QA0GYFE393N1CZ",
+          "chunk_id": "4166f76c6b774727fb9ff9e390e10b",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R010",
+          "resource_version_id": "01M5KZ04JHT0NQKS9KDWBQQBT7",
+          "chunk_id": "b0e60fec89591e08eb70854560c70d",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V36",
+      "query": "Cần làm gì với các phiên đăng nhập lạ khi bị lộ mật khẩu?",
+      "language": "vi",
+      "category": "narrow_context",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R017": 3,
+        "HL26_XDRV_R005": 3
+      },
+      "chunk_qrels": {
+        "9f6f8cbfdb2aa4b9c156045cddc2f3": 3,
+        "dd4a97ad6751a10530b3f7bcd04670": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R017",
+          "resource_version_id": "01M5KXJSV2XEF11KSDBGSPKP48",
+          "chunk_id": "9f6f8cbfdb2aa4b9c156045cddc2f3",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R005",
+          "resource_version_id": "01M5KYKBRTVVE5SCA0HVPNMSYP",
+          "chunk_id": "dd4a97ad6751a10530b3f7bcd04670",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V37",
+      "query": "Phương trình hô hấp tế bào của lá vào ban đêm là gì?",
+      "language": "vi",
+      "category": "hard_no_answer",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R022": 1,
+        "HL26_XDRV_R010": 1
+      },
+      "chunk_qrels": {
+        "4166f76c6b774727fb9ff9e390e10b": 1,
+        "b0e60fec89591e08eb70854560c70d": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R022",
+          "resource_version_id": "01M5KXZ1GDN3QA0GYFE393N1CZ",
+          "chunk_id": "4166f76c6b774727fb9ff9e390e10b",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_XDRV_R010",
+          "resource_version_id": "01M5KZ04JHT0NQKS9KDWBQQBT7",
+          "chunk_id": "b0e60fec89591e08eb70854560c70d",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V38",
+      "query": "Give Python code implementing TOTP for multi-factor authentication.",
+      "language": "en",
+      "category": "hard_no_answer",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R017": 1,
+        "HL26_XDRV_R005": 1
+      },
+      "chunk_qrels": {
+        "2ebebd1f28170768f03632f625504c": 1,
+        "a83db86b16780a3a5541aa87831676": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R017",
+          "resource_version_id": "01M5KXJSV2XEF11KSDBGSPKP48",
+          "chunk_id": "2ebebd1f28170768f03632f625504c",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_XDRV_R005",
+          "resource_version_id": "01M5KYKBRTVVE5SCA0HVPNMSYP",
+          "chunk_id": "a83db86b16780a3a5541aa87831676",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V39",
+      "query": "Tính năng lượng liên kết hóa học tiêu thụ trong quang hợp.",
+      "language": "vi",
+      "category": "hard_no_answer",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R022": 1,
+        "HL26_XDRV_R010": 1
+      },
+      "chunk_qrels": {
+        "4166f76c6b774727fb9ff9e390e10b": 1,
+        "b0e60fec89591e08eb70854560c70d": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R022",
+          "resource_version_id": "01M5KXZ1GDN3QA0GYFE393N1CZ",
+          "chunk_id": "4166f76c6b774727fb9ff9e390e10b",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_XDRV_R010",
+          "resource_version_id": "01M5KZ04JHT0NQKS9KDWBQQBT7",
+          "chunk_id": "b0e60fec89591e08eb70854560c70d",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V40",
+      "query": "How does fractional distillation separate ethanol from water?",
+      "language": "en",
+      "category": "hard_no_answer",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R014": 1,
+        "HL26_XDRV_R002": 1
+      },
+      "chunk_qrels": {
+        "f51ac24d510710b907501999505f3d": 1,
+        "a2b206fa0d8fa2e5d76eaec8e2413b": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R014",
+          "resource_version_id": "01M5KXBAHX0WSA9MCB83DW8AGV",
+          "chunk_id": "f51ac24d510710b907501999505f3d",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_XDRV_R002",
+          "resource_version_id": "01M5KYBZNVRQ6MVHW8MJ8E0V92",
+          "chunk_id": "a2b206fa0d8fa2e5d76eaec8e2413b",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V41",
+      "query": "Làm sao bẻ khóa mật khẩu đã băm Argon2?",
+      "language": "vi",
+      "category": "hard_no_answer",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R017": 1,
+        "HL26_XDRV_R005": 1
+      },
+      "chunk_qrels": {
+        "2ebebd1f28170768f03632f625504c": 1,
+        "a83db86b16780a3a5541aa87831676": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R017",
+          "resource_version_id": "01M5KXJSV2XEF11KSDBGSPKP48",
+          "chunk_id": "2ebebd1f28170768f03632f625504c",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_XDRV_R005",
+          "resource_version_id": "01M5KYKBRTVVE5SCA0HVPNMSYP",
+          "chunk_id": "a83db86b16780a3a5541aa87831676",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V42",
+      "query": "Photosynthesis quantum yield measurement protocol?",
+      "language": "mixed",
+      "category": "hard_no_answer",
+      "split": "validation",
+      "resource_qrels": {
+        "HL26_R022": 1,
+        "HL26_XDRV_R010": 1
+      },
+      "chunk_qrels": {
+        "4166f76c6b774727fb9ff9e390e10b": 1,
+        "b0e60fec89591e08eb70854560c70d": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R022",
+          "resource_version_id": "01M5KXZ1GDN3QA0GYFE393N1CZ",
+          "chunk_id": "4166f76c6b774727fb9ff9e390e10b",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_XDRV_R010",
+          "resource_version_id": "01M5KZ04JHT0NQKS9KDWBQQBT7",
+          "chunk_id": "b0e60fec89591e08eb70854560c70d",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H01",
+      "query": "Chiếc cặp 240 nghìn giảm 15 phần trăm phải trả bao nhiêu?",
+      "language": "vi",
+      "category": "calculation",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R001": 3
+      },
+      "chunk_qrels": {
+        "6581eb4741a13afccfe661781262ee": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R001",
+          "resource_version_id": "01M5KWN06ACZ2SBX7ATKNAN6WX",
+          "chunk_id": "6581eb4741a13afccfe661781262ee",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H02",
+      "query": "What percentage is eighteen students out of sixty?",
+      "language": "en",
+      "category": "cross_lingual",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R001": 3
+      },
+      "chunk_qrels": {
+        "6581eb4741a13afccfe661781262ee": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R001",
+          "resource_version_id": "01M5KWN06ACZ2SBX7ATKNAN6WX",
+          "chunk_id": "6581eb4741a13afccfe661781262ee",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H03",
+      "query": "How do water droplets in clouds turn into rain?",
+      "language": "en",
+      "category": "explanation",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R003": 3
+      },
+      "chunk_qrels": {
+        "9beb30ddb4bb25414a92e4aa5d92d4": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R003",
+          "resource_version_id": "01M5KWSXV96JYCEH4AVWPRRS61",
+          "chunk_id": "9beb30ddb4bb25414a92e4aa5d92d4",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H04",
+      "query": "Nước mưa trở lại water cycle bằng dòng chảy và thấm ra sao?",
+      "language": "mixed",
+      "category": "multi_intent",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R003": 3
+      },
+      "chunk_qrels": {
+        "b33b54a1b40e7e2a7eb050bf347cab": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R003",
+          "resource_version_id": "01M5KWSXV96JYCEH4AVWPRRS61",
+          "chunk_id": "b33b54a1b40e7e2a7eb050bf347cab",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H05",
+      "query": "Câu chủ đề và câu kết trong đoạn giải thích làm nhiệm vụ gì?",
+      "language": "vi",
+      "category": "multi_intent",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R002": 3
+      },
+      "chunk_qrels": {
+        "9e75bb163e64aeafa4de9dfaf83bbe": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R002",
+          "resource_version_id": "01M5KWQFXNY5B23BJ9698AX0Y4",
+          "chunk_id": "9e75bb163e64aeafa4de9dfaf83bbe",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H06",
+      "query": "How does taking notes while reading help build vocabulary?",
+      "language": "en",
+      "category": "narrow_context",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R002": 3
+      },
+      "chunk_qrels": {
+        "c4727f9eac506c9a897be25b00f6ec": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R002",
+          "resource_version_id": "01M5KWQFXNY5B23BJ9698AX0Y4",
+          "chunk_id": "c4727f9eac506c9a897be25b00f6ec",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H07",
+      "query": "Hai đại lượng cùng tăng đã chắc là tỉ lệ thuận chưa?",
+      "language": "vi",
+      "category": "negation",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_R016": 3,
+        "HL26_XDRV_R004": 3
+      },
+      "chunk_qrels": {
+        "0c4d73a2824354fe4fa9b6c8812a32": 3,
+        "abf330828393bf278866921bad648a": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R016",
+          "resource_version_id": "01M5KXGAS30EK4TA8FQF8350BE",
+          "chunk_id": "0c4d73a2824354fe4fa9b6c8812a32",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R004",
+          "resource_version_id": "01M5KYGX0DVCGW3TX9GYWP1DKV",
+          "chunk_id": "abf330828393bf278866921bad648a",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H08",
+      "query": "At a constant speed of 45 km per hour, how far is travelled in two hours?",
+      "language": "en",
+      "category": "calculation",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_R016": 3,
+        "HL26_XDRV_R004": 3
+      },
+      "chunk_qrels": {
+        "0c4d73a2824354fe4fa9b6c8812a32": 3,
+        "8eff4458642ff2b0596f9b50a5a632": 3,
+        "abf330828393bf278866921bad648a": 3,
+        "3062185ae72f97c046e1473415987d": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R016",
+          "resource_version_id": "01M5KXGAS30EK4TA8FQF8350BE",
+          "chunk_id": "0c4d73a2824354fe4fa9b6c8812a32",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_R016",
+          "resource_version_id": "01M5KXGAS30EK4TA8FQF8350BE",
+          "chunk_id": "8eff4458642ff2b0596f9b50a5a632",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R004",
+          "resource_version_id": "01M5KYGX0DVCGW3TX9GYWP1DKV",
+          "chunk_id": "abf330828393bf278866921bad648a",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R004",
+          "resource_version_id": "01M5KYGX0DVCGW3TX9GYWP1DKV",
+          "chunk_id": "3062185ae72f97c046e1473415987d",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H09",
+      "query": "Đặt mắt ở đâu khi đọc thermometer dạng thang chia để giảm sai số?",
+      "language": "mixed",
+      "category": "narrow_context",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_R023": 3,
+        "HL26_XDRV_R011": 3
+      },
+      "chunk_qrels": {
+        "6e89aa5cf27f0e019081e4e9b8206b": 3,
+        "adb9262b4c810dd18c9e0df7693b0f": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R023",
+          "resource_version_id": "01M5KY1HV13TSHY3TXWN8N9A1W",
+          "chunk_id": "6e89aa5cf27f0e019081e4e9b8206b",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R011",
+          "resource_version_id": "01M5KZ2KJ65NX5E70QZY4G8GM5",
+          "chunk_id": "adb9262b4c810dd18c9e0df7693b0f",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H10",
+      "query": "Có thể xem mọi chi tiết truyền thuyết là sự kiện lịch sử đã kiểm chứng không?",
+      "language": "vi",
+      "category": "negation",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_R024": 3,
+        "HL26_XDRV_R012": 3
+      },
+      "chunk_qrels": {
+        "af37582751ae4e54aa8a1fabf39495": 3,
+        "23dfbb19229233f45fb8ee956645e3": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R024",
+          "resource_version_id": "01M5KY40P799QN5WB6S016HXJQ",
+          "chunk_id": "af37582751ae4e54aa8a1fabf39495",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R012",
+          "resource_version_id": "01M5KZ51PZM31H8R90WMH1JKZV",
+          "chunk_id": "23dfbb19229233f45fb8ee956645e3",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H11",
+      "query": "Trong dữ liệu khảo sát, TEST_S01 đọc bao nhiêu phút mỗi ngày?",
+      "language": "vi",
+      "category": "table_lookup",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R006": 3
+      },
+      "chunk_qrels": {
+        "b38bec9cf457f6d022c2d4a1d24e5c": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R006",
+          "resource_version_id": "01M5KX1EVGZX6JWB7T331Q25PN",
+          "chunk_id": "b38bec9cf457f6d022c2d4a1d24e5c",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H12",
+      "query": "What crafts and farming activities are described for Van Lang residents?",
+      "language": "en",
+      "category": "multi_intent",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_R024": 3,
+        "HL26_XDRV_R012": 3
+      },
+      "chunk_qrels": {
+        "af37582751ae4e54aa8a1fabf39495": 3,
+        "23dfbb19229233f45fb8ee956645e3": 3
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R024",
+          "resource_version_id": "01M5KY40P799QN5WB6S016HXJQ",
+          "chunk_id": "af37582751ae4e54aa8a1fabf39495",
+          "grade": 3
+        },
+        {
+          "resource_id": "HL26_XDRV_R012",
+          "resource_version_id": "01M5KZ51PZM31H8R90WMH1JKZV",
+          "chunk_id": "23dfbb19229233f45fb8ee956645e3",
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H13",
+      "query": "Công thức lãi kép liên tục khi lạm phát thay đổi mỗi năm?",
+      "language": "vi",
+      "category": "hard_no_answer",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R001": 1
+      },
+      "chunk_qrels": {
+        "6581eb4741a13afccfe661781262ee": 1,
+        "a2f5d7054ab8ab2a4a1c4054e7cf6a": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R001",
+          "resource_version_id": "01M5KWN06ACZ2SBX7ATKNAN6WX",
+          "chunk_id": "6581eb4741a13afccfe661781262ee",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_GDRV_R001",
+          "resource_version_id": "01M5KWN06ACZ2SBX7ATKNAN6WX",
+          "chunk_id": "a2f5d7054ab8ab2a4a1c4054e7cf6a",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H14",
+      "query": "Derive the boiling temperature of water at a given atmospheric pressure.",
+      "language": "en",
+      "category": "hard_no_answer",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R003": 1
+      },
+      "chunk_qrels": {
+        "60a5621a55376bf4cd325b7e00d319": 1,
+        "2ff4d9d95a1037b4f5aebc75bcf3b9": 1,
+        "e985ff668849b33a383c4f4ed426f5": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R003",
+          "resource_version_id": "01M5KWSXV96JYCEH4AVWPRRS61",
+          "chunk_id": "60a5621a55376bf4cd325b7e00d319",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_GDRV_R003",
+          "resource_version_id": "01M5KWSXV96JYCEH4AVWPRRS61",
+          "chunk_id": "2ff4d9d95a1037b4f5aebc75bcf3b9",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_GDRV_R003",
+          "resource_version_id": "01M5KWSXV96JYCEH4AVWPRRS61",
+          "chunk_id": "e985ff668849b33a383c4f4ed426f5",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H15",
+      "query": "Quy trình sửa nhiệt kế thủy ngân bị vỡ tại nhà?",
+      "language": "vi",
+      "category": "hard_no_answer",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_R023": 1,
+        "HL26_XDRV_R011": 1
+      },
+      "chunk_qrels": {
+        "6e89aa5cf27f0e019081e4e9b8206b": 1,
+        "adb9262b4c810dd18c9e0df7693b0f": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R023",
+          "resource_version_id": "01M5KY1HV13TSHY3TXWN8N9A1W",
+          "chunk_id": "6e89aa5cf27f0e019081e4e9b8206b",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_XDRV_R011",
+          "resource_version_id": "01M5KZ2KJ65NX5E70QZY4G8GM5",
+          "chunk_id": "adb9262b4c810dd18c9e0df7693b0f",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H16",
+      "query": "Does the reading survey establish a causal effect of reading time on book borrowing?",
+      "language": "en",
+      "category": "hard_no_answer",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R006": 1
+      },
+      "chunk_qrels": {
+        "0f0d6df36af8a4e71b27e46c301f4d": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R006",
+          "resource_version_id": "01M5KX1EVGZX6JWB7T331Q25PN",
+          "chunk_id": "0f0d6df36af8a4e71b27e46c301f4d",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H17",
+      "query": "Hướng dẫn tạo một web server HTTP bằng Rust.",
+      "language": "vi",
+      "category": "unrelated_no_answer",
+      "split": "test",
+      "resource_qrels": {},
+      "chunk_qrels": {},
+      "evidence": []
+    },
+    {
+      "query_id": "H18",
+      "query": "Exact founding year of Van Lang supported by an absolute chronology?",
+      "language": "en",
+      "category": "hard_no_answer",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_GDRV_R008": 1,
+        "HL26_R024": 1,
+        "HL26_XDRV_R012": 1
+      },
+      "chunk_qrels": {
+        "3533a5ccf64ec9d606dd4f06e56701": 1,
+        "af37582751ae4e54aa8a1fabf39495": 1,
+        "23dfbb19229233f45fb8ee956645e3": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_GDRV_R008",
+          "resource_version_id": "01M5KX6BD7SCJ98VTZCJEGAZAX",
+          "chunk_id": "3533a5ccf64ec9d606dd4f06e56701",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_R024",
+          "resource_version_id": "01M5KY40P799QN5WB6S016HXJQ",
+          "chunk_id": "af37582751ae4e54aa8a1fabf39495",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_XDRV_R012",
+          "resource_version_id": "01M5KZ51PZM31H8R90WMH1JKZV",
+          "chunk_id": "23dfbb19229233f45fb8ee956645e3",
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H19",
+      "query": "Dự báo quỹ đạo sao chổi bằng phương pháp tích phân số nào?",
+      "language": "vi",
+      "category": "unrelated_no_answer",
+      "split": "test",
+      "resource_qrels": {},
+      "chunk_qrels": {},
+      "evidence": []
+    },
+    {
+      "query_id": "H20",
+      "query": "Prove the derivative rule for a direct proportion y=kx.",
+      "language": "en",
+      "category": "hard_no_answer",
+      "split": "test",
+      "resource_qrels": {
+        "HL26_R016": 1,
+        "HL26_XDRV_R004": 1
+      },
+      "chunk_qrels": {
+        "0c4d73a2824354fe4fa9b6c8812a32": 1,
+        "abf330828393bf278866921bad648a": 1
+      },
+      "evidence": [
+        {
+          "resource_id": "HL26_R016",
+          "resource_version_id": "01M5KXGAS30EK4TA8FQF8350BE",
+          "chunk_id": "0c4d73a2824354fe4fa9b6c8812a32",
+          "grade": 1
+        },
+        {
+          "resource_id": "HL26_XDRV_R004",
+          "resource_version_id": "01M5KYGX0DVCGW3TX9GYWP1DKV",
+          "chunk_id": "abf330828393bf278866921bad648a",
+          "grade": 1
+        }
+      ]
+    }
+  ]
+}

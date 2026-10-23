@@ -499,4 +499,4 @@ node --experimental-strip-types --test frontend/tests/fileReadiness.test.mjs fro
 ```
 
 Nếu `frontend/dist` bị khóa: `npm.cmd --prefix frontend run build -- --outDir ../.test-tmp/frontend-verify`.
-Tài liệu chi tiết: [Docker](deploy/README.md), [MASTER auth](deploy/AUTH_MASTER_USERS_SETUP.md), [Auth DB](deploy/AUTH_DATABASE_SETUP.md).
+Tài liệu chi tiết: [Docker](deploy/README.md), [MASTER auth](deploy/AUTH_MASTER_USERS_SETUP.md), [Auth DB](deploy/AUTH_DATABASE_SETUP.md), [BGE-M3 Chunk Search opt-in](research/bge-m3/README.md), [đánh giá chất lượng Vector](research/semantic-quality/README.md), [tối ưu và no-answer](research/semantic-quality/optimization/README.md).

@@ -45,6 +45,14 @@ export type SearchResponse = {
     total_pages: number
     items: SearchItem[]
     ranking_algorithm: string
+    vector_index?: {
+        model_id: string
+        revision: string
+        dimension: number
+        strategy: 'raw' | 'contextual'
+        index_ids: string[]
+        rerank_enabled: boolean
+    } | null
     representation_unit: 'content_bag'
     ready_bag_count: number
     message: 'OK' | 'NO_READY_INDEX' | 'NO_ACCESSIBLE_CONTENT' | 'QUERY_NO_KEYWORDS' | 'PUBLIC_ACCESS_UNCONFIRMED'
