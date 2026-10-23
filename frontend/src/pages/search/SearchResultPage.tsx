@@ -52,6 +52,9 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                         {result.items.length > 0 && <span className={styles.metadata}>Phù hợp nhất trước · {Math.min((result.page - 1) * result.size + 1, result.total)}–{Math.min((result.page - 1) * result.size + result.items.length, result.total)} / {result.total}</span>}
                         {result.access_scope === 'local_demo' && <p role="status" className={styles.metadata}>Tra cứu thử nghiệm nội bộ</p>}
                     </div>
+                    {result.readiness?.reindex_required && <p role="status" className={styles.metadata}>
+                        Một số học liệu chưa sẵn sàng để tìm kiếm: {result.readiness.ready_versions}/{result.readiness.eligible_versions} phiên bản đã có chỉ mục hợp lệ.
+                    </p>}
                     {result.items.length === 0 && <div className={styles.emptyState}>
                         <SearchX size={32} aria-hidden="true" /><h3>Chưa tìm thấy học liệu</h3>
                         <p>{result.message === 'PUBLIC_ACCESS_UNCONFIRMED' ? 'Chưa có học liệu đủ quyền truy xuất công khai.' :
@@ -62,11 +65,19 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                     {result.items.map((item, index) => <article key={item.resource_id} className={styles.searchResult}>
                         <div className={styles.resultTopline}><span className={styles.documentType}><FileText size={15} aria-hidden="true" /> Học liệu</span><span className={styles.source}>{item.provider_name || item.resource_type_code} · Phiên bản {item.version_number}</span></div>
                         <div className={styles.resultHeader}><h2>{item.can_view_file !== false && canVisit(`/library/${encodeURIComponent(item.resource_id)}`, principal)
-                            ? <Link to={`/library/${encodeURIComponent(item.resource_id)}?${new URLSearchParams({ versionId: item.resource_version_id, contextId: item.context_id, returnTo: `/search/query-methods?${params}` })}`}>{item.resource_title}<ArrowUpRight size={18} aria-hidden="true" /></Link>
+                            ? <Link to={`/library/${encodeURIComponent(item.resource_id)}?${new URLSearchParams({ versionId: item.resource_version_id, contextId: item.context_id, contextEvidence: item.context_evidence || '', returnTo: `/search/query-methods?${params}` })}`}>{item.resource_title}<ArrowUpRight size={18} aria-hidden="true" /></Link>
                             : item.resource_title}</h2></div>
                         {item.bag_title && <p className={styles.sectionTitle}>{item.bag_title}</p>}
                         {item.snippet && <p className={styles.snippet}>{item.snippet}</p>}
-                        <SearchContext id={item.context_id} />
+                        {!!item.lexical_evidence?.some(e => e.relation !== 'original') && <details className={styles.more}>
+                            <summary>Thuật ngữ tương đương trong học liệu</summary>
+                            <ul>{item.lexical_evidence.filter(e => e.relation !== 'original').slice(0, 6).map((e, i) =>
+                                <li key={i}>“{e.query_phrase}” → “{e.matched_phrase}”{e.field === 'title' ? ' (tiêu đề)' : ''}</li>)}</ul>
+                        </details>}
+                        <SearchContext id={item.context_id} evidence={item.context_evidence} />
+                        {!!item.meaning_variants?.length && <details className={styles.more}><summary>Các cách diễn đạt trong nhóm nghĩa khớp</summary>
+                            <ul>{item.meaning_variants.map(value => <li key={value}>{value}</li>)}</ul></details>}
+                        {item.context_evidence === 'bag' && <p className={styles.metadata}>Kết quả khớp ở cấp học liệu; đoạn trích là đoạn tham khảo, chưa xác định được đoạn khớp trực tiếp.</p>}
                         {item.page_from != null && <p className={styles.metadata}>Nội dung liên quan tại trang {item.page_from}{item.page_to != null && item.page_to !== item.page_from ? `–${item.page_to}` : ''}</p>}
                         {item.matched_keywords.length > 0 && <div className={styles.keywords}><span>Từ khóa liên quan</span>{item.matched_keywords.map(keyword =>
                             <span className={styles.keyword} key={keyword}>{keyword}</span>)}</div>}
