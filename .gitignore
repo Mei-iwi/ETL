@@ -43,3 +43,6 @@ TAI_LIEU_DOI_CHIEU/
 # Local documentation and generated reports.
 /docs/
 !deploy/.env.auth.example
+
+# Private Docker deployment settings (template stays versioned).
+/docker.env

@@ -1,0 +1,15 @@
+# SOURCE on Neon with verified TLS; MASTER and Mongo remain local Docker services.
+services:
+  api: &source-neon
+    environment:
+      ETL_DATABASE_MODE: source-neon
+    secrets:
+      - source: source-database-ca
+        target: source-database-ca.pem
+  master-sync-worker: *source-neon
+  source-file-worker: *source-neon
+  ocr-worker: *source-neon
+  preflight: *source-neon
+secrets:
+  source-database-ca:
+    file: ${SOURCE_DATABASE_CA_FILE:?Set SOURCE_DATABASE_CA_FILE to a trusted CA bundle}

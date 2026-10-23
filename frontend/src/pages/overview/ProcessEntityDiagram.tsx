@@ -4,8 +4,8 @@ const nodes = [
     { title: 'Tiếp nhận học liệu và Metadata', x: 150, y: 100, width: 240, color: 'highlight' },
     { title: 'Trích xuất nội dung đa phương tiện', x: 150, y: 200, width: 240, color: 'teal' },
     { title: 'Làm sạch, chuẩn hóa và gán nhãn', x: 150, y: 300, width: 240, color: 'teal' },
-    { title: 'Phân đoạn nội dung thành Chunk', x: 150, y: 400, width: 240, color: 'teal' },
-    { title: 'Biểu diễn BoW', x: 30, y: 540, width: 210, color: 'teal' },
+    { title: 'Tổ chức nội dung thành ContentUnit', x: 150, y: 400, width: 240, color: 'teal' },
+    { title: 'Từ khóa ContentBag', x: 30, y: 540, width: 210, color: 'teal' },
     { title: 'Vector hóa ngữ nghĩa', x: 300, y: 540, width: 210, color: 'teal' },
     { title: 'Tổ chức lưu trữ và lập chỉ mục', x: 150, y: 670, width: 240, color: 'teal' },
     { title: 'Người dùng nhập truy vấn', x: 730, y: 100, width: 240, color: 'highlight' },
@@ -20,7 +20,7 @@ const nodes = [
 
 export function ProcessEntityDiagram() {
     return <figure className={style.diagramFigure}>
-        <div className={style.treeViewport}>
+        <div className={style.treeViewport} tabIndex={0} role="region" aria-label="Sơ đồ quy trình, có thể cuộn ngang">
             <svg className={style.treeCanvas} viewBox="0 0 1160 950" role="group" aria-label="Sơ đồ phân nhánh quy trình xử lý và truy vấn học liệu">
                 <rect className={style.preparationLane} x="14" y="20" width="512" height="750" rx="14" aria-hidden="true" />
                 <rect className={style.searchLane} x="550" y="20" width="596" height="750" rx="14" aria-hidden="true" />

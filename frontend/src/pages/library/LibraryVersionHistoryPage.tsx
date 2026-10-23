@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
+import { ArrowLeft, BookOpen, History, Eye, Layers } from 'lucide-react'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
 import styles from './LibraryVersionHistoryPage.module.css'
+import detailStyles from './LibraryResourceDetailPage.module.css'
 
 type ResourceDetail = {
     id: string
@@ -67,8 +69,9 @@ export function LibraryVersionHistoryPage() {
                 const versionsData: ResourceVersion[] =
                     await versionsResponse.json()
 
+                if (controller.signal.aborted) return
                 setResource(resourceData)
-                setVersions(versionsData)
+                setVersions([...versionsData].sort((a, b) => b.version_number - a.version_number))
             } catch (err) {
                 if (controller.signal.aborted) return
 
@@ -90,25 +93,26 @@ export function LibraryVersionHistoryPage() {
     }, [resourceId])
 
     return (
-        <section className={styles.page}>
-            <Link className={styles.backLink} to="/library/list">
-                ← Quay lại danh sách học liệu
+        <section className={detailStyles.page}>
+            <Link className={detailStyles.backLink} to="/library/list">
+                <ArrowLeft size={17} aria-hidden="true" />Quay lại danh sách học liệu
             </Link>
 
-            <header className={styles.header}>
-                <h1>Lịch sử phiên bản</h1>
-
-                {resource && (
-                    <div className={styles.resourceInfo}>
-                        <h2>{resource.title}</h2>
-                        <p>
-                            {resource.provider_name} ·{' '}
-                            {resource.resource_type_name_vi}
-                        </p>
-                        
+            <div className={detailStyles.profileStage}>
+                {resource && <aside className={detailStyles.resourceCard} aria-label="Tóm tắt phiên bản">
+                    <div className={detailStyles.resourceCardBody}>
+                        <div className={detailStyles.bookPortrait}><BookOpen size={68} strokeWidth={1.2} aria-hidden="true" /></div>
+                        <h2>{resource.resource_type_name_vi}</h2>
+                        <span className={detailStyles.cardAccent} />
+                        <p className={styles.versionCount}>{versions.length}<span>phiên bản</span></p>
+                        {versions[0] && <p className={styles.latestSummary}>Phiên bản mới nhất trong danh sách<strong>Phiên bản {versions[0].version_number}</strong></p>}
                     </div>
-                )}
-            </header>
+                    <div className={detailStyles.resourceCardFooter}><History size={16} aria-hidden="true" />Lịch sử học liệu</div>
+                </aside>}
+                <div className={detailStyles.resourceInformation}>
+                    <header className={detailStyles.header}>
+                        <h1>{resource?.title || 'Lịch sử phiên bản'}</h1>
+                    </header>
 
             {error && (
                 <p className={styles.error} role="alert">
@@ -116,14 +120,15 @@ export function LibraryVersionHistoryPage() {
                 </p>
             )}
 
-            <div className={styles.panel}>
-                <h2>Các phiên bản</h2>
+            <section className={styles.panel} aria-labelledby="version-history-title">
+                <div className={styles.sectionHeading}><h2 id="version-history-title">Lịch sử phiên bản</h2>
+                    {!loading && !error && <span>{versions.length} phiên bản</span>}</div>
 
                 {loading ? (
                     <p className={styles.message}>
                         Đang tải lịch sử phiên bản...
                     </p>
-                ) : versions.length === 0 ? (
+                ) : error ? null : versions.length === 0 ? (
                     <p className={styles.message}>
                         Học liệu chưa có phiên bản nào.
                     </p>
@@ -135,11 +140,10 @@ export function LibraryVersionHistoryPage() {
                                 key={version.id}
                             >
                                 <div className={styles.versionHeading}>
-                                    <strong>
-                                        Phiên bản {version.version_number}
-                                    </strong>
+                                    <strong><Layers size={16} aria-hidden="true" />Phiên bản {version.version_number}</strong>
                                     <span className={styles.status}>
-                                        {version.lifecycle_status}
+                                        {({ INGESTED: 'Đã tiếp nhận', APPROVED: 'Đã duyệt', REJECTED: 'Đã từ chối',
+                                            PROCESSING: 'Đang xử lý', ARCHIVED: 'Đã lưu trữ' } as Record<string, string>)[version.lifecycle_status] || version.lifecycle_status}
                                     </span>
                                 </div>
 
@@ -173,11 +177,17 @@ export function LibraryVersionHistoryPage() {
                                         </dd>
                                     </div>
                                 </dl>
-                                {canVisit('/library/indexing', principal) && <Link className={styles.actionButton} to={`/library/indexing?${new URLSearchParams({ resourceId: resourceId ?? '', versionId: version.id })}`}>Phân đoạn / chỉ mục</Link>}
+                                <div className={styles.actions}>
+                                    <Link className={styles.viewButton} to={`/library/${encodeURIComponent(resourceId ?? '')}?${new URLSearchParams({ versionId: version.id })}`}>
+                                        <Eye size={14} aria-hidden="true" />Xem phiên bản</Link>
+                                    {canVisit('/library/indexing', principal) && <Link className={styles.actionButton} to={`/library/indexing?${new URLSearchParams({ resourceId: resourceId ?? '', versionId: version.id })}`}>Phân đoạn / chỉ mục</Link>}
+                                </div>
                             </li>
                         ))}
                     </ol>
                 )}
+            </section>
+                </div>
             </div>
         </section>
     )
