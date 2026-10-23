@@ -1,5 +1,6 @@
 """Managed startup states and HTTP guards, no downloaded model or Dev data."""
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
@@ -9,12 +10,22 @@ from fastapi.testclient import TestClient
 from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
 from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.domain.search import SearchError
-from data_sync_etl.main import create_app
+from data_sync_etl.main import create_app, shutdown_runtime
 from tests.unit.test_search import searchable as searchable
 
 
 def runtime():
     return LocalSentenceEmbedding('', 'minilm', 'revision', 384)
+
+
+def test_startup_warms_analyzer_before_serving_once(searchable, monkeypatch):
+    container, _ = searchable
+    calls = []
+    monkeypatch.setattr('data_sync_etl.domain.lexical.analyze', lambda text: calls.append(text) or [])
+    with TestClient(create_app(container), base_url='http://127.0.0.1') as client:
+        assert len(calls) == 1
+        assert client.get('/health').status_code == 200
+        assert len(calls) == 1
 
 
 def test_one_background_loader_per_process_and_readonly_status(monkeypatch):
@@ -88,6 +99,42 @@ def test_shutdown_during_load_does_not_publish_ready(monkeypatch):
     model._preload_thread.join(2)
     assert model.search_status() == {'state': 'STOPPED', 'ready': False}
     assert runtime().search_status() == {'state': 'UNINITIALIZED', 'ready': False}
+
+
+def test_shutdown_failure_does_not_emit_false_failed_or_restart(monkeypatch, caplog):
+    model, entered, release = runtime(), Event(), Event()
+    def prepare():
+        entered.set()
+        assert release.wait(3)
+        raise RuntimeError('interpreter shutdown')
+    monkeypatch.setattr(model, 'prepare', prepare)
+    model.start_preload()
+    assert entered.wait(2)
+    model.request_stop()
+    release.set()
+    model._preload_thread.join(2)
+    assert model.search_status()['state'] == 'STOPPED'
+    assert 'search_model FAILED' not in caplog.text
+    original = model._preload_thread
+    model.start_preload()
+    assert model._preload_thread is original
+
+
+def test_cancelled_shutdown_still_signals_stop_and_closes_owned_resources(monkeypatch):
+    async def exercise():
+        model, closed, entered = runtime(), [], asyncio.Event()
+        async def blocked_stop(_):
+            entered.set()
+            await asyncio.Event().wait()
+        monkeypatch.setattr('starlette.concurrency.run_in_threadpool', blocked_stop)
+        task = asyncio.create_task(shutdown_runtime(model, lambda: closed.append(True)))
+        await asyncio.wait_for(entered.wait(), 2)
+        assert model.search_status()['state'] == 'STOPPED'
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert closed == [True]
+    asyncio.run(exercise())
 
 
 def test_recovery_exhaustion_and_concurrent_retry_are_bounded(monkeypatch):

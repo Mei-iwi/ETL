@@ -1,7 +1,14 @@
 from typing import Annotated, Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.domain.search import SearchError, normalize_query
@@ -88,6 +95,16 @@ class SearchResponse(StrictDTO):
     ready_bag_count: int
     message: Literal['OK', 'NO_READY_INDEX', 'NO_ACCESSIBLE_CONTENT', 'QUERY_NO_KEYWORDS', 'PUBLIC_ACCESS_UNCONFIRMED']
     access_scope: Literal['public', 'local_demo', 'authenticated_admin', 'authenticated_user'] = 'public'
+    vector_index: dict | None = None
+
+    @model_serializer(mode='wrap')
+    def omit_unused_vector_index(self, handler):
+        # Preserve byte-for-byte legacy field presence, including nullable item
+        # metadata. response_model_exclude_none would remove required nulls too.
+        result = handler(self)
+        if self.vector_index is None:
+            result.pop('vector_index', None)
+        return result
 
 
 class ContextChunk(StrictDTO):
@@ -139,6 +156,12 @@ SEARCH_ERROR_RESPONSES = {status: {'model': SearchErrorResponse} for status in (
 
 
 MESSAGES = {
+    'SEMANTIC_MODEL_UNAVAILABLE': 'Mô hình tìm kiếm ngữ nghĩa chưa sẵn sàng. Có thể chọn BoW.',
+    'SEMANTIC_SCHEMA_NOT_READY': 'Chỉ mục ngữ nghĩa chưa được cấu hình. Liên hệ quản trị viên.',
+    'SEMANTIC_INDEX_NOT_READY': 'Chỉ mục ngữ nghĩa chưa sẵn sàng. Cần hoàn tất lập chỉ mục.',
+    'SEMANTIC_INDEX_STALE': 'Nội dung hoặc chỉ mục đã thay đổi. Vui lòng tìm lại.',
+    'SEMANTIC_CANDIDATE_LIMIT': 'Có quá nhiều đoạn văn. Hãy thu hẹp bộ lọc tìm kiếm.',
+    'SEMANTIC_TOKEN_LIMIT': 'Văn bản vượt giới hạn xử lý của mô hình ngữ nghĩa.',
     'BLOCKED_LEXICAL_ANALYZER': 'Underthesea chưa sẵn sàng. Cần cài đúng phiên bản analyzer.',
     'SEARCH_MODEL_LOADING': 'Đang chuẩn bị tìm kiếm. Có thể chọn BoW.',
     'SEARCH_RUNTIME_BUSY': 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',

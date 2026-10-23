@@ -110,6 +110,11 @@ def test_openapi_keep_routes_and_models_match_g0_baseline():
     # Full-content BM25 adds optional corpus readiness; preserve every legacy
     # response field and the frozen historical snapshot exactly.
     search = compatible['schemas']['SearchResponse']
+    # Chunk Semantic adds optional model/index diagnostics; legacy fields and
+    # the frozen historical snapshot retain their original contracts.
+    assert 'vector_index' not in search.get('required', [])
+    assert search['properties'].pop('vector_index')['anyOf'] == [
+        {'type': 'object', 'additionalProperties': True}, {'type': 'null'}]
     assert 'readiness' not in search.get('required', [])
     readiness = search['properties'].pop('readiness')
     assert readiness['anyOf'][0]['type'] == 'object'

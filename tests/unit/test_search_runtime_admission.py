@@ -16,7 +16,7 @@ ACCESS = SearchAccess('local_demo')
 
 
 def test_search_runtime_worker_capacity_is_bounded_and_released():
-    service = SearchService(None, SimpleNamespace(search_timeout_seconds=15), None)
+    service = SearchService(None, SimpleNamespace(search_timeout_seconds=15, search_concept_snapshot=None), None)
     with ExitStack() as stack:
         for _ in range(16):
             stack.enter_context(service.runtime_admission('vector', access=ACCESS))

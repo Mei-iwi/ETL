@@ -4,6 +4,8 @@ import math
 import re
 import unicodedata
 from collections import Counter
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -14,6 +16,22 @@ REPRESENTATION_VERSION = 'bag-lexical-tf-v1'
 RANKING_VERSION = 'bm25-concept-dismax-v3'
 TOKEN = re.compile(r'c\+\+|c#|\.net\b|\d+(?:\.\d+)+|[^\W_]+', re.IGNORECASE)
 SPECIAL = re.compile(r'(c\+\+|c#|\.net\b)', re.IGNORECASE)
+_ANALYSIS = ContextVar('lexical_request_analysis', default=None)
+
+
+@contextmanager
+def analysis_scope():
+    """Reuse exact-text analysis within one request; never cache index/ACL state."""
+    if _ANALYSIS.get() is not None:
+        yield
+        return
+    token = _ANALYSIS.set({'tokens': {}, 'characters': 0})
+    try:
+        yield
+    finally:
+        _ANALYSIS.reset(token)
+
+
 QUERY_STOPWORDS = frozenset(
     'và là của có các những một được trong cho với về từ đến này đó khi thì mà hoặc đã đang sẽ '
     'the a an of and to in is are for on what how why where when which who whom whose '
@@ -43,6 +61,20 @@ def analyze(text):
     Stopwords remain available for phrases/negation. No accent folding or
     unbounded ngrams. Technical symbols bypass punctuation splitting.
     """
+    scope = _ANALYSIS.get()
+    if scope is not None and text in scope['tokens']:
+        return list(scope['tokens'][text])
+    result = _analyze(text)
+    # Bound request-local retention even for very large corpora. Copies prevent
+    # callers from modifying later analyses of the same text.
+    if (scope is not None and len(scope['tokens']) < 4096
+            and scope['characters'] + len(text) + sum(map(len, result)) <= 2_000_000):
+        scope['tokens'][text] = tuple(result)
+        scope['characters'] += len(text) + sum(map(len, result))
+    return result
+
+
+def _analyze(text):
     from data_sync_etl.domain.indexing import IndexingError
 
     try:

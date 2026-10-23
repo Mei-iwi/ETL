@@ -26,11 +26,21 @@ BoW dùng từ điển khái niệm được kiểm duyệt để mở rộng Vi
 
 `bow` dùng **BM25** trên toàn bộ nội dung ContentBag; `vector` dùng cosine của
 biểu thức nguồn trong nhóm nghĩa (max cosine); `hybrid` dùng **RRF(k=60)** giữa hai thứ hạng. Nhánh Vector
-chỉ nhận bag có cosine **>= `SEARCH_VECTOR_MIN_SIMILARITY` (mặc định 0.6)**;
+mặc định chỉ nhận bag có cosine **>= `SEARCH_VECTOR_MIN_SIMILARITY` (mặc định 0.6)**;
 lọc trước RRF, grouping và phân trang. Cosine dương không tự chứng minh liên quan.
 Hybrid giữ kết quả BoW hợp lệ kể cả khi nhánh Vector không đạt ngưỡng; kết quả
 chỉ khớp ngữ nghĩa vẫn được nhận nếu qua ngưỡng, không bắt buộc trùng từ.
 Vector/Hybrid có thể trả 0 kết quả. Ngưỡng chỉ áp dụng cosine, không áp vào điểm RRF.
+
+Với Meaning Bag, có thể bật `SEARCH_MEANING_CONTEXT_FALLBACK_ENABLED=true`
+trong `.env` local hoặc `docker.env`. Khi điểm biểu thức chưa đạt ngưỡng chính,
+nhánh dự phòng yêu cầu đồng thời cosine biểu thức >=
+`SEARCH_MEANING_FALLBACK_MIN_SIMILARITY` (0.55) và cosine vector ContentBag
+**cùng bag** >= `SEARCH_MEANING_FALLBACK_MIN_CONTEXT_SIMILARITY` (0.45).
+Không gọi thêm model hoặc dịch vụ dịch; không thay đổi chỉ mục. Mặc định cờ tắt;
+cần kiểm tra trên câu có/không có đáp án của kho trước khi bật ở môi trường khác.
+BoW chỉ mở rộng các cặp trong từ điển: `green leaf`, `green leaves` và `lá xanh`
+là cùng khái niệm. Vector/Hybrid vẫn có thể tìm ngữ nghĩa ngoài từ điển.
 BoW không gọi
 encoder. Năm keyword của mỗi leaf chỉ phục vụ hiển thị và biểu diễn dense cũ;
 chúng không còn giới hạn query, snippet hay lexical candidates.
@@ -705,4 +715,4 @@ node --experimental-strip-types --test frontend/tests/fileReadiness.test.mjs fro
 ```
 
 Nếu `frontend/dist` bị khóa: `npm.cmd --prefix frontend run build -- --outDir ../.test-tmp/frontend-verify`.
-Tài liệu chi tiết: [Docker](deploy/README.md), [MASTER auth](deploy/AUTH_MASTER_USERS_SETUP.md), [Auth DB](deploy/AUTH_DATABASE_SETUP.md).
+Tài liệu chi tiết: [Docker](deploy/README.md), [MASTER auth](deploy/AUTH_MASTER_USERS_SETUP.md), [Auth DB](deploy/AUTH_DATABASE_SETUP.md), [BGE-M3 Chunk Search opt-in](research/bge-m3/README.md), [đánh giá chất lượng Vector](research/semantic-quality/README.md), [tối ưu và no-answer](research/semantic-quality/optimization/README.md).

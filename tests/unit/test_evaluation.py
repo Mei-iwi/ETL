@@ -301,7 +301,8 @@ def test_full_corpus_checked_only_at_run_boundaries(evaluation, monkeypatch):
         assert len(calls) == 2  # Not 2 * query_count * method_count + boundaries.
 
 
-@pytest.mark.parametrize('change', ['unit_access', 'index_run', 'source_hash', 'model', 'threshold', 'meaning_mode', 'meaning_threshold'])
+@pytest.mark.parametrize('change', ['unit_access', 'index_run', 'source_hash', 'model', 'threshold',
+    'meaning_mode', 'meaning_threshold', 'meaning_fallback', 'meaning_floor', 'meaning_context_floor'])
 def test_light_marker_detects_access_index_source_and_model_changes(evaluation, change):
     c, version, command = evaluation
     original = c.search.search
@@ -324,8 +325,14 @@ def test_light_marker_detects_access_index_source_and_model_changes(evaluation, 
                 c.settings.search_vector_min_similarity = 0.75
             elif change == 'meaning_mode':
                 c.settings.index_meaning_bags_enabled = True
-            else:
+            elif change == 'meaning_threshold':
                 c.settings.index_meaning_group_threshold = 0.9
+            elif change == 'meaning_fallback':
+                c.settings.search_meaning_context_fallback_enabled = True
+            elif change == 'meaning_floor':
+                c.settings.search_meaning_fallback_min_similarity = .57
+            else:
+                c.settings.search_meaning_fallback_min_context_similarity = .54
         return result
     with api(c) as client:
         dataset_id = client.post('/api/v1/evaluations/datasets', json=command).json()['dataset_id']

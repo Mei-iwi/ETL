@@ -7,6 +7,8 @@ x-backend: &backend
     context: ..
     dockerfile: deploy/docker/backend.Dockerfile
     target: runtime
+    args:
+      INSTALL_SEMANTIC: ${INSTALL_SEMANTIC:-false}
   user: "10001:10001"
   init: false
   read_only: true
@@ -46,8 +48,23 @@ x-backend: &backend
     INDEX_EMBEDDING_DIMENSION: ${INDEX_EMBEDDING_DIMENSION:-384}
     INDEX_HISTORICAL_EMBEDDING_DIMENSIONS: ${INDEX_HISTORICAL_EMBEDDING_DIMENSIONS:-[]}
     INDEX_AUTO_ENABLED: ${INDEX_AUTO_ENABLED:-false}
+    SEMANTIC_ENABLED: ${SEMANTIC_ENABLED:-false}
+    SEMANTIC_STRATEGY: ${SEMANTIC_STRATEGY:-contextual}
+    SEMANTIC_MODEL_REVISION: ${SEMANTIC_MODEL_REVISION:-}
+    SEMANTIC_MODEL_PATH: /opt/models/semantic
+    SEMANTIC_DEVICE: cpu
+    SEMANTIC_BATCH_SIZE: ${SEMANTIC_BATCH_SIZE:-2}
+    SEMANTIC_MAX_TOKENS: ${SEMANTIC_MAX_TOKENS:-1024}
+    SEMANTIC_MAX_CANDIDATES: ${SEMANTIC_MAX_CANDIDATES:-10000}
+    SEMANTIC_MIN_SCORE: ${SEMANTIC_MIN_SCORE:-0}
+    SEMANTIC_RERANK_ENABLED: ${SEMANTIC_RERANK_ENABLED:-false}
+    SEMANTIC_RERANK_TOP_K: ${SEMANTIC_RERANK_TOP_K:-20}
     MASTER_SYNC_AUTO_INTERVAL_SECONDS: ${MASTER_SYNC_AUTO_INTERVAL_SECONDS:-300}
     SEARCH_MODEL_WARMUP_TIMEOUT_SECONDS: ${SEARCH_MODEL_WARMUP_TIMEOUT_SECONDS:-60}
+    SEARCH_VECTOR_MIN_SIMILARITY: ${SEARCH_VECTOR_MIN_SIMILARITY:-0.6}
+    SEARCH_MEANING_CONTEXT_FALLBACK_ENABLED: ${SEARCH_MEANING_CONTEXT_FALLBACK_ENABLED:-false}
+    SEARCH_MEANING_FALLBACK_MIN_SIMILARITY: ${SEARCH_MEANING_FALLBACK_MIN_SIMILARITY:-0.55}
+    SEARCH_MEANING_FALLBACK_MIN_CONTEXT_SIMILARITY: ${SEARCH_MEANING_FALLBACK_MIN_CONTEXT_SIMILARITY:-0.45}
     MONGO_METADATA_MODE: shared
     SOURCE_MONGO_ENABLED: "false"
     MASTER_MONGO_IDENTITY_BOOTSTRAP: "false"
@@ -71,6 +88,11 @@ services:
       - type: bind
         source: ${MODEL_DIR:?Set MODEL_DIR to a prepared local model}
         target: /opt/models/minilm
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${SEMANTIC_MODEL_DIR:-${MODEL_DIR}}
+        target: /opt/models/semantic
         read_only: true
         bind: {create_host_path: false}
       - type: bind
@@ -135,6 +157,11 @@ services:
       - type: bind
         source: ${MODEL_DIR:?Set MODEL_DIR}
         target: /opt/models/minilm
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${SEMANTIC_MODEL_DIR:-${MODEL_DIR}}
+        target: /opt/models/semantic
         read_only: true
         bind: {create_host_path: false}
       - type: bind
