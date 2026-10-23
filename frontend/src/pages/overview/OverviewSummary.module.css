@@ -1,158 +1,23 @@
-﻿.page {
-    width: 100%;
-    max-width: 1240px;
-    min-width: 0;
-    margin: 0 auto;
-    padding-bottom: 32px;
-    color: #334155;
-}
-
-.hero {
-    margin-bottom: 24px;
-    padding: 0 0 18px;
-    border-bottom: 1px solid #dbe3ee;
-}
-
-.hero h1 {
-    margin: 0;
-    color: #172554;
-    font-size: clamp(26px, 3vw, 34px);
-    line-height: 1.25;
-    letter-spacing: -.025em;
-}
-
-.section {
-    min-width: 0;
-    margin-top: 20px;
-    padding: 24px 28px;
-    border: 1px solid #e5eaf1;
-    border-radius: 14px;
-    background: #fff;
-    box-shadow: 0 3px 14px rgb(15 23 42 / 3%);
-}
-
-.section h2 {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin: 0 0 18px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid #edf1f6;
-    color: #172554;
-    font-size: 19px;
-    line-height: 1.5;
-}
-
-.section h2::before {
-    content: '';
-    flex: 0 0 4px;
-    height: 18px;
-    border-radius: 4px;
-    background: #8da8d2;
-}
-
-.content {
-    max-width: 100%;
-    margin: 0;
-    padding: 18px 20px;
-    border: 1px solid #e4ecf8;
-    border-radius: 10px;
-    background: #f5f8fe;
-    color: #475569;
-    font-size: 15px;
-    line-height: 1.85;
-}
-
-.challengeList {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.challengeList li {
-    min-width: 0;
-    padding: 20px;
-    border: 1px solid #e5eaf1;
-    border-radius: 10px;
-    background: linear-gradient(180deg, #f8fafc, #ffffff);
-}
-
-.challengeList strong {
-    display: block;
-    margin-bottom: 10px;
-    color: #334155;
-    font-size: 14px;
-    line-height: 1.6;
-}
-
-.challengeList span {
-    color: #64748b;
-    font-size: 14px;
-    line-height: 1.75;
-}
-
-.grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
-}
-
-.card {
-    min-width: 0;
-    padding: 20px;
-    border: 1px solid #e2e8f0;
-    border-top: 3px solid #9db4d8;
-    border-radius: 12px;
-    background: linear-gradient(160deg, #f7faff, #ffffff);
-}
-
-.card h3 {
-    margin: 0 0 10px;
-    color: #1e3a8a;
-    font-size: 15px;
-    line-height: 1.5;
-}
-
-.card p {
-    margin: 0;
-    color: #64748b;
-    font-size: 14px;
-    line-height: 1.75;
-}
-
+.section { min-width: 0; margin-top: 32px; padding-top: 26px; border-top: 1px solid #e9ebee; }
+.section h2 { margin: 0 0 20px; color: #303b4b; font-size: 17px; line-height: 1.5; }
+.content { margin: 0 0 22px; color: #647080; font-size: 13px; line-height: 1.85; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.card { display: flex; position: relative; align-items: flex-start; gap: 12px; min-width: 0; padding: 20px 16px; color: inherit; border: 1px solid #e5eaf1; border-radius: 12px; text-decoration: none; background: white; transition: border-color .15s, box-shadow .15s; }
+.card:hover { border-color: #adc2f2; box-shadow: 0 4px 16px rgb(36 87 223 / 6%); }
+.cardIcon { display: grid; place-items: center; flex: 0 0 38px; height: 38px; border-radius: 11px; color: #536459; background: #f1eee8; }
+.card h3 { margin: 0 16px 7px 0; font-size: 14px; font-weight: 600; line-height: 1.5; }
+.card p { margin: 0; color: #758090; font-size: 12px; line-height: 1.8; }
+.cardArrow { position: absolute; top: 20px; right: 14px; color: #8b95a2; }
+.phaseGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.phaseGrid article { padding: 18px; background: #faf8f5; border-radius: 10px; }
+.phaseGrid article > span { color: #9d8e7e; font-size: 11px; }
+.phaseGrid h3 { margin: 10px 0 8px; color: #303b4b; font-size: 14px; }
+.phaseGrid p { margin: 0; color: #758090; font-size: 12px; line-height: 1.8; }
+.textLink { display: inline-flex; gap: 7px; align-items: center; margin-top: 20px; color: #2457df; font-size: 12px; font-weight: 600; text-decoration: none; }
+.textLink:hover { text-decoration: underline; }
 .diagramFigure { margin: 0; }
-.diagramViewport {
-    width: 100%;
-    overflow-x: auto;
-    padding: 12px;
-    border: 1px solid #edf1f6;
-    border-radius: 10px;
-    background: #fff;
-}
-.diagram { display: block; width: 100%; min-width: 680px; height: auto; }
-.diagramCaption {
-    margin-top: 14px;
-    color: #64748b;
-    font-size: 13px;
-    line-height: 1.6;
-    text-align: center;
-}
-
-@media (max-width: 960px) {
-    .challengeList { grid-template-columns: minmax(0, 1fr); }
-    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-@media (max-width: 600px) {
-    .hero { margin-bottom: 18px; padding-bottom: 14px; }
-    .section { margin-top: 16px; padding: 18px 16px; }
-    .section h2 { margin-bottom: 14px; padding-bottom: 12px; font-size: 17px; }
-    .grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-    .challengeList { gap: 12px; }
-    .card, .challengeList li { padding: 16px; }
-    .content { padding: 14px 16px; font-size: 14px; }
-    .diagramViewport { padding: 6px; }
-}
+.diagramViewport { box-sizing: border-box; width: 100%; overflow-x: auto; padding: 10px; border: 1px solid #e5eaf1; border-radius: 12px; }
+.diagramViewport:focus-visible { outline: 3px solid #94b6fb; outline-offset: 3px; }
+.diagram { display: block; width: 100%; min-width: 620px; height: auto; }
+@media (max-width: 1000px) and (min-width: 721px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .grid, .phaseGrid { grid-template-columns: minmax(0, 1fr); } .section { margin-top: 26px; padding-top: 22px; } .card { padding: 18px 16px; } }

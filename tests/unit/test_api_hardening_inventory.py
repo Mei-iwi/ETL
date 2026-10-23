@@ -107,6 +107,34 @@ def test_openapi_keep_routes_and_models_match_g0_baseline():
         assert "catalog" not in model.get("required", [])
         assert "catalog" in model["properties"]
         model["properties"].pop("catalog")
+    # Full-content BM25 adds optional corpus readiness; preserve every legacy
+    # response field and the frozen historical snapshot exactly.
+    search = compatible['schemas']['SearchResponse']
+    assert 'readiness' not in search.get('required', [])
+    readiness = search['properties'].pop('readiness')
+    assert readiness['anyOf'][0]['type'] == 'object'
+    assert readiness['anyOf'][1] == {'type': 'null'}
+    assert readiness['anyOf'][0]['additionalProperties']['anyOf'] == [
+        {'type': 'integer'}, {'type': 'boolean'}]
+    for name, kind in [('query_expansion', 'object'), ('search_fingerprint', 'string')]:
+        assert name not in search.get('required', [])
+        expected = {'type': kind, **({'additionalProperties': True} if kind == 'object' else {})}
+        assert search['properties'].pop(name)['anyOf'] == [expected, {'type': 'null'}]
+    filters = compatible['schemas']['SearchFilters']
+    assert 'domain' not in filters.get('required', [])
+    assert filters['properties'].pop('domain')['anyOf'] == [
+        {'type': 'string', 'minLength': 1, 'maxLength': 80}, {'type': 'null'}]
+    item = compatible['schemas']['SearchItem']
+    assert 'can_view_file' not in item.get('required', [])
+    assert item['properties'].pop('can_view_file') == {
+        'type': 'boolean', 'title': 'Can View File', 'default': False}
+    assert 'context_evidence' not in item.get('required', [])
+    assert item['properties'].pop('context_evidence')['anyOf'][0]['enum'] == ['lexical', 'semantic', 'bag']
+    assert 'meaning_variants' not in item.get('required', [])
+    assert item['properties'].pop('meaning_variants')['items']['type'] == 'string'
+    assert 'lexical_evidence' not in item.get('required', [])
+    assert item['properties'].pop('lexical_evidence')['items'] == {
+        'type': 'object', 'additionalProperties': True}
     # Optional diagnostic fields in FastAPI's validation envelope vary by version.
     # Business models, required fields and actual validation rules remain exact.
     for components in (compatible, before['components']):

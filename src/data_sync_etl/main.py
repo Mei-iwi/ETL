@@ -12,6 +12,7 @@ from data_sync_etl.api.auth_boundary import AuthBoundary, auth_error
 from data_sync_etl.api.auth_routes import router as auth_router
 from data_sync_etl.api.profile_routes import router as profile_router
 from data_sync_etl.api.reconciliation_routes import router as reconciliation_router
+from data_sync_etl.api.resource_description_routes import router as resource_description_router
 from data_sync_etl.api.routes import router
 from data_sync_etl.composition import Container
 from data_sync_etl.config import Settings
@@ -209,6 +210,7 @@ def create_app(container=None):
     app.include_router(account_router)
     app.include_router(profile_router)
     app.include_router(reconciliation_router)
+    app.include_router(resource_description_router)
     app.add_middleware(
         UploadBodyLimitMiddleware,
         max_bytes=configured.upload_request_max_bytes,

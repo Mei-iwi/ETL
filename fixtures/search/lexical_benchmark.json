@@ -1,0 +1,40 @@
+{
+  "description": "Small hand-labelled development corpus; one document per ContentBag/resource. Not an independent quality estimate.",
+  "documents": [
+    {"id":"vi-ml","title":"Học máy","text":"Học máy xây dựng mô hình từ dữ liệu. Thuật toán học máy dự đoán nhãn và phân loại ảnh. Học máy dùng dữ liệu huấn luyện."},
+    {"id":"en-ml","title":"Machine learning","text":"Machine learning algorithms learn patterns from training data to predict labels and classify images."},
+    {"id":"vi-db","title":"Cơ sở dữ liệu quan hệ","text":"Cơ sở dữ liệu quan hệ lưu thông tin trong bảng. SQL truy vấn bảng bằng khóa và phép nối. Cơ sở dữ liệu dùng giao dịch."},
+    {"id":"en-db","title":"Relational databases","text":"Relational databases store records in tables. SQL joins combine tables using primary keys. Transactions preserve consistency."},
+    {"id":"vi-dl","title":"Học sâu","text":"Học sâu sử dụng mạng nơ ron nhiều tầng. Mạng nơ ron xử lý hình ảnh và âm thanh, học biểu diễn qua nhiều tầng."},
+    {"id":"en-net","title":"Computer networks","text":"Computer networks transmit packets between routers. TCP provides reliable delivery and IP addresses identify hosts."},
+    {"id":"vi-net","title":"Mạng máy tính","text":"Mạng máy tính truyền gói tin giữa các bộ định tuyến. Giao thức TCP bảo đảm truyền dữ liệu tin cậy."},
+    {"id":"rare","title":"Optics exercise","text":"light light light wave wave wave energy energy energy lens lens lens ray ray ray birefringence"},
+    {"id":"tech","title":"Lập trình .NET","text":"Lập trình .NET sử dụng C#; C++ quản lý bộ nhớ. Python3 hỗ trợ xử lý dữ liệu năm 2026."},
+    {"id":"bank-money","title":"Bank accounts","text":"A bank provides deposits, savings accounts, loans and financial services. Customers earn interest on savings."},
+    {"id":"bank-river","title":"River bank erosion","text":"A river bank is land beside a stream. Flowing water causes erosion and sediment movement along the river bank."},
+    {"id":"unsupervised","title":"Học không giám sát","text":"Học không giám sát khám phá cấu trúc dữ liệu không có nhãn. Phân cụm gom các điểm tương tự thành nhóm."},
+    {"id":"supervised","title":"Học có giám sát","text":"Học có giám sát sử dụng dữ liệu có nhãn. Mô hình học ánh xạ từ đầu vào tới nhãn đã biết."},
+    {"id":"vi-security","title":"An toàn thông tin","text":"Mã hóa bảo vệ dữ liệu bằng khóa bí mật. Xác thực kiểm tra danh tính người dùng; phân quyền kiểm soát truy cập."},
+    {"id":"en-security","title":"Access control","text":"Authorization grants permissions to resources. Authentication verifies identity. Encryption protects confidential data."},
+    {"id":"sorting","title":"Sorting algorithms","text":"Quicksort sorts an array by partitioning around a pivot. Merge sort combines sorted subarrays. Sorting orders values."},
+    {"id":"searching","title":"Binary search","text":"Binary search finds a target in a sorted array by repeatedly halving the search interval. It does not sort the array."},
+    {"id":"noise","title":"Botany","text":"Plants absorb sunlight through leaves. Roots obtain water and minerals from soil. Flowers enable reproduction."}
+  ],
+  "queries": [
+    {"id":"rare","kind":"exact-outside-top5","text":"birefringence","qrels":{"rare":2}},
+    {"id":"phrase","kind":"Vietnamese-phrase","text":"học không giám sát","qrels":{"unsupervised":2}},
+    {"id":"nfc","kind":"Vietnamese-exact","text":"cơ sở dữ liệu quan hệ","qrels":{"vi-db":2,"en-db":1}},
+    {"id":"tech","kind":"mixed-language","text":"C# .NET Python3","qrels":{"tech":2}},
+    {"id":"vi-en","kind":"Vietnamese-English","text":"cách máy học dự đoán nhãn từ dữ liệu huấn luyện","qrels":{"vi-ml":2,"en-ml":2,"supervised":1}},
+    {"id":"en-vi","kind":"English-Vietnamese","text":"networks sending packets reliably between routers","qrels":{"vi-net":2,"en-net":2}},
+    {"id":"natural","kind":"natural-description","text":"lưu thông tin trong các bảng và kết hợp bằng khóa","qrels":{"vi-db":2,"en-db":2}},
+    {"id":"polysemy-money","kind":"polysemy","text":"bank savings account interest","qrels":{"bank-money":2}},
+    {"id":"polysemy-river","kind":"polysemy","text":"river bank erosion sediment","qrels":{"bank-river":2}},
+    {"id":"related-not-synonym","kind":"related-not-equivalent","text":"find a target by halving a sorted array without sorting it","qrels":{"searching":2}},
+    {"id":"cross-auth","kind":"English-Vietnamese","text":"verify a user's identity before granting access","qrels":{"en-security":2,"vi-security":2}},
+    {"id":"cross-db","kind":"English-Vietnamese","text":"relational database transactions and SQL joins","qrels":{"en-db":2,"vi-db":2}},
+    {"id":"long","kind":"long-query","text":"unknownone unknowntwo unknownthree unknownfour unknownfive unknownsix birefringence","qrels":{"rare":2}},
+    {"id":"vi-natural","kind":"Vietnamese-description","text":"chia dữ liệu thành nhóm khi chưa có nhãn","qrels":{"unsupervised":2}},
+    {"id":"related-learning","kind":"related-not-equivalent","text":"neural networks with many layers processing images","qrels":{"vi-dl":2}}
+  ]
+}

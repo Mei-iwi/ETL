@@ -1,0 +1,278 @@
+{
+  "$defs": {
+    "Concept": {
+      "additionalProperties": false,
+      "properties": {
+        "concept_id": {
+          "pattern": "^[a-zA-Z0-9:_-]+$",
+          "title": "Concept Id",
+          "type": "string"
+        },
+        "preferred_labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "minProperties": 1,
+          "title": "Preferred Labels",
+          "type": "object"
+        },
+        "definition": {
+          "minLength": 1,
+          "title": "Definition",
+          "type": "string"
+        },
+        "domain": {
+          "minLength": 1,
+          "title": "Domain",
+          "type": "string"
+        },
+        "terms": {
+          "items": {
+            "$ref": "#/$defs/Term"
+          },
+          "minItems": 1,
+          "title": "Terms",
+          "type": "array"
+        },
+        "relations": {
+          "items": {
+            "$ref": "#/$defs/Relation"
+          },
+          "title": "Relations",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/Source"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "review_status": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "concept_id",
+        "preferred_labels",
+        "definition",
+        "domain",
+        "terms",
+        "sources",
+        "review_status",
+        "version"
+      ],
+      "title": "Concept",
+      "type": "object"
+    },
+    "Relation": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "target_id": {
+          "title": "Target Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "equivalent",
+            "translation",
+            "broader",
+            "narrower",
+            "related"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "direction": {
+          "default": "outgoing",
+          "enum": [
+            "outgoing",
+            "bidirectional"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/Source"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "review_status": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "allow_expansion": {
+          "default": false,
+          "title": "Allow Expansion",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source_id",
+        "target_id",
+        "kind",
+        "confidence",
+        "sources",
+        "review_status"
+      ],
+      "title": "Relation",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "identifier": {
+          "minLength": 1,
+          "title": "Identifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "identifier"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Term": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "normalized": {
+          "minLength": 1,
+          "title": "Normalized",
+          "type": "string"
+        },
+        "language": {
+          "pattern": "^[a-z]{2,3}$",
+          "title": "Language",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "preferred",
+            "synonym",
+            "translation",
+            "abbreviation",
+            "spelling"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "concept_id": {
+          "title": "Concept Id",
+          "type": "string"
+        },
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "context_hints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Context Hints",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/Source"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "review_status": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "title": "Review Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "normalized",
+        "language",
+        "kind",
+        "concept_id",
+        "domain",
+        "sources",
+        "confidence",
+        "review_status"
+      ],
+      "title": "Term",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    },
+    "concepts": {
+      "items": {
+        "$ref": "#/$defs/Concept"
+      },
+      "maxItems": 10000,
+      "minItems": 1,
+      "title": "Concepts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "version",
+    "concepts"
+  ],
+  "title": "Snapshot",
+  "type": "object"
+}

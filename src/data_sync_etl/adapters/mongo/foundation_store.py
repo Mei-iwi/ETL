@@ -153,6 +153,36 @@ class MongoMetadataStore:
     def get_resource(self, document_id):
         return self._get("learning_resources", ResourceDescriptionDocument, document_id)
 
+    def update_resource_description(self, document_id, changes, revision):
+        if not changes or set(changes) - {'description', 'authors', 'tags'}:
+            raise DomainError('Invalid resource description fields')
+        document_id = identifier(document_id)
+        self.get_resource(document_id)  # Reject ambiguous legacy ObjectId identities.
+        collection = self.database.learning_resources
+        fields = {field.alias or name: 1 for name, field in ResourceDescriptionDocument.model_fields.items()}
+        raw = collection.find_one({'_id': document_id}, fields)
+        current = checked(ResourceDescriptionDocument, raw) if raw is not None else None
+        if user_profile_revision(current) != revision:
+            raise ProfileConflict('Resource description changed')
+        stamp = now()
+        candidate = checked(ResourceDescriptionDocument, {
+            **(current.bson() if current else {'_id': document_id, 'created_at': stamp}),
+            **changes, 'updated_at': stamp})
+        if raw is None:
+            try:
+                collection.insert_one(candidate.bson())
+            except DuplicateKeyError:
+                raise ProfileConflict('Resource description changed') from None
+        else:
+            conditions = [{key: {'$exists': False}} if key not in raw else
+                          {key: {'$exists': True, '$eq': raw[key]}} for key in fields if key != '_id']
+            values = candidate.bson()
+            result = collection.update_one({'_id': document_id, '$and': conditions},
+                {'$set': {key: values[key] for key in (*changes, 'updated_at')}})
+            if not result.matched_count:
+                raise ProfileConflict('Resource description changed')
+        return self.get_resource(document_id)
+
     def sync_source_metadata(self, stream, document):
         if stream not in ('users', 'resources'):
             raise DomainError('Invalid metadata stream')
@@ -405,11 +435,31 @@ class MongoBagStore:
         )
 
     def ensure_ready(self):
+        from data_sync_etl.adapters.mongo.lexical_schema import check_lexical_schema
+        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
         from data_sync_etl.adapters.mongo.schema import check_schema
         from data_sync_etl.domain.indexing import IndexingError
 
-        if not check_schema(self.database, dimension=self.dimension,
-                            historical_dimensions=self.historical_dimensions)['schema_ready']:
+        if (not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
+                and not check_lexical_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
+                and not check_schema(self.database, dimension=self.dimension,
+                                    historical_dimensions=self.historical_dimensions)['schema_ready']):
+            raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+
+    def ensure_lexical_ready(self):
+        from data_sync_etl.adapters.mongo.lexical_schema import check_lexical_schema
+        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
+        from data_sync_etl.domain.indexing import IndexingError
+
+        if (not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
+                and not check_lexical_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']):
+            raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+
+    def ensure_meanings_ready(self):
+        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
+        from data_sync_etl.domain.indexing import IndexingError
+
+        if not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']:
             raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
 
     def _current(self, document):

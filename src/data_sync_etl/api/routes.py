@@ -37,6 +37,7 @@ from data_sync_etl.api.indexing_schemas import (
     index_error,
 )
 from data_sync_etl.api.master_sync_schemas import (
+    SYNC_ERRORS,
     MasterSyncAutoRequest,
     MasterSyncRequest,
     MasterSyncRunResult,
@@ -903,6 +904,12 @@ def sync_master_data(body: MasterSyncRequest, request: Request):
         return services(request).sync.run(body.stream, body.full)
     except SyncAlreadyRunning:
         raise HTTPException(409, "A Master Data sync is already running") from None
+    except DomainError as exc:
+        code = str(exc).split(':', 1)[0]
+        if code in SYNC_ERRORS:
+            status, message = SYNC_ERRORS[code]
+            raise HTTPException(status, detail={'code': code, 'message': message}) from None
+        raise
 
 
 @router.get(
@@ -979,7 +986,7 @@ def retry_source_file(file_id: ResourceId, request: Request):
 
 @router.post("/admin/sync/master", include_in_schema=False)
 def sync(body: MasterSyncRequest, request: Request):
-    return services(request).sync.run(body.stream, body.full)
+    return sync_master_data(body, request)
 
 
 @router.post("/api/v1/resource-versions/{id}/index", tags=[TAG_INDEXING],
