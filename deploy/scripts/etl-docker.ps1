@@ -11,15 +11,38 @@ param(
     [switch]$Workers,
     [switch]$Drive,
     [switch]$RemoteDatabase,
+    [switch]$SourceNeon,
     [ValidateSet('legacy','auth','auth-tls','db-auth','db-auth-tls')][string]$AuthProfile = 'auth',
     [switch]$AcceptModelLicense
 )
 $ErrorActionPreference = 'Stop'
+if ($RemoteDatabase -and $SourceNeon) { throw 'SourceNeon and RemoteDatabase are mutually exclusive.' }
 $deployDir = Split-Path -Parent $PSScriptRoot
-if (-not $EnvFile) { $EnvFile = Join-Path $deployDir '.env.docker' }
+if (-not $EnvFile) { $EnvFile = $env:ETL_DOCKER_ENV_FILE }
+if (-not $EnvFile) {
+    $EnvFile = Join-Path (Split-Path -Parent $deployDir) 'docker.env'
+    if (-not (Test-Path -LiteralPath $EnvFile)) { $EnvFile = Join-Path $deployDir '.env.docker' }
+}
+if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) { throw 'Docker env file missing. Copy deploy/docker.env.example to docker.env and configure it.' }
+$EnvFile = (Resolve-Path -LiteralPath $EnvFile).Path
+$databaseMode = 'same-host'
+foreach ($line in Get-Content -LiteralPath $EnvFile) {
+    if ($line -match '^\s*DATABASE_MODE\s*=') {
+        if ($line -notmatch '^\s*DATABASE_MODE\s*=\s*["'']?(same-host|remote|source-neon)["'']?\s*(?:#.*)?$') { throw 'Invalid DATABASE_MODE in Docker env file.' }
+        $databaseMode = $Matches[1]
+    }
+}
+if ($env:DATABASE_MODE) { $databaseMode = $env:DATABASE_MODE }
+if ($databaseMode -notin @('same-host','remote','source-neon')) { throw 'Invalid DATABASE_MODE.' }
+if (($RemoteDatabase -and $databaseMode -eq 'source-neon') -or ($SourceNeon -and $databaseMode -eq 'remote')) { throw 'Database switch conflicts with DATABASE_MODE.' }
+if ($databaseMode -eq 'source-neon') { $SourceNeon = $true }
+if ($databaseMode -eq 'remote') { $RemoteDatabase = $true }
+Write-Output "Docker env: $EnvFile"
+Write-Output "Database profile: $(if ($SourceNeon) {'source-neon'} elseif ($RemoteDatabase) {'remote'} else {'same-host'})"
 $composeArgs = @('compose','--env-file',$EnvFile,'-f',(Join-Path $deployDir 'compose.app.yml'))
 if ($Drive) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.drive.yml')) }
 if ($RemoteDatabase) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.remote-db.yml')) }
+if ($SourceNeon) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.source-neon.yml')) }
 if ($AuthProfile -like 'db-auth*') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.db-auth.yml')) }
 elseif ($AuthProfile -ne 'legacy') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth.yml')) }
 if ($AuthProfile -in @('auth-tls','db-auth-tls')) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth-tls.yml')) }

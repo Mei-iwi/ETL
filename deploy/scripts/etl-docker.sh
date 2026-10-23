@@ -4,11 +4,38 @@ deploy_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 root_dir="$(dirname -- "$deploy_dir")"
 action="${1:-status}"
 shift || true
-env_file="${ETL_DOCKER_ENV_FILE:-$deploy_dir/.env.docker}"
+env_file="${ETL_DOCKER_ENV_FILE:-$root_dir/docker.env}"
+if [[ -z "${ETL_DOCKER_ENV_FILE:-}" && ! -f "$env_file" ]]; then env_file="$deploy_dir/.env.docker"; fi
+[[ -f "$env_file" ]] || { echo 'Docker env file missing. Copy deploy/docker.env.example to docker.env and configure it.' >&2; exit 2; }
+database_mode=same-host
+mode_pattern="^[[:space:]]*DATABASE_MODE[[:space:]]*=[[:space:]]*[\"']?(same-host|remote|source-neon)[\"']?[[:space:]]*(#.*)?$"
+while IFS= read -r line || [[ -n "$line" ]]; do
+  line="${line%$'\r'}"
+  if [[ "$line" =~ ^[[:space:]]*DATABASE_MODE[[:space:]]*= ]]; then
+    [[ "$line" =~ $mode_pattern ]] || { echo 'Invalid DATABASE_MODE in Docker env file.' >&2; exit 2; }
+    database_mode="${BASH_REMATCH[1]}"
+  fi
+done < "$env_file"
+database_mode="${DATABASE_MODE:-$database_mode}"
+case "$database_mode" in same-host|remote|source-neon) ;; *) echo 'Invalid DATABASE_MODE.' >&2; exit 2 ;; esac
+if [[ ( "${ETL_REMOTE_DB:-false}" == true && "$database_mode" == source-neon ) || ( "${ETL_SOURCE_NEON:-false}" == true && "$database_mode" == remote ) ]]; then
+  echo 'Database switch conflicts with DATABASE_MODE.' >&2; exit 2
+fi
+[[ "$database_mode" != source-neon ]] || export ETL_SOURCE_NEON=true
+[[ "$database_mode" != remote ]] || export ETL_REMOTE_DB=true
+echo "Docker env: $env_file"
+if [[ "${ETL_SOURCE_NEON:-false}" == true ]]; then database_mode=source-neon; fi
+if [[ "${ETL_REMOTE_DB:-false}" == true ]]; then database_mode=remote; fi
+echo "Database profile: $database_mode"
 docker compose version >/dev/null
+if [[ "${ETL_REMOTE_DB:-false}" == true && "${ETL_SOURCE_NEON:-false}" == true ]]; then
+  echo 'ETL_SOURCE_NEON and ETL_REMOTE_DB are mutually exclusive.' >&2
+  exit 2
+fi
 compose=(docker compose --env-file "$env_file" -f "$deploy_dir/compose.app.yml")
 [[ "${ETL_WITH_DRIVE:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.drive.yml")
 [[ "${ETL_REMOTE_DB:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.remote-db.yml")
+[[ "${ETL_SOURCE_NEON:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.source-neon.yml")
 auth_profile="${ETL_AUTH_PROFILE:-auth}"
 case "$auth_profile" in
   legacy) ;;

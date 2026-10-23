@@ -32,3 +32,6 @@ volumes
 **/*.key
 **/*.p12
 **/*.pfx
+
+# Private Docker deployment settings (template stays versioned).
+/docker.env
