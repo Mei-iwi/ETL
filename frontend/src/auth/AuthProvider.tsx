@@ -17,18 +17,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [principal, setPrincipal] = useState<Principal>()
     const revision = useRef(0)
     const currentScope = useRef('')
-    const expired = useCallback(() => { revision.current++; clearAuthRequests(); setPrincipal(undefined); setStatus('anonymous') }, [])
+    const pendingCheck = useRef<AbortController | null>(null)
+    const expired = useCallback(() => { revision.current++; pendingCheck.current?.abort(); clearAuthRequests(); setPrincipal(undefined); setStatus('anonymous') }, [])
     const refresh = useCallback(async () => {
         const expected = ++revision.current
+        pendingCheck.current?.abort()
+        const controller = new AbortController()
+        pendingCheck.current = controller
+        // One deadline includes config, session and response-body reads.
+        const deadline = window.setTimeout(() => controller.abort(), 8000)
         try {
-            const config = await fetch('/api/v1/auth/config')
+            const config = await fetch('/api/v1/auth/config', { signal: controller.signal })
             if (!config.ok) throw new Error('Auth unavailable')
             const value = await config.json()
             if (expected !== revision.current) return
             if (!['single_admin', 'db_users', 'master_users', 'local_demo', 'legacy_local'].includes(value.mode)) throw new Error('Invalid auth mode')
             setMode(value.mode); setAuthMode(value.mode)
             if (value.mode === 'legacy_local') { setPrincipal(undefined); setStatus('authenticated'); return }
-            const response = await fetch('/api/v1/auth/me')
+            const response = await fetch('/api/v1/auth/me', { signal: controller.signal })
             if (expected !== revision.current) return
             if (response.status === 401) { expired(); return }
             if (value.mode === 'master_users' && response.status === 503) {
@@ -48,6 +54,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             currentScope.current = nextScope
             setPrincipal(user); setStatus('authenticated')
         } catch { if (expected === revision.current) { setPrincipal(undefined); setStatus('unavailable') } }
+        finally {
+            window.clearTimeout(deadline)
+            if (pendingCheck.current === controller) pendingCheck.current = null
+        }
     }, [expired])
     useEffect(() => {
         void refresh()
@@ -58,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.addEventListener('pageshow', restored)
         const onFocus = () => { void refresh() }
         window.addEventListener('focus', onFocus)
-        return () => { window.removeEventListener('etl:session-expired', expired); window.removeEventListener('pageshow', restored); window.removeEventListener('focus', onFocus); channel.close() }
+        return () => { revision.current++; pendingCheck.current?.abort(); window.removeEventListener('etl:session-expired', expired); window.removeEventListener('pageshow', restored); window.removeEventListener('focus', onFocus); channel.close() }
     }, [refresh, expired])
     const logout = async () => {
         const response = await fetch('/api/v1/auth/logout', { method: 'POST' })
