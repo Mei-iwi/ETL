@@ -4,7 +4,9 @@ import math
 from collections import Counter
 
 from data_sync_etl.domain.concepts import concept_frequencies
-from data_sync_etl.domain.lexical import QUERY_STOPWORDS, analyze, contains_phrase, surface_tokens
+from data_sync_etl.domain.lexical import QUERY_STOPWORDS, contains_phrase, surface_tokens
+
+CONTEXT_RANKING_VERSION = 'query-surface-compound-v2'
 
 FUNCTION_WORDS = QUERY_STOPWORDS | frozenset(
     'what how why which where who explain please about does do can could would '
@@ -27,14 +29,22 @@ class ContextRanker:
                  expansion=None, dictionary=None, policy=None):
         self.exact = surface_tokens(query or '')
         self.terms = content_terms(keywords)
+        compounds = {term: surface_tokens(term.replace('_', ' '))
+                     for term in self.terms if '_' in term}
         self.concepts = set(concept_frequencies(self.exact)) if expand_concepts else set()
         self.expansion, self.dictionary = expansion, dictionary
         self.policy = policy
         self.tokens, self.words = [], []
         for text in texts:
             checkpoint()
-            self.tokens.append(surface_tokens(text))
-            self.words.append(content_terms(analyze(text)))
+            tokens = surface_tokens(text)
+            self.tokens.append(tokens)
+            # Query terms already carry the pinned tokenizer's compounds. Match
+            # their source word sequences directly, instead of running CRF on
+            # every passage and discarding all unrelated compound tokens.
+            words = content_terms(tokens)
+            words.update(term for term, phrase in compounds.items() if contains_phrase(tokens, phrase))
+            self.words.append(words)
         df = Counter(term for words in self.words for term in words)
         self.weights = {term: math.log1p((len(texts) + 1) / (df[term] + 1)) for term in self.terms}
 

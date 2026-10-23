@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     search_meaning_context_fallback_enabled: bool = False
     search_meaning_fallback_min_similarity: float = Field(default=0.55, gt=0, le=1, allow_inf_nan=False)
     search_meaning_fallback_min_context_similarity: float = Field(default=0.45, gt=0, le=1, allow_inf_nan=False)
+    search_meaning_context_margin: float = Field(default=0.08, ge=0, le=0.15, allow_inf_nan=False)
+    search_bow_min_coverage: float = Field(default=0., ge=0, le=1, allow_inf_nan=False)
     search_timeout_seconds: int = Field(default=15, ge=1, le=120)
     search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)
     search_query_embedding_cache_enabled: bool = False

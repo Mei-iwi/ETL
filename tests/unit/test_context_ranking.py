@@ -26,6 +26,13 @@ def test_qualified_concepts_beat_partial_overlap():
     assert ranker.score(1) > ranker.score(0)
 
 
+def test_query_compounds_match_source_sequences_without_crossing_words():
+    ranker = ContextRanker('học máy', ['học', 'máy', 'học_máy'], [
+        'học sử dụng một cái máy', 'học máy dự đoán dữ liệu', 'máy móc trong giờ học'])
+    assert ranker.score(1) > ranker.score(0)
+    assert ranker.score(1) > ranker.score(2)
+
+
 def test_unmatched_semantic_bag_has_no_passage_evidence():
     query = 'find a target by halving the interval'
     ranker = ContextRanker(query, query_terms(query), ['the and for', 'Học máy dự đoán.'])

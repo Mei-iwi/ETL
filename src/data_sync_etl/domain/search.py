@@ -37,6 +37,26 @@ def cosine(left, right):
     return max(-1.0, min(1.0, value / norm))
 
 
+def cosine_many(query, vectors):
+    """Same bounded cosine contract, validating/normalizing the query once.
+
+    No cross-request vector cache. math.sumprod runs the dot products in C on
+    Python 3.12+, and scaling still protects finite extreme input magnitudes.
+    """
+    query = validate_vector(query, len(query))
+    scale = max(map(abs, query))
+    left = [value / scale for value in query]
+    left_norm = math.sqrt(math.sumprod(left, left))
+    result = []
+    for candidate in vectors:
+        right = validate_vector(candidate, len(left))
+        scale = max(map(abs, right))
+        right = [value / scale for value in right]
+        denominator = left_norm * math.sqrt(math.sumprod(right, right))
+        result.append(max(-1., min(1., math.sumprod(left, right) / denominator)))
+    return result
+
+
 def ranks(scores):
     return {key: rank for rank, (key, _) in enumerate(
         sorted(scores.items(), key=lambda item: (-item[1], item[0])), 1)}

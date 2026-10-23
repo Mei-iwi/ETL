@@ -10,8 +10,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from data_sync_etl.domain.context_ranking import ContextRanker
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
-from data_sync_etl.domain.search import cosine
+from data_sync_etl.domain.search import cosine, cosine_many
 
 VERSION = 'observed-multilingual-meanings-v1'
 SENTENCE_END = re.compile(r'[。！？]+|[.!?]+(?:\s+|$)|\n+')
@@ -150,10 +151,28 @@ def verify_meanings(bag, units, root_id, title, model, dimension, threshold):
             and [MeaningSource(**member.model_dump(exclude={'embedding'})) for member in bag.members] == observed)
 
 
-def match_meaning(query_vector, bag):
+def match_meaning(query_vector, bag, *, context=None):
     """Score actual observed variants, never an averaged vector of mixed topics."""
-    index = max(range(len(bag.members)), key=lambda i: (cosine(query_vector, bag.members[i].embedding), -i))
+    scores = cosine_many(query_vector, [member.embedding for member in bag.members])
+    index = max(range(len(bag.members)), key=lambda i: (scores[i], -i))
+    retrieval_score = scores[index]
+    if context is not None and context.get('margin', .08) > 0:
+        # Only disambiguate near-equal dense matches. Never let arbitrary exact
+        # words promote a semantically distant span or cross a source boundary.
+        pool = [i for i, score in enumerate(scores)
+                if scores[index] - score <= context.get('margin', .08)]
+        if len(pool) > 1:
+            ranker = ContextRanker(context['query'], context['keywords'],
+                [bag.members[i].text for i in pool], expansion=context['expansion'],
+                dictionary=context['dictionary'], policy=context['policy'],
+                expand_concepts=context['policy'].enabled)
+            supported = [(ranker.score(ordinal), scores[i], -i, i) for ordinal, i in enumerate(pool)]
+            best = max(supported)
+            if any(best[0]):
+                index = best[-1]
     member = bag.members[index]
     group = next(group for group in bag.groups if index in group.members)
     variants = list(dict.fromkeys(bag.members[i].text for i in group.members))
-    return cosine(query_vector, member.embedding), member, variants
+    # Retrieval is scored at ContentBag level. Choosing its explanatory span
+    # must not lower its admission/rank or turn a valid result into an empty hit.
+    return retrieval_score, member, variants

@@ -716,3 +716,30 @@ node --experimental-strip-types --test frontend/tests/fileReadiness.test.mjs fro
 
 Nếu `frontend/dist` bị khóa: `npm.cmd --prefix frontend run build -- --outDir ../.test-tmp/frontend-verify`.
 Tài liệu chi tiết: [Docker](deploy/README.md), [MASTER auth](deploy/AUTH_MASTER_USERS_SETUP.md), [Auth DB](deploy/AUTH_DATABASE_SETUP.md), [BGE-M3 Chunk Search opt-in](research/bge-m3/README.md), [đánh giá chất lượng Vector](research/semantic-quality/README.md), [tối ưu và no-answer](research/semantic-quality/optimization/README.md).
+
+### Tốc độ và tìm kiếm đa ngôn ngữ
+
+BoW dùng từ điển khái niệm Việt–Anh; Vector dùng model đa ngôn ngữ BGE-M3 đã cấu hình. Từ điển bổ sung cộng phân số, quang hợp và tỉ lệ thuận; không tự dịch mọi truy vấn. Các điều kiện về quyền, phiên bản và nội dung hiện hành vẫn được kiểm tra trước khi trả kết quả. Đọc MongoDB theo nhóm trong từng request giúp giảm số lần truy cập; không cache quyền hoặc nội dung giữa các request.
+
+Hai tùy chọn trong `.env` (local) hoặc `docker.env` (Docker):
+
+```dotenv
+SEARCH_MEANING_CONTEXT_MARGIN=0.08
+SEARCH_BOW_MIN_COVERAGE=0
+```
+
+- `SEARCH_MEANING_CONTEXT_MARGIN`: chọn đoạn giải thích phù hợp với từ khóa/khái niệm trong khoảng cosine gần đoạn tốt nhất. Điểm xếp hạng và ngưỡng nhận tài liệu vẫn dùng cosine tối đa của ContentBag. Đặt `0` để dùng đoạn có cosine cao nhất.
+- `SEARCH_BOW_MIN_COVERAGE`: mặc định `0` để giữ khả năng tìm bằng từ hiếm. Có thể thử `0.15` để yêu cầu tối thiểu 15% từ/nhóm khái niệm được khớp, nhưng có thể bỏ sót truy vấn dài. Không có ngưỡng chung bảo đảm loại hết câu hỏi không có đáp án.
+
+Khởi động lại backend sau khi đổi cấu hình; Docker cần build lại image khi cập nhật code rồi chạy Start theo mục 2. Các thay đổi này không yêu cầu đổi schema hoặc tái lập chỉ mục đã hợp lệ. Chỉ mục/model chưa sẵn sàng vẫn cần xử lý theo bảng lỗi phía trên.
+
+Đo trên MASTER/Mongo **local**, chỉ đọc; kết quả chi tiết lưu riêng trong `.test-tmp`:
+
+```bash
+python -m scripts.benchmark_search_runtime --threads 2 --samples 2 --output .test-tmp/search-runtime-new.json
+python -m scripts.evaluate_meaning_context --baseline-ref 80b61ce --output .test-tmp/search-quality-new.json
+```
+
+File đầu ra phải chưa tồn tại. Benchmark đo service đã làm nóng model, không thay cho kiểm thử tải HTTP. Bộ nhãn chất lượng hiện có là nhãn thử nghiệm, cần người dùng đánh giá thêm trên kho thực tế. Giới hạn đọc theo nhóm: 10.000 ContentUnit, ngân sách ký tự `INDEX_MAX_SOURCE_CHARS` trên các phiên bản ứng viên và tối đa 5 giây cho mỗi truy vấn MongoDB; vượt giới hạn trả lỗi thay vì cắt dữ liệu âm thầm.
+
+Số đo, kiểm thử và giới hạn của thay đổi: [báo cáo BoW/Vector](research/search-improvement-20261024/README.md).

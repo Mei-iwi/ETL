@@ -7,6 +7,7 @@ from copy import deepcopy
 import pytest
 
 from data_sync_etl.domain.lexical import (
+    RANKING_VERSION,
     analyze,
     bm25,
     contains_phrase,
@@ -89,7 +90,7 @@ def test_rare_word_long_query_and_bow_never_encodes(searchable):
     for query in ['xylophone', 'unknown1 unknown2 unknown3 unknown4 unknown5 unknown6 xylophone']:
         result = c.search.search(query, 'bow')
         assert result['total'] == 1
-        assert result['ranking_algorithm'] == 'bm25-concept-dismax-v3'
+        assert result['ranking_algorithm'] == RANKING_VERSION
         assert result['items'][0]['matched_keywords'] == ['xylophone']
         assert result['items'][0]['score_components']['bow'] > 0
         assert 'xylophone' in result['items'][0]['snippet']
