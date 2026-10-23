@@ -18,6 +18,7 @@ from data_sync_etl.domain.lexical import (
     ANALYZER_VERSION,
     RANKING_VERSION,
     REPRESENTATION_VERSION,
+    analysis_scope,
     bm25,
     query_terms,
     snippet_text,
@@ -26,7 +27,7 @@ from data_sync_etl.domain.meaning_bags import match_meaning
 from data_sync_etl.domain.search import SearchError, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
 from data_sync_etl.domain.search_context import decode_context, encode_context
-from data_sync_etl.ports.search import SearchBagReader
+from data_sync_etl.ports.search import SearchBagReader, document_validation_scope
 
 
 class QueryEmbeddingContext:
@@ -82,6 +83,9 @@ class SearchService:
                     ('-colbert-v1' if self.settings.semantic_rerank_enabled else '-cosine-v1') +
                     ('+rrf-v1' if method == 'hybrid' else ''))
         meanings = self.settings.index_meaning_bags_enabled
+        if meanings and self.settings.search_meaning_context_fallback_enabled:
+            return {'bow': RANKING_VERSION, 'vector': 'meaning-maxcosine-context-v2',
+                    'hybrid': 'rrf-meaning-context-v2'}[method]
         return {'bow': RANKING_VERSION,
                 'vector': 'meaning-maxcosine-v1' if meanings else 'bag-cosine-threshold-v2',
                 'hybrid': 'rrf-meaning-v1' if meanings else 'rrf-vector-threshold-v2'}[method]
@@ -305,6 +309,8 @@ class SearchService:
                 break
         return evidence[:64]
 
+    @analysis_scope()
+    @document_validation_scope()
     def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
                _query_context=None, _batch_texts=False, _batch_bags=False):
         access = access or SearchAccess()
@@ -405,7 +411,15 @@ class SearchService:
                         value, member, variants = match_meaning(vector, bag.meanings)
                     else:
                         value = cosine(vector, bag.embedding)
-                    if value >= self.settings.search_vector_min_similarity:
+                    accepted = value >= self.settings.search_vector_min_similarity
+                    if (not accepted and self.settings.index_meaning_bags_enabled
+                            and self.settings.search_meaning_context_fallback_enabled
+                            and value >= self.settings.search_meaning_fallback_min_similarity):
+                        # A weak short expression alone is not enough. Require
+                        # independent same-bag topic support, without lexical
+                        # overlap, translation services or another model call.
+                        accepted = cosine(vector, bag.embedding) >= self.settings.search_meaning_fallback_min_context_similarity
+                    if accepted:
                         semantic[bag.id] = value
                         chunk['meaning_variants'] = variants[:8]
                         if member is not None and member.kind == 'text' and (
@@ -537,7 +551,12 @@ class SearchService:
                 'query_expansion': expansion.model_dump(),
                 'search_fingerprint': digest([ANALYZER_VERSION, REPRESENTATION_VERSION, RANKING_VERSION,
                                               expansion.dictionary_fingerprint,
-                                              expansion.policy_fingerprint]),
+                                              expansion.policy_fingerprint,
+                                              self.settings.search_vector_min_similarity,
+                                              self.settings.index_meaning_bags_enabled,
+                                              self.settings.search_meaning_context_fallback_enabled,
+                                              self.settings.search_meaning_fallback_min_similarity,
+                                              self.settings.search_meaning_fallback_min_context_similarity]),
                 'representation_unit': 'content_bag', 'ready_bag_count': ready_count, 'access_scope': access.scope,
                 'readiness': {'lexical_ready_bags': ready_count, 'dense_ready_bags': ready_count,
                               'eligible_versions': len(by_version), 'ready_versions': len(snapshots),

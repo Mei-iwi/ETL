@@ -83,6 +83,9 @@ class EvaluationService:
                     'policy_version': checksum(inspect.getsource(SearchAccess)),
                     'filters': filters, 'search_max_bags': self.settings.search_max_bags,
                     'search_vector_min_similarity': self.settings.search_vector_min_similarity,
+                    'meaning_context_fallback': [self.settings.search_meaning_context_fallback_enabled,
+                        self.settings.search_meaning_fallback_min_similarity,
+                        self.settings.search_meaning_fallback_min_context_similarity],
                     'concept_dictionary': search.dictionary.snapshot.fingerprint,
                     'expansion_policy': self.settings.search_expansion.model_dump(),
                     'meaning_bags': [self.settings.index_meaning_bags_enabled, self.settings.index_meaning_group_threshold],
@@ -277,7 +280,10 @@ class EvaluationService:
                          self.settings.chunk_size_words, self.settings.chunk_overlap_words,
                          self.settings.search_max_bags, self.settings.search_timeout_seconds,
                          self.settings.search_vector_min_similarity, self.settings.index_meaning_bags_enabled,
-                         self.settings.index_meaning_group_threshold])
+                         self.settings.index_meaning_group_threshold,
+                         self.settings.search_meaning_context_fallback_enabled,
+                         self.settings.search_meaning_fallback_min_similarity,
+                         self.settings.search_meaning_fallback_min_context_similarity])
 
     def check_marker(self, dataset, access, expected):
         try:

@@ -2,10 +2,12 @@
 
 import hashlib
 import json
+from copy import deepcopy
 from datetime import UTC
 
-from bson import ObjectId
+from bson import BSON, ObjectId
 from bson.codec_options import CodecOptions
+from bson.errors import BSONError
 from pydantic import TypeAdapter, ValidationError
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
@@ -22,13 +24,37 @@ from data_sync_etl.domain.mongo_documents import (
     UserProfileDocument,
     normalize_keywords,
 )
+from data_sync_etl.ports.search import SEARCH_DOCUMENT_VALIDATION
+
+
+def _copy_search_bag(document):
+    # Validated embedding elements are immutable floats. Copy their lists in C
+    # instead of asking deepcopy to visit millions of individual coordinates.
+    vectors = [document.embedding]
+    if document.meanings is not None:
+        vectors.extend(member.embedding for member in document.meanings.members)
+    return deepcopy(document, {id(vector): vector.copy() for vector in vectors})
 
 
 def checked(model, value):
     try:
         if isinstance(value, Document):
             value = value.bson()
-        return model.model_validate(value)
+        scope, key = SEARCH_DOCUMENT_VALIDATION.get(), None
+        if scope is not None and model is ContentBagDocument and isinstance(value, dict):
+            try:
+                # Compare the FULL freshly read BSON, including unknown fields.
+                # Neither IDs nor caller-supplied fingerprints prove equality.
+                key = BSON.encode(value)
+            except (BSONError, OverflowError):
+                pass  # Preserve strict DTO validation for non-BSON test inputs.
+            if key is not None and key in scope['documents']:
+                return _copy_search_bag(scope['documents'][key])
+        document = model.model_validate(value)
+        if key is not None and scope['bytes'] + len(key) <= 16 * 1024 * 1024:
+            scope['documents'][key] = _copy_search_bag(document)
+            scope['bytes'] += len(key)
+        return document
     except ValidationError:
         raise DomainError("Invalid Mongo document") from None
 

@@ -132,6 +132,13 @@ def create_app(container=None):
                 "Admin API enabled without authentication; bind only to 127.0.0.1 for local development"
             )
         try:
+            # Load the pinned tokenizer before serving requests. Its first
+            # native import/model load must not consume a search deadline.
+            from starlette.concurrency import run_in_threadpool
+
+            from data_sync_etl.domain.lexical import analyze
+
+            await run_in_threadpool(analyze, 'Kiểm tra bộ phân tích')
             yield
         finally:
             await shutdown_runtime(embedding, app.state.container.close if container is None else None)

@@ -1,8 +1,22 @@
 """Bounded read-only search seams; no schema or persistence for transient chunks."""
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Protocol
 
 from data_sync_etl.domain.mongo_documents import ContentBagDocument
+
+SEARCH_DOCUMENT_VALIDATION = ContextVar('search_document_validation', default=None)
+
+
+@contextmanager
+def document_validation_scope():
+    """Allow exact-document validation reuse only during one search call."""
+    token = SEARCH_DOCUMENT_VALIDATION.set({'documents': {}, 'bytes': 0})
+    try:
+        yield
+    finally:
+        SEARCH_DOCUMENT_VALIDATION.reset(token)
 
 
 class SearchBagReader(Protocol):

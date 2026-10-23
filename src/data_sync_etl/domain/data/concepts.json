@@ -1,6 +1,21 @@
 {
-  "version": "etl-concepts-2026-10-v1",
+  "version": "etl-concepts-2026-10-v2",
   "concepts": [
+    {
+      "concept_id": "etl:green_leaf",
+      "preferred_labels": {"en": "green leaf", "vi": "lá xanh"},
+      "definition": "A green plant leaf; a literal bilingual term, not an alias for every plant or for photosynthesis.",
+      "domain": "botany",
+      "terms": [
+        {"text": "green leaf", "normalized": "green leaf", "language": "en", "kind": "preferred", "concept_id": "etl:green_leaf", "domain": "botany", "sources": [{"name": "Project user bilingual regression requirement", "identifier": "green-leaf-la-xanh-20261023"}], "confidence": 1.0, "review_status": "approved"},
+        {"text": "green leaves", "normalized": "green leaves", "language": "en", "kind": "spelling", "concept_id": "etl:green_leaf", "domain": "botany", "sources": [{"name": "Project user bilingual regression requirement", "identifier": "green-leaf-la-xanh-20261023"}], "confidence": 1.0, "review_status": "approved"},
+        {"text": "lá xanh", "normalized": "lá xanh", "language": "vi", "kind": "preferred", "concept_id": "etl:green_leaf", "domain": "botany", "sources": [{"name": "Project user bilingual regression requirement", "identifier": "green-leaf-la-xanh-20261023"}], "confidence": 1.0, "review_status": "approved"}
+      ],
+      "relations": [],
+      "sources": [{"name": "Project user bilingual regression requirement", "identifier": "green-leaf-la-xanh-20261023"}],
+      "review_status": "approved",
+      "version": "1"
+    },
     {
       "concept_id": "etl:machine_learning",
       "preferred_labels": {

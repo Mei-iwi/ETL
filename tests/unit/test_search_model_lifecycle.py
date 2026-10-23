@@ -18,6 +18,16 @@ def runtime():
     return LocalSentenceEmbedding('', 'minilm', 'revision', 384)
 
 
+def test_startup_warms_analyzer_before_serving_once(searchable, monkeypatch):
+    container, _ = searchable
+    calls = []
+    monkeypatch.setattr('data_sync_etl.domain.lexical.analyze', lambda text: calls.append(text) or [])
+    with TestClient(create_app(container), base_url='http://127.0.0.1') as client:
+        assert len(calls) == 1
+        assert client.get('/health').status_code == 200
+        assert len(calls) == 1
+
+
 def test_one_background_loader_per_process_and_readonly_status(monkeypatch):
     model = runtime()
     entered, release = Event(), Event()
