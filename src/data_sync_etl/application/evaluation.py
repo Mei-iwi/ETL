@@ -86,6 +86,8 @@ class EvaluationService:
                     'meaning_context_fallback': [self.settings.search_meaning_context_fallback_enabled,
                         self.settings.search_meaning_fallback_min_similarity,
                         self.settings.search_meaning_fallback_min_context_similarity],
+                    'meaning_context_margin': self.settings.search_meaning_context_margin,
+                    'bow_min_coverage': self.settings.search_bow_min_coverage,
                     'concept_dictionary': search.dictionary.snapshot.fingerprint,
                     'expansion_policy': self.settings.search_expansion.model_dump(),
                     'meaning_bags': [self.settings.index_meaning_bags_enabled, self.settings.index_meaning_group_threshold],
@@ -283,7 +285,8 @@ class EvaluationService:
                          self.settings.index_meaning_group_threshold,
                          self.settings.search_meaning_context_fallback_enabled,
                          self.settings.search_meaning_fallback_min_similarity,
-                         self.settings.search_meaning_fallback_min_context_similarity])
+                         self.settings.search_meaning_fallback_min_context_similarity,
+                         self.settings.search_meaning_context_margin, self.settings.search_bow_min_coverage])
 
     def check_marker(self, dataset, access, expected):
         try:

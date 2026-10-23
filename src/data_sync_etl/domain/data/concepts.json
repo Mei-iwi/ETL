@@ -1,6 +1,47 @@
 {
-  "version": "etl-concepts-2026-10-v2",
+  "version": "etl-concepts-2026-10-v3",
   "concepts": [
+    {
+      "concept_id": "etl:fraction_addition",
+      "preferred_labels": {"en": "addition of fractions", "vi": "cộng phân số"},
+      "definition": "Addition of fractions; excludes subtraction and the distinct procedure of finding a common denominator.",
+      "domain": "mathematics",
+      "terms": [
+        {"text": "addition of fractions", "normalized": "addition of fractions", "language": "en", "kind": "preferred", "concept_id": "etl:fraction_addition", "domain": "mathematics", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"},
+        {"text": "add fractions", "normalized": "add fractions", "language": "en", "kind": "synonym", "concept_id": "etl:fraction_addition", "domain": "mathematics", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"},
+        {"text": "adding fractions", "normalized": "adding fractions", "language": "en", "kind": "synonym", "concept_id": "etl:fraction_addition", "domain": "mathematics", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"},
+        {"text": "cộng phân số", "normalized": "cộng phân số", "language": "vi", "kind": "preferred", "concept_id": "etl:fraction_addition", "domain": "mathematics", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"},
+        {"text": "cộng hai phân số", "normalized": "cộng hai phân số", "language": "vi", "kind": "synonym", "concept_id": "etl:fraction_addition", "domain": "mathematics", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"}
+      ],
+      "relations": [], "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}],
+      "review_status": "approved", "version": "1"
+    },
+    {
+      "concept_id": "etl:photosynthesis",
+      "preferred_labels": {"en": "photosynthesis", "vi": "quang hợp"},
+      "definition": "Photosynthesis as a biological process; not a synonym of green leaf or of all plant activity.",
+      "domain": "botany",
+      "terms": [
+        {"text": "photosynthesis", "normalized": "photosynthesis", "language": "en", "kind": "preferred", "concept_id": "etl:photosynthesis", "domain": "botany", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"},
+        {"text": "quang hợp", "normalized": "quang hợp", "language": "vi", "kind": "preferred", "concept_id": "etl:photosynthesis", "domain": "botany", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"}
+      ],
+      "relations": [], "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}],
+      "review_status": "approved", "version": "1"
+    },
+    {
+      "concept_id": "etl:direct_proportion",
+      "preferred_labels": {"en": "direct proportion", "vi": "tỉ lệ thuận"},
+      "definition": "Direct proportionality with a constant ratio; distinct from inverse proportion or arbitrary correlated changes.",
+      "domain": "mathematics",
+      "terms": [
+        {"text": "direct proportion", "normalized": "direct proportion", "language": "en", "kind": "preferred", "concept_id": "etl:direct_proportion", "domain": "mathematics", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"},
+        {"text": "directly proportional", "normalized": "directly proportional", "language": "en", "kind": "synonym", "concept_id": "etl:direct_proportion", "domain": "mathematics", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"},
+        {"text": "tỉ lệ thuận", "normalized": "tỉ lệ thuận", "language": "vi", "kind": "preferred", "concept_id": "etl:direct_proportion", "domain": "mathematics", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"},
+        {"text": "tỷ lệ thuận", "normalized": "tỷ lệ thuận", "language": "vi", "kind": "spelling", "concept_id": "etl:direct_proportion", "domain": "mathematics", "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}], "confidence": 0.95, "review_status": "approved"}
+      ],
+      "relations": [], "sources": [{"name": "Internal ETL Vietnamese-English glossary", "identifier": "curriculum-glossary-v1-20261024"}],
+      "review_status": "approved", "version": "1"
+    },
     {
       "concept_id": "etl:green_leaf",
       "preferred_labels": {"en": "green leaf", "vi": "lá xanh"},

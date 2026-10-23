@@ -10,8 +10,7 @@ from tests.local_admin_client import TestClient
     ('BLOCKED_LOCAL_SOURCE_CHANGE', 409), ('BLOCKED_MONGO_ID_MAPPING', 409),
     ('BLOCKED_SOURCE_MAPPING', 503),
 ])
-@pytest.mark.parametrize('path', ['/api/v1/master-data/sync', '/admin/sync/master'])
-def test_sync_returns_known_actionable_errors_without_adapter_details(container, monkeypatch, caplog, code, status, path):
+def test_sync_returns_known_actionable_errors_without_adapter_details(container, monkeypatch, caplog, code, status):
     container.settings.admin_enabled = True
 
     def fail(*args, **kwargs):
@@ -19,7 +18,7 @@ def test_sync_returns_known_actionable_errors_without_adapter_details(container,
 
     monkeypatch.setattr(container.sync, 'run', fail)
     with TestClient(create_app(container)) as client:
-        response = client.post(path, json={'full': True})
+        response = client.post('/api/v1/master-data/sync', json={'full': True})
     assert response.status_code == status
     assert response.json()['detail']['code'] == code
     assert response.json()['detail']['message']

@@ -394,6 +394,63 @@ class MongoContentReader:
 
 
 class MongoBagStore:
+    def search_phase(self, version_ids, *, limit, max_chars=10_000_000):
+        """One bounded fresh read phase, reused only within the calling Search.
+
+        Full Bag BSON is read before content fingerprints. The final phase must
+        be created independently; PostgreSQL snapshots and _verified still read
+        live content separately. No timestamp-only or cross-request cache.
+        """
+        versions = tuple(identifier(value) for value in version_ids)
+        if (len(versions) > 10000 or len(set(versions)) != len(versions) or not 1 <= limit <= 10001
+                or type(max_chars) is not int or not 1 <= max_chars <= 50_000_000):
+            raise DomainError('Search phase bounds exceeded')
+        documents, content = {}, {version: [] for version in versions}
+        selector = {'resource_version_id': {'$in': list(versions)}, 'is_current': True}
+        rows = list(self.database.content_bags.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000))
+        if len(rows) >= limit:
+            from data_sync_etl.domain.search import SearchError
+            raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+        for raw in rows:
+            doc = checked(ContentBagDocument, raw)
+            if doc.resource_version_id not in content or doc.id in documents:
+                raise DomainError('Search phase identity mismatch')
+            documents[doc.id] = doc
+        # Keep the global read bounded even when many versions contain leaves.
+        rows = self.database.mongo_content_units.find(selector, {
+            '_id': 1, 'resource_version_id': 1, 'text': 1, 'keywords': 1,
+            'projection_generation': 1}).sort('_id', 1).limit(10001).max_time_ms(5000)
+        total_chars = 0
+        for ordinal, raw in enumerate(rows, 1):
+            if not isinstance(raw.get('text'), str):
+                raise DomainError('Invalid search content phase text')
+            total_chars += len(raw.get('text', ''))
+            if ordinal > 10000 or total_chars > max_chars:
+                from data_sync_etl.domain.search import SearchError
+                raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+            version = raw.get('resource_version_id')
+            if version not in content:
+                raise DomainError('Search content phase identity mismatch')
+            content[version].append({key: value for key, value in raw.items() if key != 'resource_version_id'})
+        fingerprints = {version: hashlib.sha256(json.dumps(records, ensure_ascii=False,
+            sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+            for version, records in content.items() if records}
+
+        def read(root_ids, *, version_id, generation):
+            ids = tuple(identifier(value) for value in root_ids)
+            if (version_id not in content or len(ids) > 10000 or len(set(ids)) != len(ids)
+                    or type(generation) is not int or generation < 0):
+                raise DomainError('Search phase request bounds exceeded')
+            records = content[version_id]
+            if not records or any(row.get('projection_generation') != generation for row in records):
+                return {key: None for key in ids}
+            return {key: doc if (doc is not None and doc.resource_version_id == version_id
+                and doc.projection_generation == generation
+                and doc.content_fingerprint == fingerprints[version_id]
+                and len(doc.embedding) == self.dimension) else None
+                for key in ids for doc in [documents.get(key)]}
+        return read
+
     def search_bags(self, root_ids, *, version_id, generation):
         """Fresh, version-bounded read phase for Search ONLY; never a cache.
 

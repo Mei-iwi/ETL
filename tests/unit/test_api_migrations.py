@@ -16,7 +16,6 @@ def test_health_admin_disabled(container):
         response = client.get("/health")
         assert response.status_code == 200 and response.json()["database"] == "ok"
         assert response.headers["X-Correlation-ID"]
-        assert client.post("/admin/sync/master", json={"full": True}).status_code == 403
         assert client.post("/api/v1/master-data/sync", json={"full": True}).status_code == 403
         assert client.get("/api/v1/master-data/sync/status").status_code == 403
         assert client.patch(
@@ -144,12 +143,12 @@ def test_system_capabilities(container):
 def test_api_and_validation_redaction(container):
     container.settings.admin_enabled = True
     with TestClient(create_app(container)) as client:
-        response = client.post("/admin/sync/master", json={"full": True})
+        response = client.post("/api/v1/master-data/sync", json={"full": True})
         assert response.status_code == 200
         assert "hashed_password" not in response.text
-        response = client.post("/admin/sync/master", json={"stream": "secret-token"})
+        response = client.post("/api/v1/master-data/sync", json={"stream": "secret-token"})
         assert response.status_code == 422 and "secret-token" not in response.text
-        assert client.get("/admin/resource-versions/missing/etl-status").status_code == 400
+        assert client.get("/api/v1/resource-versions/missing/etl-status").status_code == 400
 
 
 def test_migration_up_down_up(container):

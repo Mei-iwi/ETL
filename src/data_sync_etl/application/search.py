@@ -12,7 +12,7 @@ from data_sync_etl.application.search_runtime import (
     SearchInferenceQueue,
 )
 from data_sync_etl.domain.concepts import Dictionary, Snapshot, default_dictionary, equivalent_terms
-from data_sync_etl.domain.context_ranking import ContextRanker
+from data_sync_etl.domain.context_ranking import CONTEXT_RANKING_VERSION, ContextRanker
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
 from data_sync_etl.domain.lexical import (
     ANALYZER_VERSION,
@@ -83,9 +83,9 @@ class SearchService:
                     ('-colbert-v1' if self.settings.semantic_rerank_enabled else '-cosine-v1') +
                     ('+rrf-v1' if method == 'hybrid' else ''))
         meanings = self.settings.index_meaning_bags_enabled
-        if meanings and self.settings.search_meaning_context_fallback_enabled:
-            return {'bow': RANKING_VERSION, 'vector': 'meaning-maxcosine-context-v2',
-                    'hybrid': 'rrf-meaning-context-v2'}[method]
+        if meanings:
+            return {'bow': RANKING_VERSION, 'vector': 'meaning-context-cosine-v3',
+                    'hybrid': 'rrf-meaning-context-v3'}[method]
         return {'bow': RANKING_VERSION,
                 'vector': 'meaning-maxcosine-v1' if meanings else 'bag-cosine-threshold-v2',
                 'hybrid': 'rrf-meaning-v1' if meanings else 'rrf-vector-threshold-v2'}[method]
@@ -200,7 +200,8 @@ class SearchService:
             self._deadline(started)
             return vector, started
 
-    def _ready_snapshot(self, repo, version_id, *, batch_texts=False, expected_bags=None, batch_bags=False):
+    def _ready_snapshot(self, repo, version_id, *, batch_texts=False, expected_bags=None,
+                        batch_bags=False, bag_reader=None):
         runs = self.indexing._runs(repo, version_id)
         if not runs or runs[0]['status'] != 'COMPLETED':
             return None
@@ -210,7 +211,7 @@ class SearchService:
             if runs[0]['input_fingerprint'] != snapshot[3]:
                 return None
             options = {} if expected_bags is None else {'expected_bags': expected_bags}
-            reader = getattr(self.bags, 'search_bags', None) if batch_bags else None
+            reader = bag_reader or (getattr(self.bags, 'search_bags', None) if batch_bags else None)
             if reader is not None:
                 options['bag_reader'] = reader
             self.indexing._verified(snapshot, runs[0], **options)
@@ -352,13 +353,19 @@ class SearchService:
             limit=self.settings.search_max_bags + 1) if metadata else []
         if len(candidates) > self.settings.search_max_bags:
             raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+        phase_reader = getattr(self.bags, 'search_phase', None) if _batch_bags else None
+        initial_phase = (phase_reader(sorted({bag.resource_version_id for bag in candidates}),
+                                     limit=self.settings.search_max_bags + 1,
+                                     max_chars=self.settings.index_max_source_chars)
+                         if phase_reader is not None and candidates else None)
         by_bag, bow, semantic, snapshots, ready_count, source_chars = {}, {}, {}, {}, 0, 0
         excluded, semantic_metadata = set(), {}
         authorized_roots = {}
         for version_id in sorted({bag.resource_version_id for bag in candidates}):
             self._deadline(started)
             with self.indexing.uow() as repo:
-                snapshot = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts, batch_bags=_batch_bags)
+                snapshot = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts,
+                    batch_bags=_batch_bags, bag_reader=initial_phase)
                 allowed = self._allowed_units(repo, snapshot, access) if snapshot else set()
                 if snapshot and use_semantic:
                     semantic_metadata[version_id] = repo.semantic_metadata(snapshot[0]['resource_id'])
@@ -374,7 +381,7 @@ class SearchService:
                 roots, allowed, vector, lambda: self._deadline(started), semantic_budget)
                 if use_semantic else {})
             version_bags = [bag for bag in candidates if bag.resource_version_id == version_id]
-            reader = getattr(self.bags, 'search_bags', None) if _batch_bags else None
+            reader = initial_phase or (getattr(self.bags, 'search_bags', None) if _batch_bags else None)
             current_bags = (reader([bag.id for bag in version_bags], version_id=version_id, generation=snapshot[1])
                             if reader is not None else None)
             for bag in version_bags:
@@ -408,7 +415,10 @@ class SearchService:
                 elif vector is not None:
                     member, variants = None, []
                     if self.settings.index_meaning_bags_enabled:
-                        value, member, variants = match_meaning(vector, bag.meanings)
+                        value, member, variants = match_meaning(vector, bag.meanings, context={
+                            'query': query, 'keywords': keywords, 'expansion': expansion,
+                            'dictionary': self.dictionary, 'policy': policy,
+                            'margin': self.settings.search_meaning_context_margin})
                     else:
                         value = cosine(vector, bag.embedding)
                     accepted = value >= self.settings.search_vector_min_similarity
@@ -453,7 +463,8 @@ class SearchService:
         def ranked():
             nonlocal bow
             bow = bm25(query, {key: row[0].lexical for key, row in by_bag.items()},
-                       dictionary=self.dictionary, policy=policy, expansion=expansion)
+                       dictionary=self.dictionary, policy=policy, expansion=expansion,
+                       min_coverage=self.settings.search_bow_min_coverage)
             scores = bow if method == 'bow' else semantic if method == 'vector' else rrf(bow, semantic)
             grouped, matches = {}, {}
             for bag_id in sorted(scores, key=lambda key: (-scores[key], key)):
@@ -494,9 +505,13 @@ class SearchService:
                     raise SearchError('SEARCH_INDEX_STALE', 409)
                 checked_versions = set(snapshots)  # Nonhits also influence corpus statistics.
                 expected_bags = {bag.id: bag for bag in candidates}
+                final_phase = (phase_reader(sorted(checked_versions), limit=self.settings.search_max_bags + 1,
+                                            max_chars=self.settings.index_max_source_chars)
+                               if phase_reader is not None and checked_versions else None)
                 for version_id in checked_versions:
                     fresh = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts,
-                                                 expected_bags=expected_bags, batch_bags=_batch_bags)
+                                                 expected_bags=expected_bags, batch_bags=_batch_bags,
+                                                 bag_reader=final_phase)
                     if version_id not in fresh_ids or fresh is None or fresh[3] != snapshots[version_id][3]:
                         if _batch_texts and (version_id not in fresh_ids or
                                 self._postgres_version_changed(repo, snapshots[version_id])):
@@ -550,13 +565,16 @@ class SearchService:
                 'ranking_algorithm': self._ranking_algorithm(method),
                 'query_expansion': expansion.model_dump(),
                 'search_fingerprint': digest([ANALYZER_VERSION, REPRESENTATION_VERSION, RANKING_VERSION,
+                                              CONTEXT_RANKING_VERSION,
+                                              self.settings.search_bow_min_coverage,
                                               expansion.dictionary_fingerprint,
                                               expansion.policy_fingerprint,
                                               self.settings.search_vector_min_similarity,
                                               self.settings.index_meaning_bags_enabled,
                                               self.settings.search_meaning_context_fallback_enabled,
                                               self.settings.search_meaning_fallback_min_similarity,
-                                              self.settings.search_meaning_fallback_min_context_similarity]),
+                                              self.settings.search_meaning_fallback_min_context_similarity,
+                                              self.settings.search_meaning_context_margin]),
                 'representation_unit': 'content_bag', 'ready_bag_count': ready_count, 'access_scope': access.scope,
                 'readiness': {'lexical_ready_bags': ready_count, 'dense_ready_bags': ready_count,
                               'eligible_versions': len(by_version), 'ready_versions': len(snapshots),

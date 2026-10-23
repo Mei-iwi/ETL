@@ -31,7 +31,7 @@ def test_dense_near_miss_requires_same_bag_context_without_lexical_overlap(
         searchable, monkeypatch, method, meaning, context, enabled, expected):
     container, _ = searchable
     container.settings.search_meaning_context_fallback_enabled = enabled
-    def match(vector, bag):
+    def match(vector, bag, **kwargs):
         member = next(member for member in bag.members if member.kind == 'text')
         return meaning, member, [member.text]
     monkeypatch.setattr('data_sync_etl.application.search.match_meaning', match)

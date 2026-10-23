@@ -70,7 +70,7 @@ def benchmark(corpus, *, k=5, repeats=5):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--corpus', type=Path, default=Path('fixtures/search/concept_benchmark.json'))
-    parser.add_argument('--output', type=Path, default=Path('fixtures/search/concept_benchmark_results.json'))
+    parser.add_argument('--output', type=Path, default=Path('storage/benchmarks/concepts.json'))
     parser.add_argument('--k', type=int, default=5)
     parser.add_argument('--repeats', type=int, default=5)
     args = parser.parse_args()

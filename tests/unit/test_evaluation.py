@@ -302,7 +302,8 @@ def test_full_corpus_checked_only_at_run_boundaries(evaluation, monkeypatch):
 
 
 @pytest.mark.parametrize('change', ['unit_access', 'index_run', 'source_hash', 'model', 'threshold',
-    'meaning_mode', 'meaning_threshold', 'meaning_fallback', 'meaning_floor', 'meaning_context_floor'])
+    'meaning_mode', 'meaning_threshold', 'meaning_fallback', 'meaning_floor', 'meaning_context_floor',
+    'meaning_context_margin', 'bow_coverage'])
 def test_light_marker_detects_access_index_source_and_model_changes(evaluation, change):
     c, version, command = evaluation
     original = c.search.search
@@ -331,8 +332,12 @@ def test_light_marker_detects_access_index_source_and_model_changes(evaluation, 
                 c.settings.search_meaning_context_fallback_enabled = True
             elif change == 'meaning_floor':
                 c.settings.search_meaning_fallback_min_similarity = .57
-            else:
+            elif change == 'meaning_context_floor':
                 c.settings.search_meaning_fallback_min_context_similarity = .54
+            elif change == 'meaning_context_margin':
+                c.settings.search_meaning_context_margin = .04
+            else:
+                c.settings.search_bow_min_coverage = .3
         return result
     with api(c) as client:
         dataset_id = client.post('/api/v1/evaluations/datasets', json=command).json()['dataset_id']

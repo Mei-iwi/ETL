@@ -13,7 +13,7 @@ from data_sync_etl.domain.indexing import digest
 
 ANALYZER_VERSION = 'underthesea-8.3.0-nfc-surface-compound-alnum-v2'
 REPRESENTATION_VERSION = 'bag-lexical-tf-v1'
-RANKING_VERSION = 'bm25-concept-dismax-v3'
+RANKING_VERSION = 'bm25-concept-coverage-v4'
 TOKEN = re.compile(r'c\+\+|c#|\.net\b|\d+(?:\.\d+)+|[^\W_]+', re.IGNORECASE)
 SPECIAL = re.compile(r'(c\+\+|c#|\.net\b)', re.IGNORECASE)
 _ANALYSIS = ContextVar('lexical_request_analysis', default=None)
@@ -143,8 +143,11 @@ def lexical_document(texts, title=None):
     title = unicodedata.normalize('NFC', title or '')
     # Surface words are the scoring channel; compound tokens remain available
     # from analyze() for consumers, but never inflate TF or length here.
-    for text in [*texts, title]:
-        analyze(text)  # Require the pinned tokenizer; no silent fallback.
+    # Stored TF/passages use surface_tokens exclusively. Running CRF over every
+    # body here discarded its output, including during both freshness rechecks.
+    # Keep a real pinned-tokenizer probe (request-scoped), then recompute EVERY
+    # lexical field/fingerprint from the fresh full texts exactly as before.
+    analyze('kiểm tra')
     tf = Counter(token for text in texts for token in surface_tokens(text))
     title_tf = Counter(surface_tokens(title))
     tf.update(title_tf)
@@ -165,7 +168,7 @@ def contains_phrase(tokens, query):
 
 
 def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
-         dictionary=None, policy=None, domain=None, contextual=True, expansion=None):
+         dictionary=None, policy=None, domain=None, contextual=True, expansion=None, min_coverage=0.):
     """Weighted BM25, maximum alternative per concept (no alias stacking).
 
     N, avgdl and DF cover ALL authorized verified bags including nonhits.
@@ -222,6 +225,11 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         score = sum(contribution(tf[t] + policy.title_boost * title_tf.get(t, 0), df[t], doc.length)
                     for t in sorted(terms & tf.keys()))
         counts, title = observed[key]
+        matched_features = sum(term in tf for term in terms)
+        matched_features += sum(any(counts[t.concept_id, t.term] for t in alternatives)
+                                for alternatives in groups.values())
+        if matched_features < min_coverage * max(1, len(terms) + len(groups)):
+            continue
         for cid, alternatives in groups.items():
             score += max((t.weight * contribution(counts[t.concept_id, t.term] + policy.title_boost * title[t.concept_id, t.term],
                                                  concept_df[cid], doc.length)

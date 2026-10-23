@@ -46,3 +46,12 @@ TAI_LIEU_DOI_CHIEU/
 
 # Private Docker deployment settings (template stays versioned).
 /docker.env
+
+# Generated research/benchmark outputs; keep query labels and contracts versioned.
+/fixtures/search/*_results.json
+/research/bge-m3/smoke-*.json
+/research/semantic-quality/audit.json
+/research/semantic-quality/results.json
+/research/semantic-quality/query-encoder-parity.json
+/research/semantic-quality/optimization/RESULTS.json
+/research/semantic-quality/optimization/selection-lock.json
