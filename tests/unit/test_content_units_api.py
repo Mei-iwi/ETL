@@ -15,7 +15,7 @@ def test_content_units_read_pagination_search_and_version_isolation(searchable):
     while container.worker.once("test-worker"):
         pass
     container.settings.admin_enabled = True
-    path = f"/admin/resource-versions/{version['id']}/content-units"
+    path = f"/api/v1/resource-versions/{version['id']}/content-units"
     with TestClient(create_app(container)) as client:
         first = client.get(path, params={"limit": 2})
         assert first.status_code == 200
@@ -47,12 +47,12 @@ def test_content_units_admin_validation_and_empty_version(searchable):
     with container.uow() as repo:
         repo.update('master_learning_resources', 'resource-2', {'source_origin': 'LOCAL'})
     version = container.ingestion.run("resource-2", "input", "sample.pdf")["version"]
-    path = f"/admin/resource-versions/{version['id']}/content-units"
+    path = f"/api/v1/resource-versions/{version['id']}/content-units"
     container.settings.admin_enabled = False
     with TestClient(create_app(container)) as client:
         assert client.get(path).status_code == 403
         container.settings.admin_enabled = True
         assert client.get(path).status_code == 409
-        assert client.get("/admin/resource-versions/missing/content-units").status_code == 404
+        assert client.get("/api/v1/resource-versions/missing/content-units").status_code == 404
         for params in ({"offset": -1}, {"limit": 0}, {"limit": 101}, {"search": "x" * 201}):
             assert client.get(path, params=params).status_code == 422

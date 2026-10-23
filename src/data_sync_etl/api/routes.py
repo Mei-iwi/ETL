@@ -988,11 +988,6 @@ def retry_source_file(file_id: ResourceId, request: Request):
         raise HTTPException(409, "Tệp chưa đủ điều kiện thử lại") from None
 
 
-@router.post("/admin/sync/master", include_in_schema=False)
-def sync(body: MasterSyncRequest, request: Request):
-    return sync_master_data(body, request)
-
-
 @router.post("/api/v1/resource-versions/{id}/index", tags=[TAG_INDEXING],
              status_code=202, response_model=IndexRequestResponse, responses=ERROR_RESPONSES,
              summary="Xếp hàng phân đoạn và lập chỉ mục học liệu")
@@ -1007,7 +1002,6 @@ def index_version(id: ResourceId, request: Request, response: Response):
         raise index_error(exc) from None
 
 
-@router.post("/admin/resources/{id}/versions/ingest", include_in_schema=False)
 @router.post("/api/v1/resources/{id}/versions/ingest", tags=[TAG_MASTER])
 def ingest(id: ResourceId, body: IngestInput, request: Request):
     container = services(request)
@@ -1039,7 +1033,6 @@ def chunk_preview(id: ResourceId, request: Request,
         raise index_error(exc) from None
 
 
-@router.post("/admin/resource-versions/{id}/ocr-jobs", include_in_schema=False)
 @router.post("/api/v1/resource-versions/{id}/ocr-jobs", tags=[TAG_PROCESSING])
 def create_job(id: ResourceId, request: Request, body: JobInput | None = None):
     services(request)
@@ -1058,7 +1051,6 @@ def index_status(id: ResourceId, request: Request):
         raise index_error(exc) from None
 
 
-@router.post("/admin/resource-versions/{id}/postprocess", include_in_schema=False)
 @router.post("/api/v1/resource-versions/{id}/postprocess", tags=[TAG_PROCESSING])
 def postprocess(id: ResourceId, request: Request):
     return services(request).postprocess.run(id)
@@ -1075,7 +1067,6 @@ def reindex_version(id: ResourceId, request: Request, body: ReindexRequest | Non
         raise index_error(exc) from None
 
 
-@router.get("/admin/resource-versions/{id}/etl-status", include_in_schema=False)
 @router.get("/api/v1/resource-versions/{id}/etl-status", tags=[TAG_PROCESSING])
 def status(id: ResourceId, request: Request):
     return services(request).orchestrator.status(id)
@@ -1103,15 +1094,3 @@ def list_public_content_units(
         )
     except DomainError:
         raise HTTPException(status_code=404, detail="Resource version not found") from None
-
-
-@router.get("/admin/resource-versions/{id}/content-units", include_in_schema=False)
-def content_units(
-    id: ResourceId,
-    request: Request,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    search: Annotated[str, Query(max_length=200)] = "",
-):
-    services(request)
-    return list_public_content_units(id, request, offset, limit, search)

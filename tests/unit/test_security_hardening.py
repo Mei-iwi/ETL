@@ -23,7 +23,7 @@ def test_api_consumes_sensitive_errors(container, monkeypatch, caplog, exception
     monkeypatch.setattr(container.sync, "run", fail)
     # Default raise_server_exceptions=True also proves no traceback escapes to server logs.
     with TestClient(create_app(container)) as client:
-        response = client.post("/admin/sync/master", json={"full": True})
+        response = client.post("/api/v1/master-data/sync", json={"full": True})
     assert response.status_code == (400 if exception is DomainError else 500)
     assert "private-password-and-document-body" not in response.text + caplog.text
 
