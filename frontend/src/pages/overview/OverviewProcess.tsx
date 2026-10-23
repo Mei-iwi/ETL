@@ -1,11 +1,12 @@
 import style from './OverviewProcess.module.css'
 import { ProcessEntityDiagram } from './ProcessEntityDiagram'
+import { OverviewLayout } from './OverviewLayout'
 
 const processSteps = [
     {
         step: 1,
         name: 'Tiếp nhận học liệu',
-        content: 'Tải học liệu, nhập thông tin mô tả, tạo phiên bản',
+        content: 'Đồng bộ tham chiếu tệp nguồn hoặc tải tệp LOCAL, nhập thông tin và tạo phiên bản',
         output: 'Học liệu và Metadata',
     },
     {
@@ -22,15 +23,15 @@ const processSteps = [
     },
     {
         step: 4,
-        name: 'Phân đoạn dữ liệu',
-        content: 'Chia nội dung thành Chunk có thông tin vị trí và nguồn gốc',
-        output: 'Danh sách Chunk',
+        name: 'Tổ chức nội dung',
+        content: 'Tổ chức ContentUnit theo cấu trúc tài liệu; xem các đoạn nội dung kèm vị trí và nguồn gốc',
+        output: 'ContentUnit và bản xem phân đoạn',
     },
     {
         step: 5,
         name: 'Biểu diễn dữ liệu',
-        content: 'Xây dựng biểu diễn Bag of Words và vector ngữ nghĩa',
-        output: 'Dữ liệu biểu diễn',
+        content: 'Tổng hợp từ khóa và tạo vector ngữ nghĩa cho ContentBag',
+        output: 'ContentBag với từ khóa và vector',
     },
     {
         step: 6,
@@ -54,18 +55,16 @@ const processSteps = [
 
 export function OverviewProcess() {
     return (
-        <section className={style.page}>
-            <header className={style.hero}>
-                <h1>Quy trình hoạt động</h1>
-            </header>
+        <OverviewLayout title="Quy trình hoạt động"
+            introduction="Theo dõi hành trình từ tài liệu gốc đến kết quả tìm kiếm, qua hai pha chuẩn bị và tra cứu học liệu.">
 
             <section className={style.section}>
-                <h2>1. Sơ đồ tổng thể</h2>
+                <h2>Sơ đồ tổng thể</h2>
                 <ProcessEntityDiagram />
             </section>
 
             <section className={style.section}>
-                <h2>2. Chi tiết các bước xử lý</h2>
+                <h2>Các bước xử lý</h2>
                 <div className={style.tableWrapper} role="region" aria-label="Chi tiết các bước xử lý" tabIndex={0}>
                     <table className={style.processTable}>
                         <thead>
@@ -93,6 +92,6 @@ export function OverviewProcess() {
                     </table>
                 </div>
             </section>
-        </section>
+        </OverviewLayout>
     )
 }
