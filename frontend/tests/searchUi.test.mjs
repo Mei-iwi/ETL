@@ -23,6 +23,8 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     let modelState = 'LOADING'
     let authRole = null
     let canViewFile = true
+    let contextEvidence = 'lexical'
+    let holdAuthConfig = true
     let releaseSearch
     const bodies = [], responses = []
     const server = createServer(async (req, res) => {
@@ -33,7 +35,10 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(wire)
         }
         if (url.pathname === '/health') return json({ status: 'ok', database: 'ok' })
-        if (url.pathname === '/api/v1/auth/config') return json({ mode: authRole ? 'master_users' : 'legacy_local', login_required: !!authRole })
+        if (url.pathname === '/api/v1/auth/config') {
+            if (holdAuthConfig) return // Simulate the backend accepting TCP but never responding.
+            return json({ mode: authRole ? 'master_users' : 'legacy_local', login_required: !!authRole })
+        }
         if (url.pathname === '/api/v1/auth/me') return json({ id: 'master:search-reader', mode: 'master_users',
             role: authRole, roles: [authRole === 'ADMIN' ? 'admin' : 'viewer'], resource_ids: [], admin_feature_enabled: true })
         if (url.pathname === '/api/v1/auth/csrf') return json({ csrf_token: 'search-fixture-csrf' })
@@ -74,7 +79,12 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
                 can_view_file: canViewFile,
                 provider_name: 'Nhà cung cấp', resource_type_code: 'DOC', bag_id: 'b1', bag_title: null, unit_type: 'SECTION', representation_mode: 'fallback',
                 score: .03, score_components: { bow: .5, vector: .7 }, matched_bag_count: 1, matched_keywords: ['toán'],
-                snippet: 'Văn bản <script>không được thực thi</script>', page_from: 2, page_to: 2, content_unit_id: 'unit-1', context_id: 'token-1', context_url: '/api/v1/chunks/token-1/context',
+                snippet: 'Văn bản <script>không được thực thi</script>' + (contextEvidence === 'semantic' ? ' Machine learning' : ''), page_from: 2, page_to: 2, content_unit_id: 'unit-1', context_id: 'token-1', context_url: '/api/v1/chunks/token-1/context',
+                context_evidence: contextEvidence,
+                lexical_evidence: contextEvidence === 'semantic' ? [{ query_phrase: 'học máy', matched_phrase: 'Machine learning',
+                    concept_id: 'etl:machine_learning', relation: 'translation', field: 'content', weight: 0.65,
+                    sources: [{ name: 'curated', identifier: 'fixture' }] }] : [],
+                meaning_variants: contextEvidence === 'semantic' ? ['học máy', 'machine learning', 'hệ thống học từ dữ liệu'] : [],
             })) })
         }
         if (url.pathname === '/api/v1/chunks/token-1/context') {
@@ -155,6 +165,10 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await call('Page.enable')
         await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
         await open('/search')
+        await waitFor(() => evaluate("document.querySelector('[role=alert]')?.textContent.includes('Dịch vụ xác thực chưa khả dụng')"))
+        assert.equal(await evaluate("document.body.textContent.includes('Đang kiểm tra phiên đăng nhập')"), false)
+        holdAuthConfig = false
+        await click('Thử lại')
         await waitFor(() => evaluate("document.querySelector('fieldset button[aria-pressed=\"true\"]')?.textContent === 'Tìm kết hợp'"))
         await waitFor(() => evaluate("document.body.textContent.includes('Đang chuẩn bị tìm kiếm')"))
         assert.equal(await evaluate("document.querySelector('button[type=submit]').disabled"), true)
@@ -411,6 +425,29 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         authRole = 'ADMIN'
         await open('/search/query-methods?q=public&method=bow')
         await waitFor(() => evaluate("!!document.querySelector('article h2 a')"))
+        // Follow the actual result locator and verify both passage evidence states.
+        for (const evidence of ['lexical', 'semantic', 'bag']) {
+            contextEvidence = evidence
+            mode = 'results'
+            await open('/search/result?q=toán&method=bow')
+            await waitFor(() => evaluate("!!document.querySelector('article h2 a')"))
+            assert.equal(await evaluate("new URL(document.querySelector('article h2 a').href).searchParams.get('contextEvidence')"), evidence)
+            if (evidence === 'semantic') {
+                await evaluate("Array.from(document.querySelectorAll('summary')).find(item => item.textContent === 'Thuật ngữ tương đương trong học liệu').click()")
+                assert.ok(await evaluate("Array.from(document.querySelectorAll('details[open] li')).some(item => item.textContent.includes('học máy') && item.textContent.includes('Machine learning'))"))
+                await evaluate("Array.from(document.querySelectorAll('summary')).find(item => item.textContent === 'Các cách diễn đạt trong nhóm nghĩa khớp').click()")
+                assert.ok(await evaluate("Array.from(document.querySelectorAll('details[open] li')).some(item => item.textContent === 'hệ thống học từ dữ liệu')"))
+            }
+            const beforeContext = contextCount
+            await evaluate("document.querySelector('article h2 a').click()")
+            await waitFor(() => evaluate("document.body.textContent.includes('Tệp học liệu')"))
+            assert.equal(contextCount, beforeContext, 'passage loading remains lazy')
+            await click('Ngữ cảnh')
+            await waitFor(() => evaluate("document.querySelector('section[aria-label=\"Ngữ cảnh học liệu\"]')?.textContent.includes('Nội dung ngữ cảnh được chọn')"))
+            const content = await evaluate("document.querySelector('section[aria-label=\"Ngữ cảnh học liệu\"]').textContent")
+            assert.ok(content.includes(evidence === 'lexical' ? 'Đoạn có từ/cụm từ khớp truy vấn' : evidence === 'semantic' ? 'Đoạn gần nghĩa với truy vấn' : 'chưa xác định được đoạn khớp trực tiếp'))
+            assert.equal(contextCount, beforeContext + 1)
+        }
 
     } finally {
         releaseSearch?.()

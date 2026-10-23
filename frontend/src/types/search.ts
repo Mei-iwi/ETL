@@ -1,5 +1,6 @@
 export type SearchMethod = 'bow' | 'vector' | 'hybrid'
 export type SearchFilters = {
+    domain?: string | null
     subject_id?: string | null
     grade_level_id?: string | null
     resource_type_code?: string | null
@@ -35,8 +36,14 @@ export type SearchItem = {
     context_id: string
     context_url: string
     can_view_file?: boolean
+    context_evidence?: 'lexical' | 'semantic' | 'bag' | null
+    meaning_variants?: string[]
+    lexical_evidence?: { query_phrase: string; matched_phrase: string; concept_id: string | null; relation: string; field: string; weight: number; sources: { name: string; identifier: string }[] }[]
 }
 export type SearchResponse = {
+    query_expansion?: Record<string, unknown> | null
+    search_fingerprint?: string | null
+    readiness?: { lexical_ready_bags: number; dense_ready_bags: number; eligible_versions: number; ready_versions: number; reindex_required: boolean } | null
     query: string
     method: SearchMethod
     page: number

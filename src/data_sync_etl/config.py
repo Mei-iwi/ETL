@@ -4,6 +4,8 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from data_sync_etl.domain.concepts import ExpansionPolicy
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -72,6 +74,8 @@ class Settings(BaseSettings):
         default=256, ge=16, le = 4096
     )
     index_auto_enabled: bool = False
+    index_meaning_bags_enabled: bool = True
+    index_meaning_group_threshold: float = Field(default=0.8, gt=0, le=1, allow_inf_nan=False)
     index_embedding_model_path: Path | None = Field(default=None, repr=False)
     index_embedding_model_id: str = Field(default="", max_length=255)
     index_embedding_model_version: str = Field(default="", max_length=128)
@@ -94,6 +98,9 @@ class Settings(BaseSettings):
     semantic_rerank_enabled: bool = False
     semantic_rerank_top_k: int = Field(default=20, ge=1, le=50)
     search_max_bags: int = Field(default=2000, ge=1, le=10000)
+    search_concept_snapshot: Path | None = None
+    search_expansion: ExpansionPolicy = Field(default_factory=ExpansionPolicy)
+    search_vector_min_similarity: float = Field(default=0.6, gt=0, le=1, allow_inf_nan=False)
     search_timeout_seconds: int = Field(default=15, ge=1, le=120)
     search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)
     search_query_embedding_cache_enabled: bool = False

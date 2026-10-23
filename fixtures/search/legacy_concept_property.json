@@ -1,0 +1,85 @@
+{
+  "bsonType": "object",
+  "additionalProperties": false,
+  "required": [
+    "dictionary_version",
+    "fingerprint",
+    "resolver_version",
+    "counts",
+    "evidence"
+  ],
+  "properties": {
+    "dictionary_version": {
+      "bsonType": "string",
+      "maxLength": 100,
+      "minLength": 1
+    },
+    "fingerprint": {
+      "bsonType": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "resolver_version": {
+      "bsonType": "string",
+      "minLength": 1
+    },
+    "counts": {
+      "bsonType": "object",
+      "additionalProperties": {
+        "bsonType": "int",
+        "minimum": 1
+      }
+    },
+    "evidence": {
+      "bsonType": "array",
+      "maxItems": 4096,
+      "items": {
+        "bsonType": "object",
+        "additionalProperties": false,
+        "required": [
+          "unit_id",
+          "start",
+          "end",
+          "text",
+          "concept_ids",
+          "ambiguous"
+        ],
+        "properties": {
+          "unit_id": {
+            "bsonType": "string"
+          },
+          "start": {
+            "bsonType": "int",
+            "minimum": 0
+          },
+          "end": {
+            "bsonType": "int",
+            "minimum": 1
+          },
+          "text": {
+            "bsonType": "string"
+          },
+          "concept_ids": {
+            "bsonType": "array",
+            "items": {
+              "bsonType": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true,
+            "minItems": 1
+          },
+          "ambiguous": {
+            "bsonType": "bool"
+          }
+        }
+      }
+    },
+    "indexed_ids": {
+      "bsonType": "array",
+      "items": {
+        "bsonType": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  }
+}

@@ -9,6 +9,7 @@ from time import perf_counter
 
 from data_sync_etl.application.content_bags import bag_structure
 from data_sync_etl.application.search import QueryEmbeddingContext
+from data_sync_etl.domain import concepts, context_ranking, lexical, meaning_bags
 from data_sync_etl.domain.core import new_id, now
 from data_sync_etl.domain.evaluation import (
     METHODS,
@@ -76,9 +77,15 @@ class EvaluationService:
         snapshot = {'scope': access.scope, 'relevance_unit': 'resource', 'versions': versions,
                     'model': {'id': model.model_id, 'version': model.version, 'dimension': model.dimension},
                     'search_version': checksum([inspect.getsource(type(search)), inspect.getsource(binary_score),
-                                                inspect.getsource(cosine), inspect.getsource(rrf)]),
+                                                inspect.getsource(cosine), inspect.getsource(rrf),
+                                                inspect.getsource(lexical), inspect.getsource(concepts),
+                                                inspect.getsource(context_ranking), inspect.getsource(meaning_bags)]),
                     'policy_version': checksum(inspect.getsource(SearchAccess)),
                     'filters': filters, 'search_max_bags': self.settings.search_max_bags,
+                    'search_vector_min_similarity': self.settings.search_vector_min_similarity,
+                    'concept_dictionary': search.dictionary.snapshot.fingerprint,
+                    'expansion_policy': self.settings.search_expansion.model_dump(),
+                    'meaning_bags': [self.settings.index_meaning_bags_enabled, self.settings.index_meaning_group_threshold],
                     'search_timeout_seconds': self.settings.search_timeout_seconds}
         if self.settings.semantic_enabled:
             semantic = search.semantic.embedding
@@ -268,7 +275,9 @@ class EvaluationService:
                     if self.settings.semantic_enabled and self.search.semantic is not None else None)
         return checksum([marker, access.scope, model.model_id, model.version, model.dimension, semantic,
                          self.settings.chunk_size_words, self.settings.chunk_overlap_words,
-                         self.settings.search_max_bags, self.settings.search_timeout_seconds])
+                         self.settings.search_max_bags, self.settings.search_timeout_seconds,
+                         self.settings.search_vector_min_similarity, self.settings.index_meaning_bags_enabled,
+                         self.settings.index_meaning_group_threshold])
 
     def check_marker(self, dataset, access, expected):
         try:

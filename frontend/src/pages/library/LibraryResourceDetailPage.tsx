@@ -188,6 +188,7 @@ export function LibraryResourceDetailPage() {
             <div className={styles.fileSection}>
             <ResourceFilePanel key={`${resource.id}:${params.get('versionId')}`} resourceId={resource.id}
                 versionId={params.get('versionId')} contextId={params.get('contextId')}
+                contextEvidence={params.get('contextEvidence')}
                 sourceOwned={resource.source_origin === 'POSTGRESQL'} />
 
             <Link

@@ -14,6 +14,199 @@ Mẫu cài mới dùng **BGE-M3 1024 chiều**. Giữ đường dẫn mẫu ho�
 
 Env/secret không được commit. Docker không lấy URL DB từ `.env` host. Nếu đã export biến trong terminal, giá trị đó có thể ghi đè env file.
 
+## Tìm kiếm BoW/BM25 và triển khai lexical index
+
+**Túi nghĩa tự động:** mặc định `INDEX_MEANING_BAGS_ENABLED=true`. Model multilingual
+đọc các cách gọi/câu mô tả trong nội dung gốc, gom những biểu thức đủ gần nghĩa và
+lưu vector cùng vị trí nguồn cho từng biểu thức. Vector/Hybrid truy vấn các nhóm
+này; không còn dùng vector của 5 unigram để đại diện nghĩa khi chế độ này bật.
+Xem [thiết kế, triển khai và kiểm chứng](docs/meaning-bags.md). Corpus cũ cần
+validator bổ sung và full reindex; restart đơn thuần không tạo được nhóm nghĩa.
+BoW dùng từ điển khái niệm được kiểm duyệt để mở rộng Việt–Anh và BM25, không gọi encoder.
+
+`bow` dùng **BM25** trên toàn bộ nội dung ContentBag; `vector` dùng cosine của
+biểu thức nguồn trong nhóm nghĩa (max cosine); `hybrid` dùng **RRF(k=60)** giữa hai thứ hạng. Nhánh Vector
+chỉ nhận bag có cosine **>= `SEARCH_VECTOR_MIN_SIMILARITY` (mặc định 0.6)**;
+lọc trước RRF, grouping và phân trang. Cosine dương không tự chứng minh liên quan.
+Hybrid giữ kết quả BoW hợp lệ kể cả khi nhánh Vector không đạt ngưỡng; kết quả
+chỉ khớp ngữ nghĩa vẫn được nhận nếu qua ngưỡng, không bắt buộc trùng từ.
+Vector/Hybrid có thể trả 0 kết quả. Ngưỡng chỉ áp dụng cosine, không áp vào điểm RRF.
+BoW không gọi
+encoder. Năm keyword của mỗi leaf chỉ phục vụ hiển thị và biểu diễn dense cũ;
+chúng không còn giới hạn query, snippet hay lexical candidates.
+
+Analyzer dùng Underthesea 8.3.0. Script `scripts/check_lexical_analyzer.py` kiểm tra
+Windows/Python 3.13 và container Linux/Python 3.12. Chuẩn hóa NFC/casefold, giữ dấu, từ thành phần,
+token ghép tiếng Việt, số và C++/C#/.NET/Python3. Không tạo mọi n-gram.
+Stopwords được giữ trong dữ liệu kiểm tra cụm từ/phủ định; query chỉ
+có stopwords trả `QUERY_NO_KEYWORDS`, token lặp không nhân trọng số query.
+BM25 không cộng điểm chỉ vì trùng stopwords trong query có nghĩa; Hybrid không
+được hồi sinh một kết quả Vector dưới ngưỡng chỉ nhờ trùng `the`, `and`, `của`.
+Từ phủ định `không` vẫn được giữ và cụm từ vẫn kiểm tra trên chuỗi nguồn đầy đủ.
+
+Mỗi bag lưu `lexical`: terms/TF, length, title TF, các chuỗi surface token theo
+leaf, analyzer/version và fingerprint nguồn. TF/length gồm body và title một lần;
+BM25 dùng k1=1.2, b=0.75, title có TF hiệu dụng gấp 2, cụm từ nhiều từ khớp đúng
+được nhân điểm 1.2. Không nối cụm từ qua hai leaf. Title ở đây là **tiêu đề bag**.
+Ngữ cảnh chọn chunk theo cụm khớp nguyên văn, cụm thuật ngữ tương đương, rồi độ
+phủ từ mang nội dung có trọng số theo độ hiếm trong các chunk đủ quyền. Từ nối
+không tạo bằng chứng khớp; khi bằng điểm ưu tiên đoạn gọn hơn rồi thứ tự nguồn.
+Snippet bỏ từ nối và ưu tiên hit ít lặp, hiển thị vùng quanh hit thay vì đầu chunk.
+`context_id` luôn trỏ tới chính chunk được chọn; các đoạn liền kề chỉ bổ sung
+bối cảnh. `context_evidence=lexical` cho biết đoạn có từ/cụm từ khớp, không cam kết
+tương đương ngữ nghĩa toàn câu. Nếu bag chỉ khớp ở title hoặc qua Vector mà body
+không có bằng chứng, `context_evidence=bag` và giao diện ghi rõ đoạn tham khảo.
+Chưa có bước xếp hạng ngữ nghĩa riêng cho chunk. Không cần reindex cho thay đổi này.
+
+Corpus statistics **N/df/avgdl** được tính lại trên tất cả bag được xác minh và
+đủ quyền trong phạm vi bộ lọc, gồm cả bag không khớp query. Không có cache corpus
+hay cache kết quả. Candidate retrieval hiện đọc toàn bộ corpus có giới hạn,
+không lọc bằng display keywords; vượt cap báo lỗi thay vì cắt ranking. Kiểm tra
+cuối request bao gồm cả nonhit vì chúng ảnh hưởng BM25. Quyền descendant,
+generation, tombstone, grouping theo resource và pagination được giữ lại.
+`ranking_algorithm=bm25-concept-dismax-v3`; `score_components.bow` là BM25 có trọng số và boost,
+Hybrid chỉ hợp nhất thứ hạng. Response có `readiness` để báo corpus cần reindex.
+Chế độ tự động dùng `ranking_algorithm=meaning-maxcosine-v1` và `rrf-meaning-v1`.
+Chế độ cũ dùng `bag-cosine-threshold-v2` và `rrf-vector-threshold-v2`.
+Evaluation fingerprint và marker bao gồm cấu hình nhóm nghĩa và ngưỡng cosine,
+không so sánh lại run cũ như thể đang dùng cùng cấu hình.
+`dense_ready_bags` xác nhận vector lưu trữ hợp lệ theo model đã cấu hình; trạng thái
+model resident vẫn do endpoint model-status hiện có cung cấp. Evaluation fingerprint
+bao gồm mã analyzer/BM25 để không tái sử dụng đánh giá của thuật toán khác.
+
+Mở rộng khái niệm đọc snapshot đã kiểm duyệt và có phiên bản tại
+`src/data_sync_etl/domain/data/concepts.json`, độc lập với cấu hình nhóm nghĩa
+embedding. `domain/concepts.py` nhận diện cụm dài nhất, phân giải theo ngữ cảnh/
+lĩnh vực, giới hạn mở rộng và giữ bằng chứng nguồn. Quan hệ rộng hơn, hẹp hơn
+và liên quan mặc định tắt. Bảng hard-code `domain/multilingual.py` đã được xóa
+sau khi cập nhật mọi caller sang nguồn khái niệm mới.
+
+Analyzer mới cần lexical backfill/reindex. Chỉ thay snapshot query-time hoặc
+trọng số thì không cần reindex. `scripts/reindex_lexical.py` có thể giữ dense
+vector và meaning bag đã xác minh, với dry-run chỉ đọc, apply tường minh và
+backup/rollback BSON. Giữ nguyên manifest migration v1; hợp đồng mới nằm tại
+`migrations_mongo/lexical_v2.json`.
+
+Chạy `python scripts/benchmark_concepts.py` để so sánh ba nhánh BM25. Fixture nhỏ
+có nhãn và kết quả chạy thật nằm trong `fixtures/search/concept_*`.
+
+**Phụ thuộc hiện tại:** build ContentBag mới vẫn cần model/schema/vector hợp lệ;
+lexical readiness chưa tách thành pipeline độc lập. Backfill dưới đây giữ nguyên
+vector đã xác minh, không encode, tải model hay sửa `.env`. Bag cũ hoặc analyzer
+khác không được dùng như chỉ mục READY trước khi backfill/reindex.
+Root chỉ có số, không có display keyword, vẫn bị trì hoãn theo điều kiện build
+hiện tại; chữ số trong nội dung có keyword được đưa đầy đủ vào lexical index.
+
+**Semantic tự động:** encode query gốc và so với các biểu thức/đoạn nội dung nguồn,
+không dùng từ điển alias để quyết định khớp nghĩa. Trường keyword/vector nền vẫn
+được giữ để tương thích và rollback. Khi tắt chế độ tự động, biểu diễn dense cũ
+vẫn có hạn chế top5 keyword. Model không bảo đảm mọi câu/ngôn ngữ cùng nghĩa
+đều được gom đúng hoặc tìm thấy. Model local
+`Models/bge-m3` đã được benchmark offline và cho vector 1024 chiều, revision
+`5617a9f61b028005a4858fdac845db406aefb181`. Không tự chuyển corpus/model/dimension.
+
+**Số đo biểu diễn keyword cũ:** `python scripts/benchmark_vector_filter.py` đo model local,
+biểu diễn keyword production và fixture có nhãn; ghi `storage/benchmarks/vector-filter.json`.
+Trên 15 query/18 bag của fixture hiện tại, gate cũ `>0` nhận cả 270 cặp; ngưỡng
+0.6 nhận 10 cặp, trong đó 9 cặp có nhãn liên quan. Đồng thời chỉ giữ 9/22 cặp
+liên quan đã gán nhãn: đây là lựa chọn ưu tiên giảm nhiễu, có thể bỏ sót kết quả
+đa ngôn ngữ. Fixture nhỏ và các cặp chưa có nhãn không mặc nhiên là không liên quan;
+không xem số này là chất lượng trên corpus thật. Giảm ngưỡng (ví dụ 0.55) tăng độ
+phủ nhưng có thể tăng nhiễu; hiệu chỉnh trên query và nhãn thực tế của corpus/model.
+Chỉ cần restart API khi đổi ngưỡng, không cần reindex. Hạn chế top5 keyword ở dense
+vẫn còn; ngưỡng không thay thế biểu diễn nội dung tốt hơn hoặc bộ reranker.
+
+### Thứ tự triển khai và rollback
+
+Các bước lexical backfill dưới đây dành cho chế độ cũ
+`INDEX_MEANING_BAGS_ENABLED=false`. Với chế độ tự động mặc định, dùng validator
+và full reindex trong [hướng dẫn túi nghĩa](docs/meaning-bags.md).
+
+1. Dừng API/worker/sync đang dùng `.venv` **trước khi cài lại package**. Trên
+   Windows, worker chạy bằng `etl` giữ khóa `etl.exe`, khiến pip uninstall dở dang.
+   Cài dependencies bằng lệnh cài repo bên dưới. Giữ nguyên `.env`, model và số
+   chiều hiện tại. Foundation v1 vẫn có 5 collection/6 business indexes; lexical
+   chỉ thêm field tùy chọn ở `content_bags`. Manifest mở rộng là
+   `migrations_mongo/lexical_v1.json`; không sửa migration/schema lịch sử.
+2. Xác nhận target, backup hạ tầng và dừng **mọi tiến trình ghi** (API/worker/sync).
+   Với database trống, chạy foundation bootstrap hiện có trước; sau đó chạy:
+
+   ```bash
+   python scripts/check_migration_governance.py
+   python scripts/reindex_lexical.py --dry-run
+   ```
+
+3. Chỉ khi dry-run thành công, operator mới chạy lệnh ghi đã duyệt:
+
+   ```bash
+   python scripts/reindex_lexical.py --apply --writers-stopped --backup storage/lexical-backup.json
+   python scripts/reindex_lexical.py --check
+   ```
+
+   Backup BSON chứa validator cũ, bag gốc và run IDs, đồng thời là checkpoint.
+   Chạy lại cùng lệnh/cùng backup để resume. Script kiểm tra nguồn, membership,
+   model/revision/dimension và TF trước khi đánh dấu run COMPLETED. Tối đa 10.000
+   bag mỗi target; nguồn đã đổi hoặc vector không khớp cần full reindex bằng luồng
+   indexing hiện có, không được tái sử dụng vector cũ. `--check` kiểm tra schema/
+   documents; kiểm tra index-status từng version để xác nhận readiness nguồn.
+   Foundation CLI `schema --check` vẫn kiểm tra contract v1 đóng băng, vì vậy sau
+   extension hãy dùng `reindex_lexical.py --check` để kiểm tra schema hoạt động.
+   Schema concept cũ đã biết cũng được nhận diện chính xác bằng fingerprint:
+   payload `concepts` được giữ trong backup, bỏ khỏi bag khi chuyển sang lexical,
+   và được khôi phục cùng validator khi rollback. Schema lạ vẫn bị từ chối.
+   Bag concept lịch sử không-current cần migration được xem xét riêng.
+4. Khởi động lại ứng dụng/worker, kiểm tra index-status, BoW/Hybrid và context.
+   Nếu cần rollback, dừng writers, chạy:
+
+   ```bash
+   python scripts/reindex_lexical.py --rollback --writers-stopped --backup storage/lexical-backup.json
+   ```
+
+   Sau đó dùng checkout ứng dụng tương thích trước nâng cấp. Rollback từ chối
+   ghi đè nếu nguồn/bag đã thay đổi; không xóa dữ liệu học liệu hay model. Backup
+   phải được giữ trong kho nội bộ (mặc định `storage/` được gitignore).
+
+### Đánh giá có thể chạy lại
+
+```bash
+python scripts/benchmark_lexical.py --output storage/benchmarks/lexical.json
+python -m pytest tests/unit/test_lexical_search.py --basetemp=.test-tmp/lexical
+# TEST_MONGO_URI chỉ trỏ server test; fixture tự tạo database etl_test_<UUID>.
+python -m pytest tests/integration/test_lexical_mongo.py --basetemp=.test-tmp/lexical-mongo
+```
+
+Corpus/qrels: `fixtures/search/lexical_benchmark.json`; kết quả model thật:
+`fixtures/search/lexical_benchmark_results.json`. Cùng 18 bag/15 query, k=5,
+3 lần/query; latency là trung bình median mỗi query, chỉ đo ranking/encode offline,
+không bao gồm DB, quyền, verification, HTTP hoặc cache. Bộ dữ liệu nhỏ được gán
+nhãn thủ công để phát triển, chưa chứng minh chất lượng trên học liệu thực tế.
+
+| Phương pháp | Recall@5 | nDCG@5 | MRR | Latency ms |
+| --- | ---: | ---: | ---: | ---: |
+| Binary top5 cũ | 0.511 | 0.481 | 0.580 | 0.029 |
+| BM25 | 0.778 | 0.823 | 0.933 | 0.223 |
+| Hybrid + BGE-M3 thật | 0.878 | 0.786 | 0.843 | 121.304 |
+
+BM25 không giảm nDCG so baseline trên bộ này. Hybrid giảm so BM25 ở `phrase`,
+`vi-en`, `vi-natural`; tăng recall không đồng nghĩa cải thiện thứ tự mọi query.
+Các truy vấn exact ngoài top5, Việt/Anh, mô tả tự nhiên, đa nghĩa và khái niệm
+liên quan nhưng không tương đương đều có trong fixture. Vector benchmark giữ
+đúng keyword input của production hiện tại, không dùng fake vectors để suy luận
+chất lượng semantic.
+
+Kiểm chứng triển khai ngày 22/10/2026: 245 test liên quan search/indexing/quyền/
+context/cache và 43 Mongo integration pass (1 skip), 10 test lexical riêng,
+37 test evaluation và 45 frontend API/runtime test pass; Python lint, frontend lint/build, diff check
+và migration governance pass. Suite unit rộng ban đầu có 1.240 pass/9 skip/4 lỗi;
+hai hồi quy schema-readiness và `word` → `word42` đã được sửa và kiểm tra lại.
+Hai lỗi còn lại (snapshot OpenAPI, capabilities modes) và test UI xem Office
+đều tái hiện trên HEAD gốc trích riêng dưới `.test-tmp/lexical-baseline`, không
+được sửa snapshot để che lỗi. PostgreSQL integration/concurrency chưa được chạy
+do chưa có TEST_DATABASE_URL cô lập; Mongo tests dùng UUID riêng, metadata fixture
+dùng SQLite. Không apply lên database đang phục vụ.
+
+## 1. Cài môi trường và dependencies
+
 ## 1. Chạy local
 
 ### 1.1. Cài môi trường và thư viện
@@ -32,6 +225,19 @@ mkdir -p /d/etl/private/auth /d/etl/source /d/etl/source-temp /d/etl/storage /d/
 
 Linux: dùng `python3.12`, `source .venv/bin/activate`, `npm` thay `npm.cmd`, và đường dẫn tuyệt đối Linux thay `D:/etl/...`.
 Không dùng `~` trong env; không chép `.venv` từ thư mục/máy khác.
+
+Nếu cài lại gặp `WinError 32` tại `.venv/Scripts/etl.exe`, dừng terminal worker
+bằng Ctrl+C trước khi chạy lại pip; không tiếp tục apply sau khi pip báo lỗi.
+Uninstall dở dang có thể làm mất editable import và gây `ModuleNotFoundError`.
+Sau khi dừng các tiến trình, có thể sửa bản cài bằng dependencies đã có:
+
+```bash
+python -m pip install -e . --no-deps --no-build-isolation
+python -c "import data_sync_etl; print(data_sync_etl.__file__)"
+python scripts/reindex_lexical.py --dry-run
+```
+
+## 2. Cấu hình `.env`
 
 ### 1.2. Cài OCR và công cụ xem Office
 

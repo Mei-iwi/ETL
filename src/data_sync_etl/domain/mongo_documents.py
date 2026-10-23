@@ -7,6 +7,9 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from data_sync_etl.domain.lexical import LexicalDocument
+from data_sync_etl.domain.meaning_bags import MeaningBag
+
 DocumentId = Annotated[str, Field(strict=True, min_length=1, max_length=30)]
 Int32 = Annotated[int, Field(strict=True, ge=1, le=2**31 - 1)]
 STRUCTURED_BAG_TYPES = ('CHAPTER', 'LESSON', 'SECTION')
@@ -147,6 +150,8 @@ class ContentUnitDocument(ProjectedDocument):
 
 
 class ContentBagDocument(ProjectedDocument):
+    lexical: LexicalDocument | None = None
+    meanings: MeaningBag | None = None
     unit_type: BagUnitType
     title: Annotated[str, Field(max_length=500)] | None = None
     keywords: list[str]

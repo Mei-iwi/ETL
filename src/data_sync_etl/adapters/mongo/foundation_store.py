@@ -435,11 +435,31 @@ class MongoBagStore:
         )
 
     def ensure_ready(self):
+        from data_sync_etl.adapters.mongo.lexical_schema import check_lexical_schema
+        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
         from data_sync_etl.adapters.mongo.schema import check_schema
         from data_sync_etl.domain.indexing import IndexingError
 
-        if not check_schema(self.database, dimension=self.dimension,
-                            historical_dimensions=self.historical_dimensions)['schema_ready']:
+        if (not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
+                and not check_lexical_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
+                and not check_schema(self.database, dimension=self.dimension,
+                                    historical_dimensions=self.historical_dimensions)['schema_ready']):
+            raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+
+    def ensure_lexical_ready(self):
+        from data_sync_etl.adapters.mongo.lexical_schema import check_lexical_schema
+        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
+        from data_sync_etl.domain.indexing import IndexingError
+
+        if (not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
+                and not check_lexical_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']):
+            raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+
+    def ensure_meanings_ready(self):
+        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
+        from data_sync_etl.domain.indexing import IndexingError
+
+        if not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']:
             raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
 
     def _current(self, document):

@@ -11,8 +11,19 @@ from data_sync_etl.application.search_runtime import (
     SearchCall,
     SearchInferenceQueue,
 )
+from data_sync_etl.domain.concepts import Dictionary, Snapshot, default_dictionary, equivalent_terms
+from data_sync_etl.domain.context_ranking import ContextRanker
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
-from data_sync_etl.domain.search import SearchError, binary_score, cosine, normalize_query, rrf
+from data_sync_etl.domain.lexical import (
+    ANALYZER_VERSION,
+    RANKING_VERSION,
+    REPRESENTATION_VERSION,
+    bm25,
+    query_terms,
+    snippet_text,
+)
+from data_sync_etl.domain.meaning_bags import match_meaning
+from data_sync_etl.domain.search import SearchError, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
 from data_sync_etl.domain.search_context import decode_context, encode_context
 from data_sync_etl.ports.search import SearchBagReader
@@ -53,6 +64,10 @@ class SearchService:
                  semantic=None):
         self.indexing, self.settings, self.bags = indexing, settings, bags
         self.semantic = semantic
+        path = settings.search_concept_snapshot
+        self.dictionary = (Dictionary(Snapshot.model_validate_json(path.read_text(encoding='utf-8')))
+                           if path is not None else default_dictionary())
+
         self._http_inference = SearchInferenceQueue()
         # Retain worker leases after HTTP timeout: repeated cancellations cannot
         # spawn unbounded abandoned model/driver threads. BoW has separate room.
@@ -60,6 +75,16 @@ class SearchService:
         self._http_light_calls = BoundedSemaphore(8)
         self._http_query_vectors = (HttpQueryVectorCache(query_cache_runtime)
                                     if query_cache_runtime is not None else None)
+
+    def _ranking_algorithm(self, method):
+        if self.settings.semantic_enabled and method in ('vector', 'hybrid'):
+            return ('bge-m3-chunk-' + self.settings.semantic_strategy +
+                    ('-colbert-v1' if self.settings.semantic_rerank_enabled else '-cosine-v1') +
+                    ('+rrf-v1' if method == 'hybrid' else ''))
+        meanings = self.settings.index_meaning_bags_enabled
+        return {'bow': RANKING_VERSION,
+                'vector': 'meaning-maxcosine-v1' if meanings else 'bag-cosine-threshold-v2',
+                'hybrid': 'rrf-meaning-v1' if meanings else 'rrf-vector-threshold-v2'}[method]
 
     def search_http(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None):
         """Called only inside the route's existing authorization/admission guard.
@@ -241,24 +266,44 @@ class SearchService:
     def _metadata(repo, filters, access, limit):
         if not access.internal:
             return []  # No existing contract can prove public full-text rights.
-        return repo.search_versions(filters, limit=limit)
+        return repo.search_versions({k: v for k, v in filters.items() if k != 'domain'}, limit=limit)
 
-    def _snippets(self, snapshot, keywords, started, allowed):
+    def _snippets(self, snapshot, keywords, started, allowed, query=None, expansion=None, policy=None):
         roots = bag_structure(snapshot[2])
         # Bag scores include ALL member keywords/vectors. Never expose a Bag that
         # embeds denied descendants, even when another leaf could supply a snippet.
         roots = {root: leaves for root, leaves in roots.items() if set(leaves) <= allowed}
         leaf_root = {leaf: root for root, leaves in roots.items() for leaf in leaves}
-        best = {}
+        best, chunks = {}, []
         for chunk in self.indexing._preview(snapshot):
             self._deadline(started)
             root = leaf_root.get(chunk['content_unit_id'])
             if root is None or chunk['content_unit_id'] not in allowed or len(chunk['text']) > 20000:
                 continue
-            score, _ = binary_score(keywords, self.indexing.extractor.extract(chunk['text']))
+            chunks.append(chunk)
+        ranker = ContextRanker(query, keywords, [chunk['text'] for chunk in chunks],
+                               checkpoint=lambda: self._deadline(started),
+                               expand_concepts=self.settings.search_expansion.enabled,
+                               expansion=expansion, dictionary=self.dictionary, policy=policy)
+        for ordinal, chunk in enumerate(chunks):
+            self._deadline(started)
+            root = leaf_root[chunk['content_unit_id']]
+            score = ranker.score(ordinal)
             if root not in best or score > best[root][0]:
                 best[root] = (score, chunk)
-        return roots, best
+        return roots, best, chunks
+
+    def _lexical_evidence(self, expansion, bag, snapshot, policy):
+        evidence = [{**row, 'content_unit_id': bag.id} for row in
+                    self.dictionary.evidence(expansion, bag.title or '', field='title', policy=policy)]
+        members = set(bag_structure(snapshot[2])[bag.id])
+        for unit in snapshot[2]:
+            if unit['id'] in members:
+                evidence.extend({**row, 'content_unit_id': unit['id']} for row in
+                                self.dictionary.evidence(expansion, unit['text'], policy=policy))
+            if len(evidence) >= 64:
+                break
+        return evidence[:64]
 
     def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
                _query_context=None, _batch_texts=False, _batch_bags=False):
@@ -269,10 +314,11 @@ class SearchService:
             return {'query': query, 'method': method, 'page': page, 'size': size,
                     'total': 0, 'total_pages': 0, 'items': [], 'ready_bag_count': 0,
                     'representation_unit': 'content_bag', 'access_scope': 'public',
-                    'ranking_algorithm': {'bow': 'binary-keyword-cosine-v1',
-                                          'vector': 'bag-cosine-v1', 'hybrid': 'rrf-v1'}[method],
+                    'ranking_algorithm': self._ranking_algorithm(method),
                     'message': 'PUBLIC_ACCESS_UNCONFIRMED'}
-        keywords = self.indexing.extractor.extract(query)
+        keywords = query_terms(query)
+        policy = self.settings.search_expansion.model_copy(deep=True)
+        expansion = self.dictionary.expand(query, domain=filters.get('domain'), policy=policy)
         if self.bags is None:
             raise SearchError('SEARCH_SCHEMA_UNAVAILABLE')
         self.bags.ensure_ready()
@@ -302,6 +348,7 @@ class SearchService:
             raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
         by_bag, bow, semantic, snapshots, ready_count, source_chars = {}, {}, {}, {}, 0, 0
         excluded, semantic_metadata = set(), {}
+        authorized_roots = {}
         for version_id in sorted({bag.resource_version_id for bag in candidates}):
             self._deadline(started)
             with self.indexing.uow() as repo:
@@ -315,7 +362,8 @@ class SearchService:
             if source_chars > self.settings.index_max_source_chars:
                 raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
             snapshots[version_id] = snapshot
-            roots, snippets = self._snippets(snapshot, keywords, started, allowed)
+            roots, snippets, preview = self._snippets(snapshot, keywords, started, allowed, query, expansion, policy)
+            authorized_roots[version_id] = set(roots)
             semantic_hits = (self.semantic.scores(snapshot, semantic_metadata[version_id],
                 roots, allowed, vector, lambda: self._deadline(started), semantic_budget)
                 if use_semantic else {})
@@ -338,14 +386,39 @@ class SearchService:
                 if bag.id not in roots or bag.id not in snippets:
                     continue
                 ready_count += 1
-                score, matched = binary_score(keywords, bag.keywords)
-                if score > 0:
-                    bow[bag.id] = score
-                if vector is not None:
-                    value = (semantic_hits[bag.id][0] if bag.id in semantic_hits else 0.) if use_semantic else cosine(vector, bag.embedding)
-                    if value > 0:
+                matched = sorted(set(keywords) & set(bag.lexical.terms))
+                if policy.enabled:
+                    matched = sorted(set(matched) | equivalent_terms(query, bag.lexical.title_tokens, expansion=expansion, dictionary=self.dictionary, policy=policy)
+                                 | set().union(*(equivalent_terms(query, passage, expansion=expansion, dictionary=self.dictionary, policy=policy)
+                                                 for passage in bag.lexical.passages)))
+                chunk = dict(snippets[bag.id][1])
+                chunk['context_evidence'] = 'lexical' if any(snippets[bag.id][0]) else 'bag'
+                chunk['meaning_variants'] = []
+                if use_semantic:
+                    hit = semantic_hits.get(bag.id)
+                    if hit is not None:
+                        semantic[bag.id] = hit[0]
+                        chunk = {**hit[1], 'context_evidence': 'semantic', 'meaning_variants': []}
+                elif vector is not None:
+                    member, variants = None, []
+                    if self.settings.index_meaning_bags_enabled:
+                        value, member, variants = match_meaning(vector, bag.meanings)
+                    else:
+                        value = cosine(vector, bag.embedding)
+                    if value >= self.settings.search_vector_min_similarity:
                         semantic[bag.id] = value
-                chunk = semantic_hits[bag.id][1] if bag.id in semantic_hits else snippets[bag.id][1]
+                        chunk['meaning_variants'] = variants[:8]
+                        if member is not None and member.kind == 'text' and (
+                                method == 'vector' or not snippets[bag.id][0][0]):
+                            passages = [part for part in preview if part['content_unit_id'] == member.unit_id
+                                          and part['char_start'] < member.end and part['char_end'] > member.start]
+                            if passages:
+                                chosen = max(passages, key=lambda part: (
+                                    min(part['char_end'], member.end) - max(part['char_start'], member.start),
+                                    -part['unit_chunk_sequence']))
+                                chunk = {**chosen, 'context_evidence': 'semantic',
+                                         'meaning_variants': variants[:8],
+                                         'anchor': max(member.start - chosen['char_start'], 0)}
                 by_bag[bag.id] = (bag, chunk, matched,
                     representation_mode(snapshot[2], {bag.id: roots[bag.id]}))
 
@@ -364,6 +437,9 @@ class SearchService:
         if excluded:
             discard_versions()
         def ranked():
+            nonlocal bow
+            bow = bm25(query, {key: row[0].lexical for key, row in by_bag.items()},
+                       dictionary=self.dictionary, policy=policy, expansion=expansion)
             scores = bow if method == 'bow' else semantic if method == 'vector' else rrf(bow, semantic)
             grouped, matches = {}, {}
             for bag_id in sorted(scores, key=lambda key: (-scores[key], key)):
@@ -383,25 +459,27 @@ class SearchService:
                     'representation_mode': mode, 'matched_keywords': matched, 'score': scores[bag_id],
                     'score_components': {key: branch[bag_id] for key, branch in
                                          [('bow', bow), ('vector', semantic)] if bag_id in branch},
-                    'snippet': chunk['text'][:400], 'page_from': chunk['page_from'], 'page_to': chunk['page_to'],
+                    'snippet': snippet_text(chunk['text'], set(keywords), query=query, anchor=chunk.get('anchor'), expansion=expansion, dictionary=self.dictionary, policy=policy), 'page_from': chunk['page_from'], 'page_to': chunk['page_to'],
                     'content_unit_id': chunk['content_unit_id'], 'context_id': token,
+                    'context_evidence': chunk['context_evidence'],
+                    'meaning_variants': chunk['meaning_variants'],
+                    'lexical_evidence': self._lexical_evidence(expansion, bag, snapshot, policy),
                     'context_url': f'/api/v1/chunks/{token}/context',
                 }
             return grouped, matches
         grouped, matches = ranked()
         whole_file_access = {}
         # Recheck metadata and snapshots after ranking; never publish a known stale vector.
-        if grouped or (_batch_texts and excluded):
+        if snapshots or (_batch_texts and excluded):
             with self.indexing.uow() as repo:
                 fresh_rows = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
                 fresh_by_version = {row['version_id']: row for row in fresh_rows}
                 fresh_ids = set(fresh_by_version)
-                if _batch_texts and (len(fresh_rows) > self.settings.search_max_bags
-                                     or fresh_ids - by_version.keys()):
+                if (len(fresh_rows) > self.settings.search_max_bags
+                        or fresh_ids - by_version.keys()):
                     raise SearchError('SEARCH_INDEX_STALE', 409)
-                checked_versions = (set(snapshots) if _batch_texts else
-                                    {item['resource_version_id'] for item in grouped.values()})
-                expected_bags = {bag.id: bag for bag in candidates} if _batch_texts else None
+                checked_versions = set(snapshots)  # Nonhits also influence corpus statistics.
+                expected_bags = {bag.id: bag for bag in candidates}
                 for version_id in checked_versions:
                     fresh = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts,
                                                  expected_bags=expected_bags, batch_bags=_batch_bags)
@@ -413,7 +491,7 @@ class SearchService:
                         raise SearchError('SEARCH_INDEX_STALE', 409)
                     if _batch_texts and fresh_by_version[version_id] != by_version[version_id]:
                         raise SearchError('SEARCH_INDEX_STALE', 409)
-                    if use_semantic:
+                    if use_semantic and authorized_roots[version_id]:
                         if fresh_by_version[version_id] != by_version[version_id]:
                             raise SearchError('SEARCH_INDEX_STALE', 409)
                         fresh_metadata = repo.semantic_metadata(fresh[0]['resource_id'])
@@ -425,8 +503,12 @@ class SearchService:
                             raise SearchError('SEMANTIC_INDEX_STALE', 409)
                     allowed = self._allowed_units(repo, fresh, access)
                     whole_file_access[version_id] = bool(fresh[2]) and {unit['id'] for unit in fresh[2]} <= allowed
-                    if any(not set(bag_structure(fresh[2])[item['bag_id']]) <= allowed
-                           for item in grouped.values() if item['resource_version_id'] == version_id):
+                    fresh_roots = {root for root, leaves in bag_structure(fresh[2]).items()
+                                   if set(leaves) <= allowed}
+                    if fresh_roots != authorized_roots[version_id]:
+                        raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
+                    if any(not set(bag_structure(fresh[2])[bag_id]) <= allowed
+                           for bag_id, (bag, *_) in by_bag.items() if bag.resource_version_id == version_id):
                         if _batch_texts and self._postgres_version_changed(repo, snapshots[version_id]):
                             excluded.add(version_id)
                             continue
@@ -451,11 +533,15 @@ class SearchService:
         return {'query': query, 'method': method, 'page': page, 'size': size, 'total': total,
                 **vector_info,
                 'total_pages': (total + size - 1) // size, 'items': items[offset:offset+size],
-                'ranking_algorithm': (('bge-m3-chunk-' + self.settings.semantic_strategy +
-                    ('-colbert-v1' if self.settings.semantic_rerank_enabled else '-cosine-v1') +
-                    ('+rrf-v1' if method == 'hybrid' else '')) if use_semantic else
-                    {'bow': 'binary-keyword-cosine-v1', 'vector': 'bag-cosine-v1', 'hybrid': 'rrf-v1'}[method]),
+                'ranking_algorithm': self._ranking_algorithm(method),
+                'query_expansion': expansion.model_dump(),
+                'search_fingerprint': digest([ANALYZER_VERSION, REPRESENTATION_VERSION, RANKING_VERSION,
+                                              expansion.dictionary_fingerprint,
+                                              expansion.policy_fingerprint]),
                 'representation_unit': 'content_bag', 'ready_bag_count': ready_count, 'access_scope': access.scope,
+                'readiness': {'lexical_ready_bags': ready_count, 'dense_ready_bags': ready_count,
+                              'eligible_versions': len(by_version), 'ready_versions': len(snapshots),
+                              'reindex_required': len(snapshots) < len(by_version)},
                 'message': 'QUERY_NO_KEYWORDS' if not keywords and method == 'bow' else
                            'NO_READY_INDEX' if metadata and not snapshots else
                            'NO_ACCESSIBLE_CONTENT' if not ready_count else 'OK'}

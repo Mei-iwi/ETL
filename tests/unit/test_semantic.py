@@ -329,3 +329,42 @@ def test_curriculum_metadata_change_invalidates_semantic_without_changing_bow(se
     assert c.search.search('learning', method='bow') == before
     assert service.build(version['id'], apply=True)['index_id'] != built['index_id']
     assert any('Subject: New verified subject name' in text for text in service.embedding.inputs)
+
+
+@pytest.mark.parametrize('method', ['vector', 'hybrid'])
+def test_chunk_semantic_coexists_with_meaning_bags_and_legacy_threshold(semantic_search, monkeypatch, method):
+    """Merge wiring regression only: synthetic scores do not claim model quality."""
+    c, version, service = semantic_search
+    c.settings.index_meaning_bags_enabled = True
+    c.indexing.enqueue(version['id'], force=True)
+    assert c.indexing.once()
+    service.build(version['id'], apply=True)
+    c.settings.semantic_enabled = True
+    c.settings.search_vector_min_similarity = .99
+    original = service.scores
+    def low_semantic_score(*args):
+        return {key: (.2, chunk) for key, (_, chunk) in original(*args).items()}
+    monkeypatch.setattr(service, 'scores', low_semantic_score)
+    def wrong_branch(*_):
+        pytest.fail('Chunk semantic must not score legacy vectors or meaning bags')
+    monkeypatch.setattr('data_sync_etl.application.search.cosine', wrong_branch)
+    monkeypatch.setattr('data_sync_etl.application.search.match_meaning', wrong_branch)
+    result = c.search.search('completelydifferentwords', method=method)
+    assert result['total'] == 1
+    item = result['items'][0]
+    assert item['score_components']['vector'] == .2
+    assert item['context_evidence'] == 'semantic'
+    assert item['meaning_variants'] == []
+    assert result['query_expansion']['dictionary_fingerprint']
+    assert result['vector_index']['dimension'] == 1024
+    assert result['ranking_algorithm'].startswith('bge-m3-chunk-')
+
+
+def test_search_recheck_skips_semantic_manifest_for_denied_version(semantic_search, monkeypatch):
+    c, _, service = semantic_search
+    c.settings.semantic_enabled = True
+    monkeypatch.setattr(c.search, '_allowed_units', lambda *_: set())
+    assert not service.store.manifests
+    result = c.search.search('semantic description', method='vector')
+    assert result['total'] == 0
+    assert result['items'] == []

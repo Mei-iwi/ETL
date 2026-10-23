@@ -167,6 +167,19 @@ class LocalSentenceEmbedding:
         self.prepare()
         return self._encode(text)
 
+    def embed_many(self, texts):
+        if not isinstance(texts, list) or not 1 <= len(texts) <= 16 or any(not isinstance(text, str) for text in texts):
+            raise IndexingError('INVALID_EMBEDDING', 503)
+        self.prepare()
+        try:
+            vectors = self._model.encode(texts, batch_size=16, show_progress_bar=False).tolist()
+        except Exception:
+            self._checked = False
+            raise IndexingError('BLOCKED_EMBEDDING_RUNTIME', 503) from None
+        if len(vectors) != len(texts):
+            raise IndexingError('INVALID_EMBEDDING', 503)
+        return [validate_vector(vector, self.dimension) for vector in vectors]
+
     def prepare_query(self):
         """Validate/load once, then return the encoder for the immediate query.
 
