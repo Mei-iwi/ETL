@@ -44,6 +44,7 @@ export function SystemMasterSyncLayout() {
         <nav className={styles.errorTabs} aria-label="Nhóm đồng bộ dữ liệu">
             <NavLink to="/library/source-sync" end>Cấu hình đồng bộ</NavLink>
             <NavLink to="/library/source-sync/files" end>Tệp học liệu từ nguồn</NavLink>
+            <NavLink to="/library/source-sync/reconciliation" end>Đối soát toàn vẹn dữ liệu</NavLink>
         </nav>
         <Outlet />
     </section>

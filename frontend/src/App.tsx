@@ -35,6 +35,7 @@ import { SystemStatusPage } from './pages/system/SystemStatusPage'
 import { MasterDataPage } from './pages/system/MasterDataPage'
 import { SystemCapalitiesPage } from './pages/system/SystemCapalitiesPage'
 import { SystemMasterSyncLayout, SystemMasterSyncPage } from './pages/system/SystemMasterSyncPage'
+import { DataReconciliationPage } from './pages/system/DataReconciliationPage'
 import { LibraryUpdateVersion } from './pages/library/LibraryUpdateVersion'
 
 export default function App() {
@@ -65,6 +66,7 @@ export default function App() {
             <Route path='source-sync' element={<SystemMasterSyncLayout />}>
               <Route index element={<SystemMasterSyncPage />} />
               <Route path='files' element={<LibrarySourceFilesPage />} />
+              <Route path='reconciliation' element={<DataReconciliationPage />} />
             </Route>
             <Route path='source-files' element={<Navigate to='/library/source-sync/files' replace />} />
             <Route path='source-sync-errors'>
