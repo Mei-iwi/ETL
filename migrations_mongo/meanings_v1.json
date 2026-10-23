@@ -1,0 +1,9 @@
+{
+  "schema_version": "content-bag-meanings-v1",
+  "base_version": "etl-bag-lexical-v1",
+  "dimension": 384,
+  "validator_sha256": "53ab112c8e0b892f30049156b5e54649e2a293bd40700b8862e42c560be31366",
+  "collections_added": [],
+  "indexes_added": [],
+  "optional_property": "meanings"
+}

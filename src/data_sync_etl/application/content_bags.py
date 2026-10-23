@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from data_sync_etl.domain.core import DomainError, now
+from data_sync_etl.domain.lexical import lexical_document
+from data_sync_etl.domain.meaning_bags import build_meanings
 from data_sync_etl.domain.mongo_documents import (
     FALLBACK_BAG_TYPES,
     STRUCTURED_BAG_TYPES,
@@ -104,8 +106,9 @@ def representation_mode(units, roots):
 
 
 class ContentBagBuilder:
-    def __init__(self, embedding: EmbeddingPort | None = None):
+    def __init__(self, embedding: EmbeddingPort | None = None, *, meaning_threshold=None):
         self.embedding = embedding
+        self.meaning_threshold = meaning_threshold
 
     def build(
         self,
@@ -194,6 +197,9 @@ class ContentBagBuilder:
             if len(vector) != model.dimension:
                 raise DomainError("Embedding dimension mismatch")
             stamp = now()
+            meanings = (build_meanings([(key, leaf_by_id[key].text) for key in membership],
+                                       root.id, root.title, model, self.meaning_threshold)
+                        if self.meaning_threshold is not None else None)
             try:
                 bags.append(
                     ContentBagDocument(
@@ -202,6 +208,8 @@ class ContentBagBuilder:
                         unit_type=root.unit_type,
                         title=root.title,
                         keywords=keywords,
+                        lexical=lexical_document([leaf_by_id[key].text for key in membership], root.title),
+                        **({'meanings': meanings} if meanings is not None else {}),
                         embedding_text=text,
                         embedding=vector,
                         embedding_model=f"{model.model_id}@{model.version}",

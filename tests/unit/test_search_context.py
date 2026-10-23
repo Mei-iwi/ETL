@@ -45,7 +45,7 @@ def test_context_matches_search_snippet_and_is_read_only(searchable):
     ' '.join(f'word{i}' for i in range(start, start + 10)) for start in range(0, 70, 10))]}], indirect=True)
 def test_neighbors_offsets_and_ordinal_bounds(searchable):
     c, version = searchable
-    item = c.search.search('word', 'bow')['items'][0]
+    item = c.search.search('word42', 'bow')['items'][0]
     version_id, unit_id, _, fingerprint = decode_context(item['context_id'])
     token = encode_context(version_id, unit_id, 2, fingerprint)
     context = c.search.context(token, neighbors=2)
@@ -106,3 +106,26 @@ def test_openapi_search_contract_is_exposed(searchable):
         operation = schema['paths'][path][verb]
         assert operation['tags'] == ['Learning Resource Retrieval and Search']
         assert {'200', '404', '409', '422', '503'} <= operation['responses'].keys()
+
+
+@pytest.mark.parametrize('searchable', [{'texts': [
+    'the and for in the text\n' * 9 + 'A xylophone produces musical sounds.',
+]}], indirect=True)
+def test_context_selects_informative_late_hit_and_keeps_search_locator(searchable):
+    c, _ = searchable
+    item = c.search.search('please explain the xylophone in the text', 'bow')['items'][0]
+    assert item['context_evidence'] == 'lexical'
+    assert 'xylophone' in item['snippet']
+    context = c.search.context(item['context_id'], neighbors=0)
+    selected = next(chunk for chunk in context['chunks'] if chunk['selected'])
+    assert 'xylophone' in selected['text']
+    assert item['snippet'] in selected['text']
+    assert selected['unit_chunk_sequence'] > 1
+
+
+def test_vector_only_context_is_explicitly_a_bag_fallback(searchable):
+    c, _ = searchable
+    item = c.search.search('unmatchedsemanticquery', 'vector')['items'][0]
+    assert item['context_evidence'] == 'bag'
+    selected = c.search.context(item['context_id'], neighbors=0)['chunks'][0]
+    assert item['snippet'] in selected['text']

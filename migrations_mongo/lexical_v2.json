@@ -1,0 +1,14 @@
+{
+  "schema_version": "etl-bag-lexical-v2",
+  "mode": "PREPARED_NOT_APPLIED",
+  "previous": "lexical_v1.json",
+  "analyzer": "underthesea-8.3.0-nfc-surface-compound-alnum-v2",
+  "dimension": 384,
+  "lexical_validator_sha256": "9a242af4519efbf45b36a9f05d5908ce34bb7d054c201cd69ea66c6c8794a93f",
+  "meaning_validator_sha256": "1ba060f895d8362c29944beef7e233ba0441dce0944f29cdaf235b8fb39a2104",
+  "collections_added": [],
+  "indexes_added": [],
+  "installer": "python scripts/reindex_lexical.py",
+  "apply_policy": "Default dry-run; --apply requires --writers-stopped and durable --backup PATH. Preserve dense vectors and meaning bags.",
+  "rollback": "--rollback --writers-stopped --backup PATH; restore previous application checkout."
+}

@@ -6,6 +6,8 @@ from data_sync_etl.domain.mongo_documents import ContentBagDocument
 
 
 class SearchBagReader(Protocol):
+    # Read the complete bounded corpus, including nonhits and full lexical TF.
+    # Never prefilter by display keywords; cap+1 lets Search reject truncation.
     def search_bags(self, root_ids: list[str], *, version_id: str,
                     generation: int) -> dict[str, ContentBagDocument | None]: ...
     def ensure_ready(self) -> None: ...

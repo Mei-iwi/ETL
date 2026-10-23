@@ -27,6 +27,7 @@ def searchable(container, request, monkeypatch):
     index = setup_index(container)
     options = getattr(request, 'param', False)
     options = options if isinstance(options, dict) else {'structured': options}
+    container.settings.index_meaning_bags_enabled = options.get('meanings', False)
     if options.get('structured'):
         structured_projection(container)
     if options.get('texts'):

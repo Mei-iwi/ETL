@@ -13,6 +13,9 @@ from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
 from data_sync_etl.domain.keywords import UnigramKeywords
+from data_sync_etl.domain.lexical import ANALYZER_VERSION, REPRESENTATION_VERSION, lexical_document
+from data_sync_etl.domain.meaning_bags import VERSION as MEANING_VERSION
+from data_sync_etl.domain.meaning_bags import verify_meanings
 from data_sync_etl.domain.mongo_documents import normalize_keywords
 from data_sync_etl.ports.indexing import IndexContentPort, IndexEmbeddingPort
 from data_sync_etl.ports.mongo_foundation import (
@@ -87,7 +90,9 @@ class IndexingService:
             'units': [{k: u[k] for k in ('id', 'parent_unit_id', 'unit_type', 'title', 'sequence_no',
                                         'text', 'page_from', 'page_to', 'review_status', 'retrieval_eligible')} for u in content],
             'keywords': keywords, 'extractor': self.extractor.version, 'bag_algorithm': 'pg-structured-leaf-fallback-v2',
-            'membership': membership,
+            'membership': membership, 'lexical': [REPRESENTATION_VERSION, ANALYZER_VERSION],
+            **({'meanings': [MEANING_VERSION, self.settings.index_meaning_group_threshold]}
+               if self.settings.index_meaning_bags_enabled else {}),
             'chunk_algorithm': 'word_window_v1', 'size': self.settings.chunk_size_words,
             'overlap': self.settings.chunk_overlap_words,
             'model': [self.embedding.model_id, self.embedding.version, self.embedding.dimension],
@@ -121,6 +126,9 @@ class IndexingService:
                 or len(f'{self.embedding.model_id}@{self.embedding.version}') > 255):
             raise IndexingError('BLOCKED_EMBEDDING_RUNTIME', 503)
         self.bags.ensure_ready()
+        self.bags.ensure_lexical_ready()
+        if self.settings.index_meaning_bags_enabled:
+            self.bags.ensure_meanings_ready()
 
     def _verified(self, snapshot, run, *, expected_bags=None, bag_reader=None):
         roots = self._roots(snapshot)
@@ -142,10 +150,15 @@ class IndexingService:
                     or bag.resource_version_id != snapshot[0]['id'] or bag.projection_generation != snapshot[1]
                     or bag.unit_type != nodes[root]['unit_type'] or bag.title != nodes[root]['title']
                     or bag.keywords != keywords or bag.embedding_text != ' | '.join(keywords)
+                    or bag.lexical != lexical_document([snapshot[4][leaf].text for leaf in leaves], nodes[root]['title'])
                     or bag.embedding_model != f'{self.embedding.model_id}@{self.embedding.version}'
                     or any(snapshot[4][leaf].keywords != snapshot[5][leaf] for leaf in leaves)):
                 raise IndexingError('INDEX_ARTIFACT_INVALID', 503)
             validate_vector(bag.embedding, self.embedding.dimension)
+            if self.settings.index_meaning_bags_enabled and not verify_meanings(
+                    bag.meanings, [(leaf, snapshot[4][leaf].text) for leaf in leaves], root, nodes[root]['title'],
+                    bag.embedding_model, self.embedding.dimension, self.settings.index_meaning_group_threshold):
+                raise IndexingError('INDEX_ARTIFACT_INVALID', 503)
             result.append({'id': root, 'unit_type': bag.unit_type, 'title': bag.title, 'keywords': bag.keywords,
                            'representation_mode': representation_mode(snapshot[2], {root: leaves}),
                            'embedding_text': bag.embedding_text, 'embedding_model': bag.embedding_model,
@@ -188,9 +201,10 @@ class IndexingService:
                 'index_status': 'READY' if run['status'] == 'COMPLETED' else run['status'],
                 'action': action, 'status_url': f'/api/v1/resource-versions/{version_id}/index-status'}
 
-    def once(self):
+    def once(self, version_id=None):
         with self.uow() as repo:
-            runs = repo.index_candidates()
+            runs = (repo.index_candidates() if version_id is None else
+                    [run for run in self._runs(repo, version_id) if run['status'] in ('PENDING', 'RUNNING')])
         for run in runs:
             with self.uow.processing_lock(run['resource_version_id']) as acquired:
                 if not acquired:
@@ -234,8 +248,16 @@ class IndexingService:
                     service._deadline(started)
                     return vector
 
+                def embed_many(self, texts):
+                    service._deadline(started)
+                    encoder = getattr(service.embedding, 'embed_many', None)
+                    vectors = encoder(texts) if encoder is not None else [self.embed(text) for text in texts]
+                    service._deadline(started)
+                    return [validate_vector(vector, self.dimension) for vector in vectors]
+
             source_fp = self.reader.content_fingerprint(version_id, generation=current[1])
-            result = ContentBagBuilder(CheckedEmbedding()).build(
+            result = ContentBagBuilder(CheckedEmbedding(), meaning_threshold=(
+                self.settings.index_meaning_group_threshold if self.settings.index_meaning_bags_enabled else None)).build(
                 version_id, [StructuredUnit(**{k: u[k] for k in StructuredUnit.model_fields}) for u in current[2]],
                 [current[4][key] for key in leaf_ids], generation=current[1], content_fingerprint=source_fp)
             if result.status != 'BUILT' or len(result.bags) != len(roots):
