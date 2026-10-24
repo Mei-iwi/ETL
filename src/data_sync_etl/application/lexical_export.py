@@ -64,6 +64,10 @@ class TrustedLexicalExporter:
 
     def capture(self, *, filters=None, include_review_candidates=False):
         access = self._principal()
+        if self.search.settings.search_approved_accent_variants_enabled:
+            # V1 records one expansion policy, not a union of query branches.
+            # Refuse a misleading native-BM25 parity claim until a V2 export exists.
+            raise SearchError('EVALUATION_UNSUPPORTED_QUERY_POLICY', 409)
         dictionary = self.search.dictionary.fingerprint
         policy_before = self.search.settings.search_expansion.model_dump()
         captured = []
@@ -101,7 +105,8 @@ class TrustedLexicalExporter:
         if self._principal() != access:
             raise SearchError('EVALUATION_ACCESS_CHANGED', 403)
         if (dictionary != self.search.dictionary.fingerprint
-                or policy_before != self.search.settings.search_expansion.model_dump()):
+                or policy_before != self.search.settings.search_expansion.model_dump()
+                or self.search.settings.search_approved_accent_variants_enabled):
             raise SearchError('EVALUATION_POLICY_CHANGED', 409)
         if len(captured) != 1:
             raise SearchError('EVALUATION_SNAPSHOT_INCOMPLETE', 409)

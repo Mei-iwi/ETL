@@ -16,6 +16,13 @@ def exporter(c, provider=None):
                                    environment='isolated_fixture')
 
 
+def test_v1_export_refuses_experimental_multi_query_parity_claim(searchable):
+    c, _ = searchable
+    c.settings.search_approved_accent_variants_enabled = True
+    with pytest.raises(SearchError, match='EVALUATION_UNSUPPORTED_QUERY_POLICY'):
+        exporter(c).capture()
+
+
 def test_trusted_export_full_corpus_runtime_bm25_pagination_parity_and_stats(searchable):
     c, _ = searchable
     second_resource(c)
