@@ -39,11 +39,13 @@ def container(pg_container):
 
 @pytest.mark.parametrize('vector_path', ['semantic_chunk', 'meaning_bag'])
 @pytest.mark.parametrize('concurrency', [1, 2])
-def test_real_semantic_index_authenticated_http_and_context(searchable, mongo_test_database, tmp_path, vector_path, concurrency):
+def test_real_semantic_index_authenticated_http_and_context(searchable, mongo_test_database, tmp_path, vector_path, concurrency,
+        *, diagnostic_queries=None, accent_variants=False, evidence_root=None):
     import psutil
     import torch
     torch.set_num_threads(2)
     c, version = searchable
+    c.settings.search_approved_accent_variants_enabled = accent_variants
     use_semantic = vector_path == 'semantic_chunk'
     model = (BgeM3Embedding(os.environ['BGE_M3_TEST_PATH'], os.environ['BGE_M3_TEST_REVISION'], max_tokens=512)
              if use_semantic else LocalSentenceEmbedding(os.environ['BGE_M3_TEST_PATH'], 'BAAI/bge-m3',
@@ -127,7 +129,7 @@ def test_real_semantic_index_authenticated_http_and_context(searchable, mongo_te
             assert server.started and model.search_status()['ready']
             profile = HttpProfile(environment='approved_staging', base_url=origin, email=c.settings.admin_login_email,
                 password_file=str(files['password']), proxy_key_file=str(files['proxy']), expected_vector_path=vector_path,
-                queries=['page text', 'Page one text', 'page two', 'page three', 'text', 'native text extraction',
+                queries=diagnostic_queries or ['page text', 'Page one text', 'page two', 'page three', 'text', 'native text extraction',
                          'green leaf', 'feuille verte', 'page text français', 'quantum banana'], repeats=2, concurrency=concurrency)
             observed = []
             encode = model.embed_queries if use_semantic else model._encode
@@ -146,7 +148,12 @@ def test_real_semantic_index_authenticated_http_and_context(searchable, mongo_te
             process_cpu_seconds, total_wall_seconds = process_time()-cpu_start, monotonic()-wall_start
             measuring[0] = False
             assert result['errors'] == result['timeouts'] == 0
-            assert len(encoding_times) == 42  # 2 first + 40 warm Vector/Hybrid; zero BoW query encodes.
+            from data_sync_etl.domain.query_variants import approved_accent_variant
+            def query_calls(query):
+                return 1 + int(accent_variants and approved_accent_variant(query, c.search.dictionary,
+                    policy=c.search.settings.search_expansion) is not None)
+            expected_encodes = 2 * query_calls(profile.queries[0]) + 2 * profile.repeats * sum(map(query_calls, profile.queries))
+            assert len(encoding_times) == expected_encodes
             assert model._model is loaded_model
             for method, payload in observed:
                 if method != 'bow' and use_semantic:
@@ -165,7 +172,7 @@ def test_real_semantic_index_authenticated_http_and_context(searchable, mongo_te
                     [('postgres_statements', pg_times), ('mongo_commands', [r['ms'] for r in mongo_times]),
                      ('query_encoding', encoding_times)]},
                 'readiness': {k: v for k, v in readiness.items() if k in ('status', 'coverage_verified', 'chunk_count')}})
-            root = os.environ.get('ETL_PHASE3_HTTP_EVIDENCE')
+            root = evidence_root or os.environ.get('ETL_PHASE3_HTTP_EVIDENCE')
             if root:
                 write_review(Path(root)/(vector_path+'-http.json'), result)
             assert 'password' not in json.dumps(result)

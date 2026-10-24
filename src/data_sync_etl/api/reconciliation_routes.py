@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 
 from data_sync_etl.api.reconciliation_schemas import (
@@ -33,9 +33,11 @@ from data_sync_etl.domain.core import DomainError
 router = APIRouter(prefix="/api/v1/reconciliation", tags=["Reconciliation & Integrity Verification"])
 
 
-@router.post("/runs", response_model=ReconcileTriggerResponse)
+@router.post("/runs", response_model=ReconcileTriggerResponse,
+             responses={202: {'model': ReconcileTriggerResponse, 'description': 'Đã tiếp nhận tác vụ đối soát nền'}})
 def trigger_reconciliation(
     request: Request,
+    response: Response,
     body: ReconcileTriggerRequest | None = None,
 ) -> dict[str, Any]:
     """Kích hoạt một đợt đối soát toàn vẹn dữ liệu giữa Nguồn và Đích.
@@ -50,12 +52,18 @@ def trigger_reconciliation(
     if not body.dry_run:
         raise HTTPException(409, 'Đối soát chỉ phát hiện sai lệch. Dùng chức năng đồng bộ để cập nhật dữ liệu.')
     try:
+        if body.stream in ('files', 'all'):
+            result = request.app.state.container.reconciliation_jobs.start(body.stream)
+            response.status_code = 202
+            return result
         result = engine.execute_stream_reconcile(stream_name=body.stream, dry_run=body.dry_run)
     except DomainError as exc:
         if str(exc) == 'RECONCILIATION_BUSY':
             raise HTTPException(409, 'Một đợt đối soát đang chạy. Vui lòng chờ hoàn tất.') from None
         if str(exc) == 'RECONCILIATION_LIMIT_EXCEEDED':
             raise HTTPException(422, 'Luồng dữ liệu vượt giới hạn 10.000 bản ghi; cần đối soát theo lô riêng.') from None
+        if str(exc) in ('RECONCILIATION_START_TIMEOUT', 'RECONCILIATION_FAILED'):
+            raise HTTPException(503, 'Không khởi động được đối soát nền. Kiểm tra kết nối Master và bảng audit.') from None
         raise
     return result
 
@@ -112,8 +120,12 @@ def get_latest_reconciliation_report(
         max_pop = max(1, max(total_source, total_target))
         overall_match_rate = round((total_matched / max_pop) * 100, 2)
         latest_runs.sort(key=lambda run: (run.started_at, run.run_id), reverse=True)
-        overall_status = next((status for status in ('FAILED', 'BLOCKED', 'RUNNING', 'PARTIAL')
-                               if any(run.status == status for run in latest_runs)), 'COMPLETED')
+        recoverable = (any(r.stream_name == 'files' and r.status == 'RUNNING' for r in latest_runs)
+                       and container.reconciliation_jobs.can_recover())
+        def displayed_status(run):
+            return 'PARTIAL' if recoverable and run.stream_name == 'files' and run.status == 'RUNNING' else run.status
+        overall_status = next((status for status in ('RUNNING', 'FAILED', 'BLOCKED', 'PARTIAL')
+                               if any(displayed_status(run) == status for run in latest_runs)), 'COMPLETED')
 
         stream_reports = []
         for r in latest_runs:
@@ -123,7 +135,7 @@ def get_latest_reconciliation_report(
                 ReconciliationRunReport(
                     run_id=r.run_id,
                     stream_name=r.stream_name,
-                    status=r.status,
+                    status=displayed_status(r),
                     started_at=r.started_at.isoformat(),
                     finished_at=r.finished_at.isoformat() if r.finished_at else None,
                     source_count=r.source_count,
@@ -135,7 +147,8 @@ def get_latest_reconciliation_report(
                     target_total_bytes=r.target_total_bytes,
                     source_table_hash=r.source_table_hash,
                     target_table_hash=r.target_table_hash,
-                    summary_meta=r.summary_meta,
+                    summary_meta=({**(r.summary_meta or {}), 'reason': 'RECONCILIATION_INTERRUPTED'}
+                                  if displayed_status(r) != r.status else r.summary_meta),
                 )
             )
 

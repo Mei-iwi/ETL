@@ -32,6 +32,7 @@ from data_sync_etl.domain.lexical import (
 )
 from data_sync_etl.domain.meaning_bags import match_meaning
 from data_sync_etl.domain.retrieval_fusion import version_rrf
+from data_sync_etl.domain.query_variants import VERSION as ACCENT_VARIANT_VERSION, approved_accent_variant
 from data_sync_etl.domain.search import SearchError, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
 from data_sync_etl.domain.search_context import decode_context, encode_context
@@ -86,6 +87,10 @@ class SearchService:
                                     if query_cache_runtime is not None else None)
 
     def _ranking_algorithm(self, method):
+        base = self._base_ranking_algorithm(method)
+        return base + '+approved-accent-max-v1' if self.settings.search_approved_accent_variants_enabled else base
+
+    def _base_ranking_algorithm(self, method):
         if method != 'bow' and self.settings.search_evidence_strategy != 'current':
             return 'bge-m3-version-' + self.settings.search_evidence_strategy + '-v1'
         if method == 'hybrid' and self.settings.search_hybrid_fusion_unit == 'version':
@@ -341,6 +346,11 @@ class SearchService:
         keywords = query_terms(query)
         policy = self.settings.search_expansion.model_copy(deep=True)
         expansion = self.dictionary.expand(query, domain=filters.get('domain'), policy=policy)
+        variant = (approved_accent_variant(query, self.dictionary, policy=policy, domain=filters.get('domain'))
+                   if self.settings.search_approved_accent_variants_enabled else None)
+        variant_expansion = self.dictionary.expand(variant, domain=filters.get('domain'), policy=policy) if variant else None
+        variant_keywords = query_terms(variant) if variant else []
+        extra_vectors = []
         if self.bags is None:
             raise SearchError('SEARCH_SCHEMA_UNAVAILABLE')
         self.bags.ensure_ready()
@@ -355,9 +365,15 @@ class SearchService:
                 self.semantic.embedding.require_search_ready()
                 with self._inference():
                     vector = self.semantic.query(query)
+                    if variant is not None:
+                        self._deadline(started)
+                        extra_vectors.append(self.semantic.query(variant))
                 self._deadline(started)
             else:
                 vector, started = self._query_vector(query, _query_context, started)
+                if variant is not None:
+                    extra, started = self._query_vector(variant, _query_context, started)
+                    extra_vectors.append(extra)
         with self.indexing.uow() as repo:
             metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
         if len(metadata) > self.settings.search_max_bags:
@@ -391,8 +407,16 @@ class SearchService:
                 raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
             snapshots[version_id] = snapshot
             roots, snippets, preview = self._snippets(snapshot, keywords, started, allowed, query, expansion, policy)
+            if variant is not None:
+                _, alternatives, _ = self._snippets(snapshot, variant_keywords, started, allowed,
+                                                     variant, variant_expansion, policy)
+                for key, candidate in alternatives.items():
+                    if candidate[0] > snippets[key][0]:
+                        snippets[key] = (candidate[0], {**candidate[1], '_retrieval_query': variant})
             authorized_roots[version_id] = set(roots)
             evidence_options = {}
+            if extra_vectors:
+                evidence_options['query_vectors'] = extra_vectors
             if use_semantic and self.settings.search_evidence_strategy != 'current':
                 evidence_by_version[version_id] = []
                 evidence_options['evidence_candidates'] = evidence_by_version[version_id]
@@ -419,6 +443,8 @@ class SearchService:
                     continue
                 ready_count += 1
                 matched = sorted(set(keywords) & set(bag.lexical.terms))
+                if variant is not None:
+                    matched = sorted(set(matched) | (set(variant_keywords) & set(bag.lexical.terms)))
                 if policy.enabled:
                     matched = sorted(set(matched) | equivalent_terms(query, bag.lexical.title_tokens, expansion=expansion, dictionary=self.dictionary, policy=policy)
                                  | set().union(*(equivalent_terms(query, passage, expansion=expansion, dictionary=self.dictionary, policy=policy)
@@ -433,13 +459,23 @@ class SearchService:
                         chunk = {**hit[1], 'context_evidence': 'semantic', 'meaning_variants': []}
                 elif vector is not None:
                     member, variants = None, []
+                    winning_vector = vector
                     if self.settings.index_meaning_bags_enabled:
                         value, member, variants = match_meaning(vector, bag.meanings, context={
                             'query': query, 'keywords': keywords, 'expansion': expansion,
                             'dictionary': self.dictionary, 'policy': policy,
                             'margin': self.settings.search_meaning_context_margin})
+                        for extra in extra_vectors:
+                            candidate = match_meaning(extra, bag.meanings, context={
+                                'query': variant, 'keywords': variant_keywords,
+                                'expansion': variant_expansion,
+                                'dictionary': self.dictionary, 'policy': policy,
+                                'margin': self.settings.search_meaning_context_margin})
+                            if candidate[0] > value:
+                                value, member, variants = candidate
+                                winning_vector = extra
                     else:
-                        value = cosine(vector, bag.embedding)
+                        value = max(cosine(v, bag.embedding) for v in [vector, *extra_vectors])
                     accepted = value >= self.settings.search_vector_min_similarity
                     if (not accepted and self.settings.index_meaning_bags_enabled
                             and self.settings.search_meaning_context_fallback_enabled
@@ -447,7 +483,7 @@ class SearchService:
                         # A weak short expression alone is not enough. Require
                         # independent same-bag topic support, without lexical
                         # overlap, translation services or another model call.
-                        accepted = cosine(vector, bag.embedding) >= self.settings.search_meaning_fallback_min_context_similarity
+                        accepted = cosine(winning_vector, bag.embedding) >= self.settings.search_meaning_fallback_min_context_similarity
                     if accepted:
                         semantic[bag.id] = value
                         chunk['meaning_variants'] = variants[:8]
@@ -484,6 +520,13 @@ class SearchService:
             bow = bm25(query, {key: row[0].lexical for key, row in by_bag.items()},
                        dictionary=self.dictionary, policy=policy, expansion=expansion,
                        min_coverage=self.settings.search_bow_min_coverage)
+            if variant is not None:
+                assisted = bm25(variant, {key: row[0].lexical for key, row in by_bag.items()},
+                    dictionary=self.dictionary, policy=policy, domain=filters.get('domain'),
+                    min_coverage=self.settings.search_bow_min_coverage)
+                # Union by identity and maximum score, never duplicate-score addition.
+                bow = {key: max(bow.get(key, 0), policy.synonyms * assisted.get(key, 0))
+                       for key in bow.keys() | assisted.keys()}
             scores = bow if method == 'bow' else semantic if method == 'vector' else rrf(bow, semantic)
             fusion = (version_rrf({'bow': bow, 'vector': semantic},
                                  {key: row[0].resource_version_id for key, row in by_bag.items()},
@@ -550,9 +593,12 @@ class SearchService:
                             context_url=f'/api/v1/chunks/{token}/context', context_evidence='semantic', meaning_variants=[])
                         if method == 'vector':
                             item['score_components'] = {'vector': item['score']}
-                item['snippet'] = snippet_text(chunk['text'], set(keywords), query=query,
-                    anchor=chunk.get('anchor'), expansion=expansion, dictionary=self.dictionary, policy=policy)
-                item['lexical_evidence'] = self._lexical_evidence(expansion, bag, snapshots[bag.resource_version_id], policy)
+                rendered_variant = variant is not None and chunk.get('_retrieval_query') == variant
+                rendered_expansion = variant_expansion if rendered_variant else expansion
+                item['snippet'] = snippet_text(chunk['text'], set(variant_keywords if rendered_variant else keywords),
+                    query=variant if rendered_variant else query,
+                    anchor=chunk.get('anchor'), expansion=rendered_expansion, dictionary=self.dictionary, policy=policy)
+                item['lexical_evidence'] = self._lexical_evidence(rendered_expansion, bag, snapshots[bag.resource_version_id], policy)
             return grouped, matches
         grouped, matches = ranked()
         whole_file_access = {}
@@ -632,7 +678,11 @@ class SearchService:
                 **vector_info,
                 'total_pages': (total + size - 1) // size, 'items': items[offset:offset+size],
                 'ranking_algorithm': self._ranking_algorithm(method),
-                'query_expansion': expansion.model_dump(),
+                'query_expansion': {**expansion.model_dump(), **({'variant_policy': ACCENT_VARIANT_VERSION,
+                    'retrieval_queries': [query, *([variant] if variant is not None else [])],
+                    'fusion': 'per-bag-max-before-rrf', 'lexical_variant_weight': policy.synonyms,
+                    'dictionary_approved_only': True}
+                    if self.settings.search_approved_accent_variants_enabled else {})},
                 'search_fingerprint': digest([ANALYZER_VERSION, REPRESENTATION_VERSION, RANKING_VERSION,
                                               CONTEXT_RANKING_VERSION,
                                               self.settings.search_bow_min_coverage,
@@ -649,7 +699,8 @@ class SearchService:
                                               self.settings.search_meaning_context_fallback_enabled,
                                               self.settings.search_meaning_fallback_min_similarity,
                                               self.settings.search_meaning_fallback_min_context_similarity,
-                                              self.settings.search_meaning_context_margin]),
+                                              self.settings.search_meaning_context_margin] +
+                                              ([ACCENT_VARIANT_VERSION] if self.settings.search_approved_accent_variants_enabled else [])),
                 'representation_unit': 'content_bag', 'ready_bag_count': ready_count, 'access_scope': access.scope,
                 'readiness': {'lexical_ready_bags': ready_count, 'dense_ready_bags': ready_count,
                               'eligible_versions': len(by_version), 'ready_versions': len(snapshots),

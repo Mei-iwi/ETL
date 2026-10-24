@@ -322,6 +322,10 @@ Local thay `sslrootcert` bằng `D%3A%2Fetl%2Fprivate%2Fneon-ca.pem`. Dùng đú
 
 Vector 384D không dùng lại như 1024D: đổi model cần backup, điều chỉnh validator và tái lập chỉ mục theo quy trình maintenance. Semantic Chunk và các tùy chọn fusion/evidence vẫn opt-in; giữ mặc định nếu chưa kiểm chứng.
 
+Thử nghiệm query không dấu: `SEARCH_APPROVED_ACCENT_VARIANTS_ENABLED=true` trong `.env` local hoặc `docker.env`, rồi restart API/tạo lại container. Cờ mặc định `false`; chỉ dùng cụm tiếng Việt đã duyệt, giữ query gốc và thêm tối đa một biến thể. Không cần reindex; không bật cùng ColBERT. Đây chưa phải cấu hình được nghiệm thu chất lượng production; rollback bằng `false`. Export lexical V1 từ chối chế độ này để tránh báo parity sai.
+
+Đối soát **Kho tệp** chạy nền: API trả `202`, giao diện cập nhật tiến độ từng tệp mỗi 2 giây; có thể rời trang mà không hủy lượt quét. `SOURCE_READ_TIMEOUT_SECONDS` (mặc định `120`) giới hạn riêng từng tệp, không giới hạn cả kho trong 30 giây. Tệp lỗi/hết thời gian được ghi **Chưa xác minh**, các tệp khác vẫn tiếp tục. Nếu API bị dừng, mở lại trang và bấm **Quét đối soát** để ưu tiên phần chưa quét; không tái sử dụng hash cũ làm kết quả xác minh mới. Chỉ ghi nhật ký đối soát, không sửa dữ liệu học liệu hoặc lưu bản sao SOURCE lâu dài.
+
 Đổi password admin cấu hình: `python -m data_sync_etl.security.cli hash --output D:/etl/private/auth/admin_password_hash_v2`, đổi đường dẫn secret rồi restart. Password user MASTER đổi ở SOURCE rồi đồng bộ.
 
 Kiểm thử fixture, không cần DB đang phục vụ:

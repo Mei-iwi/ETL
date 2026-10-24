@@ -26,6 +26,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     let contextEvidence = 'lexical'
     let holdAuthConfig = true
     const reconciliationBodies = []
+    let reconciliationPolls = 0
     let releaseSearch
     const bodies = [], responses = []
     const server = createServer(async (req, res) => {
@@ -116,6 +117,24 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             res.writeHead(200, { 'Content-Type': 'image/png' })
             return res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=', 'base64'))
         }
+        if (url.pathname === '/api/v1/resources') return json({ items: [], pagination: { page: 1, size: 7, total: 0, total_pages: 0 } })
+        if (url.pathname === '/api/v1/reconciliation/runs/latest' && reconciliationBodies.length && ++reconciliationPolls < 3) return json({
+            latest_run_id: 'fixture-audit', overall_status: 'RUNNING', overall_match_rate_percent: 0,
+            total_source_records: 0, total_target_records: 1, total_matched_records: 0, total_mismatched_records: 0,
+            total_source_bytes: 0, total_target_bytes: 0,
+            stream_reports: [{ run_id: 'fixture-audit', stream_name: 'files', status: 'RUNNING',
+                summary_meta: { processed_files: 0, total_files: 1 } }] })
+        if (url.pathname === '/api/v1/reconciliation/runs/latest' && reconciliationBodies.length) return json({
+            latest_run_id: 'fixture-audit', overall_status: 'PARTIAL', overall_match_rate_percent: 0,
+            total_source_records: 1, total_target_records: 1, total_matched_records: 0, total_mismatched_records: 0,
+            total_source_bytes: 0, total_target_bytes: 0,
+            stream_reports: [{ run_id: 'fixture-audit', stream_name: 'files', status: 'PARTIAL',
+                summary_meta: { unverified_source_files: 1 } }] })
+        if (url.pathname === '/api/v1/reconciliation/discrepancies') return json({
+            items: [{ id: 'audit-item', run_id: 'fixture-audit', record_id: 'version-1', stream_name: 'files',
+                discrepancy_flag: 'NOT_VERIFIED', source_value: { source_file_size: 100 },
+                target_value: { reason_code: 'SOURCE_REFERENCE_DISABLED' }, resolution_status: 'UNRESOLVED' }],
+            total: 1, page: 1, page_size: 10, total_pages: 1 })
         if (url.pathname === '/api/v1/reconciliation/runs/latest') return json({
             overall_status: 'NO_RUNS_YET', overall_match_rate_percent: 0, total_source_records: 0,
             total_target_records: 0, total_matched_records: 0, total_mismatched_records: 0,
@@ -123,7 +142,8 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         if (url.pathname === '/api/v1/reconciliation/runs') {
             let body = ''; for await (const chunk of req) body += chunk
             reconciliationBodies.push(JSON.parse(body))
-            return json({ status: 'COMPLETED', reports: [] })
+            reconciliationPolls = 0
+            return json({ status: 'RUNNING', reports: [{ run_id: 'fixture-audit', stream_name: 'files', status: 'RUNNING' }] }, 202)
         }
         if (url.pathname.startsWith('/api/')) return json({ detail: 'not found' }, 404)
         const file = url.pathname.startsWith('/assets/') ? resolve(root, 'dist', '.' + url.pathname) : join(root, 'dist/index.html')
@@ -249,7 +269,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         async function capture(name) {
             if (!process.env.ETL_TEST_CAPTURE_LAYOUT) return
             await delay(450)
-            const directory = resolve(root, '../.test-tmp/search-layout')
+            const directory = resolve(process.env.ETL_TEST_LAYOUT_OUTPUT || resolve(root, '../.test-tmp/search-layout'))
             await mkdir(directory, { recursive: true })
             const result = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true })
             await writeFile(join(directory, name + '.png'), Buffer.from(result.data, 'base64'))
@@ -496,12 +516,25 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             window.clearInterval = id => { if (id === 2147483000) window.fixtureAutoScan = null; else originalClear(id); };
             window.alert = window.confirm = () => { throw new Error('Native dialog forbidden'); };
         ` })
+        await call('Page.navigate', { url: origin + '/library/list' })
+        await waitFor(() => evaluate("!!document.querySelector('a[href=\"/library/add\"]')"))
+        assert.equal(await evaluate("document.querySelector('a[href=\"/library/add\"]').textContent.replace(/\\s+/g, ' ').trim()"), '+ Thêm học liệu')
+        assert.equal(await evaluate("document.querySelector('a[href=\"/library/add\"]').getBoundingClientRect().height >= 44"), true)
+        await capture('library-add-desktop')
+        await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+        assert.equal(await evaluate("document.querySelector('a[href=\"/library/add\"]').getBoundingClientRect().right <= innerWidth"), true)
+        await capture('library-add-mobile')
+        await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 960, deviceScaleFactor: 1, mobile: false })
         await call('Page.navigate', { url: origin + '/library/source-sync/reconciliation' })
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Quét đối soát' && !button.disabled)"))
         await click('Quét đối soát')
+        await waitFor(() => evaluate("document.body.textContent.includes('Đang đối soát nền:')"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('Đang đối soát'))?.disabled"), true)
         await waitFor(() => evaluate("!!document.querySelector('dialog[open]')"))
         assert.equal(reconciliationBodies.length, 1)
         assert.equal(reconciliationBodies[0].dry_run, true)
+        await waitFor(() => evaluate("document.body.textContent.includes('Chưa bật truy xuất nguồn')"))
+        assert.equal(await evaluate("document.body.textContent.includes('Chưa xác minh')"), true)
         assert.equal(await evaluate("document.body.textContent.includes('Tự phục hồi')"), false)
         await capture('reconciliation-dialog')
         await click('Đóng')

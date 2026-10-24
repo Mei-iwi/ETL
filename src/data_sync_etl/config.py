@@ -108,6 +108,8 @@ class Settings(BaseSettings):
     search_bow_min_coverage: float = Field(default=0., ge=0, le=1, allow_inf_nan=False)
     # Experimental grouping; retain legacy bag fusion until independent acceptance.
     search_hybrid_fusion_unit: Literal['bag', 'version'] = 'bag'
+    # Query-only experiment: original + at most one reviewed phrase variant.
+    search_approved_accent_variants_enabled: bool = False
     search_hybrid_lexical_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
     search_hybrid_vector_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
     search_evidence_strategy: Literal['current', 'version_dense', 'version_context'] = 'current'
@@ -147,6 +149,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_search_grants(self):
+        if self.search_approved_accent_variants_enabled and self.semantic_rerank_enabled:
+            raise ValueError('Approved accent variants require ColBERT OFF until combined evaluation')
         if self.search_evidence_strategy != 'current' and (not self.semantic_enabled or self.semantic_rerank_enabled
                 or self.search_hybrid_fusion_unit != 'version'):
             raise ValueError('Experimental evidence requires Semantic Chunk, version fusion and ColBERT OFF')

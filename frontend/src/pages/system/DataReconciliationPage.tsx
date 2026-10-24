@@ -41,6 +41,7 @@ function formatDate(dateStr?: string | null): string {
 }
 
 const FLAG_LABELS: Record<string, { label: string; badgeClass: string; desc: string }> = {
+    NOT_VERIFIED: { label: 'NOT_VERIFIED', badgeClass: styles.badgeWarning, desc: 'Chưa xác minh' },
     SYNCED: {
         label: 'SYNCED',
         badgeClass: styles.badgeSuccess,
@@ -95,6 +96,8 @@ export function DataReconciliationPage() {
     const [notice, setNotice] = useState<{ title: string; message: string } | null>(null)
     const [automatic, setAutomatic] = useState(false)
     const running = useRef(false)
+    const posting = useRef(false)
+    const startedRun = useRef<string | null>(null)
     const loadRevision = useRef(0)
 
     const loadData = useCallback(async () => {
@@ -106,6 +109,19 @@ export function DataReconciliationPage() {
             const latest = await getLatestReconciliationReport(selectedStream)
             if (revision !== loadRevision.current) return
             setReport(latest)
+            const active = latest.stream_reports.some(row => row.status === 'RUNNING')
+            running.current = active || posting.current
+            setReconciling(active || posting.current)
+            const completed = latest.stream_reports.find(row => row.run_id === startedRun.current && row.status !== 'RUNNING')
+            if (completed) {
+                startedRun.current = null
+                setNotice({ title: 'Kết quả đối soát', message: completed.summary_meta?.reason === 'RECONCILIATION_INTERRUPTED'
+                    ? 'Đối soát đã gián đoạn. Bấm Quét đối soát để ưu tiên phần chưa xử lý.'
+                    : completed.status === 'COMPLETED'
+                    ? 'Đã quét và xác minh xong kho tệp.'
+                    : completed.status === 'FAILED' ? 'Đối soát bị gián đoạn. Tiến độ đã được lưu; có thể chạy lại.'
+                    : 'Đã quét xong. Xem các tệp sai lệch hoặc chưa xác minh và lý do trong bảng chi tiết.' })
+            }
 
             // Thu thập run_id của các stream trong báo cáo mới nhất
             const latestRunIds = latest.stream_reports
@@ -137,13 +153,26 @@ export function DataReconciliationPage() {
         return () => { loadRevision.current++ }
     }, [loadData])
 
+    useEffect(() => {
+        if (!reconciling) return
+        const timer = window.setInterval(() => { void loadData() }, 2000)
+        return () => window.clearInterval(timer)
+    }, [reconciling, loadData])
+
     const handleRunReconcile = useCallback(async () => {
         if (running.current) return
         running.current = true
+        posting.current = true
         setReconciling(true)
         setError('')
         try {
             const result = await triggerReconciliation(selectedStream, true)
+            if (result.status === 'RUNNING') {
+                startedRun.current = result.reports.find(row => row.stream_name === 'files')?.run_id ?? null
+                setPage(1)
+                await loadData()
+                return
+            }
             setNotice({ title: 'Kết quả đối soát', message: result.status === 'BLOCKED'
                 ? 'Đã quét xong. Có sai lệch vượt ngưỡng an toàn; dữ liệu chưa được thay đổi.'
                 : result.reports.some(report => report.status === 'PARTIAL')
@@ -154,8 +183,11 @@ export function DataReconciliationPage() {
         } catch (err) {
             setNotice({ title: 'Không thể đối soát', message: err instanceof Error ? err.message : 'Lỗi khi kích hoạt đối soát' })
         } finally {
-            setReconciling(false)
-            running.current = false
+            posting.current = false
+            if (!startedRun.current) {
+                setReconciling(false)
+                running.current = false
+            }
         }
     }, [selectedStream, loadData])
 
@@ -169,6 +201,10 @@ export function DataReconciliationPage() {
 
     const hasBlockedRun = report?.stream_reports?.some((r) => r.status === 'BLOCKED')
     const blockedReason = report?.stream_reports?.find((r) => r.summary_meta?.reason)?.summary_meta?.reason
+    const unverified = report?.stream_reports.reduce((total, row) => total +
+        (row.summary_meta?.unverified_source_files ?? 0) + (row.summary_meta?.unverified_metadata_records ?? 0), 0) ?? 0
+    const onlyUnverified = unverified > 0 && report?.total_matched_records === 0 && report.total_mismatched_records === 0
+    const fileProgress = report?.stream_reports.find(row => row.stream_name === 'files')?.summary_meta
 
     return (
         <div className={styles.container}>
@@ -214,6 +250,11 @@ export function DataReconciliationPage() {
 
                 {/* THÔNG BÁO / CẢNH BÁO */}
                 {error && <div className={`${styles.alertBox} ${styles.alertWarning}`}>{error}</div>}
+                {reconciling && <p role="status">Đang đối soát nền: {fileProgress?.processed_files ?? 0}/{fileProgress?.total_files ?? 0} tệp.
+                    Có thể rời trang; tiến độ được lưu sau từng tệp. Đã xác minh {formatBytes(fileProgress?.verified_bytes)}.</p>}
+                {!reconciling && fileProgress?.reason === 'RECONCILIATION_INTERRUPTED' && <p role="status">
+                    Lượt trước bị gián đoạn ở {fileProgress.processed_files ?? 0}/{fileProgress.total_files ?? 0} tệp.
+                    Bấm Quét đối soát để ưu tiên phần chưa xử lý.</p>}
 
                 {hasBlockedRun && (
                     <div className={`${styles.alertBox} ${styles.alertWarning}`}>
@@ -226,7 +267,7 @@ export function DataReconciliationPage() {
                     <div className={styles.statusItem}>
                         <span className={styles.statusLabel}>Tỷ lệ đồng nhất</span>
                         <span className={styles.statusValue} style={{ color: (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
-                            {report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
+                            {onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
                         </span>
                         <span className={styles.statusSub}>
                             Trạng thái: <strong>{report?.overall_status ?? 'CHƯA CHẠY'}</strong>
@@ -240,6 +281,7 @@ export function DataReconciliationPage() {
                         </span>
                         <span className={styles.statusSub}>
                             Khớp: <strong style={{ color: '#166534' }}>{report?.total_matched_records ?? 0}</strong> | Lệch: <strong style={{ color: '#991b1b' }}>{report?.total_mismatched_records ?? 0}</strong>
+                            {unverified > 0 && <> | Chưa xác minh: <strong>{unverified}</strong></>}
                         </span>
                     </div>
 
@@ -280,6 +322,7 @@ export function DataReconciliationPage() {
                         { key: 'DESYNC_BLOB_SIZE', label: 'Lệch dung lượng' },
                         { key: 'DESYNC_CHECKSUM', label: 'Lệch SHA-256' },
                         { key: 'ORPHAN_SOURCE', label: 'Mới ở Nguồn' },
+                        { key: 'NOT_VERIFIED', label: 'Chưa xác minh' },
                         { key: 'ORPHAN_MASTER', label: 'Đã xóa ở Nguồn' },
                         { key: 'DESYNC_METADATA', label: 'Lệch Metadata' },
                     ].map((tab) => (
@@ -364,6 +407,20 @@ export function DataReconciliationPage() {
                                                 {item.target_value ? (
                                                     <div>
                                                         {tVal.title && <div className={styles.cellTitle}>{tVal.title}</div>}
+                                                        {tVal.reason_code && <div className={styles.cellMeta}>
+                                                            Lý do: <strong>{({
+                                                                SOURCE_REFERENCE_DISABLED: 'Chưa bật truy xuất nguồn',
+                                                                SOURCE_TEMP_POLICY_REQUIRED: 'Chưa bật tệp tạm',
+                                                                SOURCE_HASH_MISMATCH: 'SHA-256 nguồn không khớp phiên bản đã đồng bộ',
+                                                                SOURCE_VERSION_MUTATED: 'Thông tin phiên bản nguồn đã thay đổi',
+                                                                FILE_NOT_FOUND: 'Không tìm thấy tệp tại nguồn',
+                                                                SOURCE_UNAVAILABLE: 'Nguồn chưa khả dụng',
+                                                                SOURCE_RESOLVER_UNAVAILABLE: 'Chưa cấu hình resolver nguồn',
+                                                                BLOCKED_SOURCE_MAPPING: 'Chưa xác minh được tham chiếu nguồn',
+                                                                BLOCKED_SOURCE_POLICY: 'Nguồn chưa cho phép truy xuất',
+                                                                RECONCILIATION_READ_BUDGET: 'Tệp vượt thời gian xử lý; các tệp khác vẫn được quét',
+                                                            } as Record<string, string>)[tVal.reason_code] ?? tVal.reason_code}</strong>
+                                                        </div>}
                                                         {tVal.storage_file_size !== undefined && (
                                                             <div className={styles.cellMeta}>
                                                                 Dung lượng đĩa: <strong>{formatBytes(tVal.storage_file_size)}</strong>

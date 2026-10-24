@@ -155,7 +155,8 @@ class SemanticService:
                 'coverage_verified': state == 'READY', 'model_identity': plan['model_identity'],
                 'strategy': plan['strategy']}
 
-    def scores(self, snapshot, title, roots, allowed, vector, deadline, budget, *, evidence_candidates=None):
+    def scores(self, snapshot, title, roots, allowed, vector, deadline, budget, *, evidence_candidates=None,
+               query_vectors=()):
         """Bounded exact cosine over the filtered versions, no unbounded corpus scan.
 
         This first implementation is exact CPU retrieval, not a Mongo Atlas ANN
@@ -164,6 +165,8 @@ class SemanticService:
         """
         if not roots or not allowed:
             return {}  # An inaccessible version cannot make an allowed search unavailable.
+        if len(query_vectors) > 1:
+            raise IndexingError('SEMANTIC_QUERY_VARIANT_LIMIT', 422)
         plan, expected = self.plan(snapshot, title)
         manifest = self.store.manifest(plan['_id'])
         if not manifest or manifest.get('status') != 'READY':
@@ -174,7 +177,7 @@ class SemanticService:
         if budget[0] > self.settings.semantic_max_candidates:
             raise IndexingError('SEMANTIC_CANDIDATE_LIMIT', 422)
         rows = self._validated(self.store.records(plan['_id'], len(expected) + 1), expected)
-        query_vector = normalize_dense(vector)
+        query_vectors = [normalize_dense(value) for value in [vector, *query_vectors]]
         chunks = {chunk['id']: chunk for chunk in self.indexing._preview(snapshot)}
         best = {}
         for spec in expected:
@@ -184,8 +187,8 @@ class SemanticService:
                 continue
             # Both operands have passed the same dimension/finite/L2 checks.
             # Avoid revalidating/scaling/norming the query for every Chunk.
-            score = max(-1., min(1., math.fsum(a*b for a, b in zip(
-                query_vector, rows[spec['chunk_id']]['vector'], strict=True))))
+            score = max(max(-1., min(1., math.fsum(a*b for a, b in zip(
+                query_vector, rows[spec['chunk_id']]['vector'], strict=True)))) for query_vector in query_vectors)
             chunk = chunks[spec['chunk_id']]
             if score <= self.settings.semantic_min_score:
                 continue
