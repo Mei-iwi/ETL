@@ -514,6 +514,23 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await click('Đóng')
         await evaluate("history.pushState({}, '', '/overview/summary'); window.dispatchEvent(new PopStateEvent('popstate'))")
         await waitFor(() => evaluate("window.fixtureAutoScan === null"))
+        // Unicode/mixed-language transport through every real React method.
+        // Fixture responses attest UI/API mapping, not semantic relevance.
+        mode = 'results'
+        modelState = 'READY'
+        for (const query of ['quang hợp'.normalize('NFD'), 'photosynthesis', 'base de données',
+            'quang hợp photosynthesis photosynthèse']) {
+            for (const method of ['bow', 'vector', 'hybrid']) {
+                const previous = postCount
+                const criteria = new URLSearchParams({ q: query, method, page: '1', size: '5' })
+                await call('Page.navigate', { url: origin + '/search/query-methods?' + criteria })
+                await waitFor(() => postCount > previous)
+                await waitFor(() => evaluate("!!document.querySelector('article')"))
+                assert.equal(bodies.at(-1).query, query.normalize('NFC'))
+                assert.equal(bodies.at(-1).method, method)
+                assert.equal(await evaluate("document.querySelector('#search-query').value"), query.normalize('NFC'))
+            }
+        }
     } finally {
         releaseSearch?.()
         if (ws) ws.close()
