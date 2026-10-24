@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import math
 from typing import Any
-from fastapi import APIRouter, Query, Request
+
+from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import func, select
 
 from data_sync_etl.api.reconciliation_schemas import (
@@ -22,10 +23,12 @@ from data_sync_etl.api.reconciliation_schemas import (
     ReconciliationLatestReport,
     ReconciliationRunReport,
 )
+from data_sync_etl.application.reconciliation_engine import serialize_json_value
 from data_sync_etl.db.models import (
     SyncReconciliationDiscrepancy,
     SyncReconciliationRun,
 )
+from data_sync_etl.domain.core import DomainError
 
 router = APIRouter(prefix="/api/v1/reconciliation", tags=["Reconciliation & Integrity Verification"])
 
@@ -33,7 +36,7 @@ router = APIRouter(prefix="/api/v1/reconciliation", tags=["Reconciliation & Inte
 @router.post("/runs", response_model=ReconcileTriggerResponse)
 def trigger_reconciliation(
     request: Request,
-    body: ReconcileTriggerRequest = ReconcileTriggerRequest(),
+    body: ReconcileTriggerRequest | None = None,
 ) -> dict[str, Any]:
     """Kích hoạt một đợt đối soát toàn vẹn dữ liệu giữa Nguồn và Đích.
 
@@ -42,8 +45,18 @@ def trigger_reconciliation(
     - So sánh song song và phát hiện các loại cờ lỗi: ORPHAN_SOURCE, ORPHAN_MASTER, DESYNC_BLOB_SIZE, DESYNC_CHECKSUM, DESYNC_METADATA.
     - Tự động áp dụng ngưỡng an toàn max_ratio <= 10% (0.1).
     """
+    body = body or ReconcileTriggerRequest()
     engine = request.app.state.container.reconciliation_engine
-    result = engine.execute_stream_reconcile(stream_name=body.stream, dry_run=body.dry_run)
+    if not body.dry_run:
+        raise HTTPException(409, 'Đối soát chỉ phát hiện sai lệch. Dùng chức năng đồng bộ để cập nhật dữ liệu.')
+    try:
+        result = engine.execute_stream_reconcile(stream_name=body.stream, dry_run=body.dry_run)
+    except DomainError as exc:
+        if str(exc) == 'RECONCILIATION_BUSY':
+            raise HTTPException(409, 'Một đợt đối soát đang chạy. Vui lòng chờ hoàn tất.') from None
+        if str(exc) == 'RECONCILIATION_LIMIT_EXCEEDED':
+            raise HTTPException(422, 'Luồng dữ liệu vượt giới hạn 10.000 bản ghi; cần đối soát theo lô riêng.') from None
+        raise
     return result
 
 
@@ -79,7 +92,7 @@ def get_latest_reconciliation_report(
                 "latest_run_id": None,
                 "last_reconciled_at": None,
                 "overall_status": "NO_RUNS_YET",
-                "overall_match_rate_percent": 100.0,
+                "overall_match_rate_percent": 0.0,
                 "total_source_records": 0,
                 "total_target_records": 0,
                 "total_matched_records": 0,
@@ -98,7 +111,9 @@ def get_latest_reconciliation_report(
 
         max_pop = max(1, max(total_source, total_target))
         overall_match_rate = round((total_matched / max_pop) * 100, 2)
-        overall_status = "BLOCKED" if any(r.status == "BLOCKED" for r in latest_runs) else "COMPLETED"
+        latest_runs.sort(key=lambda run: (run.started_at, run.run_id), reverse=True)
+        overall_status = next((status for status in ('FAILED', 'BLOCKED', 'RUNNING', 'PARTIAL')
+                               if any(run.status == status for run in latest_runs)), 'COMPLETED')
 
         stream_reports = []
         for r in latest_runs:
@@ -143,6 +158,7 @@ def get_latest_reconciliation_report(
 def list_discrepancies(
     request: Request,
     run_id: str | None = Query(None, description="Lọc theo mã đợt đối soát cụ thể"),
+    latest_only: bool = Query(False, description="Chỉ lấy đợt mới nhất của từng luồng"),
     stream: str | None = Query(None, description="Lọc theo luồng dữ liệu (resources, files, subjects...)"),
     discrepancy_flag: str | None = Query(None, description="Lọc theo cờ hiệu (DESYNC_BLOB_SIZE, DESYNC_CHECKSUM, ORPHAN_SOURCE...)"),
     page: int = Query(1, ge=1, description="Số trang hiển thị (bắt đầu từ 1)"),
@@ -154,6 +170,13 @@ def list_discrepancies(
         session = repo.session
 
         query = select(SyncReconciliationDiscrepancy)
+        if latest_only:
+            ranked = select(SyncReconciliationRun.run_id, func.row_number().over(
+                partition_by=SyncReconciliationRun.stream_name,
+                order_by=(SyncReconciliationRun.started_at.desc(), SyncReconciliationRun.run_id.desc())
+            ).label('ordinal')).subquery()
+            query = query.where(SyncReconciliationDiscrepancy.run_id.in_(
+                select(ranked.c.run_id).where(ranked.c.ordinal == 1)))
         if run_id:
             query = query.where(SyncReconciliationDiscrepancy.run_id == run_id)
         if stream:
@@ -181,8 +204,8 @@ def list_discrepancies(
                 record_id=r.record_id,
                 stream_name=r.stream_name,
                 discrepancy_flag=r.discrepancy_flag,
-                source_value=r.source_value,
-                target_value=r.target_value,
+                source_value=serialize_json_value(r.source_value),
+                target_value=serialize_json_value(r.target_value),
                 detected_at=r.detected_at.isoformat(),
                 resolution_status=r.resolution_status,
             )

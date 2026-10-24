@@ -21,20 +21,21 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from data_sync_etl.db.models import (
+    MasterLearningResource,
     ResourceVersion,
     SyncReconciliationDiscrepancy,
     SyncReconciliationRun,
 )
-from data_sync_etl.domain.core import new_id, now
+from data_sync_etl.domain.core import DomainError, new_id, now
 from data_sync_etl.domain.source_ownership import state_hash
 
 # Ma trận cờ trạng thái đối soát
@@ -46,12 +47,32 @@ FLAG_ORPHAN_SOURCE = "ORPHAN_SOURCE"
 FLAG_ORPHAN_MASTER = "ORPHAN_MASTER"
 FLAG_MUTATED_SOURCE = "MUTATED_SOURCE"
 FLAG_MUTATED_DOWNSTREAM = "MUTATED_DOWNSTREAM"
+FLAG_NOT_VERIFIED = "NOT_VERIFIED"
+
+METADATA_FIELDS = {
+    'resources': ('title', 'publication_status', 'provider_id', 'resource_type_id', 'is_active', 'deleted_at'),
+    'users': ('email', 'full_name', 'role_id', 'is_active', 'email_verified_at', 'deleted_at'),
+    'subjects': ('subject_code', 'name', 'grade_level_id', 'is_active', 'deleted_at'),
+    'grades': ('grade_code', 'grade_name_vi', 'education_level_id', 'is_active', 'deleted_at'),
+}
+
+
+def metadata_differences(stream, source, target):
+    return [key for key in METADATA_FIELDS.get(stream, ()) if key in source and key in target
+            and serialize_json_value(source[key]) != serialize_json_value(target[key])]
 
 
 def serialize_json_value(value: Any) -> Any:
     """Đảm bảo mọi đối tượng datetime, UUID hoặc custom object đều được serialize an toàn trước khi lưu JSON."""
     if value is None:
         return None
+    if isinstance(value, dict):
+        secrets = {'password', 'hashed_password', 'password_hash', 'remember_token',
+                   'access_token', 'refresh_token', 'session_token', 'api_key'}
+        return {key: serialize_json_value(item) for key, item in value.items()
+                if str(key).casefold() not in secrets}
+    if isinstance(value, (list, tuple)):
+        return [serialize_json_value(item) for item in value]
     return json.loads(json.dumps(value, default=str))
 
 STREAM_TABLE_MAPPING: dict[str, dict[str, Any]] = {
@@ -109,6 +130,7 @@ class ReconciliationEngine:
         self.storage_root = Path(storage_root)
         self.max_ratio = max_ratio
         self.batch_size = batch_size
+        self._run_lock = Lock()
 
     def compute_table_summary(
         self,
@@ -203,24 +225,27 @@ class ReconciliationEngine:
         Cấp 2 (Deep Check): Đọc stream SHA-256 đối chiếu source_hash O(N) khi kích thước khớp.
         """
         root = Path(storage_root or self.storage_root)
-        stmt = select(ResourceVersion).order_by(ResourceVersion.id)
+        stmt = select(ResourceVersion).order_by(ResourceVersion.id).limit(10001)
         if sample_limit:
             stmt = stmt.limit(sample_limit)
 
         versions = db_session.scalars(stmt).all()
+        if len(versions) > 10000:
+            raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
+        origins = dict(db_session.execute(select(MasterLearningResource.id, MasterLearningResource.source_origin)
+            .where(MasterLearningResource.id.in_({row.resource_id for row in versions}))).all())
         results: list[dict[str, Any]] = []
 
         for ver in versions:
-            # Kiến trúc SOURCE Reference Only: tệp lưu tại Nguồn (Google Drive / local mount),
-            # KHÔNG sao chép vào ./storage. Chỉ kiểm tra blob vật lý cho tệp LOCAL_OWNED
-            # (storage_bucket là None hoặc 'learning-resources').
+            # Ownership comes from the resource, never an assumed bucket name.
+            # SOURCE bytes are not verified by inspecting historical Master copies.
             bucket = ver.storage_bucket or ""
-            is_source_reference = bucket not in ("", "learning-resources")
+            is_source_reference = origins.get(ver.resource_id) != 'LOCAL'
             if is_source_reference:
-                # Bỏ qua kiểm tra blob vật lý — tham chiếu Nguồn hợp lệ trong DB = SYNCED
+                # Report as unverified instead of claiming SOURCE integrity.
                 results.append({
                     "record_id": ver.id,
-                    "discrepancy_flag": FLAG_SYNCED,
+                    "discrepancy_flag": FLAG_NOT_VERIFIED,
                     "source_value": {
                         "version_number": ver.version_number,
                         "storage_bucket": bucket,
@@ -236,11 +261,16 @@ class ReconciliationEngine:
                 continue
 
             # Xác định vị trí tệp LOCAL_OWNED trên kho lưu trữ
-            blob_path = root / bucket / ver.storage_object_key if bucket else root / ver.storage_object_key
+            blob_path = (root / bucket / ver.storage_object_key).resolve()
+            if not blob_path.is_relative_to(root.resolve()):
+                results.append({'record_id': ver.id, 'discrepancy_flag': FLAG_DESYNC_BLOB_SIZE,
+                                'source_value': None, 'target_value': {'file_exists': False},
+                                'message': 'Unsafe storage path'})
+                continue
             if not blob_path.is_file():
                 # Thử đường dẫn không có bucket nếu object_key đã chứa đầy đủ
                 alt_path = root / ver.storage_object_key
-                if alt_path.is_file():
+                if alt_path.resolve().is_relative_to(root.resolve()) and alt_path.is_file():
                     blob_path = alt_path
 
             if not blob_path.is_file():
@@ -310,11 +340,6 @@ class ReconciliationEngine:
                 })
             else:
                 # Hoàn toàn đồng nhất
-                if ver.storage_file_size != st_size:
-                    ver.storage_file_size = st_size
-                if ver.source_file_size is None:
-                    ver.source_file_size = st_size
-
                 results.append({
                     "record_id": ver.id,
                     "discrepancy_flag": FLAG_SYNCED,
@@ -330,7 +355,6 @@ class ReconciliationEngine:
                     "message": "File blob verified and synced",
                 })
 
-        db_session.flush()
         return results
 
     def _fetch_source_records(self, stream_name: str) -> dict[str, dict[str, Any]]:
@@ -343,7 +367,9 @@ class ReconciliationEngine:
         if hasattr(self.source_adapter, "engine"):
             tbl = STREAM_TABLE_MAPPING.get(stream_name, {}).get("source_table", stream_name)
             with self.source_adapter.engine.connect() as conn:
-                rows = conn.execute(text(f"SELECT * FROM {tbl}")).mappings().all()
+                rows = conn.execute(text(f"SELECT * FROM {tbl} LIMIT 10001")).mappings().all()
+                if len(rows) > 10000:
+                    raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
                 for r in rows:
                     source_records[str(r["id"])] = dict(r)
             return source_records
@@ -358,6 +384,8 @@ class ReconciliationEngine:
                         break
                     for r_id in ids:
                         source_records[str(r_id)] = {"id": str(r_id)}
+                    if len(source_records) > 10000:
+                        raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
                     after = ids[-1]
             return source_records
 
@@ -367,11 +395,23 @@ class ReconciliationEngine:
                 for agg in batch:
                     r_id = getattr(agg, "id", None) or agg.values.get("id")
                     source_records[str(r_id)] = dict(agg.values)
+                    if len(source_records) > 10000:
+                        raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
             return source_records
 
         return source_records
 
     def execute_stream_reconcile(
+        self, stream_name: str = 'all', dry_run: bool = True,
+    ) -> dict[str, Any]:
+        if not self._run_lock.acquire(blocking=False):
+            raise DomainError('RECONCILIATION_BUSY')
+        try:
+            return self._execute_stream_reconcile(stream_name, dry_run)
+        finally:
+            self._run_lock.release()
+
+    def _execute_stream_reconcile(
         self,
         stream_name: str = "all",
         dry_run: bool = True,
@@ -395,6 +435,8 @@ class ReconciliationEngine:
             session: Session = repo.session
 
             for stream in streams_to_run:
+                source_dict, target_rows, file_results = {}, [], []
+                unverified_metadata, matched_metadata = 0, 0
                 mapping = STREAM_TABLE_MAPPING.get(stream)
                 if not mapping:
                     continue
@@ -430,7 +472,7 @@ class ReconciliationEngine:
                     # Luồng tệp học liệu: thực hiện Fast Check và Deep Check trên Storage
                     file_results = self.verify_file_blobs(session, self.storage_root)
                     for fr in file_results:
-                        if fr["discrepancy_flag"] != FLAG_SYNCED:
+                        if fr["discrepancy_flag"] not in (FLAG_SYNCED, FLAG_NOT_VERIFIED):
                             discrepancies.append({
                                 "record_id": fr["record_id"],
                                 "stream_name": stream,
@@ -441,7 +483,9 @@ class ReconciliationEngine:
                 else:
                     # Luồng metadata: lấy dữ liệu 2 bên
                     source_dict = self._fetch_source_records(stream)
-                    target_rows = repo.find(target_tbl, limit=10000)
+                    target_rows = repo.find(target_tbl, limit=10001)
+                    if len(target_rows) > 10000:
+                        raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
                     target_dict = {str(r["id"]): r for r in target_rows}
 
                     all_ids = set(source_dict.keys()) | set(target_dict.keys())
@@ -449,6 +493,8 @@ class ReconciliationEngine:
                     for rec_id in sorted(all_ids):
                         s_val = source_dict.get(rec_id)
                         t_val = target_dict.get(rec_id)
+                        if t_val and t_val.get('source_origin') == 'LOCAL':
+                            continue
 
                         if s_val and not t_val:
                             # Bản ghi có ở Nguồn nhưng thiếu ở Master
@@ -485,13 +531,28 @@ class ReconciliationEngine:
                                     "source_value": s_val,
                                     "target_value": t_val,
                                 })
+                            else:
+                                compared = [key for key in METADATA_FIELDS.get(stream, ()) if key in s_val and key in t_val]
+                                unverified_metadata += not bool(compared)
+                                different = metadata_differences(stream, s_val, t_val)
+                                if different:
+                                    discrepancies.append({'record_id': rec_id, 'stream_name': stream,
+                                        'discrepancy_flag': FLAG_DESYNC_METADATA,
+                                        'source_value': {**{key: s_val[key] for key in different}, 'different_fields': different},
+                                        'target_value': {**{key: t_val[key] for key in different}, 'different_fields': different}})
+                                elif compared:
+                                    matched_metadata += 1
 
                 # 4. Đánh giá ngưỡng an toàn tự phục hồi (Safety bounds check)
-                s_count = source_summary.get("count") or len(source_dict if "source_dict" in locals() else [])
-                t_count = target_summary.get("count") or len(target_rows if "target_rows" in locals() else [])
+                s_count = source_summary.get("count", len(source_dict))
+                t_count = target_summary.get("count", len(target_rows))
+                if stream != 'files':
+                    t_count = max(0, t_count - sum(row.get('source_origin') == 'LOCAL' for row in target_rows))
                 mismatched_count = len(discrepancies)
+                skipped_files = sum(row['discrepancy_flag'] == FLAG_NOT_VERIFIED for row in file_results)
                 max_population = max(1, max(s_count, t_count))
-                matched_count = max(0, t_count - mismatched_count)
+                matched_count = (sum(row['discrepancy_flag'] == FLAG_SYNCED for row in file_results)
+                                 if stream == 'files' else matched_metadata)
                 mismatch_ratio = mismatched_count / max_population
 
                 summary_meta = {
@@ -500,6 +561,8 @@ class ReconciliationEngine:
                     "dry_run": dry_run,
                     "mismatch_ratio": round(mismatch_ratio, 4),
                     "max_allowed_ratio": self.max_ratio,
+                    "unverified_source_files": skipped_files,
+                    "unverified_metadata_records": unverified_metadata,
                 }
 
                 if mismatch_ratio > self.max_ratio:
@@ -507,10 +570,10 @@ class ReconciliationEngine:
                     summary_meta["guard_alert"] = "BLOCKED_MASS_DISCREPANCY"
                     summary_meta["reason"] = (
                         f"Tỷ lệ lệch ({round(mismatch_ratio * 100, 2)}%) vượt ngưỡng an toàn "
-                        f"cho phép ({self.max_ratio * 100}%). Chặn tự động đồng bộ để bảo toàn dữ liệu."
+                        f"cho phép ({self.max_ratio * 100}%). Cần kiểm tra trước khi đồng bộ lại."
                     )
                 else:
-                    run_status = "COMPLETED"
+                    run_status = "PARTIAL" if skipped_files or unverified_metadata else "COMPLETED"
                     # Nếu không phải dry_run và là ORPHAN_MASTER, có thể tiến hành Auto-Heal (tombstone) an toàn
                     if not dry_run:
                         for d in discrepancies:
@@ -578,12 +641,13 @@ class ReconciliationEngine:
                     "target_total_bytes": target_summary.get("total_bytes", 0),
                     "source_table_hash": source_summary.get("table_fingerprint"),
                     "target_table_hash": target_summary.get("table_fingerprint"),
-                    "discrepancies_sample": discrepancies[:20],
+                    "discrepancies_sample": serialize_json_value(discrepancies[:20]),
                     "summary_meta": summary_meta,
                 })
 
         return {
-            "status": "COMPLETED" if all(r["status"] == "COMPLETED" for r in overall_reports) else "BLOCKED",
+            "status": next((status for status in ('BLOCKED', 'PARTIAL')
+                            if any(row['status'] == status for row in overall_reports)), 'COMPLETED'),
             "executed_at": now().isoformat(),
             "dry_run": dry_run,
             "total_streams": len(overall_reports),

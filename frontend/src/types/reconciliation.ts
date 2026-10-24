@@ -1,7 +1,7 @@
 export interface ReconciliationRunReport {
     run_id: string
     stream_name: string
-    status: 'RUNNING' | 'COMPLETED' | 'BLOCKED' | 'FAILED'
+    status: 'RUNNING' | 'COMPLETED' | 'BLOCKED' | 'FAILED' | 'PARTIAL'
     started_at: string
     finished_at?: string | null
     source_count: number

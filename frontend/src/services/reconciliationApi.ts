@@ -9,6 +9,8 @@ async function getErrorMessage(response: Response) {
     if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') {
         return body.detail
     }
+    if (body && typeof body === 'object' && 'detail' in body && body.detail && typeof body.detail === 'object'
+        && 'message' in body.detail && typeof body.detail.message === 'string') return body.detail.message
     return `Yêu cầu đối soát thất bại: HTTP ${response.status}`
 }
 
@@ -52,6 +54,7 @@ export async function getDiscrepancies(
         flag?: string
         page?: number
         pageSize?: number
+        latestOnly?: boolean
     } = {},
     signal?: AbortSignal,
 ): Promise<DiscrepancyListResponse> {
@@ -60,6 +63,7 @@ export async function getDiscrepancies(
         page_size: String(params.pageSize ?? 10),
     })
     if (params.runId) query.set('run_id', params.runId)
+    if (params.latestOnly) query.set('latest_only', 'true')
     if (params.stream && params.stream !== 'all') query.set('stream', params.stream)
     if (params.flag && params.flag !== 'ALL') query.set('discrepancy_flag', params.flag)
 
