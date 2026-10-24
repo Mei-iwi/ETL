@@ -49,13 +49,8 @@ TAI_LIEU_DOI_CHIEU/
 
 # Generated research/benchmark outputs; keep query labels and contracts versioned.
 /fixtures/search/*_results.json
-/research/bge-m3/smoke-*.json
-/research/semantic-quality/audit.json
-/research/semantic-quality/results.json
-/research/semantic-quality/query-encoder-parity.json
-/research/semantic-quality/optimization/RESULTS.json
-/research/semantic-quality/optimization/selection-lock.json
 
 # Local reports and archives; executable inputs live under fixtures/.
 /research/
 /research.rar
+/profile-evidence/
