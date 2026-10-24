@@ -11,8 +11,15 @@ from data_sync_etl.application.search_runtime import (
     SearchCall,
     SearchInferenceQueue,
 )
-from data_sync_etl.domain.concepts import Dictionary, Snapshot, default_dictionary, equivalent_terms
+from data_sync_etl.domain.concepts import (
+    Dictionary,
+    Snapshot,
+    concept_analysis_scope,
+    default_dictionary,
+    equivalent_terms,
+)
 from data_sync_etl.domain.context_ranking import CONTEXT_RANKING_VERSION, ContextRanker
+from data_sync_etl.domain.evidence_selection import select_evidence
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
 from data_sync_etl.domain.lexical import (
     ANALYZER_VERSION,
@@ -24,6 +31,7 @@ from data_sync_etl.domain.lexical import (
     snippet_text,
 )
 from data_sync_etl.domain.meaning_bags import match_meaning
+from data_sync_etl.domain.retrieval_fusion import version_rrf
 from data_sync_etl.domain.search import SearchError, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
 from data_sync_etl.domain.search_context import decode_context, encode_context
@@ -78,6 +86,12 @@ class SearchService:
                                     if query_cache_runtime is not None else None)
 
     def _ranking_algorithm(self, method):
+        if method != 'bow' and self.settings.search_evidence_strategy != 'current':
+            return 'bge-m3-version-' + self.settings.search_evidence_strategy + '-v1'
+        if method == 'hybrid' and self.settings.search_hybrid_fusion_unit == 'version':
+            if self.settings.search_hybrid_lexical_weight != 1. or self.settings.search_hybrid_vector_weight != 1.:
+                return 'resource-version-weighted-rrf-v1'
+            return 'resource-version-rrf-v1'
         if self.settings.semantic_enabled and method in ('vector', 'hybrid'):
             return ('bge-m3-chunk-' + self.settings.semantic_strategy +
                     ('-colbert-v1' if self.settings.semantic_rerank_enabled else '-cosine-v1') +
@@ -311,9 +325,10 @@ class SearchService:
         return evidence[:64]
 
     @analysis_scope()
+    @concept_analysis_scope()
     @document_validation_scope()
     def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
-               _query_context=None, _batch_texts=False, _batch_bags=False):
+               _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None):
         access = access or SearchAccess()
         started, filters = monotonic(), filters or {}
         query = normalize_query(query)
@@ -360,7 +375,7 @@ class SearchService:
                          if phase_reader is not None and candidates else None)
         by_bag, bow, semantic, snapshots, ready_count, source_chars = {}, {}, {}, {}, 0, 0
         excluded, semantic_metadata = set(), {}
-        authorized_roots = {}
+        authorized_roots, evidence_by_version = {}, {}
         for version_id in sorted({bag.resource_version_id for bag in candidates}):
             self._deadline(started)
             with self.indexing.uow() as repo:
@@ -377,8 +392,12 @@ class SearchService:
             snapshots[version_id] = snapshot
             roots, snippets, preview = self._snippets(snapshot, keywords, started, allowed, query, expansion, policy)
             authorized_roots[version_id] = set(roots)
+            evidence_options = {}
+            if use_semantic and self.settings.search_evidence_strategy != 'current':
+                evidence_by_version[version_id] = []
+                evidence_options['evidence_candidates'] = evidence_by_version[version_id]
             semantic_hits = (self.semantic.scores(snapshot, semantic_metadata[version_id],
-                roots, allowed, vector, lambda: self._deadline(started), semantic_budget)
+                roots, allowed, vector, lambda: self._deadline(started), semantic_budget, **evidence_options)
                 if use_semantic else {})
             version_bags = [bag for bag in candidates if bag.resource_version_id == version_id]
             reader = initial_phase or (getattr(self.bags, 'search_bags', None) if _batch_bags else None)
@@ -466,8 +485,18 @@ class SearchService:
                        dictionary=self.dictionary, policy=policy, expansion=expansion,
                        min_coverage=self.settings.search_bow_min_coverage)
             scores = bow if method == 'bow' else semantic if method == 'vector' else rrf(bow, semantic)
+            fusion = (version_rrf({'bow': bow, 'vector': semantic},
+                                 {key: row[0].resource_version_id for key, row in by_bag.items()},
+                                 weights=({'bow': self.settings.search_hybrid_lexical_weight,
+                                           'vector': self.settings.search_hybrid_vector_weight}
+                                          if self.settings.search_hybrid_lexical_weight != 1.
+                                          or self.settings.search_hybrid_vector_weight != 1. else None))
+                      if method == 'hybrid' and self.settings.search_hybrid_fusion_unit == 'version' else None)
+            if fusion is not None:
+                scores = fusion.scores
             grouped, matches = {}, {}
-            for bag_id in sorted(scores, key=lambda key: (-scores[key], key)):
+            for bag_id in sorted(scores, key=lambda key: (-scores[key],
+                    bool(fusion and key != fusion.representatives[by_bag[key][0].resource_version_id]), key)):
                 bag, chunk, matched, mode = by_bag[bag_id]
                 row = by_version[bag.resource_version_id]
                 matches[row['resource_id']] = matches.get(row['resource_id'], 0) + 1
@@ -482,15 +511,48 @@ class SearchService:
                     'resource_version_id': bag.resource_version_id,
                     'bag_id': bag.id, 'bag_title': bag.title, 'unit_type': bag.unit_type,
                     'representation_mode': mode, 'matched_keywords': matched, 'score': scores[bag_id],
-                    'score_components': {key: branch[bag_id] for key, branch in
-                                         [('bow', bow), ('vector', semantic)] if bag_id in branch},
-                    'snippet': snippet_text(chunk['text'], set(keywords), query=query, anchor=chunk.get('anchor'), expansion=expansion, dictionary=self.dictionary, policy=policy), 'page_from': chunk['page_from'], 'page_to': chunk['page_to'],
+                    'score_components': (fusion.components[bag.resource_version_id] if fusion else
+                                         {key: branch[bag_id] for key, branch in
+                                          [('bow', bow), ('vector', semantic)] if bag_id in branch}),
+                    'page_from': chunk['page_from'], 'page_to': chunk['page_to'],
                     'content_unit_id': chunk['content_unit_id'], 'context_id': token,
                     'context_evidence': chunk['context_evidence'],
                     'meaning_variants': chunk['meaning_variants'],
-                    'lexical_evidence': self._lexical_evidence(expansion, bag, snapshot, policy),
                     'context_url': f'/api/v1/chunks/{token}/context',
                 }
+            # Rendering does not affect rank/total. Hydrate only the visible
+            # winners, BEFORE final snapshot/ACL validation, including on rerank.
+            visible = sorted(grouped.values(), key=lambda row: (-row['score'], row['resource_id']))
+            offset = (page - 1) * size
+            for item in visible[offset:offset + size]:
+                self._deadline(started)
+                bag, chunk, *_ = by_bag[item['bag_id']]
+                version_id = bag.resource_version_id
+                if use_semantic and self.settings.search_evidence_strategy != 'current' and method != 'bow':
+                    selected = select_evidence(evidence_by_version.get(version_id, []), version_id=version_id,
+                        strategy='dense' if self.settings.search_evidence_strategy == 'version_dense' else 'context',
+                        top_n=self.settings.search_evidence_top_n, margin=self.settings.search_evidence_dense_margin,
+                        query=query, keywords=keywords, dictionary=self.dictionary, expansion=expansion, policy=policy,
+                        checkpoint=lambda: self._deadline(started))
+                    if selected is not None:
+                        current = by_bag.get(selected.bag_id)
+                        if (current is None or current[0].resource_version_id != version_id
+                                or selected.chunk['content_unit_id'] not in
+                                bag_structure(snapshots[version_id][2]).get(selected.bag_id, ())):
+                            raise SearchError('SEARCH_INDEX_STALE', 409)
+                        bag, _, matched, mode = by_bag[selected.bag_id]
+                        chunk = {**selected.chunk, 'context_evidence': 'semantic', 'meaning_variants': []}
+                        token = encode_context(version_id, chunk['content_unit_id'],
+                                               chunk['unit_chunk_sequence'], snapshots[version_id][3])
+                        item.update(bag_id=bag.id, bag_title=bag.title, unit_type=bag.unit_type,
+                            representation_mode=mode, matched_keywords=matched, content_unit_id=chunk['content_unit_id'],
+                            page_from=chunk['page_from'], page_to=chunk['page_to'], context_id=token,
+                            context_url=f'/api/v1/chunks/{token}/context', context_evidence='semantic', meaning_variants=[])
+                        if method == 'vector':
+                            item['score_components'] = {'vector': item['score']}
+                item['snippet'] = snippet_text(chunk['text'], set(keywords), query=query,
+                    anchor=chunk.get('anchor'), expansion=expansion, dictionary=self.dictionary, policy=policy)
+                item['lexical_evidence'] = self._lexical_evidence(expansion, bag, snapshots[bag.resource_version_id], policy)
             return grouped, matches
         grouped, matches = ranked()
         whole_file_access = {}
@@ -546,6 +608,13 @@ class SearchService:
                 discard_versions()
                 grouped, matches = ranked()
         self._deadline(started)
+        if _evaluation_capture is not None:
+            # Internal evaluation adapter only, never bound from HTTP input.
+            # Export ALL admitted Bags (including nonhits) AFTER both phases.
+            # Partial index coverage must not silently change corpus statistics.
+            if excluded or len(snapshots) != len(by_version):
+                raise SearchError('EVALUATION_SNAPSHOT_INCOMPLETE', 409)
+            _evaluation_capture(by_bag, snapshots, policy, by_version)
         items = sorted(grouped.values(), key=lambda item: (-item['score'], item['resource_id']))
         for item in items:
             item['matched_bag_count'] = matches[item['resource_id']]
@@ -567,6 +636,12 @@ class SearchService:
                 'search_fingerprint': digest([ANALYZER_VERSION, REPRESENTATION_VERSION, RANKING_VERSION,
                                               CONTEXT_RANKING_VERSION,
                                               self.settings.search_bow_min_coverage,
+                                              self.settings.search_hybrid_fusion_unit,
+                                              self.settings.search_hybrid_lexical_weight,
+                                              self.settings.search_hybrid_vector_weight,
+                                              self.settings.search_evidence_strategy,
+                                              self.settings.search_evidence_top_n,
+                                              self.settings.search_evidence_dense_margin,
                                               expansion.dictionary_fingerprint,
                                               expansion.policy_fingerprint,
                                               self.settings.search_vector_min_similarity,

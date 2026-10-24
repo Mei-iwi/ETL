@@ -5,6 +5,8 @@ This dictionary is query-time data, never document TF or embedding input.
 
 import re
 from collections import Counter, defaultdict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -15,6 +17,21 @@ from data_sync_etl.domain.indexing import digest
 
 Status = Literal['pending', 'approved', 'rejected']
 RelationKind = Literal['equivalent', 'translation', 'broader', 'narrower', 'related']
+EXPANSION_VERSION = 'reviewed-context-hints-v2'
+_OBSERVATIONS = ContextVar('concept_request_observations', default=None)
+
+
+@contextmanager
+def concept_analysis_scope():
+    """Bounded text analysis only; no index state, rankings or ACL decisions."""
+    if _OBSERVATIONS.get() is not None:
+        yield
+        return
+    token = _OBSERVATIONS.set({'entries': {}, 'characters': 0})
+    try:
+        yield
+    finally:
+        _OBSERVATIONS.reset(token)
 
 
 def normalize(text):
@@ -170,6 +187,20 @@ class Dictionary:
             for term in concept.terms:
                 if term.review_status == 'approved':
                     self.aliases[term.normalized].append(term)
+        # Immutable lookup work belongs to this versioned dictionary, not every
+        # query/document mention. Pending terms must never disambiguate a sense.
+        self.context_hints = {}
+        for cid, concept in self.concepts.items():
+            hints = {}
+            for term in concept.terms:
+                if term.review_status != 'approved':
+                    continue
+                for hint in term.context_hints:
+                    normalized = normalize(hint)
+                    if normalized:
+                        hints[normalized] = max(hints.get(normalized, 0.), term.confidence)
+            self.context_hints[cid] = [(confidence, re.compile(r'(?<!\w)' + re.escape(hint) + r'(?!\w)'))
+                                       for hint, confidence in hints.items()]
         def pattern(alias):
             def cjk(c):
                 return '\u3040' <= c <= '\u9fff'
@@ -182,6 +213,20 @@ class Dictionary:
 
     def observations(self, text, *, policy=None):
         """Do not attribute an ambiguous document mention to the wrong sense."""
+        scope = _OBSERVATIONS.get()
+        policy = policy or ExpansionPolicy()
+        key = (self.fingerprint, policy.model_dump_json(), text)
+        if scope is not None and key in scope['entries']:
+            yield from scope['entries'][key]
+            return
+        result = list(self._observations(text, policy=policy))
+        if (scope is not None and len(scope['entries']) < 256
+                and scope['characters'] + len(text) <= 1_000_000):
+            scope['entries'][key] = tuple(result)
+            scope['characters'] += len(text)
+        yield from result
+
+    def _observations(self, text, *, policy):
         matches = list(self.occurrences(text))
         needs_context = any(len({t.concept_id for t in self.aliases[m.group()]}) > 1
                             or any(t.kind == 'abbreviation' for t in self.aliases[m.group()])
@@ -202,7 +247,7 @@ class Dictionary:
         policy = policy or ExpansionPolicy()
         normalized = normalize(query)
         recognized, expanded, seen = [], [], set()
-        for match in self.occurrences(query):
+        for match in self.pattern.finditer(normalized):
             terms = [t for t in self.aliases[match.group()] if t.confidence >= policy.min_confidence]
             by_concept = {t.concept_id: t for t in terms}
             if not by_concept:
@@ -212,9 +257,9 @@ class Dictionary:
                 concept = self.concepts[cid]
                 # Domain = 3, each distinct context hint outside the mention = 2.
                 context = normalized[:match.start()] + ' ' + normalized[match.end():]
-                hints = {normalize(h) for t in concept.terms for h in t.context_hints}
                 score = (3.0 if domain == concept.domain else 0.0) + 2.0 * sum(
-                    bool(re.search(r'(?<!\w)' + re.escape(h) + r'(?!\w)', context)) for h in hints if h)
+                    bool(pattern.search(context)) for confidence, pattern in self.context_hints[cid]
+                    if confidence >= policy.min_confidence)
                 scores[cid] = score
             ordered = sorted(scores, key=lambda cid: (-scores[cid], cid))
             cid = ordered[0]
@@ -285,7 +330,7 @@ class Dictionary:
                     term.weight == old.weight and term.relation == 'original'):
                 unique_terms[key] = term
         return ExpandedQuery(original=query, dictionary_fingerprint=self.fingerprint,
-                             policy_fingerprint=digest(policy.model_dump()), recognized=recognized,
+                             policy_fingerprint=digest([EXPANSION_VERSION, policy.model_dump()]), recognized=recognized,
                              terms=list(unique_terms.values()))
 
     def evidence(self, expansion, text, *, field='content', policy=None):

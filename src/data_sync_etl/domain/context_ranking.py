@@ -31,7 +31,10 @@ class ContextRanker:
         self.terms = content_terms(keywords)
         compounds = {term: surface_tokens(term.replace('_', ' '))
                      for term in self.terms if '_' in term}
-        self.concepts = set(concept_frequencies(self.exact)) if expand_concepts else set()
+        # An explicit expansion already drives evidence scoring below. Avoid a
+        # second default-dictionary expansion whose result that branch never uses.
+        self.concepts = (set(concept_frequencies(self.exact))
+                         if expand_concepts and not (dictionary is not None and expansion is not None) else set())
         self.expansion, self.dictionary = expansion, dictionary
         self.policy = policy
         self.tokens, self.words = [], []
