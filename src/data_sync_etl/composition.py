@@ -53,6 +53,7 @@ from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.reconciliation_engine import ReconciliationEngine
+from data_sync_etl.application.file_reconciliation import FileReconciliationJobs
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
 from data_sync_etl.application.semantic import SemanticService
@@ -97,6 +98,8 @@ def create_ocr_engine(settings):
 
 class Container:
     def close(self):
+        if hasattr(self, 'reconciliation_jobs'):
+            self.reconciliation_jobs.close()
         if hasattr(self.source, "close"):
             self.source.close()
         if self.mongo_client is not None:
@@ -331,6 +334,9 @@ class Container:
             self.settings, SourceTemporaryFiles(self.settings, self.storage.root),
         )
         self.source_file_import.resolver = self.source_resolver
+        self.reconciliation_engine.source_resolver = self.source_resolver
+        self.reconciliation_engine.file_read_budget_seconds = self.settings.source_read_timeout_seconds
+        self.reconciliation_jobs = FileReconciliationJobs(self.reconciliation_engine)
         self.file_previews = FilePreviewService(self.source_resolver, self.settings)
         self.ocr.resolver = self.source_resolver
         self.source_file_worker = SourceFileImportWorker(self.source_file_import)

@@ -19,6 +19,13 @@ export interface ReconciliationRunReport {
         guard_alert?: string
         reason?: string
         dry_run?: boolean
+        unverified_source_files?: number
+        unverified_metadata_records?: number
+        verified_file_count?: number
+        verification_reason_counts?: Record<string, number>
+        processed_files?: number
+        total_files?: number
+        verified_bytes?: number
     } | null
 }
 

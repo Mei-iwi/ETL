@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
+from time import monotonic
 from typing import Any
 
 from sqlalchemy import select, text
@@ -35,7 +37,7 @@ from data_sync_etl.db.models import (
     SyncReconciliationDiscrepancy,
     SyncReconciliationRun,
 )
-from data_sync_etl.domain.core import DomainError, new_id, now
+from data_sync_etl.domain.core import DomainError, SourceFileError, new_id, now
 from data_sync_etl.domain.source_ownership import state_hash
 
 # Ma trận cờ trạng thái đối soát
@@ -48,6 +50,19 @@ FLAG_ORPHAN_MASTER = "ORPHAN_MASTER"
 FLAG_MUTATED_SOURCE = "MUTATED_SOURCE"
 FLAG_MUTATED_DOWNSTREAM = "MUTATED_DOWNSTREAM"
 FLAG_NOT_VERIFIED = "NOT_VERIFIED"
+
+
+class _ReadBudget:
+    """Cooperative cancellation for existing provider readers; no timer thread."""
+    def __init__(self, deadline, stopped=None):
+        self.deadline, self.stopped = deadline, stopped
+
+    def is_set(self):
+        return monotonic() >= self.deadline or bool(self.stopped and self.stopped.is_set())
+
+    def wait(self, seconds):
+        (self.stopped or Event()).wait(max(0, min(seconds, self.deadline - monotonic())))
+        return self.is_set()
 
 METADATA_FIELDS = {
     'resources': ('title', 'publication_status', 'provider_id', 'resource_type_id', 'is_active', 'deleted_at'),
@@ -131,6 +146,9 @@ class ReconciliationEngine:
         self.max_ratio = max_ratio
         self.batch_size = batch_size
         self._run_lock = Lock()
+        self.source_resolver = None
+        self.file_read_budget_seconds = 30
+        self.file_cancelled = None
 
     def compute_table_summary(
         self,
@@ -218,6 +236,7 @@ class ReconciliationEngine:
         db_session: Session,
         storage_root: Path | None = None,
         sample_limit: int | None = None,
+        version_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Kiểm tra toàn vẹn dung lượng file vật lý 2 cấp:
 
@@ -226,6 +245,8 @@ class ReconciliationEngine:
         """
         root = Path(storage_root or self.storage_root)
         stmt = select(ResourceVersion).order_by(ResourceVersion.id).limit(10001)
+        if version_ids is not None:
+            stmt = stmt.where(ResourceVersion.id.in_(version_ids))
         if sample_limit:
             stmt = stmt.limit(sample_limit)
 
@@ -237,13 +258,14 @@ class ReconciliationEngine:
         results: list[dict[str, Any]] = []
 
         for ver in versions:
+            # A slow first file must not consume the deadline of every later file.
+            deadline = monotonic() + self.file_read_budget_seconds
             # Ownership comes from the resource, never an assumed bucket name.
             # SOURCE bytes are not verified by inspecting historical Master copies.
             bucket = ver.storage_bucket or ""
             is_source_reference = origins.get(ver.resource_id) != 'LOCAL'
             if is_source_reference:
-                # Report as unverified instead of claiming SOURCE integrity.
-                results.append({
+                result = {
                     "record_id": ver.id,
                     "discrepancy_flag": FLAG_NOT_VERIFIED,
                     "source_value": {
@@ -256,8 +278,34 @@ class ReconciliationEngine:
                         "storage_file_size": ver.storage_file_size,
                         "note": "SOURCE_REFERENCE_ONLY — blob không lưu trong storage local",
                     },
-                    "message": f"SOURCE_REFERENCE_ONLY bucket='{bucket}': bỏ qua kiểm tra blob vật lý",
-                })
+                    "message": "Chưa xác minh được tệp nguồn",
+                }
+                try:
+                    if monotonic() >= deadline:
+                        raise SourceFileError('RECONCILIATION_READ_BUDGET')
+                    if self.source_resolver is None:
+                        raise SourceFileError('SOURCE_RESOLVER_UNAVAILABLE')
+                    reference = self.source_resolver.resolve(ver.id)
+                    if reference.ownership != 'SOURCE_BACKED':
+                        raise SourceFileError('BLOCKED_SOURCE_MAPPING')
+                    # Resolver verifies canonical ownership, source revision and SHA-256,
+                    # then removes the private temporary file. Never inspect a Master copy.
+                    with self.source_resolver.temporary_path(reference, cancelled=_ReadBudget(deadline, self.file_cancelled)) as source_path:
+                        size = source_path.stat().st_size
+                    expected = ver.source_file_size
+                    flag = FLAG_DESYNC_BLOB_SIZE if expected is not None and expected != size else FLAG_SYNCED
+                    result.update(discrepancy_flag=flag, message='Đã đọc và xác minh tệp từ nguồn')
+                    result['target_value'] = {'verified_size': size, 'verified_sha256': ver.source_hash,
+                                              'verification': 'SOURCE_STREAM_SHA256'}
+                except SourceFileError as exc:
+                    flag = {'SOURCE_HASH_MISMATCH': FLAG_DESYNC_CHECKSUM,
+                            'SOURCE_VERSION_MUTATED': FLAG_DESYNC_METADATA}.get(exc.code, FLAG_NOT_VERIFIED)
+                    result.update(discrepancy_flag=flag)
+                    result['target_value'] = {'verification': 'NOT_VERIFIED', 'reason_code':
+                        'RECONCILIATION_READ_BUDGET' if exc.code == 'SOURCE_REQUEST_CANCELLED' else exc.code}
+                except OSError:
+                    result['target_value'] = {'verification': 'NOT_VERIFIED', 'reason_code': 'SOURCE_UNAVAILABLE'}
+                results.append(result)
                 continue
 
             # Xác định vị trí tệp LOCAL_OWNED trên kho lưu trữ
@@ -472,7 +520,7 @@ class ReconciliationEngine:
                     # Luồng tệp học liệu: thực hiện Fast Check và Deep Check trên Storage
                     file_results = self.verify_file_blobs(session, self.storage_root)
                     for fr in file_results:
-                        if fr["discrepancy_flag"] not in (FLAG_SYNCED, FLAG_NOT_VERIFIED):
+                        if fr["discrepancy_flag"] != FLAG_SYNCED:
                             discrepancies.append({
                                 "record_id": fr["record_id"],
                                 "stream_name": stream,
@@ -548,7 +596,7 @@ class ReconciliationEngine:
                 t_count = target_summary.get("count", len(target_rows))
                 if stream != 'files':
                     t_count = max(0, t_count - sum(row.get('source_origin') == 'LOCAL' for row in target_rows))
-                mismatched_count = len(discrepancies)
+                mismatched_count = sum(row['discrepancy_flag'] != FLAG_NOT_VERIFIED for row in discrepancies)
                 skipped_files = sum(row['discrepancy_flag'] == FLAG_NOT_VERIFIED for row in file_results)
                 max_population = max(1, max(s_count, t_count))
                 matched_count = (sum(row['discrepancy_flag'] == FLAG_SYNCED for row in file_results)
@@ -563,6 +611,10 @@ class ReconciliationEngine:
                     "max_allowed_ratio": self.max_ratio,
                     "unverified_source_files": skipped_files,
                     "unverified_metadata_records": unverified_metadata,
+                    "verified_file_count": sum(row['discrepancy_flag'] == FLAG_SYNCED for row in file_results),
+                    "verification_reason_counts": dict(Counter(
+                        row['target_value'].get('reason_code', 'UNKNOWN') for row in file_results
+                        if row['discrepancy_flag'] == FLAG_NOT_VERIFIED)),
                 }
 
                 if mismatch_ratio > self.max_ratio:

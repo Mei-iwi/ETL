@@ -1,11 +1,11 @@
 from hashlib import sha256
 
 import pytest
-from test_source_file_import import discover_and_import
-from test_source_file_import import importing as importing
 
 from data_sync_etl.domain.core import SourceFileError
 from tests.unit.test_search import searchable as searchable
+from tests.unit.test_source_file_import import discover_and_import
+from tests.unit.test_source_file_import import importing as importing
 
 
 def test_import_reference_no_managed_copy_and_source_readonly(importing):
@@ -250,13 +250,12 @@ async def test_cancelled_source_response_cleans_temp(source_viewer):
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
 
-def test_new_source_concurrent_read_microbenchmark(importing):
+def test_new_source_concurrent_read_microbenchmark(importing, tmp_path):
     """Synthetic fixture measurements; not a real Drive or production benchmark."""
     import json
     import math
     import time
     from concurrent.futures import ThreadPoolExecutor
-    from pathlib import Path
     from threading import Lock
 
     from test_source_google_drive import DriveHTTP, reader
@@ -299,8 +298,7 @@ def test_new_source_concurrent_read_microbenchmark(importing):
             measurements.append({'provider': provider, 'clients': clients, 'samples': len(ordered),
                                  'p50_ms': percentile(.5), 'p95_ms': percentile(.95), 'p99_ms': percentile(.99),
                                  'read_bytes': total_bytes, 'cpu_seconds': time.process_time() - cpu_start, 'errors': 0})
-    Path('.test-tmp').mkdir(exist_ok=True)
-    Path('.test-tmp/source-reference-metrics.json').write_text(json.dumps({'kind': 'synthetic_new_only',
+    (tmp_path / 'source-reference-metrics.json').write_text(json.dumps({'kind': 'synthetic_new_only',
         'baseline': 'NOT_RUN', 'real_drive': 'NOT_RUN', 'rss': 'NOT_MEASURED', 'measurements': measurements}, indent=2))
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
     assert not list((c.storage.root / 'resources').rglob('*'))
