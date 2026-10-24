@@ -49,7 +49,7 @@ USER root
 RUN pip install --no-cache-dir 'pytest>=8,<10' 'pytest-asyncio>=0.24,<2' 'httpx>=0.27,<1' 'ruff>=0.9,<1' 'PyYAML==6.0.3'
 COPY pyproject.toml ./
 COPY tests ./tests
-COPY fixtures/source ./fixtures/source
+COPY fixtures ./fixtures
 COPY scripts ./scripts
 COPY deploy ./deploy
 RUN mkdir -p /tmp/etl-qa && chown 10001:10001 /tmp/etl-qa

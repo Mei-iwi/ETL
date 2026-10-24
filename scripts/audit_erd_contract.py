@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCE = ROOT / 'TAI_LIEU_DOI_CHIEU'
-OUTPUT = ROOT / 'docs/audits/erd-contract'
+OUTPUT = ROOT / '.test-tmp/audits/erd-contract'
 FILES = (
     'ERD_SOURCE_GOC_15_BANG.jpg', 'ERD_MASTER_DE_XUAT_10_BANG.png',
     'MO_TA_SOURCE_POSTGRESQL.xlsx', 'MO_TA_MONGODB_BOW.xlsx',
@@ -442,7 +442,7 @@ def main():
     sys.addaudithook(readonly_guard)
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--write', action='store_true', help='Generate derived audit artifacts under docs/audits/erd-contract only')
+    mode.add_argument('--write', action='store_true', help='Generate derived audit artifacts under .test-tmp/audits/erd-contract only')
     mode.add_argument('--check', action='store_true', help='Compare artifacts with current inputs, no writes')
     args = parser.parse_args()
     artifacts, snapshot = collect()

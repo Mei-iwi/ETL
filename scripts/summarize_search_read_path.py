@@ -9,7 +9,7 @@ from pathlib import Path
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    folder = root / 'docs/audits/search-read-path'
+    folder = root / '.test-tmp/audits/search-read-path'
     metrics = json.loads((folder / 'baseline_metrics.json').read_text(encoding='utf-8'))
     if metrics['status'] != 'MEASURED' and len(metrics.get('requests', [])) < 1:
         raise ValueError('Physical traces required; incomplete runs must be reported explicitly')

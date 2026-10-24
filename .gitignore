@@ -55,3 +55,7 @@ TAI_LIEU_DOI_CHIEU/
 /research/semantic-quality/query-encoder-parity.json
 /research/semantic-quality/optimization/RESULTS.json
 /research/semantic-quality/optimization/selection-lock.json
+
+# Local reports and archives; executable inputs live under fixtures/.
+/research/
+/research.rar

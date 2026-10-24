@@ -33,7 +33,7 @@ def main():
         os.environ['ETL_PAGINATION_BASELINE'] = '1'
         os.environ['ETL_PAGINATION_MODEL_PATH'] = str(model.resolve())
         os.environ['ETL_PAGINATION_BASELINE_OUTPUT'] = str(
-            root / 'docs/audits/search-pagination-cache/metrics_baseline.json')
+            root / '.test-tmp/audits/search-pagination-cache/metrics_baseline.json')
         targets.append('tests/performance/test_search_pagination_baseline.py')
 
     def audit(event, values):

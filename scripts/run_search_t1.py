@@ -36,7 +36,7 @@ def main():
         import hashlib
         import json
 
-        folder = root / 'docs/audits/search-pg-text-batch'
+        folder = root / '.test-tmp/audits/search-pg-text-batch'
         try:
             race = json.loads((folder / 'T1_RECOVERY_ACCEPTANCE.json').read_text())
             extra = json.loads((folder / 'T1_RECOVERY_EXTRA.json').read_text())
@@ -56,7 +56,7 @@ def main():
         import hashlib
         import json
 
-        proofs = [json.loads(path.read_text()) for path in (root / 'docs/audits' / folder).glob('T3_TARGETED*.json')]
+        proofs = [json.loads(path.read_text()) for path in (root / '.test-tmp/audits' / folder).glob('T3_TARGETED*.json')]
         if not any(value.get('status') == 'TARGETED_PASS' and value.get('source_hashes')
                    and value.get('queued_revocation') and len(value.get('network_disconnects', [])) == 2
                    and all(hashlib.sha256((root / key).read_bytes()).hexdigest() == checksum
@@ -67,7 +67,7 @@ def main():
         import json
 
         proofs = []
-        for path in (root / 'docs/audits' / folder).glob('T2_TARGETED*.json'):
+        for path in (root / '.test-tmp/audits' / folder).glob('T2_TARGETED*.json'):
             value = json.loads(path.read_text())
             if (value.get('status') == 'TARGETED_PASS' and value.get('static_pairs') == 54
                     and len(value.get('races', [])) == 84 and value.get('source_hashes')
@@ -76,7 +76,7 @@ def main():
                 proofs.append(value)
         if not proofs:
             parser.error('T2 targeted parity/race evidence missing or code changed; benchmark forbidden')
-    target = root / "docs/audits" / folder / (
+    target = root / ".test-tmp/audits" / folder / (
         names[args.phase] + ("_" + args.run_tag if args.run_tag else "") + ".json"
     )
     if target.exists():

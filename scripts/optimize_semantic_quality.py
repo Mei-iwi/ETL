@@ -407,7 +407,7 @@ def main():
         "--corpus", type=Path, default=Path(".test-tmp/semantic-quality/verified/corpus.json")
     )
     parser.add_argument(
-        "--spec", type=Path, default=Path("research/semantic-quality/optimization/queries-v1.json")
+        "--spec", type=Path, default=Path("fixtures/search/semantic-quality/optimization/queries-v1.json")
     )
     parser.add_argument(
         "--baseline", type=Path, default=Path(".test-tmp/semantic-quality/experiment")

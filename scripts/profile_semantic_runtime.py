@@ -250,7 +250,7 @@ def main():
         "--corpus", type=Path, default=Path(".test-tmp/semantic-quality/verified/corpus.json")
     )
     p.add_argument(
-        "--spec", type=Path, default=Path("research/semantic-quality/optimization/queries-v1.json")
+        "--spec", type=Path, default=Path("fixtures/search/semantic-quality/optimization/queries-v1.json")
     )
     p.add_argument("--model-path", type=Path, default=Path("Models/bge-m3"))
     p.add_argument("--revision", default="5617a9f61b028005a4858fdac845db406aefb181")

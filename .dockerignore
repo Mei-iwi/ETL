@@ -35,3 +35,8 @@ volumes
 
 # Private Docker deployment settings (template stays versioned).
 /docker.env
+
+# Local reports and archives; executable inputs live under fixtures/.
+/research/
+/research.rar
+/docs/

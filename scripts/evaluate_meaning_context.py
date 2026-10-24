@@ -78,8 +78,8 @@ def main():
         matrix = np.asarray(vectors, dtype=np.float64)
         matrix /= np.linalg.norm(matrix, axis=1, keepdims=True)
         specifications = []
-        for path in ('research/semantic-quality/query-specification.json',
-                     'research/semantic-quality/optimization/queries-v1.json'):
+        for path in ('fixtures/search/semantic-quality/query-specification.json',
+                     'fixtures/search/semantic-quality/optimization/queries-v1.json'):
             specifications.extend(json.loads(Path(path).read_text(encoding='utf-8'))['queries'])
         container.indexing.embedding.prepare()
         output = {'label_status': 'EXPLORATORY_EXISTING_DRAFT_LABELS_NOT_INDEPENDENT_ACCEPTANCE',
