@@ -134,7 +134,9 @@ export function LibraryListPage() {
                 <div>
                     <h1>Danh sách học liệu</h1>
                 </div>
-                {canVisit('/library/add', principal) && <Link className={styles.addButton} to="/library/add">Thêm học liệu</Link>}
+                {canVisit('/library/add', principal) && <Link className={styles.addButton} to="/library/add">
+                    <span aria-hidden="true">+</span> Thêm học liệu
+                </Link>}
             </header>
 
             <form className={styles.searchForm} onSubmit={handleSearch}>
