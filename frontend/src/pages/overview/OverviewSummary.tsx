@@ -1,51 +1,45 @@
-import { ArrowUpRight, Library, ScanText, Layers, Search, ChartNoAxesCombined, Activity } from 'lucide-react'
 import { Link } from 'react-router'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
 import { OverviewLayout } from './OverviewLayout'
 import style from './OverviewSummary.module.css'
-import pha from '../../assets/img/Pha.png'
 
-const features = [
-    { title: 'Kho học liệu', text: 'Xem tài liệu, thông tin và các phiên bản được phép truy cập.', path: '/library/list', icon: Library },
-    { title: 'Tra cứu nội dung', text: 'Tìm bằng từ khóa, ngữ nghĩa hoặc kết hợp hai phương pháp.', path: '/search/query-methods', icon: Search },
-    { title: 'Xử lý học liệu', text: 'Trích xuất, OCR và chuẩn hóa nội dung tài liệu.', path: '/library/processing', icon: ScanText },
-    { title: 'Phân đoạn và chỉ mục', text: 'Xem cấu trúc nội dung, ContentBag và trạng thái chỉ mục.', path: '/library/indexing', icon: Layers },
-    { title: 'Đánh giá tìm kiếm', text: 'Thực nghiệm và so sánh chất lượng các phương pháp.', path: '/experiments/run', icon: ChartNoAxesCombined },
-    { title: 'Trạng thái hệ thống', text: 'Kiểm tra kết nối và khả năng xử lý của hệ thống.', path: '/systems/status', icon: Activity },
+const methods = [
+    { number: '01', name: 'BoW', label: 'Truy hồi từ vựng', technique: 'BM25', text: 'Đối sánh từ và cụm từ trong nội dung; ưu tiên các thuật ngữ mang thông tin.' },
+    { number: '02', name: 'Vector', label: 'Truy hồi ngữ nghĩa', technique: 'BGE-M3', text: 'Tìm nội dung gần nghĩa với truy vấn, kể cả khi cách diễn đạt khác nhau.' },
+    { number: '03', name: 'Hybrid', label: 'Kết hợp phương pháp', technique: 'RRF', text: 'Kết hợp kết quả tìm kiếm từ khóa và ngữ nghĩa.' },
+]
+const tools = [
+    { title: 'Kho học liệu', text: 'Học liệu, nguồn tham chiếu và lịch sử phiên bản', path: '/library/list' },
+    { title: 'Xử lý và chuẩn hóa', text: 'Trích xuất văn bản, OCR và kiểm tra nội dung', path: '/library/processing' },
+    { title: 'Biểu diễn và chỉ mục', text: 'ContentUnit, ContentBag và trạng thái sẵn sàng', path: '/library/indexing' },
 ]
 
 export function OverviewSummary() {
     const { principal } = useAuth()
-    return <OverviewLayout title="Tổng quan hệ thống"
-        introduction="Quản lý học liệu, khai thác nội dung và tìm kiếm thông tin trong cùng một không gian.">
+    const available = tools.filter(item => canVisit(item.path, principal))
+    return <OverviewLayout title={'Quản lý và\ntra cứu học liệu'}
+        introduction="Đồng bộ học liệu, xử lý nội dung và tìm kiếm theo từ khóa hoặc ngữ nghĩa.">
         <section className={style.section}>
-            <h2>Bạn muốn bắt đầu từ đâu?</h2>
-            <div className={style.grid}>
-                {features.filter(item => canVisit(item.path, principal)).map(({ title, text, path, icon: Icon }) =>
-                    <Link key={path} to={path} className={style.card}>
-                        <span className={style.cardIcon}><Icon size={20} strokeWidth={1.6} aria-hidden="true" /></span>
-                        <div><h3>{title}</h3><p>{text}</p></div>
-                        <ArrowUpRight size={16} className={style.cardArrow} aria-hidden="true" />
-                    </Link>)}
+            <div className={style.sectionHeading}>
+                <div><h2>Phương pháp tìm kiếm</h2></div>
+                <p>Tìm học liệu bằng từ khóa, ngữ nghĩa hoặc kết hợp cả hai. Kết quả hiển thị theo quyền truy cập.</p>
             </div>
+            <div className={style.methods}>{methods.map(method => <article key={method.name}>
+                <div className={style.methodTop}><span>{method.number}</span><span>{method.technique}</span></div>
+                <h3>{method.name}</h3><h4>{method.label}</h4><p>{method.text}</p>
+            </article>)}</div>
         </section>
-        <section className={style.section}>
-            <h2>Học liệu được khai thác như thế nào?</h2>
-            <p className={style.content}>Tài liệu được tiếp nhận, trích xuất và tổ chức thành nội dung có thể tra cứu.
-                Kết quả tìm kiếm đi kèm ngữ cảnh và nguồn tham chiếu; quyền truy cập được kiểm tra khi xem hoặc tải tệp.</p>
-            <div className={style.phaseGrid}>
-                <article><span>01</span><h3>Chuẩn bị học liệu</h3><p>Tiếp nhận phiên bản, chuẩn hóa nội dung, tạo ContentBag và chỉ mục.</p></article>
-                <article><span>02</span><h3>Tra cứu học liệu</h3><p>Nhập truy vấn, chọn BoW, Vector hoặc Hybrid và xem kết quả phù hợp.</p></article>
-            </div>
-            <Link className={style.textLink} to="/overview/process">Xem quy trình hoạt động<ArrowUpRight size={15} aria-hidden="true" /></Link>
-        </section>
-        <section className={style.section}>
-            <h2>Mô hình hoạt động hai pha</h2>
-            <figure className={style.diagramFigure}>
-                <div className={style.diagramViewport} tabIndex={0} role="region" aria-label="Sơ đồ hai pha, có thể cuộn ngang">
-                    <img className={style.diagram} src={pha} alt="Pha chuẩn bị dữ liệu và pha tra cứu dữ liệu" />
+        <section className={style.experiment}>
+            <div><h2>Đánh giá tìm kiếm</h2></div>
+            <div><p>So sánh các phương pháp trên tập truy vấn có nhãn liên quan; kiểm tra đoạn nội dung và nguồn tham chiếu.</p>
+                <div className={style.metrics}><span>Recall@k</span><span>nDCG@k</span><span>MRR</span></div>
                 </div>
-            </figure>
+        </section>
+        <section className={style.section}>
+            <div className={style.sectionHeading}><div><h2>Quản lý học liệu</h2></div></div>
+            <div className={style.tools}>{available.map(({ title, text, path }, index) => <Link key={path} to={path}>
+                <span className={style.toolNumber}>{String(index + 1).padStart(2, '0')}</span><div><h3>{title}</h3><p>{text}</p></div>
+            </Link>)}</div>
         </section>
     </OverviewLayout>
 }

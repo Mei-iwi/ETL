@@ -51,20 +51,28 @@ const processSteps = [
         content: 'Hiển thị đoạn nội dung liên quan, ngữ cảnh và nguồn tham chiếu',
         output: 'Nội dung học liệu phù hợp',
     },
+    {
+        step: 9,
+        name: 'Thực nghiệm và đánh giá',
+        content: 'Đối chiếu các phương pháp trên tập truy vấn có nhãn liên quan; xem lại ngữ cảnh để phân tích kết quả',
+        output: 'Recall@k, nDCG@k và MRR',
+    },
 ]
 
 export function OverviewProcess() {
     return (
-        <OverviewLayout title="Quy trình hoạt động"
-            introduction="Theo dõi hành trình từ tài liệu gốc đến kết quả tìm kiếm, qua hai pha chuẩn bị và tra cứu học liệu.">
+        <OverviewLayout title={'Từ học liệu\nđến kết quả tìm kiếm'} chapter="02"
+            introduction="Tiếp nhận học liệu, trích xuất nội dung, lập chỉ mục và truy hồi kết quả.">
 
             <section className={style.section}>
-                <h2>Sơ đồ tổng thể</h2>
+                <h2>Quy trình xử lý và tìm kiếm</h2>
+                <p className={style.sectionLead}>Hai pha dùng chung dữ liệu đã xử lý và chỉ mục; mỗi kết quả gắn với đoạn nội dung và nguồn tham chiếu.</p>
                 <ProcessEntityDiagram />
             </section>
 
             <section className={style.section}>
                 <h2>Các bước xử lý</h2>
+                <details className={style.technical}><summary>Xem chi tiết các bước và đầu ra</summary>
                 <div className={style.tableWrapper} role="region" aria-label="Chi tiết các bước xử lý" tabIndex={0}>
                     <table className={style.processTable}>
                         <thead>
@@ -91,6 +99,7 @@ export function OverviewProcess() {
                         </tbody>)}
                     </table>
                 </div>
+                </details>
             </section>
         </OverviewLayout>
     )

@@ -269,6 +269,9 @@ Cả DB remote: đặt `DATABASE_MODE=remote`, `DATABASE_CA_FILE` và URL TLS th
 
 ## 4. Kiểm tra và cấu hình tùy chọn
 
+- Đối soát: quét chỉ ghi báo cáo audit, không tự sửa dữ liệu. Có thể bật tự quét mỗi 5 phút khi trang đang mở và hiển thị; đóng trang sẽ dừng lịch. Tệp SOURCE chưa đọc xác minh được báo riêng, không tính là đã kiểm tra toàn vẹn.
+- Tìm kiếm giữ tạm tối đa 8 trang kết quả trong bộ nhớ tab trong 60 giây. Đăng xuất/kiểm tra lại phiên sẽ xóa cache; nút **Cập nhật kết quả** luôn truy vấn lại. Xem/tải tệp vẫn kiểm tra quyền tại backend.
+
 - `AUTH_MASTER_STALE`: kiểm tra Full baseline/Auto users và Master Sync Worker; không bỏ freshness guard.
 - Search rỗng: nội dung phải sẵn sàng, chỉ mục READY, đúng model/dimension và quyền. `SEARCH_VECTOR_MIN_SIMILARITY=0.6`; giảm ngưỡng có thể tăng nhiễu. `SEARCH_MEANING_CONTEXT_MARGIN=0.08` chọn đoạn gần nghĩa; `SEARCH_BOW_MIN_COVERAGE=0` giữ recall mặc định.
 - Vector 384D cũ không dùng lại như 1024D; chuyển model cần backup và tái lập chỉ mục theo công cụ maintenance, không chỉ đổi env.

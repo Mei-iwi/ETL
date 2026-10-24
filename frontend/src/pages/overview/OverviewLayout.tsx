@@ -1,36 +1,33 @@
 import type { ReactNode } from 'react'
-import { BookOpen, Library, Search, ArrowUpRight } from 'lucide-react'
 import { Link } from 'react-router'
+import { canVisit, useAuth } from '../../auth/AuthProvider'
 import styles from './OverviewLayout.module.css'
+import libraryPhoto from '../../assets/img/library-room.jpg'
 
-export function OverviewLayout({ title, introduction, children }: {
-    title: string; introduction: string; children: ReactNode
+// Local photo-1507842217343-583bb7270b66. License: https://unsplash.com/license.
+export function OverviewLayout({ title, introduction, chapter = '01', children }: {
+    title: string; introduction: string; chapter?: '01' | '02'; children: ReactNode
 }) {
+    const { principal } = useAuth()
+    const research = canVisit('/experiments/run', principal)
     return <section className={styles.page}>
-        <div className={styles.stage}>
-            <aside className={styles.card} aria-label="Giới thiệu kho học liệu">
-                <div className={styles.cardBody}>
-                    <div className={styles.portrait}><BookOpen size={68} strokeWidth={1.2} aria-hidden="true" /></div>
-                    <h2>Kho học liệu số</h2>
-                    <span className={styles.accent} />
-                    <p>Từ tài liệu đến nội dung có thể tìm kiếm</p>
-                    <ol className={styles.phases}>
-                        <li><span>01</span><div><strong>Chuẩn bị học liệu</strong><p>Tiếp nhận và xử lý nội dung</p></div></li>
-                        <li><span>02</span><div><strong>Tra cứu học liệu</strong><p>Tìm kiếm và xem ngữ cảnh</p></div></li>
-                    </ol>
+        <header className={styles.hero}>
+            <div className={styles.heroCopy}>
+                <p className={styles.eyebrow}>HỆ THỐNG HỌC LIỆU SỐ</p>
+                <h1>{title}</h1><p className={styles.introduction}>{introduction}</p>
+                <div className={styles.actions}>
+                    <Link to={research ? '/experiments/run' : '/search/query-methods'} className={styles.primary}>
+                        {research ? 'Thực nghiệm tìm kiếm' : 'Tra cứu học liệu'}</Link>
+                    <Link to={chapter === '01' ? '/overview/process' : '/overview/summary'} className={styles.secondary}>
+                        {chapter === '01' ? 'Quy trình hoạt động' : 'Giới thiệu hệ thống'}</Link>
                 </div>
-                <Link to="/library/list" className={styles.cardFooter}><Library size={16} aria-hidden="true" />Khám phá kho học liệu<ArrowUpRight size={14} aria-hidden="true" /></Link>
-            </aside>
-            <div className={styles.content}>
-                <header className={styles.hero}>
-                    <h1>{title}</h1><p>{introduction}</p>
-                    <div className={styles.actions}>
-                        <Link to="/search/query-methods" className={styles.primary}><Search size={15} aria-hidden="true" />Tra cứu học liệu</Link>
-                        <Link to="/library/list" className={styles.secondary}><Library size={15} aria-hidden="true" />Kho học liệu</Link>
-                    </div>
-                </header>
-                {children}
             </div>
-        </div>
+            <figure className={styles.cover}>
+                <div className={styles.mainPhoto}>
+                    <img src={libraryPhoto} alt="Kệ sách trong thư viện" width="1200" height="704" />
+                </div>
+            </figure>
+        </header>
+        <div id="overview-content" className={styles.content}>{children}</div>
     </section>
 }
