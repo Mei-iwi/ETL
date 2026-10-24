@@ -14,7 +14,6 @@ FROM base AS qa
 RUN pip install --no-cache-dir '.[dev]'
 COPY tests ./tests
 COPY scripts ./scripts
-COPY docs ./docs
 COPY .env.example .gitignore .dockerignore docker-compose.yml Dockerfile ./
 CMD ["python", "scripts/verify.py"]
 
