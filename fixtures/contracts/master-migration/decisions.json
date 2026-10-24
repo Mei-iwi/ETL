@@ -15,7 +15,7 @@
     "lineage_and_lov_policy": "HOLD_CURRENT_BEHAVIOR_UNTIL_USER_DECISION"
   },
   "base_head": "753fb22",
-  "baseline": "docs/audits/erd-contract/contract_snapshot.json",
+  "baseline": "fixtures/contracts/erd-contract/contract_snapshot.json",
   "design_decisions": [
     {
       "id": "B03",

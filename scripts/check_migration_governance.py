@@ -15,9 +15,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from scripts.audit_erd_contract import collect, readonly_guard, trigger_inventory  # noqa: E402
 
-BASELINE = "docs/audits/erd-contract/contract_snapshot.json"
+BASELINE = "fixtures/contracts/erd-contract/contract_snapshot.json"
 MONGO_MANIFEST = "migrations_mongo/manifest.json"
-REGISTER = "docs/audits/master-migration/decisions.json"
+REGISTER = "fixtures/contracts/master-migration/decisions.json"
 REFERENCE_PATHS = {
     "MASTER": "alembic/sql/triggers/master_current.sql",
     "SOURCE": "alembic_source/sql/triggers/source_current.sql",

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from time import monotonic
 
 from data_sync_etl.application.content_bags import bag_structure
+from data_sync_etl.domain.evidence_selection import EvidenceCandidate
 from data_sync_etl.domain.indexing import IndexingError, digest
 from data_sync_etl.domain.semantic import (
     CONTEXT_FORMAT,
@@ -154,7 +155,7 @@ class SemanticService:
                 'coverage_verified': state == 'READY', 'model_identity': plan['model_identity'],
                 'strategy': plan['strategy']}
 
-    def scores(self, snapshot, title, roots, allowed, vector, deadline, budget):
+    def scores(self, snapshot, title, roots, allowed, vector, deadline, budget, *, evidence_candidates=None):
         """Bounded exact cosine over the filtered versions, no unbounded corpus scan.
 
         This first implementation is exact CPU retrieval, not a Mongo Atlas ANN
@@ -188,6 +189,10 @@ class SemanticService:
             chunk = chunks[spec['chunk_id']]
             if score <= self.settings.semantic_min_score:
                 continue
+            if evidence_candidates is not None:
+                evidence_candidates.append(EvidenceCandidate(snapshot[0]['id'], root, chunk, score))
+                evidence_candidates.sort(key=lambda row: (-row.dense_score, row.chunk['id']))
+                del evidence_candidates[self.settings.search_evidence_top_n:]
             previous = best.get(root)
             if previous is None or (-score, chunk['id']) < (-previous[0], previous[1]['id']):
                 best[root] = (score, chunk)

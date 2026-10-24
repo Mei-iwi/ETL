@@ -106,6 +106,13 @@ class Settings(BaseSettings):
     search_meaning_fallback_min_context_similarity: float = Field(default=0.45, gt=0, le=1, allow_inf_nan=False)
     search_meaning_context_margin: float = Field(default=0.08, ge=0, le=0.15, allow_inf_nan=False)
     search_bow_min_coverage: float = Field(default=0., ge=0, le=1, allow_inf_nan=False)
+    # Experimental grouping; retain legacy bag fusion until independent acceptance.
+    search_hybrid_fusion_unit: Literal['bag', 'version'] = 'bag'
+    search_hybrid_lexical_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
+    search_hybrid_vector_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
+    search_evidence_strategy: Literal['current', 'version_dense', 'version_context'] = 'current'
+    search_evidence_top_n: int = Field(default=3, ge=1, le=10)
+    search_evidence_dense_margin: float = Field(default=.08, ge=0, le=.15, allow_inf_nan=False)
     search_timeout_seconds: int = Field(default=15, ge=1, le=120)
     search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)
     search_query_embedding_cache_enabled: bool = False
@@ -140,6 +147,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_search_grants(self):
+        if self.search_evidence_strategy != 'current' and (not self.semantic_enabled or self.semantic_rerank_enabled
+                or self.search_hybrid_fusion_unit != 'version'):
+            raise ValueError('Experimental evidence requires Semantic Chunk, version fusion and ColBERT OFF')
+        if (self.search_hybrid_fusion_unit != 'version'
+                and (self.search_hybrid_lexical_weight != 1. or self.search_hybrid_vector_weight != 1.)):
+            raise ValueError('Experimental branch weights require version fusion')
         if self.search_internal_dev_enabled and self.app_environment != 'development':
             raise ValueError('Local demo Search is restricted to Development')
         return self

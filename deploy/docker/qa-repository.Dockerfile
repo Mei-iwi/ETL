@@ -17,8 +17,7 @@ COPY Dockerfile ./Dockerfile
 COPY migrations_mongo ./migrations_mongo
 COPY frontend/src ./frontend/src
 COPY frontend/public ./frontend/public
-COPY docs/audits/erd-contract/contract_snapshot.json ./docs/audits/erd-contract/contract_snapshot.json
-COPY docs/audits/master-migration/decisions.json ./docs/audits/master-migration/decisions.json
+COPY fixtures ./fixtures
 # These eight reference-only artifacts must be provided for ERD governance QA.
 COPY TAI_LIEU_DOI_CHIEU/ ./TAI_LIEU_DOI_CHIEU/
 USER 10001:10001

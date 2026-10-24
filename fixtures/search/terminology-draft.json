@@ -1,0 +1,787 @@
+{
+  "version": "multilingual-context-dev-v1",
+  "concepts": [
+    {
+      "concept_id": "fixture:database",
+      "preferred_labels": {
+        "vi": "cơ sở dữ liệu",
+        "en": "database",
+        "fr": "base de données"
+      },
+      "definition": "Synthetic lexical equivalence fixture, not a reviewed production glossary.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "cơ sở dữ liệu",
+          "normalized": "cơ sở dữ liệu",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "fixture:database",
+          "domain": "computing",
+          "context_hints": [
+            "sql",
+            "records",
+            "python"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "database",
+          "normalized": "database",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "fixture:database",
+          "domain": "computing",
+          "context_hints": [
+            "sql",
+            "records",
+            "python"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "base de données",
+          "normalized": "base de données",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "fixture:database",
+          "domain": "computing",
+          "context_hints": [
+            "sql",
+            "records",
+            "python"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "CSDL",
+          "normalized": "csdl",
+          "language": "vi",
+          "kind": "abbreviation",
+          "concept_id": "fixture:database",
+          "domain": "computing",
+          "context_hints": [
+            "sql",
+            "records",
+            "python"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "DB",
+          "normalized": "db",
+          "language": "en",
+          "kind": "abbreviation",
+          "concept_id": "fixture:database",
+          "domain": "computing",
+          "context_hints": [
+            "sql",
+            "records",
+            "python"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "co so du lieu",
+          "normalized": "co so du lieu",
+          "language": "vi",
+          "kind": "spelling",
+          "concept_id": "fixture:database",
+          "domain": "computing",
+          "context_hints": [
+            "sql",
+            "records",
+            "python"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "Authored synthetic development fixture; independent review pending",
+          "identifier": "multilingual-context-dev-v1"
+        }
+      ],
+      "review_status": "pending",
+      "version": "1"
+    },
+    {
+      "concept_id": "fixture:photosynthesis",
+      "preferred_labels": {
+        "vi": "quang hợp",
+        "en": "photosynthesis",
+        "fr": "photosynthèse"
+      },
+      "definition": "Synthetic lexical equivalence fixture, not a reviewed production glossary.",
+      "domain": "biology",
+      "terms": [
+        {
+          "text": "quang hợp",
+          "normalized": "quang hợp",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "fixture:photosynthesis",
+          "domain": "biology",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "photosynthesis",
+          "normalized": "photosynthesis",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "fixture:photosynthesis",
+          "domain": "biology",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "photosynthèse",
+          "normalized": "photosynthèse",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "fixture:photosynthesis",
+          "domain": "biology",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "Authored synthetic development fixture; independent review pending",
+          "identifier": "multilingual-context-dev-v1"
+        }
+      ],
+      "review_status": "pending",
+      "version": "1"
+    },
+    {
+      "concept_id": "fixture:cell_biology",
+      "preferred_labels": {
+        "vi": "tế bào",
+        "en": "cell",
+        "fr": "cellule"
+      },
+      "definition": "Synthetic lexical equivalence fixture, not a reviewed production glossary.",
+      "domain": "biology",
+      "terms": [
+        {
+          "text": "tế bào",
+          "normalized": "tế bào",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "fixture:cell_biology",
+          "domain": "biology",
+          "context_hints": [
+            "biology",
+            "membrane",
+            "sinh học"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "cell",
+          "normalized": "cell",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "fixture:cell_biology",
+          "domain": "biology",
+          "context_hints": [
+            "biology",
+            "membrane",
+            "sinh học"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "cellule",
+          "normalized": "cellule",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "fixture:cell_biology",
+          "domain": "biology",
+          "context_hints": [
+            "biology",
+            "membrane",
+            "sinh học"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "Authored synthetic development fixture; independent review pending",
+          "identifier": "multilingual-context-dev-v1"
+        }
+      ],
+      "review_status": "pending",
+      "version": "1"
+    },
+    {
+      "concept_id": "fixture:cell_spreadsheet",
+      "preferred_labels": {
+        "vi": "ô bảng tính",
+        "en": "cell",
+        "fr": "cellule"
+      },
+      "definition": "Synthetic lexical equivalence fixture, not a reviewed production glossary.",
+      "domain": "computing",
+      "terms": [
+        {
+          "text": "ô bảng tính",
+          "normalized": "ô bảng tính",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "fixture:cell_spreadsheet",
+          "domain": "computing",
+          "context_hints": [
+            "excel",
+            "spreadsheet",
+            "formula"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "cell",
+          "normalized": "cell",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "fixture:cell_spreadsheet",
+          "domain": "computing",
+          "context_hints": [
+            "excel",
+            "spreadsheet",
+            "formula"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "cellule",
+          "normalized": "cellule",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "fixture:cell_spreadsheet",
+          "domain": "computing",
+          "context_hints": [
+            "excel",
+            "spreadsheet",
+            "formula"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "Authored synthetic development fixture; independent review pending",
+          "identifier": "multilingual-context-dev-v1"
+        }
+      ],
+      "review_status": "pending",
+      "version": "1"
+    },
+    {
+      "concept_id": "fixture:gcd",
+      "preferred_labels": {
+        "vi": "ước chung lớn nhất",
+        "en": "greatest common divisor",
+        "fr": "plus grand commun diviseur"
+      },
+      "definition": "Synthetic lexical equivalence fixture, not a reviewed production glossary.",
+      "domain": "mathematics",
+      "terms": [
+        {
+          "text": "ước chung lớn nhất",
+          "normalized": "ước chung lớn nhất",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "fixture:gcd",
+          "domain": "mathematics",
+          "context_hints": [
+            "ước",
+            "divisor",
+            "euclid"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "greatest common divisor",
+          "normalized": "greatest common divisor",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "fixture:gcd",
+          "domain": "mathematics",
+          "context_hints": [
+            "ước",
+            "divisor",
+            "euclid"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "plus grand commun diviseur",
+          "normalized": "plus grand commun diviseur",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "fixture:gcd",
+          "domain": "mathematics",
+          "context_hints": [
+            "ước",
+            "divisor",
+            "euclid"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "UCLN",
+          "normalized": "ucln",
+          "language": "vi",
+          "kind": "abbreviation",
+          "concept_id": "fixture:gcd",
+          "domain": "mathematics",
+          "context_hints": [
+            "ước",
+            "divisor",
+            "euclid"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "GCD",
+          "normalized": "gcd",
+          "language": "en",
+          "kind": "abbreviation",
+          "concept_id": "fixture:gcd",
+          "domain": "mathematics",
+          "context_hints": [
+            "ước",
+            "divisor",
+            "euclid"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "Authored synthetic development fixture; independent review pending",
+          "identifier": "multilingual-context-dev-v1"
+        }
+      ],
+      "review_status": "pending",
+      "version": "1"
+    },
+    {
+      "concept_id": "fixture:lcm",
+      "preferred_labels": {
+        "vi": "bội chung nhỏ nhất",
+        "en": "least common multiple",
+        "fr": "plus petit commun multiple"
+      },
+      "definition": "Synthetic lexical equivalence fixture, not a reviewed production glossary.",
+      "domain": "mathematics",
+      "terms": [
+        {
+          "text": "bội chung nhỏ nhất",
+          "normalized": "bội chung nhỏ nhất",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "fixture:lcm",
+          "domain": "mathematics",
+          "context_hints": [
+            "bội",
+            "multiple"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "least common multiple",
+          "normalized": "least common multiple",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "fixture:lcm",
+          "domain": "mathematics",
+          "context_hints": [
+            "bội",
+            "multiple"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "plus petit commun multiple",
+          "normalized": "plus petit commun multiple",
+          "language": "fr",
+          "kind": "preferred",
+          "concept_id": "fixture:lcm",
+          "domain": "mathematics",
+          "context_hints": [
+            "bội",
+            "multiple"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "BCNN",
+          "normalized": "bcnn",
+          "language": "vi",
+          "kind": "abbreviation",
+          "concept_id": "fixture:lcm",
+          "domain": "mathematics",
+          "context_hints": [
+            "bội",
+            "multiple"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "Authored synthetic development fixture; independent review pending",
+          "identifier": "multilingual-context-dev-v1"
+        }
+      ],
+      "review_status": "pending",
+      "version": "1"
+    },
+    {
+      "concept_id": "fixture:carbon_dioxide",
+      "preferred_labels": {
+        "en": "carbon dioxide",
+        "vi": "khí cacbonic"
+      },
+      "definition": "Synthetic lexical equivalence fixture, not a reviewed production glossary.",
+      "domain": "chemistry",
+      "terms": [
+        {
+          "text": "carbon dioxide",
+          "normalized": "carbon dioxide",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "fixture:carbon_dioxide",
+          "domain": "chemistry",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "khí cacbonic",
+          "normalized": "khí cacbonic",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "fixture:carbon_dioxide",
+          "domain": "chemistry",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "CO₂",
+          "normalized": "co₂",
+          "language": "und",
+          "kind": "spelling",
+          "concept_id": "fixture:carbon_dioxide",
+          "domain": "chemistry",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "CO2",
+          "normalized": "co2",
+          "language": "und",
+          "kind": "spelling",
+          "concept_id": "fixture:carbon_dioxide",
+          "domain": "chemistry",
+          "context_hints": [],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "Authored synthetic development fixture; independent review pending",
+          "identifier": "multilingual-context-dev-v1"
+        }
+      ],
+      "review_status": "pending",
+      "version": "1"
+    },
+    {
+      "concept_id": "fixture:otp",
+      "preferred_labels": {
+        "en": "one time password",
+        "vi": "mã xác thực dùng một lần"
+      },
+      "definition": "Synthetic lexical equivalence fixture, not a reviewed production glossary.",
+      "domain": "security",
+      "terms": [
+        {
+          "text": "one time password",
+          "normalized": "one time password",
+          "language": "en",
+          "kind": "preferred",
+          "concept_id": "fixture:otp",
+          "domain": "security",
+          "context_hints": [
+            "login",
+            "đăng nhập"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "mã xác thực dùng một lần",
+          "normalized": "mã xác thực dùng một lần",
+          "language": "vi",
+          "kind": "preferred",
+          "concept_id": "fixture:otp",
+          "domain": "security",
+          "context_hints": [
+            "login",
+            "đăng nhập"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        },
+        {
+          "text": "OTP",
+          "normalized": "otp",
+          "language": "en",
+          "kind": "abbreviation",
+          "concept_id": "fixture:otp",
+          "domain": "security",
+          "context_hints": [
+            "login",
+            "đăng nhập"
+          ],
+          "sources": [
+            {
+              "name": "Authored synthetic development fixture; independent review pending",
+              "identifier": "multilingual-context-dev-v1"
+            }
+          ],
+          "confidence": 1.0,
+          "review_status": "pending"
+        }
+      ],
+      "relations": [],
+      "sources": [
+        {
+          "name": "Authored synthetic development fixture; independent review pending",
+          "identifier": "multilingual-context-dev-v1"
+        }
+      ],
+      "review_status": "pending",
+      "version": "1"
+    }
+  ]
+}

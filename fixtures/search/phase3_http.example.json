@@ -1,0 +1,12 @@
+{
+  "environment": "approved_staging",
+  "base_url": "https://staging.example.invalid",
+  "email": "reviewer@example.invalid",
+  "password_file": ".test-tmp/phase3-private/login_password",
+  "proxy_key_file": ".test-tmp/phase3-private/auth_proxy_key",
+  "expected_vector_path": "meaning_bag",
+  "concurrency": 1,
+  "repeats": 2,
+  "timeout_seconds": 15,
+  "queries": ["cơ sở dữ liệu", "green leaf", "feuille verte", "cộng phân số", "SQL", "C++", "quang hợp và respiration", "How to separate salt from water?", "mã học liệu không tồn tại", "đọc và ghi chú"]
+}

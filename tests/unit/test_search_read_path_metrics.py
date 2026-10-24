@@ -12,7 +12,7 @@ pytestmark = pytest.mark.skipif(os.environ.get('ETL_READPATH_VERIFY_METRICS') !=
 
 @pytest.fixture(scope='module')
 def reports():
-    folder = Path(__file__).resolve().parents[2] / 'docs/audits/search-read-path'
+    folder = Path(__file__).resolve().parents[2] / '.test-tmp/audits/search-read-path'
     return [json.loads((folder / name).read_text(encoding='utf-8'))
             for name in ('baseline_metrics.json', 'baseline_completion.json')]
 

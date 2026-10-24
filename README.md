@@ -1,24 +1,24 @@
 # ETL — Kho học liệu số
 
-Đồng bộ SOURCE → MASTER, OCR/trích xuất nội dung và tìm kiếm BoW/Vector/Hybrid. Tệp SOURCE được đọc trực tiếp từ nguồn; tệp LOCAL dùng storage riêng. React chạy ở cổng 3000 khi phát triển, hoặc 8080 qua Docker.
+Đồng bộ SOURCE → MASTER, OCR/trích xuất nội dung và tìm kiếm BoW, BGE-M3 Vector, Hybrid. Tệp SOURCE được đọc trực tiếp từ nguồn; tệp LOCAL dùng storage riêng. Backend FastAPI, frontend React/TypeScript, PostgreSQL và MongoDB.
 
-Các lệnh Windows dưới đây dùng **Git Bash tại gốc repo**, trừ khối ghi PowerShell. Linux thay `python` bằng Python 3.12, `npm.cmd` bằng `npm` và đường dẫn `D:/etl/...` bằng đường dẫn tuyệt đối Linux.
+Các lệnh Windows dùng **Git Bash tại gốc repo**, trừ khối ghi PowerShell. Linux dùng `npm` thay `npm.cmd` và thay `D:/etl/...` bằng đường dẫn tuyệt đối Linux. Không dùng dấu backtick PowerShell để xuống dòng trong Git Bash.
 
 | Cấu hình | Vị trí và vai trò |
 | --- | --- |
-| `.env` | Tạo từ `.env.example`; API/worker local và DB Compose gốc |
-| `docker.env` | Tạo từ `deploy/docker.env.example`; cấu hình ứng dụng Docker |
-| `D:/etl/private/connections.json` | URL MASTER/SOURCE/Mongo cho Docker; `CONNECTIONS_FILE` trỏ tới file này |
-| `D:/etl/private/auth/` | Password hash, session key và proxy key; không có mật khẩu mặc định |
-| `D:/etl/models/bge-m3/` | Model offline, revision và `etl-model-manifest.json` kiểm tra checksum |
+| `.env` ← `.env.example` | API/worker local và Compose DB ở gốc repo |
+| `docker.env` ← `deploy/docker.env.example` | Image, mount, auth và chế độ kết nối Docker ứng dụng |
+| `D:/etl/private/connections.json` | Bốn thông số kết nối DB của Docker |
+| `D:/etl/private/auth/` | Password hash, session key, proxy key; không có mật khẩu mặc định |
+| `D:/etl/models/bge-m3/` | Model offline và manifest kiểm tra checksum |
 
-Env, secret, model và kết quả kiểm thử không đưa vào Git. Giá trị mẫu `YOUR_*` phải thay bằng giá trị thật. Biến đã export trong terminal có thể ghi đè env file.
+Env thật, secret, model và báo cáo chạy thử không đưa vào Git. Thay `YOUR_*` bằng giá trị thật. Biến đã export trong terminal có thể ghi đè env file.
 
 ## 1. Chạy local
 
-### Cài thư viện
+### 1.1. Cài thư viện
 
-Cần Python 3.12, Node.js 22.12+, Git và Docker nếu dùng DB local trong container.
+Cần Python 3.12, Node.js 22.12+, Git; Docker chỉ cần nếu chạy DB trong container.
 
 ```bash
 py -3.12 -m venv .venv
@@ -32,7 +32,7 @@ mkdir -p /d/etl/private/auth /d/etl/source /d/etl/source-temp /d/etl/storage /d/
 
 Linux: tạo venv bằng `python3.12 -m venv .venv`, kích hoạt bằng `source .venv/bin/activate`. Không chép venv từ máy/thư mục khác.
 
-### Cài Tesseract và LibreOffice
+### 1.2. Tesseract và LibreOffice
 
 Tesseract đọc ảnh/PDF scan; LibreOffice chuyển Word/PPT sang PDF để xem. **PowerShell Windows:**
 
@@ -42,7 +42,7 @@ winget install --id TheDocumentFoundation.LibreOffice --exact
 & 'C:\Program Files\Tesseract-OCR\tesseract.exe' --list-langs
 ```
 
-Nếu thiếu `vie` hoặc `eng`, chạy PowerShell Administrator:
+Nếu thiếu `vie` hoặc `eng`, chạy **PowerShell Administrator**:
 
 ```powershell
 foreach ($lang in @('vie', 'eng')) {
@@ -61,9 +61,9 @@ sudo apt-get install -y tesseract-ocr tesseract-ocr-vie tesseract-ocr-eng libreo
 tesseract --list-langs
 ```
 
-### Tải model BGE-M3 1024 chiều
+### 1.3. Chuẩn bị BGE-M3 1024 chiều
 
-Chỉ tải nếu chưa có model/manifest hợp lệ; cần Internet và chấp nhận giấy phép model. Sau khi tải, runtime dùng model offline.
+Tải một lần nếu chưa có model/manifest hợp lệ; cần Internet và chấp nhận giấy phép model. Runtime không tải lại.
 
 ```bash
 python deploy/runtime/model.py prepare \
@@ -72,9 +72,9 @@ python deploy/runtime/model.py prepare \
   --dimension 1024 --accept-model-license
 ```
 
-### Sửa `.env`
+### 1.4. Sửa `.env`
 
-Giữ mặc định trong `.env.example`, sửa các nhóm sau theo máy của bạn:
+Giữ các giá trị còn lại từ `.env.example`; sửa URL, password và đường dẫn theo máy. Mẫu dùng DB local:
 
 ```dotenv
 DATABASE_URL=postgresql+psycopg://etl:YOUR_MASTER_PASSWORD@127.0.0.1:5432/etl
@@ -102,17 +102,29 @@ SEARCH_MODEL_WARMUP_TIMEOUT_SECONDS=120
 INDEX_AUTO_ENABLED=false
 ```
 
-Linux dùng `/usr/bin/tesseract`, `/usr/bin/libreoffice`. URL phải percent-encode ký tự đặc biệt trong password. SOURCE runtime dùng tài khoản chỉ SELECT; không dùng owner/migration URL. Đường dẫn tệp nguồn là `<SOURCE_FILE_STORAGE_ROOT>/<bucket>/<object_key>`; tách kho SOURCE, LOCAL và thư mục tạm.
+Linux dùng `/usr/bin/tesseract`, `/usr/bin/libreoffice`. Password trong URL phải percent-encode ký tự đặc biệt. SOURCE runtime dùng tài khoản chỉ SELECT. Tệp nguồn local nằm ở `<SOURCE_FILE_STORAGE_ROOT>/<bucket>/<object_key>`; kho SOURCE, LOCAL và thư mục tạm tách riêng. [Nguồn Google Drive](deploy/DRIVE_SETUP.md) cần credentials/quyền riêng.
 
-### Chuẩn bị DB
+### 1.5. Chuẩn bị DB
 
-**DB đã có schema:** không chạy migration. Nếu DB local đang dừng:
+**DB có schema sẵn:** điền URL ở trên, không chạy migration. Nếu DB local đã tạo nhưng đang dừng:
 
 ```bash
 docker compose up -d postgres source-postgres mongo
 ```
 
-**Chỉ dành cho DB local mới/trống:** đặt `POSTGRES_USER=etl`, `POSTGRES_DB=etl`, `POSTGRES_PASSWORD`, `POSTGRES_PORT=5432`, `SOURCE_POSTGRES_USER=etl_source_admin`, `SOURCE_POSTGRES_DB=etl_source`, `SOURCE_POSTGRES_PASSWORD`, `SOURCE_POSTGRES_PORT=5433`, `MONGO_PORT=27018` trong `.env`. Sau đó:
+**Chỉ dành cho DB local mới/trống:** thêm vào `.env` các giá trị sau; password MASTER phải khớp `DATABASE_URL`. Password owner SOURCE khác password reader.
+
+```dotenv
+POSTGRES_USER=etl
+POSTGRES_DB=etl
+POSTGRES_PASSWORD=YOUR_MASTER_PASSWORD
+POSTGRES_PORT=5432
+SOURCE_POSTGRES_USER=etl_source_admin
+SOURCE_POSTGRES_DB=etl_source
+SOURCE_POSTGRES_PASSWORD=YOUR_SOURCE_OWNER_PASSWORD
+SOURCE_POSTGRES_PORT=5433
+MONGO_PORT=27018
+```
 
 ```bash
 docker compose up --build -d
@@ -122,17 +134,17 @@ docker compose exec -T source-postgres psql -v ON_ERROR_STOP=1 -U etl_source_adm
 docker compose exec source-postgres psql -U etl_source_admin -d etl_source
 ```
 
-Trong psql chạy `\password etl_source_reader`, nhập password khớp URL rồi `\q`. Ba job khởi tạo phải exit 0. Không dùng nhóm lệnh này trên DB Dev/Production/remote có sẵn. DB mới chưa có người dùng hoặc học liệu nghiệp vụ.
+Trong psql chạy `\password etl_source_reader`, nhập password khớp `SOURCE_DATABASE_URL`, rồi `\q`. Ba job khởi tạo phải exit 0. DB mới chưa có người dùng/học liệu. Không chạy nhóm khởi tạo này trên Dev/Production hoặc remote có sẵn.
 
-### Cấu hình đăng nhập
+### 1.6. Đăng nhập
 
-Tạo secret một lần, bỏ qua nếu đã có:
+Tạo secret một lần, bỏ qua nếu đã có; nhập password admin ít nhất 15 ký tự:
 
 ```bash
 python -m data_sync_etl.security.cli init --directory D:/etl/private/auth
 ```
 
-Nhập password admin ít nhất 15 ký tự. Thêm vào `.env`:
+Thêm vào `.env`:
 
 ```dotenv
 AUTH_MODE=single_admin
@@ -149,27 +161,35 @@ AUTH_PROXY_KEY_FILE=D:/etl/private/auth/auth_proxy_key
 AUTH_STATE_PATH=D:/etl/private/auth/sessions.sqlite3
 ```
 
-Đăng nhập cả user MASTER và admin cấu hình: dùng `AUTH_MODE=master_users`, `AUTH_MASTER_FRESHNESS_SECONDS=120`, `AUTH_MASTER_PBKDF2_SALT_ENCODING=auto`. Người dùng dùng mật khẩu tài khoản SOURCE đã đồng bộ, không dùng mật khẩu DB. User/role phải hợp lệ, email verified và đồng bộ users còn mới. `ADMIN_ENABLED=true` bật chức năng, không bỏ login. Xem [MASTER users](deploy/AUTH_MASTER_USERS_SETUP.md); Auth DB độc lập dùng [db_users](deploy/AUTH_DATABASE_SETUP.md).
+| Nhu cầu | Cấu hình |
+| --- | --- |
+| Chỉ admin cấu hình riêng | `AUTH_MODE=single_admin` |
+| User MASTER và admin riêng | `AUTH_MODE=master_users`, `AUTH_MASTER_FRESHNESS_SECONDS=120`, `AUTH_MASTER_PBKDF2_SALT_ENCODING=auto` |
+| Auth DB độc lập | `AUTH_MODE=db_users`; theo [hướng dẫn Auth DB](deploy/AUTH_DATABASE_SETUP.md) |
 
-### Khởi động
+User MASTER dùng mật khẩu tài khoản SOURCE đã đồng bộ, không dùng password DB. User/email verified/role phải hợp lệ và đồng bộ users còn mới. `ADMIN_ENABLED=true` bật chức năng, không bỏ login. Chi tiết: [MASTER users](deploy/AUTH_MASTER_USERS_SETUP.md).
 
-Mỗi tiến trình mở terminal riêng, kích hoạt venv cho các lệnh Python:
+### 1.7. Khởi động
 
-| Vai trò | Lệnh |
+Mỗi tiến trình mở terminal riêng; kích hoạt venv trước lệnh Python:
+
+| Tiến trình | Lệnh |
 | --- | --- |
 | API | `python -m uvicorn data_sync_etl.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers` |
 | React | `npm.cmd --prefix frontend run dev` |
 | Đồng bộ metadata | `python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-1` |
-| Xác minh/tham chiếu tệp nguồn | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
-| OCR, xử lý và lập chỉ mục | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
+| Xác minh/tham chiếu tệp | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
+| OCR/xử lý nội dung | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
 
-Mở **http://127.0.0.1:3000/login**, Swagger admin tại **http://127.0.0.1:3000/docs**. Chạy Full baseline rồi bật Auto Incremental trong giao diện Đồng bộ, nhất là nhóm users khi dùng MASTER auth. Worker đang chạy không tự bật lịch đồng bộ. Khi model/schema đã hợp lệ, đặt `INDEX_AUTO_ENABLED=true` để tự lập chỉ mục nội dung sẵn sàng. Đổi `.env` phải restart API/worker; đổi origin/proxy key thì restart React. Dừng bằng Ctrl+C.
+Mở **http://127.0.0.1:3000/login**; Swagger admin qua **http://127.0.0.1:3000/docs**. Chạy Full baseline rồi bật Auto Incremental trong giao diện Đồng bộ, đặc biệt luồng users khi dùng MASTER auth. Worker đang chạy không tự bật lịch đồng bộ.
+
+Khi model/schema/index hợp lệ, đặt `INDEX_AUTO_ENABLED=true` để tự lập chỉ mục. Đổi `.env` phải restart API/worker; đổi origin/proxy key phải restart React. Dừng bằng Ctrl+C.
 
 ## 2. Chạy Docker
 
-Host cần Git, Docker Desktop/Engine với Compose v2. Image chứa Python, Tesseract `vie+eng`, LibreOffice và embedding dependencies; model, secret và DB đặt riêng. Không cần cài Python/Node/Tesseract trên host.
+Host cần Git, Docker Desktop/Engine và Compose v2. Image chứa Python, Tesseract `vie+eng`, LibreOffice và embedding dependencies. Model, secret và DB nằm riêng; host không cần Python/Node/Tesseract.
 
-### Tạo cấu hình
+### 2.1. Cấu hình
 
 ```bash
 test -f docker.env || cp deploy/docker.env.example docker.env
@@ -177,7 +197,27 @@ mkdir -p /d/etl/private/auth /d/etl/source /d/etl/models/bge-m3
 test -f /d/etl/private/connections.json || cp deploy/config/connections.example.json /d/etl/private/connections.json
 ```
 
-Sửa `docker.env`: `MODEL_DIR`, `MODEL_MANIFEST_FILE`, `CONNECTIONS_FILE`, `SOURCE_LOCAL_DIR`, `ADMIN_LOGIN_EMAIL` và ba đường dẫn `*_SECRET_FILE`. Giữ image tag `:local` nếu không cần phiên bản riêng. Bật `SOURCE_REFERENCE_ENABLED=true` và `SOURCE_TEMPORARY_FILES_ENABLED=true` khi được phép truy xuất nguồn. Mẫu dùng BGE-M3 1024D và auth localhost; muốn dùng user MASTER đặt `AUTH_MODE=master_users` như local.
+Sửa `docker.env` ở gốc repo, tối thiểu:
+
+```dotenv
+BACKEND_IMAGE=etl-portable-backend:local
+FRONTEND_IMAGE=etl-portable-frontend:local
+WEB_PORT=8080
+MODEL_DIR=D:/etl/models/bge-m3
+MODEL_MANIFEST_FILE=D:/etl/models/bge-m3/etl-model-manifest.json
+CONNECTIONS_FILE=D:/etl/private/connections.json
+SOURCE_LOCAL_DIR=D:/etl/source
+DATABASE_MODE=same-host
+SOURCE_REFERENCE_ENABLED=true
+SOURCE_TEMPORARY_FILES_ENABLED=true
+AUTH_MODE=single_admin
+ADMIN_LOGIN_EMAIL=YOUR_ADMIN_EMAIL
+ADMIN_PASSWORD_HASH_SECRET_FILE=D:/etl/private/auth/admin_password_hash
+SESSION_SIGNING_KEY_SECRET_FILE=D:/etl/private/auth/session_signing_key
+AUTH_PROXY_KEY_SECRET_FILE=D:/etl/private/auth/auth_proxy_key
+```
+
+Giữ BGE-M3 1024D và auth localhost theo template; dùng user MASTER thì đổi `AUTH_MODE=master_users`. Hai cờ SOURCE chỉ bật khi được phép truy xuất nguồn. Nếu đổi `WEB_PORT`, đổi cả `AUTH_ORIGIN` (mặc định `http://127.0.0.1:8080`). LAN/HTTPS cần [cấu hình proxy/TLS](deploy/README.md), không bật bypass.
 
 Sửa `connections.json` với đúng bốn key:
 
@@ -190,11 +230,11 @@ Sửa `connections.json` với đúng bốn key:
 }
 ```
 
-Docker không đọc URL DB từ `.env` local. DB container dùng hostname/alias network, không dùng `127.0.0.1`. Nếu Mongo đã bật auth, điền tài khoản/`authSource` được cấp.
+Docker ứng dụng lấy URL từ file này, không dùng URL của `.env` local. DB cùng network dùng alias/cổng nội bộ; `127.0.0.1` trong container là chính container. Mongo có auth cần credentials/`authSource` được cấp.
 
-### DB, network và build
+### 2.2. DB, network và build
 
-DB mới: dùng nhóm khởi tạo local phía trên; DB có sẵn: bỏ migration. Nối các container DB hiện có vào network ứng dụng (tên thật lấy từ `docker ps -a`):
+Chuẩn bị DB theo mục 1.5 hoặc [Compose DB riêng](deploy/DATABASE_SETUP.md); Start không tự migrate. Với DB của Compose gốc, nối network một lần (tên thật lấy từ `docker ps -a`):
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Network
@@ -204,11 +244,11 @@ docker network connect --alias mongo etl-data etl-master-data-mongo-1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Build
 ```
 
-Endpoint đã tồn tại thì bỏ bước nối tương ứng. SOURCE Neon thì không cần nối SOURCE Docker. [Compose DB riêng](deploy/DATABASE_SETUP.md) cần provision schema/roles trước; không tự migration lúc Start.
+Bỏ lệnh connect nếu endpoint đã tồn tại. SOURCE Neon không cần container SOURCE. Ba worker dùng chung backend image, không build riêng.
 
-### Chuẩn bị model và secret
+### 2.3. Model và secret
 
-Có model/secret rồi thì dùng lại. Nếu chưa có, tải model bằng image vừa build và tạo secret:
+Có model/manifest và secret từ local thì dùng lại. Nếu chưa có, sau khi build chạy:
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
@@ -219,70 +259,77 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/setup-aut
   -Directory D:/etl/private/auth -AdminEmail YOUR_ADMIN_EMAIL -Image etl-portable-backend:local
 ```
 
-Script secret không sửa `docker.env`; kiểm tra lại email và đường dẫn. Model được mount read-only và không tải lại khi khởi động.
+Script secret không sửa `docker.env`; kiểm tra email/đường dẫn. Model mount read-only. `PrepareModel` dùng image `etl-portable-backend:local`; nếu đổi tag đặt `ETL_MODEL_TOOL_IMAGE` theo image đã build.
 
-### Start, kiểm tra, dừng và cập nhật
+### 2.4. Start, kiểm tra và cập nhật
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Check
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Start -Workers
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Status
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Logs
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Stop
 ```
 
-`Check` kiểm tra cấu hình/model/kết nối; `Start -Workers` chạy API, frontend và cả ba worker. Mở **http://127.0.0.1:8080/login**, docs tại **http://127.0.0.1:8080/docs**.
+`Check` kiểm tra auth/model/DB; `Start -Workers` chạy API, frontend và ba worker. Mở **http://127.0.0.1:8080/login**; Swagger admin tại **http://127.0.0.1:8080/docs**.
 
-- Đổi code: **Build → Start -Workers**.
-- Đổi `docker.env`: **Start -Workers** để Compose tạo lại container cần thiết.
-- Đổi nội dung secret/JSON tại cùng đường dẫn: **Stop → Check → Start -Workers**.
-- Launcher dùng `-EnvFile` nếu truyền, nếu không dùng `docker.env` gốc. Kiểm tra đường dẫn env in ra. Không dùng `down -v` để sửa lỗi.
+| Thao tác | Nhóm lệnh `-Action` |
+| --- | --- |
+| Đổi code, cập nhật image/container | `Build` → `Start -Workers` |
+| Đổi `docker.env` | `Start -Workers` để tạo lại container cần thiết |
+| Đổi nội dung secret/JSON cùng đường dẫn | `Stop` → `Check` → `Start -Workers` |
+| Dừng, giữ dữ liệu | `Stop` |
 
-Linux dùng cùng `docker.env` với path Linux, UID 10001 phải đọc được model/secret:
+Launcher mặc định đọc `docker.env` ở gốc repo. Dùng `-EnvFile D:/etl/private/app.env` cho mọi lệnh nếu chọn vị trí khác. Không dùng `down -v` để sửa lỗi.
+
+Linux dùng đường dẫn Linux trong `docker.env`; UID 10001 phải đọc được model/secret:
 
 ```bash
-bash deploy/scripts/etl-docker.sh build
 bash deploy/scripts/etl-docker.sh network
+bash deploy/scripts/etl-docker.sh build
 bash deploy/scripts/etl-docker.sh check
 bash deploy/scripts/etl-docker.sh start --workers
 bash deploy/scripts/etl-docker.sh stop
 ```
 
-Tải model/tạo secret trên Linux và xuất/nhập image: [hướng dẫn Docker](deploy/README.md).
+Model/secret Linux và xuất/nhập image `.tar`: [hướng dẫn Docker](deploy/README.md). Archive image không chứa model, secret hoặc dữ liệu DB.
 
-## 3. Đổi DB local sang remote/Neon
+## 3. Đổi DB sang remote/Neon
 
-| Chạy | Sửa ở đâu |
+| Chạy | File cần sửa |
 | --- | --- |
 | Local | `.env`: `DATABASE_URL`, `SOURCE_DATABASE_URL`, `MONGO_URI`, `MONGO_DATABASE` |
-| Docker | `connections.json`: bốn key trên; `docker.env`: `DATABASE_MODE` và đường dẫn CA |
+| Docker | Bốn key trên trong `connections.json`; `docker.env`: `DATABASE_MODE`, đường dẫn CA |
 
-Chỉ SOURCE Neon: giữ MASTER/Mongo local, đặt `DATABASE_MODE=source-neon`, `SOURCE_DATABASE_CA_FILE=D:/etl/private/neon-ca.pem`. SOURCE URL Docker:
+**Chỉ SOURCE Neon:** giữ MASTER/Mongo local, đổi `SOURCE_DATABASE_URL`. Docker đặt `DATABASE_MODE=source-neon`, `SOURCE_DATABASE_CA_FILE=D:/etl/private/neon-ca.pem`. URL SOURCE Docker:
 
 ```text
 postgresql+psycopg://etl_source_reader:ENCODED_PASSWORD@YOUR_NEON_HOST:5432/Learning_Resources?sslmode=verify-full&channel_binding=require&sslrootcert=/run/secrets/source-database-ca.pem
 ```
 
-Local dùng cùng URL nhưng `sslrootcert=D%3A%2Fetl%2Fprivate%2Fneon-ca.pem`. Lấy CA bundle hợp lệ từ DBA; không tắt TLS. `SOURCE_POSTGRES_*` chỉ khởi tạo DB Docker cũ, không quyết định nguồn ETL; nguồn runtime lấy từ `SOURCE_DATABASE_URL`.
+Local thay `sslrootcert` bằng `D%3A%2Fetl%2Fprivate%2Fneon-ca.pem`. Dùng đúng hostname, tên DB phân biệt hoa/thường, role chỉ đọc và CA bundle được DBA cấp. `SOURCE_POSTGRES_*` chỉ tạo DB Docker local, không chọn nguồn ETL; runtime dùng `SOURCE_DATABASE_URL`. Bỏ `SOURCE_MIGRATION_DATABASE_URL` nếu không chủ ý migrate DB nguồn local.
 
-Cả DB remote: đặt `DATABASE_MODE=remote`, `DATABASE_CA_FILE` và URL TLS theo [mẫu remote](deploy/config/connections.remote.example.json). Không chạy migration/seed lên DB remote. Đổi kết nối xong restart local; Docker chạy Stop → Check → Start -Workers.
+**Các DB remote:** đặt `DATABASE_MODE=remote`, `DATABASE_CA_FILE` và URL TLS theo [mẫu remote](deploy/config/connections.remote.example.json). Không chạy migration/seed lên remote. Sau thay đổi restart API/worker local; Docker chạy `Stop` → `Check` → `Start -Workers`.
 
-## 4. Kiểm tra và cấu hình tùy chọn
+## 4. Kiểm tra và xử lý lỗi
 
-- Đối soát: quét chỉ ghi báo cáo audit, không tự sửa dữ liệu. Có thể bật tự quét mỗi 5 phút khi trang đang mở và hiển thị; đóng trang sẽ dừng lịch. Tệp SOURCE chưa đọc xác minh được báo riêng, không tính là đã kiểm tra toàn vẹn.
-- Tìm kiếm giữ tạm tối đa 8 trang kết quả trong bộ nhớ tab trong 60 giây. Đăng xuất/kiểm tra lại phiên sẽ xóa cache; nút **Cập nhật kết quả** luôn truy vấn lại. Xem/tải tệp vẫn kiểm tra quyền tại backend.
+| Hiện tượng | Kiểm tra |
+| --- | --- |
+| `AUTH_MASTER_STALE` | Full baseline/Auto users và Master Sync Worker; không bỏ freshness guard |
+| Search rỗng | Nội dung/index READY, quyền, model/revision/dimension khớp; không hạ ngưỡng về 0 để che lỗi |
+| `SOURCE_REFERENCE_DISABLED` / không xem tệp | Hai cờ SOURCE, quyền nguồn, mount/credentials và metadata/hash |
+| Container unhealthy / BLOCKED | `-Action Logs`, `-Action Check`; đọc mã lỗi cụ thể trước khi sửa |
+| Thiếu `argon2` / launcher trỏ đường dẫn cũ | Đúng venv và dependencies mục 1.1; tạo venv mới nếu đã di chuyển repo |
 
-- `AUTH_MASTER_STALE`: kiểm tra Full baseline/Auto users và Master Sync Worker; không bỏ freshness guard.
-- Search rỗng: nội dung phải sẵn sàng, chỉ mục READY, đúng model/dimension và quyền. `SEARCH_VECTOR_MIN_SIMILARITY=0.6`; giảm ngưỡng có thể tăng nhiễu. `SEARCH_MEANING_CONTEXT_MARGIN=0.08` chọn đoạn gần nghĩa; `SEARCH_BOW_MIN_COVERAGE=0` giữ recall mặc định.
-- Vector 384D cũ không dùng lại như 1024D; chuyển model cần backup và tái lập chỉ mục theo công cụ maintenance, không chỉ đổi env.
-- File nguồn cần quyền, metadata/hash hợp lệ và mount read-only; [Google Drive](deploy/DRIVE_SETUP.md) cần cấu hình riêng.
-- Quên password admin: `python -m data_sync_etl.security.cli hash --output D:/etl/private/auth/admin_password_hash_v2`, trỏ secret sang file mới rồi restart. Password user MASTER đổi ở SOURCE.
+Vector 384D không dùng lại như 1024D: đổi model cần backup, điều chỉnh validator và tái lập chỉ mục theo quy trình maintenance. Semantic Chunk và các tùy chọn fusion/evidence vẫn opt-in; giữ mặc định nếu chưa kiểm chứng.
 
-Kiểm thử fixture, không dùng DB đang phục vụ:
+Đổi password admin cấu hình: `python -m data_sync_etl.security.cli hash --output D:/etl/private/auth/admin_password_hash_v2`, đổi đường dẫn secret rồi restart. Password user MASTER đổi ở SOURCE rồi đồng bộ.
+
+Kiểm thử fixture, không cần DB đang phục vụ:
 
 ```bash
 python -m pytest tests/unit -q
+node --experimental-strip-types --test --test-concurrency=1 frontend/tests/*.test.mjs
 npm.cmd --prefix frontend run build
 ```
 
-Scripts đánh giá và dữ liệu nhãn: [tìm kiếm](research/semantic-quality/README.md). Kết quả sinh mới lưu trong `.test-tmp` hoặc `storage`, không đưa vào Git.
+Hợp đồng schema ở `fixtures/contracts/`; truy vấn/nhãn đánh giá ở `fixtures/search/`. Nhãn draft chưa được nghiệm thu. Báo cáo sinh mới đặt trong `.test-tmp/` hoặc `artifacts/`; `docs/` và `research/` chỉ giữ ở máy, không thuộc cây source Git.
