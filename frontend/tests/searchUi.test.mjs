@@ -16,7 +16,7 @@ const executable = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Micro
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 test('search form, methods, results, pagination, empty, error/retry and mobile layout', {
-    skip: !existsSync(executable) || !existsSync(join(root, 'dist/index.html')), timeout: 60000,
+    skip: !existsSync(executable) || !existsSync(join(root, 'dist/index.html')), timeout: 90000,
 }, async () => {
     let postCount = 0, contextCount = 0, catalogCount = 0, mode = 'results', fileKind = 'image'
     let resultCount = 8
@@ -25,6 +25,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     let canViewFile = true
     let contextEvidence = 'lexical'
     let holdAuthConfig = true
+    const reconciliationBodies = []
     let releaseSearch
     const bodies = [], responses = []
     const server = createServer(async (req, res) => {
@@ -115,11 +116,20 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             res.writeHead(200, { 'Content-Type': 'image/png' })
             return res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=', 'base64'))
         }
+        if (url.pathname === '/api/v1/reconciliation/runs/latest') return json({
+            overall_status: 'NO_RUNS_YET', overall_match_rate_percent: 0, total_source_records: 0,
+            total_target_records: 0, total_matched_records: 0, total_mismatched_records: 0,
+            total_source_bytes: 0, total_target_bytes: 0, stream_reports: [] })
+        if (url.pathname === '/api/v1/reconciliation/runs') {
+            let body = ''; for await (const chunk of req) body += chunk
+            reconciliationBodies.push(JSON.parse(body))
+            return json({ status: 'COMPLETED', reports: [] })
+        }
         if (url.pathname.startsWith('/api/')) return json({ detail: 'not found' }, 404)
         const file = url.pathname.startsWith('/assets/') ? resolve(root, 'dist', '.' + url.pathname) : join(root, 'dist/index.html')
         if (!file.startsWith(join(root, 'dist') + sep)) { res.writeHead(403); return res.end() }
         try {
-            res.writeHead(200, { 'Content-Type': { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png' }[extname(file)] || 'application/octet-stream' })
+            res.writeHead(200, { 'Content-Type': { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png', '.jpg': 'image/jpeg' }[extname(file)] || 'application/octet-stream' })
             res.end(await readFile(file))
         } catch { res.writeHead(404); res.end() }
     })
@@ -238,6 +248,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await assertFixedSearch()
         async function capture(name) {
             if (!process.env.ETL_TEST_CAPTURE_LAYOUT) return
+            await delay(450)
             const directory = resolve(root, '../.test-tmp/search-layout')
             await mkdir(directory, { recursive: true })
             const result = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true })
@@ -254,19 +265,15 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("!!document.querySelector('#search-query')"), true)
         await waitFor(() => evaluate("document.querySelector('#search-query')?.value === 'toán'"))
         await waitFor(() => evaluate("document.querySelector('#search-grade')?.value === 'g1'"))
-        // Same-page duplicate clicks produce one request; the page body is never
-        // reused on back, including after access/revision failures.
+        // Explicit refresh must validate with the server and discard cached
+        // snapshots on access/revision failures, rather than resurrect old text.
         for (const failure of ['revoked', 'denied', 'stale', 'busy']) {
-            mode = 'slow'
-            const before = postCount
-            await evaluate(`window.t4Form = document.querySelector('form'); for (let i=0;i<${baseline ? 1 : 10};i++) Array.from(document.querySelectorAll('button')).find(e => e.textContent === 'Tiếp').click()`)
-            await waitFor(() => !!releaseSearch && postCount === before + 1)
-            assert.equal(await evaluate("document.querySelectorAll('article').length"), 0, 'old protected page hidden during validation')
             mode = failure
-            await evaluate('history.back()')
+            const before = postCount
+            await evaluate("window.t4Form = document.querySelector('form'); undefined")
+            await click('Cập nhật kết quả')
             await waitFor(() => evaluate("!!document.querySelector('[role=alert]')"))
-            releaseSearch()
-            releaseSearch = undefined
+            assert.equal(postCount, before + 1)
             assert.equal(await evaluate("document.querySelectorAll('article').length"), 0)
             if (!baseline) assert.equal(await evaluate("window.t4Form === document.querySelector('form')"), true)
             mode = 'results'
@@ -294,7 +301,8 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
                         throw new Error(`${temperature}/${group}: ${error.message}; fixture UI state=${JSON.stringify(state)}`)
                     })
                 assert.equal(result.exceptionDetails, undefined, `${temperature}/${group}`)
-                assert.equal(postCount - posts, 1, 'every page goes through live Search')
+                assert.equal(postCount - posts, ['visited', 'back'].includes(group) ? 0 : 1,
+                    'visited pages reuse recent tab snapshots; new pages use live Search')
                 const usage = process.cpuUsage(cpu)
                 const memory = process.memoryUsage()
                 assert.equal(responses.at(-1).status, 200)
@@ -338,7 +346,8 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await waitFor(() => evaluate("document.querySelector('iframe[title=\"Xem tệp PDF\"]')?.src.startsWith('blob:')"))
         assert.equal(await evaluate("document.querySelector('pre')"), null)
         assert.ok(await evaluate("document.querySelector('a[download]').href.endsWith('/api/v1/resource-versions/v1/file?download=true')"))
-        await click('Quay lại kết quả tìm kiếm')
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('a')).find(link => link.textContent.includes('Quay lại danh sách học liệu'))?.getAttribute('href')"), '/library/list')
+        await evaluate('history.back()')
         await waitFor(() => evaluate("!!document.querySelector('article')"))
         mode = 'error'
         await open('/search/result?q=toán&method=vector')
@@ -449,6 +458,62 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             assert.equal(contextCount, beforeContext + 1)
         }
 
+        // Horizontal overview and reconciliation dialogs use the real built UI.
+        authRole = 'ADMIN'
+        await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
+        await call('Page.navigate', { url: origin + '/overview/summary' })
+        await waitFor(() => evaluate("document.querySelector('img[alt=\"Kệ sách trong thư viện\"]')?.naturalWidth > 0"))
+        assert.equal(await evaluate("document.querySelector('h1').getBoundingClientRect().right > document.querySelector('figure img').getBoundingClientRect().left"), true)
+        assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true)
+        assert.equal(await evaluate("/Ảnh minh họa|Nghiên cứu & phát triển|[↗↓→]/.test(document.querySelector('main').textContent)"), false)
+        await capture('overview-horizontal-desktop')
+        await evaluate("document.getElementById('overview-content').scrollIntoView(); undefined")
+        await capture('overview-research-desktop')
+        await evaluate("document.querySelector('main').scrollTop = 0; undefined")
+        await evaluate("history.pushState({}, '', '/overview/process'); window.dispatchEvent(new PopStateEvent('popstate'))")
+        await waitFor(() => evaluate("document.querySelector('h1')?.textContent.includes('đến kết quả tìm kiếm')"))
+        assert.equal(await evaluate("document.querySelector('details').open"), false)
+        await evaluate("document.querySelector('details summary').click()")
+        assert.equal(await evaluate("document.querySelector('details').open"), true)
+        await evaluate("document.querySelector('details summary').click()")
+        assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true)
+        await capture('overview-process-desktop')
+        await evaluate("document.getElementById('overview-content').scrollIntoView(); undefined")
+        await capture('overview-workflow-desktop')
+        await evaluate("document.querySelector('main').scrollTop = 0; undefined")
+        await evaluate("history.pushState({}, '', '/overview/summary'); window.dispatchEvent(new PopStateEvent('popstate'))")
+        await waitFor(() => evaluate("document.querySelector('h1')?.textContent.includes('Quản lý và')"))
+        await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+        assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true)
+        await capture('overview-mobile')
+        await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
+        await call('Page.addScriptToEvaluateOnNewDocument', { source: `
+            const originalInterval = window.setInterval, originalClear = window.clearInterval;
+            window.setInterval = (fn, ms, ...args) => {
+                if (ms === 300000) { window.fixtureAutoScan = fn; return 2147483000; }
+                return originalInterval(fn, ms, ...args);
+            };
+            window.clearInterval = id => { if (id === 2147483000) window.fixtureAutoScan = null; else originalClear(id); };
+            window.alert = window.confirm = () => { throw new Error('Native dialog forbidden'); };
+        ` })
+        await call('Page.navigate', { url: origin + '/library/source-sync/reconciliation' })
+        await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Quét đối soát' && !button.disabled)"))
+        await click('Quét đối soát')
+        await waitFor(() => evaluate("!!document.querySelector('dialog[open]')"))
+        assert.equal(reconciliationBodies.length, 1)
+        assert.equal(reconciliationBodies[0].dry_run, true)
+        assert.equal(await evaluate("document.body.textContent.includes('Tự phục hồi')"), false)
+        await capture('reconciliation-dialog')
+        await click('Đóng')
+        await evaluate("document.querySelector('input[type=checkbox]').click()")
+        await waitFor(() => evaluate("typeof window.fixtureAutoScan === 'function'"))
+        await evaluate("for (let i = 0; i < 10; i++) window.fixtureAutoScan()")
+        await waitFor(() => reconciliationBodies.length === 2)
+        assert.equal(reconciliationBodies[1].dry_run, true)
+        await waitFor(() => evaluate("!!document.querySelector('dialog[open]')"))
+        await click('Đóng')
+        await evaluate("history.pushState({}, '', '/overview/summary'); window.dispatchEvent(new PopStateEvent('popstate'))")
+        await waitFor(() => evaluate("window.fixtureAutoScan === null"))
     } finally {
         releaseSearch?.()
         if (ws) ws.close()

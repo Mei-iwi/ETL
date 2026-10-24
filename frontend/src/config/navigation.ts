@@ -56,11 +56,6 @@ export const navagationItems: NavigationGroup[] = [
                 end: false
             },
             {
-                to: '/library/add',
-                label: 'Thêm học liệu',
-                end: true
-            },
-            {
                 to: '/library/indexing',
                 label: 'Phân đoạn và chỉ mục',
                 end: true

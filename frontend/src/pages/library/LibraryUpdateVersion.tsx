@@ -238,8 +238,8 @@ export function LibraryUpdateVersion() {
 
     return (
         <section className={styles.page}>
-            <Link className={styles.backLink} to={detailPath}>
-                ← Quay lại chi tiết
+            <Link className={styles.backLink} to="/library/list">
+                ← Quay lại danh sách học liệu
             </Link>
 
             <header className={styles.pageHeader}>
@@ -377,7 +377,7 @@ export function LibraryUpdateVersion() {
                         >
                             {submitLabel}
                         </button>
-                        <button className={styles.secondaryButton} type="button" onClick={() => navigate(detailPath)} disabled={isLoading || updateStage !== 'idle'}>
+                        <button className={styles.secondaryButton} type="button" onClick={() => navigate('/library/list')} disabled={isLoading || updateStage !== 'idle'}>
                             Hủy
                         </button>
                     </div>

@@ -37,9 +37,8 @@ type ResourceDetail = {
 export function LibraryResourceDetailPage() {
     const { resourceId } = useParams<{ resourceId: string }>()
     const [params] = useSearchParams()
-    const returnTo = params.get('returnTo')
-    const backTo = returnTo?.startsWith('/search/query-methods?') ? returnTo : '/library/list'
-    const backLabel = backTo === '/library/list' ? 'Quay lại danh sách học liệu' : 'Quay lại kết quả tìm kiếm'
+    const backTo = '/library/list'
+    const backLabel = 'Quay lại danh sách học liệu'
 
     const [resource, setResource] = useState<ResourceDetail | null>(null)
     const [loading, setLoading] = useState(true)

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { NoticeDialog } from '../../components/NoticeDialog'
 import {
     getDiscrepancies,
     getLatestReconciliationReport,
@@ -91,14 +92,19 @@ export function DataReconciliationPage() {
     const [loading, setLoading] = useState(false)
     const [reconciling, setReconciling] = useState(false)
     const [error, setError] = useState('')
-    const [message, setMessage] = useState('')
+    const [notice, setNotice] = useState<{ title: string; message: string } | null>(null)
+    const [automatic, setAutomatic] = useState(false)
+    const running = useRef(false)
+    const loadRevision = useRef(0)
 
     const loadData = useCallback(async () => {
+        const revision = ++loadRevision.current
         setLoading(true)
         setError('')
         try {
             // Lấy báo cáo mới nhất trước để lấy run_id của từng stream
             const latest = await getLatestReconciliationReport(selectedStream)
+            if (revision !== loadRevision.current) return
             setReport(latest)
 
             // Thu thập run_id của các stream trong báo cáo mới nhất
@@ -108,73 +114,65 @@ export function DataReconciliationPage() {
 
             // Chỉ lấy discrepancies thuộc các lần chạy mới nhất (lọc theo run_id)
             if (latestRunIds && latestRunIds.length > 0) {
-                const results = await Promise.all(
-                    latestRunIds.map((runId) =>
-                        getDiscrepancies({
-                            runId,
-                            stream: selectedStream,
-                            flag: selectedFlag,
-                            page: 1,
-                            pageSize: 100,
-                        }),
-                    ),
-                )
-                // Gộp kết quả và phân trang phía client
-                const allItems = results.flatMap((r) => r.items)
-                const totalCount = allItems.length
-                const start = (page - 1) * pageSize
-                const pageItems = allItems.slice(start, start + pageSize)
-                setDiscrepancies(pageItems)
-                setTotal(totalCount)
-                setTotalPages(Math.ceil(totalCount / pageSize) || 0)
+                const result = await getDiscrepancies({ latestOnly: true, stream: selectedStream,
+                    flag: selectedFlag, page, pageSize })
+                if (revision !== loadRevision.current) return
+                setDiscrepancies(result.items)
+                setTotal(result.total)
+                setTotalPages(result.total_pages)
             } else {
                 setDiscrepancies([])
                 setTotal(0)
                 setTotalPages(0)
             }
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Không thể tải báo cáo đối soát')
+            if (revision === loadRevision.current) setError(err instanceof Error ? err.message : 'Không thể tải báo cáo đối soát')
         } finally {
-            setLoading(false)
+            if (revision === loadRevision.current) setLoading(false)
         }
     }, [selectedStream, selectedFlag, page, pageSize])
 
     useEffect(() => {
         void loadData()
+        return () => { loadRevision.current++ }
     }, [loadData])
 
-    async function handleRunReconcile(dryRun: boolean) {
-        if (!dryRun) {
-            const ok = window.confirm('Xác nhận chạy tự phục hồi dữ liệu?')
-            if (!ok) return
-        }
-
+    const handleRunReconcile = useCallback(async () => {
+        if (running.current) return
+        running.current = true
         setReconciling(true)
         setError('')
-        setMessage('')
         try {
-            const result = await triggerReconciliation(selectedStream, dryRun)
-            setMessage(
-                result.status === 'BLOCKED'
-                    ? 'Đợt đối soát đã bị khóa do sai lệch vượt ngưỡng 10%.'
-                    : dryRun
-                      ? 'Đã quét xong đối soát (Dry-run).'
-                      : 'Đã hoàn tất tự phục hồi dữ liệu.',
-            )
+            const result = await triggerReconciliation(selectedStream, true)
+            setNotice({ title: 'Kết quả đối soát', message: result.status === 'BLOCKED'
+                ? 'Đã quét xong. Có sai lệch vượt ngưỡng an toàn; dữ liệu chưa được thay đổi.'
+                : result.reports.some(report => report.status === 'PARTIAL')
+                    ? 'Đã đối soát. Một phần dữ liệu chưa đủ điều kiện xác minh; tệp SOURCE chưa được đọc kiểm tra sẽ không tính là toàn vẹn.'
+                    : 'Đã quét xong đối soát. Dữ liệu nghiệp vụ không thay đổi.' })
             setPage(1)
             await loadData()
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Lỗi khi kích hoạt đối soát')
+            setNotice({ title: 'Không thể đối soát', message: err instanceof Error ? err.message : 'Lỗi khi kích hoạt đối soát' })
         } finally {
             setReconciling(false)
+            running.current = false
         }
-    }
+    }, [selectedStream, loadData])
+
+    useEffect(() => {
+        if (!automatic) return
+        const timer = window.setInterval(() => {
+            if (document.visibilityState === 'visible' && !running.current) void handleRunReconcile()
+        }, 300_000)
+        return () => window.clearInterval(timer)
+    }, [automatic, handleRunReconcile])
 
     const hasBlockedRun = report?.stream_reports?.some((r) => r.status === 'BLOCKED')
     const blockedReason = report?.stream_reports?.find((r) => r.summary_meta?.reason)?.summary_meta?.reason
 
     return (
         <div className={styles.container}>
+            {notice && <NoticeDialog {...notice} onClose={() => setNotice(null)} />}
             {/* THẺ ĐIỀU KHIỂN & BỘ LỌC */}
             <div className={styles.card}>
                 <div className={styles.sectionHeader}>
@@ -186,6 +184,7 @@ export function DataReconciliationPage() {
                         <select
                             className={styles.select}
                             value={selectedStream}
+                            disabled={reconciling || loading}
                             onChange={(e) => {
                                 setSelectedStream(e.target.value)
                                 setPage(1)
@@ -204,29 +203,21 @@ export function DataReconciliationPage() {
                             type="button"
                             className={styles.primaryButton}
                             disabled={reconciling || loading}
-                            onClick={() => void handleRunReconcile(true)}
+                            onClick={() => void handleRunReconcile()}
                         >
                             {reconciling ? 'Đang đối soát...' : 'Quét đối soát'}
                         </button>
 
-                        <button
-                            type="button"
-                            className={styles.secondaryButton}
-                            disabled={reconciling || loading}
-                            onClick={() => void handleRunReconcile(false)}
-                        >
-                            Tự phục hồi
-                        </button>
+                        <label><input type="checkbox" checked={automatic} onChange={event => setAutomatic(event.target.checked)} /> Tự quét mỗi 5 phút khi mở trang</label>
                     </div>
                 </div>
 
                 {/* THÔNG BÁO / CẢNH BÁO */}
                 {error && <div className={`${styles.alertBox} ${styles.alertWarning}`}>{error}</div>}
-                {message && <div className={`${styles.alertBox} ${styles.alertSuccess}`}>{message}</div>}
 
                 {hasBlockedRun && (
                     <div className={`${styles.alertBox} ${styles.alertWarning}`}>
-                        <strong>Khóa an toàn:</strong> {blockedReason || 'Tỷ lệ sai lệch vượt ngưỡng 10%, đã tạm dừng thao tác tự sửa.'}
+                        <strong>Cần kiểm tra:</strong> {blockedReason || 'Sai lệch vượt ngưỡng an toàn. Xem chi tiết trước khi đồng bộ lại.'}
                     </div>
                 )}
 
@@ -235,7 +226,7 @@ export function DataReconciliationPage() {
                     <div className={styles.statusItem}>
                         <span className={styles.statusLabel}>Tỷ lệ đồng nhất</span>
                         <span className={styles.statusValue} style={{ color: (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
-                            {report ? `${report.overall_match_rate_percent}%` : '—'}
+                            {report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
                         </span>
                         <span className={styles.statusSub}>
                             Trạng thái: <strong>{report?.overall_status ?? 'CHƯA CHẠY'}</strong>
@@ -310,9 +301,9 @@ export function DataReconciliationPage() {
                     <div className={styles.emptyState}>Đang tải dữ liệu...</div>
                 ) : discrepancies.length === 0 ? (
                     <div className={styles.emptyState}>
-                        {report?.total_mismatched_records === 0
-                            ? 'Dữ liệu hai bên đồng nhất. Không có sai lệch.'
-                            : 'Không có bản ghi phù hợp.'}
+                        {report?.latest_run_id
+                            ? 'Không có sai lệch theo bộ lọc đã chọn.'
+                            : 'Chưa có kết quả đối soát. Hãy quét để kiểm tra.'}
                     </div>
                 ) : (
                     <div className={styles.tableWrap}>

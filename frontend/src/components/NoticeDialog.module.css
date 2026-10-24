@@ -1,0 +1,5 @@
+.dialog { width: min(440px, calc(100vw - 48px)); box-sizing: border-box; padding: 26px; border: 0; border-radius: 14px; color: #172b4d; box-shadow: 0 24px 70px #14213d40; }
+.dialog::backdrop { background: #14213d66; }
+.dialog h2 { margin: 0 0 14px; font-size: 20px; }
+.dialog p { line-height: 1.7; white-space: pre-line; }
+.dialog button { display: block; margin: 22px 0 0 auto; padding: 10px 24px; background: #223c89; border: 0; border-radius: 7px; color: white; cursor: pointer; }

@@ -16,7 +16,7 @@ export function MaterialSearchPage() {
     const [params] = useSearchParams()
     const model = useSearchModel()
     // Page navigation keeps the form/catalog mounted. A criteria change starts a
-    // new session; protected results below still remount and fetch on EVERY page.
+    // new criteria session. Recent authorized page snapshots are retained in tab memory.
     const session = writeSearch({ ...readSearch(params), page: 1 }).toString()
     return <SearchForm key={session} params={params} model={model} />
 }

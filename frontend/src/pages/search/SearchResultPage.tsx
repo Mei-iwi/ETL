@@ -8,12 +8,15 @@ import styles from './SearchPages.module.css'
 import { readSearch, writeSearch } from './searchParams'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
 import { SearchContext } from './SearchContext'
+import { clearSearchViewCache, readSearchView, saveSearchView } from './searchViewCache'
 
 export function SearchResults({ params, onBusyChange }: { params: URLSearchParams; onBusyChange?: (busy: boolean) => void }) {
-    const { principal } = useAuth()
+    const { principal, mode } = useAuth()
     const criteria = readSearch(params)
+    const encoded = writeSearch(criteria).toString()
+    const cacheKey = JSON.stringify([mode, principal, encoded])
     const [, setParams] = useSearchParams()
-    const [result, setResult] = useState<SearchResponse | null>(null)
+    const [result, setResult] = useState<SearchResponse | null>(() => readSearchView(cacheKey))
     const [error, setError] = useState('')
     const [attempt, setAttempt] = useState(0)
     const retrying = useRef(false)
@@ -25,10 +28,11 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
         navigating.current = true
         setParams(writeSearch({ ...criteria, page }))
     }
-    const encoded = params.toString()
     useEffect(() => {
         const request = readSearch(new URLSearchParams(encoded))
         if (!request.query) return
+        const cached = attempt === 0 ? readSearchView(cacheKey) : null
+        if (cached) { setResult(cached); onBusyChange?.(false); return }
         const controller = new AbortController()
         // StrictMode cleans up its probe effect before this microtask starts a POST.
         void Promise.resolve().then(() => {
@@ -36,11 +40,11 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
             onBusyChange?.(true)
             return searchMaterials(request, controller.signal)
         })
-            .then(data => { if (data && !controller.signal.aborted) { setResult(data); setError('') } })
-            .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof SearchApiError ? reason.message : 'Tìm kiếm thất bại. Vui lòng thử lại.') })
+            .then(data => { if (data && !controller.signal.aborted) { saveSearchView(cacheKey, data); setResult(data); setError('') } })
+            .catch(reason => { if (!controller.signal.aborted) { clearSearchViewCache(); setError(reason instanceof SearchApiError ? reason.message : 'Tìm kiếm thất bại. Vui lòng thử lại.') } })
             .finally(() => { if (!controller.signal.aborted) { retrying.current = false; onBusyChange?.(false) } })
         return () => { controller.abort(); onBusyChange?.(false) }
-    }, [encoded, attempt, onBusyChange])
+    }, [encoded, cacheKey, attempt, onBusyChange])
     return <section className={styles.results} aria-label="Kết quả tìm kiếm" aria-busy={Boolean(criteria.query && !error && !result)} tabIndex={0}>
         <div className={styles.stack}>
             {!criteria.query ? <p role="status">Nhập truy vấn để tìm kiếm.</p> : error ?
@@ -51,6 +55,7 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                         <div><h2>Kết quả tìm kiếm</h2><p role="status"><strong>{result.total.toLocaleString('vi-VN')}</strong> kết quả cho <strong>“{criteria.query}”</strong></p></div>
                         {result.items.length > 0 && <span className={styles.metadata}>Phù hợp nhất trước · {Math.min((result.page - 1) * result.size + 1, result.total)}–{Math.min((result.page - 1) * result.size + result.items.length, result.total)} / {result.total}</span>}
                         {result.access_scope === 'local_demo' && <p role="status" className={styles.metadata}>Tra cứu thử nghiệm nội bộ</p>}
+                        <button type="button" className={styles.textButton} onClick={() => { clearSearchViewCache(); setResult(null); setAttempt(value => value + 1) }}>Cập nhật kết quả</button>
                     </div>
                     {result.readiness?.reindex_required && <p role="status" className={styles.metadata}>
                         Một số học liệu chưa sẵn sàng để tìm kiếm: {result.readiness.ready_versions}/{result.readiness.eligible_versions} phiên bản đã có chỉ mục hợp lệ.

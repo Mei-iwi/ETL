@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { ReactNode } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router'
 import { clearAuthRequests, setAuthMode } from './transport'
+import { clearSearchViewCache } from '../pages/search/searchViewCache'
 
 export type Principal = { id?: string; role: 'ADMIN' | 'OPERATOR' | 'VIEWER'; mode: string; admin_feature_enabled: boolean;
     roles?: string[]; display_name?: string; email?: string; must_change_password?: boolean; permissions?: string[]; resource_ids?: string[] }
@@ -18,8 +19,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const revision = useRef(0)
     const currentScope = useRef('')
     const pendingCheck = useRef<AbortController | null>(null)
-    const expired = useCallback(() => { revision.current++; pendingCheck.current?.abort(); clearAuthRequests(); setPrincipal(undefined); setStatus('anonymous') }, [])
+    const expired = useCallback(() => { revision.current++; pendingCheck.current?.abort(); clearAuthRequests(); clearSearchViewCache(); setPrincipal(undefined); setStatus('anonymous') }, [])
     const refresh = useCallback(async () => {
+        clearSearchViewCache()
         const expected = ++revision.current
         pendingCheck.current?.abort()
         const controller = new AbortController()
@@ -105,6 +107,7 @@ export function canVisit(path: string, user?: Principal) {
     if (user.must_change_password) return path === '/account/password'
     if (path === '/account/password' || path === '/account/profile' || path === '/' || path.startsWith('/overview') || path.startsWith('/search')) return true
     if (user.role === 'ADMIN') return true
+    if (path === '/library/source-sync/reconciliation') return false
     if (path === '/library' || path === '/library/list') return true
     const resource = /^\/library\/([^/]+)(?:\/versions)?$/.exec(path)
     // Detail URLs are read-only candidates. Backend checks public file rights;
