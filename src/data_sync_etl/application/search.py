@@ -363,8 +363,10 @@ class SearchService:
                         checkpoint=lambda: self._deadline(started))
                 status.update({f'metadata_{key}': value for key, value in metadata_status.items()})
                 status['metadata'] = 'READY'
-            except SearchError:
-                raise
+            except SearchError as exc:
+                if exc.code != 'METADATA_CANDIDATE_LIMIT':
+                    raise
+                status['metadata'] = exc.code  # Bound metadata without disabling authorized content retrieval.
             except Exception as exc:
                 status['metadata'] = exc.code if isinstance(exc, IndexingError) else 'METADATA_UNAVAILABLE'
         self._deadline(started)

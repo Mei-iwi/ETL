@@ -84,6 +84,16 @@ class MetadataSearchService:
             return result
 
     def reconcile(self, filters=None, *, apply=False, dense=False, access=None):
+        if apply:
+            # Serialize writers across CLI and worker owners. No PG write
+            # transaction is held while reading Mongo or encoding documents.
+            with self.uow.metadata_projection_lock('metadata-index-write') as acquired:
+                if not acquired:
+                    raise IndexingError('METADATA_INDEX_BUSY', 409)
+                return self._reconcile(filters, apply=apply, dense=dense, access=access)
+        return self._reconcile(filters, apply=apply, dense=dense, access=access)
+
+    def _reconcile(self, filters=None, *, apply=False, dense=False, access=None):
         started = monotonic()
         self.store.ensure_ready()
         access = access or SearchAccess('authenticated_admin')
@@ -105,6 +115,7 @@ class MetadataSearchService:
                 validate_vector(previous.get('vector', []), 1024)
             if (previous.get('projection_fingerprint') == snap['projection_fingerprint']
                     and previous.get('lexical_fingerprint') == snap['lexical_fingerprint']
+                    and (previous.get('dense_status') != 'READY' or dense_same)
                     and (not dense or dense_same)):
                 report['unchanged'] += 1
                 report['ready'] += 1
@@ -211,7 +222,11 @@ class MetadataSearchService:
                 'snippet': snippet_text(text, set(surface_tokens(query)), query=query),
                 'page_from': None, 'page_to': None, 'content_unit_id': None, 'context_id': None,
                 'context_url': None, 'can_view_file': False})
-        status = {'lexical': 'STALE' if len(stored) > len(verified) else 'READY', 'dense': dense_status}
+        status = {'lexical': ('STALE' if len(stored) > len(verified) else
+                              'NOT_READY' if len(stored) < len(snapshots) else 'READY'),
+                  'dense': dense_status,
+                  'extension': 'PARTIAL' if any('description' not in snap['fields'] and 'tags' not in snap['fields']
+                                               for _, snap in snapshots.values()) else 'READY'}
         return items, snapshots, status, {'metadata_lexical': lexical, 'metadata_dense': dense}
 
     def final_validate(self, items, snapshots, filters, access, *, checkpoint=lambda: None, content=False):
