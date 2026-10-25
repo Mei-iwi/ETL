@@ -168,40 +168,20 @@ export function DataReconciliationPage() {
         return () => { loadRevision.current++ }
     }, [loadData])
 
-    const executeReconciliation = useCallback(async (dryRun: boolean, isAuto: boolean = false) => {
-        setReconciling(true)
-        if (!isAuto) {
-            setError('')
-            setMessage('')
-        }
-        try {
-            const result = await triggerReconciliation(selectedStream, dryRun)
-            if (result.status === 'BLOCKED') {
-                setMessage('Đợt đối soát đã bị khóa do sai lệch vượt ngưỡng 10%.')
-            } else if (!isAuto) {
-                setMessage(
-                    dryRun
-                        ? 'Đã quét xong đối soát (Dry-run).'
-                        : 'Đã hoàn tất tự phục hồi dữ liệu.',
-                )
-            }
-            if (isAuto) {
-                setLastAutoRunAt(new Date().toLocaleTimeString('vi-VN'))
-            }
     useEffect(() => {
         if (!reconciling) return
         const timer = window.setInterval(() => { void loadData() }, 2000)
         return () => window.clearInterval(timer)
     }, [reconciling, loadData])
 
-    const handleRunReconcile = useCallback(async () => {
+    const handleRunReconcile = useCallback(async (dryRun: boolean = true) => {
         if (running.current) return
         running.current = true
         posting.current = true
         setReconciling(true)
         setError('')
         try {
-            const result = await triggerReconciliation(selectedStream, true)
+            const result = await triggerReconciliation(selectedStream, dryRun)
             if (result.status === 'RUNNING') {
                 startedRun.current = result.reports.find(row => row.stream_name === 'files')?.run_id ?? null
                 setPage(1)
@@ -225,6 +205,11 @@ export function DataReconciliationPage() {
             }
         }
     }, [selectedStream, loadData])
+
+    const executeReconciliation = useCallback(async (dryRun: boolean, isAuto: boolean = false) => {
+        await handleRunReconcile(dryRun)
+        if (isAuto) setLastAutoRunAt(new Date().toLocaleTimeString('vi-VN'))
+    }, [handleRunReconcile])
 
     // TIMER CHẠY TỰ ĐỘNG
     useEffect(() => {
