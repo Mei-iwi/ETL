@@ -60,6 +60,9 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                     {result.readiness?.reindex_required && <p role="status" className={styles.metadata}>
                         Một số học liệu chưa sẵn sàng để tìm kiếm: {result.readiness.ready_versions}/{result.readiness.eligible_versions} phiên bản đã có chỉ mục hợp lệ.
                     </p>}
+                    {result.branch_status && Object.values(result.branch_status).some(value =>
+                        !['READY', 'NOT_REQUESTED', 'OK', 'DISABLED', 'NO_ACCESSIBLE_CONTENT', 'NO_READY_INDEX'].includes(value)) &&
+                        <p role="status" className={styles.metadata}>Một phần tìm kiếm chưa sẵn sàng; kết quả hiện có thể chưa đầy đủ.</p>}
                     {result.items.length === 0 && <div className={styles.emptyState}>
                         <SearchX size={32} aria-hidden="true" /><h3>Chưa tìm thấy học liệu</h3>
                         <p>{result.message === 'PUBLIC_ACCESS_UNCONFIRMED' ? 'Chưa có học liệu đủ quyền truy xuất công khai.' :
@@ -69,9 +72,10 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                     </div>}
                     {result.items.map((item, index) => <article key={item.resource_id} className={styles.searchResult}>
                         <div className={styles.resultTopline}><span className={styles.documentType}><FileText size={15} aria-hidden="true" /> Học liệu</span><span className={styles.source}>{item.provider_name || item.resource_type_code} · Phiên bản {item.version_number}</span></div>
-                        <div className={styles.resultHeader}><h2>{item.can_view_file !== false && canVisit(`/library/${encodeURIComponent(item.resource_id)}`, principal)
-                            ? <Link to={`/library/${encodeURIComponent(item.resource_id)}?${new URLSearchParams({ versionId: item.resource_version_id, contextId: item.context_id, contextEvidence: item.context_evidence || '', returnTo: `/search/query-methods?${params}` })}`}>{item.resource_title}<ArrowUpRight size={18} aria-hidden="true" /></Link>
+                        <div className={styles.resultHeader}><h2>{(item.match_origin === 'METADATA' || item.can_view_file !== false) && canVisit(`/library/${encodeURIComponent(item.resource_id)}`, principal)
+                            ? <Link to={`/library/${encodeURIComponent(item.resource_id)}?${new URLSearchParams({ versionId: item.resource_version_id, contextId: item.context_id || '', contextEvidence: item.context_evidence || '', returnTo: `/search/query-methods?${params}` })}`}>{item.resource_title}<ArrowUpRight size={18} aria-hidden="true" /></Link>
                             : item.resource_title}</h2></div>
+                        {item.resource_format && <p className={styles.metadata}>{item.resource_format.toUpperCase()}</p>}
                         {item.bag_title && <p className={styles.sectionTitle}>{item.bag_title}</p>}
                         {item.snippet && <p className={styles.snippet}>{item.snippet}</p>}
                         {!!item.lexical_evidence?.some(e => e.relation !== 'original') && <details className={styles.more}>
@@ -79,7 +83,10 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                             <ul>{item.lexical_evidence.filter(e => e.relation !== 'original').slice(0, 6).map((e, i) =>
                                 <li key={i}>“{e.query_phrase}” → “{e.matched_phrase}”{e.field === 'title' ? ' (tiêu đề)' : ''}</li>)}</ul>
                         </details>}
-                        <SearchContext id={item.context_id} evidence={item.context_evidence} />
+                        {item.context_id && <SearchContext id={item.context_id} evidence={item.context_evidence} />}
+                        {item.match_origin && <p className={styles.metadata}>{item.matched_fields?.length
+                            ? item.matched_fields.map(field => ({ TITLE: 'Kh?p ti?u ??', DESCRIPTION: 'Kh?p m? t?', TAGS: 'Kh?p th?/t? kh?a', CONTENT: 'Kh?p n?i dung' }[field] || field)).join(' ? ')
+                            : 'Li?n quan theo th?ng tin m? t?'}</p>}
                         {!!item.meaning_variants?.length && <details className={styles.more}><summary>Các cách diễn đạt trong nhóm nghĩa khớp</summary>
                             <ul>{item.meaning_variants.map(value => <li key={value}>{value}</li>)}</ul></details>}
                         {item.context_evidence === 'bag' && <p className={styles.metadata}>Kết quả khớp ở cấp học liệu; đoạn trích là đoạn tham khảo, chưa xác định được đoạn khớp trực tiếp.</p>}

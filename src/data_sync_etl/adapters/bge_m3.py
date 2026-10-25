@@ -12,6 +12,7 @@ from time import monotonic
 
 from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.domain.semantic import normalize_dense
+from data_sync_etl.ports.metadata_search import QUERY_ENCODINGS
 
 
 class BgeM3Embedding:
@@ -168,7 +169,19 @@ class BgeM3Embedding:
         return self._encode(texts)
 
     def embed_queries(self, queries):
-        return self._encode(queries)
+        scope = QUERY_ENCODINGS.get()
+        if scope is None or len(queries) != 1:
+            return self._encode(queries)
+        from data_sync_etl.domain.indexing import digest
+
+        self.prepare()
+        key = (id(self), digest([self.model_identity(), queries]))
+        if key not in scope:
+            result = self._encode(queries)
+            if len(scope) < 4:
+                scope[key] = [{**row, 'vector': list(row['vector'])} for row in result]
+            return result
+        return [{**row, 'vector': list(row['vector'])} for row in scope[key]]
 
     def rerank(self, query, texts):
         """Mean query-token MaxSim, matching BGE-M3 ColBERT; never a cross encoder."""

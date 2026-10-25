@@ -56,7 +56,7 @@ export type SourceSyncFilesResponse = {
         source_lifecycle_status: string
         updated_at: string
         import_status: 'UNTRACKED' | 'PENDING' | 'FETCHING' | 'IMPORTED' | 'PROCESSING' |
-            'RETRY_WAIT' | 'RETRY_PROCESSING' | 'FAILED' | 'RETRY_EXHAUSTED'
+            'RETRY_WAIT' | 'RETRY_PROCESSING' | 'FAILED' | 'RETRY_EXHAUSTED' | 'METADATA_ONLY'
         retry_eligible: boolean
         import_job_id: string | null
         etl_status: string | null

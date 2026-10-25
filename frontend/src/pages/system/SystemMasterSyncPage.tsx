@@ -421,7 +421,7 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
 
     const importLabels: Record<string, string> = {
         UNTRACKED: 'Chưa có ánh xạ', PENDING: 'Đang chờ', FETCHING: 'Đang nhập',
-        IMPORTED: 'Đã nhập', PROCESSING: 'Đã nhập', RETRY_WAIT: 'Chờ thử lại',
+        IMPORTED: 'Đã nhập', PROCESSING: 'Đã nhập', METADATA_ONLY: 'Đã đăng ký thông tin; chưa có nội dung', RETRY_WAIT: 'Chờ thử lại',
         RETRY_PROCESSING: 'Chờ thử lại ETL', FAILED: 'Lỗi', RETRY_EXHAUSTED: 'Hết lượt tự thử',
     }
     const etlLabels: Record<string, string> = {

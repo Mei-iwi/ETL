@@ -23,7 +23,7 @@ class SourceGoogleDriveFileReader:
     def __init__(self, settings, *, session_factory=None, clock=time.monotonic, sleep=time.sleep):
         self.settings, self.roots = settings, dict(settings.source_drive_buckets)
         self.session_factory, self.clock, self.sleep = session_factory, clock, sleep
-        self.formats = FormatValidatorRegistry()
+        self.formats = FormatValidatorRegistry(media_registration=settings.source_metadata_media_enabled)
         if any(not BUCKET.fullmatch(k) or not ID.fullmatch(v) for k, v in self.roots.items()):
             raise SourceFileError('INVALID_DRIVE_BUCKET_CONFIG')
 
@@ -171,7 +171,8 @@ class SourceGoogleDriveFileReader:
             validator = self.formats.find_validator(filename)
         except Exception:
             raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT') from None
-        if mime not in validator.mime_types or not validator.text_extraction_supported:
+        registered_media = self.settings.source_metadata_media_enabled and validator.extension in ('.mp3', '.mp4')
+        if mime not in validator.mime_types or (not validator.text_extraction_supported and not registered_media):
             raise SourceFileError('DRIVE_MIME_MISMATCH')
         size = metadata.get('size')
         if not isinstance(size, str) or not size.isascii() or not size.isdecimal() or len(size) > 15:

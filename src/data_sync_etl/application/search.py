@@ -1,6 +1,6 @@
 """Search reads verified Index snapshots; it never queues processing or writes data."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from threading import BoundedSemaphore
 from time import monotonic
 
@@ -31,11 +31,13 @@ from data_sync_etl.domain.lexical import (
     snippet_text,
 )
 from data_sync_etl.domain.meaning_bags import match_meaning
+from data_sync_etl.domain.query_variants import VERSION as ACCENT_VARIANT_VERSION
+from data_sync_etl.domain.query_variants import approved_accent_variant
 from data_sync_etl.domain.retrieval_fusion import version_rrf
-from data_sync_etl.domain.query_variants import VERSION as ACCENT_VARIANT_VERSION, approved_accent_variant
 from data_sync_etl.domain.search import SearchError, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
 from data_sync_etl.domain.search_context import decode_context, encode_context
+from data_sync_etl.ports.metadata_search import query_encoding_scope
 from data_sync_etl.ports.search import SearchBagReader, document_validation_scope
 
 
@@ -71,9 +73,10 @@ class QueryEmbeddingContext:
 
 class SearchService:
     def __init__(self, indexing, settings, bags: SearchBagReader | None, *, query_cache_runtime=None,
-                 semantic=None):
+                 semantic=None, metadata=None):
         self.indexing, self.settings, self.bags = indexing, settings, bags
         self.semantic = semantic
+        self.metadata = metadata
         path = settings.search_concept_snapshot
         self.dictionary = (Dictionary(Snapshot.model_validate_json(path.read_text(encoding='utf-8')))
                            if path is not None else default_dictionary())
@@ -120,7 +123,8 @@ class SearchService:
             with self.runtime_admission(method, access=access or SearchAccess()):
                 return self.search_http(query, method, filters, page, size, access=access)
         CURRENT_SEARCH.get().check()
-        if method != 'bow' and access is not None and access.internal and not self.settings.semantic_enabled:
+        if (method != 'bow' and access is not None and access.internal and not self.settings.semantic_enabled
+                and not self.settings.search_metadata_enabled):
             ready = getattr(self.indexing.embedding, 'require_search_ready', None)
             if ready is not None:
                 ready()
@@ -128,6 +132,8 @@ class SearchService:
         # Initial and final snapshots always hydrate independently.
         criteria = dict(query=query, method=method, filters=filters, page=page, size=size, access=access,
                         _batch_texts=True, _batch_bags=True)
+        if self.settings.search_metadata_enabled:
+            return self.search(**criteria)
         if self.settings.semantic_enabled and method != 'bow':
             # Legacy query cache is model-specific; never reuse its bag query vectors.
             return self.search(**criteria)
@@ -172,7 +178,7 @@ class SearchService:
                           self._http_inference.wake, authorize=authorize)
 
     @contextmanager
-    def _inference(self):
+    def _inference(self, *, metadata=False):
         call = CURRENT_SEARCH.get()
         if call is None:  # Direct Search/Evaluation keeps its existing lifecycle.
             yield
@@ -180,7 +186,7 @@ class SearchService:
         with self._http_inference.slot(call):
             call.reauthorize()
             ready = getattr(self.indexing.embedding, 'require_search_ready', None)
-            if ready is not None and not self.settings.semantic_enabled:
+            if ready is not None and not self.settings.semantic_enabled and not metadata:
                 ready()
             yield
 
@@ -332,8 +338,84 @@ class SearchService:
     @analysis_scope()
     @concept_analysis_scope()
     @document_validation_scope()
+    @query_encoding_scope()
     def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
                _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None):
+        access = access or SearchAccess()
+        options = dict(access=access, _query_context=_query_context, _batch_texts=_batch_texts,
+                       _batch_bags=_batch_bags, _evaluation_capture=_evaluation_capture)
+        if not self.settings.search_metadata_enabled or not access.internal:
+            return self._content_search(query, method, filters, page, size, **options)
+        from data_sync_etl.application.metadata_search import fuse_results
+
+        if _evaluation_capture is not None:
+            raise SearchError('METADATA_EVALUATION_REQUIRES_SEPARATE_CORPUS', 422)
+        if method not in ('bow', 'vector', 'hybrid'):
+            raise SearchError('INVALID_SEARCH_METHOD', 422)
+        started, query, filters = monotonic(), normalize_query(query), filters or {}
+        metadata_items, snapshots, branch_scores = [], {}, {}
+        status = {'metadata': 'METADATA_SCHEMA_NOT_READY'}
+        if self.metadata is not None:
+            try:
+                with self._inference(metadata=True) if method != 'bow' else nullcontext():
+                    metadata_items, snapshots, metadata_status, branch_scores = self.metadata.retrieve(
+                        query, method, filters, access, dictionary=self.dictionary, policy=self.settings.search_expansion,
+                        checkpoint=lambda: self._deadline(started))
+                status.update({f'metadata_{key}': value for key, value in metadata_status.items()})
+                status['metadata'] = 'READY'
+            except SearchError:
+                raise
+            except Exception as exc:
+                status['metadata'] = exc.code if isinstance(exc, IndexingError) else 'METADATA_UNAVAILABLE'
+        self._deadline(started)
+        content = dict(query=query, method=method, page=page, size=size, items=[], ready_bag_count=0,
+                       representation_unit='content_bag', access_scope=access.scope, message='NO_READY_INDEX')
+        content_branches = {}
+        if self.settings.search_metadata_content_enabled:
+            try:
+                content = self._content_search(query, method, filters, 1, self.settings.search_max_bags,
+                                                **options, _branch_capture=content_branches)
+                status['content'] = content['message']
+            except (SearchError, IndexingError) as exc:
+                if exc.code not in ('SEARCH_SCHEMA_UNAVAILABLE', 'BLOCKED_INDEX_SCHEMA', 'BLOCKED_EMBEDDING_RUNTIME',
+                                    'SEMANTIC_SCHEMA_NOT_READY', 'SEMANTIC_MODEL_UNAVAILABLE',
+                                    'SEMANTIC_INDEX_STALE', 'SEARCH_INDEX_STALE'):
+                    raise
+                status['content'] = exc.code
+        else:
+            status['content'] = 'DISABLED'
+        # Metadata final validation follows all content inference. A failed live
+        # metadata read discards metadata candidates, while content keeps its own
+        # independently verified snapshot and ACL contract.
+        if metadata_items:
+            try:
+                metadata_hit_count = len(metadata_items)
+                metadata_items = self.metadata.final_validate(metadata_items, snapshots, filters, access,
+                    checkpoint=lambda: self._deadline(started))
+                if metadata_hit_count and not metadata_items:
+                    status['metadata'] = 'STALE'
+                content['items'] = self.metadata.final_validate(content['items'], snapshots, filters, access,
+                    checkpoint=lambda: self._deadline(started), content=True)
+            except SearchError:
+                raise
+            except Exception:
+                metadata_items = []
+                status['metadata'] = 'METADATA_FINAL_CHECK_UNAVAILABLE'
+        valid = {item['resource_version_id'] for item in metadata_items}
+        branches = {name: {key: score for key, score in scores.items() if key in valid}
+                    for name, scores in branch_scores.items()}
+        branches.update(content_branches)
+        rows = fuse_results(content['items'], metadata_items, branches)
+        self._deadline(started)
+        offset, total = (page - 1) * size, len(rows)
+        return {**content, 'page': page, 'size': size, 'items': rows[offset:offset + size],
+                'total': total, 'total_pages': (total + size - 1) // size, 'branch_status': status,
+                'ranking_algorithm': 'metadata-content-four-source-version-rrf-opt-in-v1',
+                'message': 'OK' if rows else content['message']}
+
+    def _content_search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
+                        _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None,
+                        _branch_capture=None):
         access = access or SearchAccess()
         started, filters = monotonic(), filters or {}
         query = normalize_query(query)
@@ -666,6 +748,16 @@ class SearchService:
             item['matched_bag_count'] = matches[item['resource_id']]
             item['can_view_file'] = whole_file_access.get(item['resource_version_id'], False)
         total, offset = len(items), (page - 1) * size
+        if _branch_capture is not None:
+            for name, scores in [('content_lexical', bow), ('content_dense', semantic)]:
+                if (name == 'content_lexical' and method == 'vector') or (name == 'content_dense' and method == 'bow'):
+                    continue
+                versions = {}
+                for key, score in scores.items():
+                    if key in by_bag:
+                        version_id = by_bag[key][0].resource_version_id
+                        versions[version_id] = max(score, versions.get(version_id, float('-inf')))
+                _branch_capture[name] = versions
         vector_info = {}
         if use_semantic:
             selected_versions = {item['resource_version_id'] for item in items[offset:offset+size]}

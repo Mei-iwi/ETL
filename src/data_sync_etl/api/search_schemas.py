@@ -22,6 +22,7 @@ class StrictDTO(BaseModel):
 
 
 class SearchFilters(StrictDTO):
+    resource_format: Literal['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'mp3', 'mp4'] | None = None
     domain: Annotated[str, Field(min_length=1, max_length=80)] | None = None
     subject_id: Identifier | None = None
     grade_level_id: Identifier | None = None
@@ -59,10 +60,10 @@ class SearchItem(StrictDTO):
     version_number: int
     provider_name: str | None
     resource_type_code: str
-    bag_id: str
+    bag_id: str | None
     bag_title: str | None
-    unit_type: str
-    representation_mode: Literal['structured', 'fallback']
+    unit_type: str | None
+    representation_mode: Literal['structured', 'fallback', 'metadata']
     matched_keywords: list[str]
     matched_bag_count: int
     score: float
@@ -70,16 +71,39 @@ class SearchItem(StrictDTO):
     snippet: str
     page_from: int | None
     page_to: int | None
-    content_unit_id: str
-    context_id: str
-    context_url: str
+    content_unit_id: str | None
+    context_id: str | None
+    context_url: str | None
+    match_origin: Literal['METADATA', 'CONTENT', 'BOTH'] | None = None
+    matched_fields: list[str] | None = None
+    evidence_kind: Literal['METADATA_FIELD', 'CONTENT_CHUNK'] | None = None
+    evidence_text: str | None = None
+    resource_format: str | None = None
     can_view_file: bool = False
     context_evidence: Literal['lexical', 'semantic', 'bag'] | None = None
     meaning_variants: list[str] = Field(default_factory=list)
     lexical_evidence: list[dict] = Field(default_factory=list)
 
+    @model_validator(mode='after')
+    def metadata_has_no_context(self):
+        if self.representation_mode == 'metadata' and (
+            self.match_origin != 'METADATA' or any(value is not None for value in
+                (self.bag_id, self.content_unit_id, self.context_id, self.context_url))
+                or self.matched_bag_count != 0 or self.can_view_file):
+            raise ValueError('Metadata cannot contain content locators')
+        return self
+
+    @model_serializer(mode='wrap')
+    def omit_unused_provenance(self, handler):
+        result = handler(self)
+        for key in ('match_origin', 'matched_fields', 'evidence_kind', 'evidence_text', 'resource_format'):
+            if getattr(self, key) is None:
+                result.pop(key, None)
+        return result
+
 
 class SearchResponse(StrictDTO):
+    branch_status: dict[str, str] | None = None
     query_expansion: dict | None = None
     search_fingerprint: str | None = None
     readiness: dict[str, int | bool] | None = None
@@ -104,6 +128,8 @@ class SearchResponse(StrictDTO):
         result = handler(self)
         if self.vector_index is None:
             result.pop('vector_index', None)
+        if self.branch_status is None:
+            result.pop('branch_status', None)
         return result
 
 

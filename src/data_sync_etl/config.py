@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     index_timeout_seconds: int = Field(default=300, ge=1, le=3600)
     # Opt-in parallel index. Legacy bag vectors/BoW remain the default.
     semantic_enabled: bool = False
+    search_metadata_enabled: bool = False
+    search_metadata_content_enabled: bool = True
+    search_metadata_max_resources: int = Field(default=200, ge=1, le=2000)
+    source_metadata_media_enabled: bool = False
     semantic_strategy: Literal['raw', 'contextual'] = 'contextual'
     semantic_model_path: Path | None = Field(default=None, repr=False)
     semantic_model_revision: str = Field(default='', max_length=40)

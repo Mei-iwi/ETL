@@ -127,7 +127,7 @@ class MongoMetadataStore:
             update["$unset"] = unset
         self.database[collection].update_one({"_id": data["_id"]}, update, upsert=True)
 
-    def _get(self, collection, model, document_id):
+    def _get(self, collection, model, document_id, *, search=False):
         document_id = identifier(document_id)
         if ObjectId.is_valid(document_id) and self.database[collection].find_one(
             {'_id': ObjectId(document_id)}, {'_id': 1},
@@ -135,7 +135,13 @@ class MongoMetadataStore:
             raise DomainError('BLOCKED_MONGO_ID_MAPPING')
         # Whitelist avoids returning any legacy authentication fields.
         fields = {f.alias or name: 1 for name, f in model.model_fields.items()}
+        privacy_fields = ('visibility', 'field_visibility', 'private_fields', 'description_private',
+                          'tags_private', 'description_visibility', 'tags_visibility')
+        if search:
+            fields.update({key: 1 for key in privacy_fields})
         result = self.database[collection].find_one({"_id": document_id}, fields)
+        if search and result is not None and any(key in result for key in privacy_fields):
+            raise DomainError('METADATA_FIELD_VISIBILITY_UNCONFIRMED')
         return checked(model, result) if result is not None else None
 
     def upsert_user(self, document: UserProfileDocument):
@@ -178,6 +184,11 @@ class MongoMetadataStore:
 
     def get_resource(self, document_id):
         return self._get("learning_resources", ResourceDescriptionDocument, document_id)
+
+    def get_resource_search(self, document_id):
+        # Ad-hoc legacy privacy fields must not disappear through projection
+        # before search can assess them. Unknown field policy fails closed.
+        return self._get('learning_resources', ResourceDescriptionDocument, document_id, search=True)
 
     def update_resource_description(self, document_id, changes, revision):
         if not changes or set(changes) - {'description', 'authors', 'tags'}:

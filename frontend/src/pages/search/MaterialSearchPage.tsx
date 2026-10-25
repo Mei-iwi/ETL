@@ -38,6 +38,7 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
         { key: 'grade_level_id' as const, label: catalog?.grades.find(item => item.id === filters.grade_level_id)?.grade_name_vi || 'Khối lớp đã chọn' },
         { key: 'subject_id' as const, label: catalog?.subjects.find(item => item.id === filters.subject_id)?.name || 'Môn học đã chọn' },
         { key: 'resource_type_code' as const, label: catalog?.types.find(item => item.code === filters.resource_type_code)?.name || filters.resource_type_code },
+        { key: 'resource_format' as const, label: filters.resource_format?.toUpperCase() },
         { key: 'resource_id' as const, label: 'Trong học liệu đã chọn' },
         { key: 'resource_version_id' as const, label: 'Trong phiên bản đã chọn' },
     ].filter(item => filters[item.key])
@@ -92,6 +93,12 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
                     <select id="search-type" disabled={!catalog} value={filters.resource_type_code || ''}
                         onChange={event => setFilters({ ...filters, resource_type_code: event.target.value || null })}>
                         <option value="">Tất cả loại học liệu</option>{catalog?.types.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
+                    </select></div>
+                <div className={layout.field}><label htmlFor="search-format">Định dạng</label>
+                    <select id="search-format" value={filters.resource_format || ''}
+                        onChange={event => setFilters({ ...filters, resource_format: event.target.value || null })}>
+                        <option value="">Tất cả định dạng</option>{['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'mp3', 'mp4'].map(format =>
+                            <option key={format} value={format}>{format.toUpperCase()}</option>)}
                     </select></div>
             </div>
             <div className={layout.actions}>
