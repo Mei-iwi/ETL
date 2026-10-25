@@ -100,6 +100,21 @@ export function DataReconciliationPage() {
     const startedRun = useRef<string | null>(null)
     const loadRevision = useRef(0)
 
+    // CHẾ ĐỘ CHẠY: THỦ CÔNG / TỰ ĐỘNG
+    const [runMode, setRunMode] = useState<'MANUAL' | 'AUTO'>('MANUAL')
+    const [autoInterval, setAutoInterval] = useState<number>(60)
+    const [autoHealEnabled, setAutoHealEnabled] = useState<boolean>(false)
+    const [isAutoRunning, setIsAutoRunning] = useState<boolean>(false)
+    const [countdown, setCountdown] = useState<number>(60)
+    const [lastAutoRunAt, setLastAutoRunAt] = useState<string | null>(null)
+
+    // MODAL THÔNG BÁO GIỮA MÀN HÌNH
+    const [confirmModal, setConfirmModal] = useState<{
+        title: string
+        message: string
+        onConfirm: () => void
+    } | null>(null)
+
     const loadData = useCallback(async () => {
         const revision = ++loadRevision.current
         setLoading(true)
@@ -153,6 +168,26 @@ export function DataReconciliationPage() {
         return () => { loadRevision.current++ }
     }, [loadData])
 
+    const executeReconciliation = useCallback(async (dryRun: boolean, isAuto: boolean = false) => {
+        setReconciling(true)
+        if (!isAuto) {
+            setError('')
+            setMessage('')
+        }
+        try {
+            const result = await triggerReconciliation(selectedStream, dryRun)
+            if (result.status === 'BLOCKED') {
+                setMessage('Đợt đối soát đã bị khóa do sai lệch vượt ngưỡng 10%.')
+            } else if (!isAuto) {
+                setMessage(
+                    dryRun
+                        ? 'Đã quét xong đối soát (Dry-run).'
+                        : 'Đã hoàn tất tự phục hồi dữ liệu.',
+                )
+            }
+            if (isAuto) {
+                setLastAutoRunAt(new Date().toLocaleTimeString('vi-VN'))
+            }
     useEffect(() => {
         if (!reconciling) return
         const timer = window.setInterval(() => { void loadData() }, 2000)
@@ -191,6 +226,38 @@ export function DataReconciliationPage() {
         }
     }, [selectedStream, loadData])
 
+    // TIMER CHẠY TỰ ĐỘNG
+    useEffect(() => {
+        if (runMode !== 'AUTO' || !isAutoRunning) {
+            return
+        }
+
+        setCountdown(autoInterval)
+
+        const timer = setInterval(() => {
+            setCountdown((prev) => {
+                if (prev <= 1) {
+                    void executeReconciliation(!autoHealEnabled, true)
+                    return autoInterval
+                }
+                return prev - 1
+            })
+        }, 1000)
+
+        return () => clearInterval(timer)
+    }, [runMode, isAutoRunning, autoInterval, autoHealEnabled, executeReconciliation])
+
+    function handleAutoHealClick() {
+        setConfirmModal({
+            title: 'Xác nhận tự phục hồi dữ liệu',
+            message:
+                'Hệ thống sẽ đối soát toàn vẹn và tự động đánh dấu xóa mềm (Tombstone) các bản ghi mồ côi bên Đích (ORPHAN_MASTER). Ngưỡng an toàn 10% sẽ tự động khóa nếu phát hiện sai lệch hàng loạt. Bạn có chắc chắn muốn thực hiện?',
+            onConfirm: () => {
+                setConfirmModal(null)
+                void executeReconciliation(false)
+            },
+        })
+    }
     useEffect(() => {
         if (!automatic) return
         const timer = window.setInterval(() => {
@@ -235,6 +302,94 @@ export function DataReconciliationPage() {
                             <option value="users">Người dùng</option>
                         </select>
 
+                        {/* NÚT CHUYỂN ĐỔI CHẾ ĐỘ THỦ CÔNG / TỰ ĐỘNG */}
+                        <div className={styles.segmentedControl} role="group" aria-label="Chế độ đối soát">
+                            <button
+                                type="button"
+                                className={`${styles.segmentedBtn} ${runMode === 'MANUAL' ? styles.segmentedBtnActive : ''}`}
+                                onClick={() => {
+                                    setRunMode('MANUAL')
+                                    setIsAutoRunning(false)
+                                }}
+                            >
+                                Thủ công
+                            </button>
+                            <button
+                                type="button"
+                                className={`${styles.segmentedBtn} ${runMode === 'AUTO' ? styles.segmentedBtnActive : ''}`}
+                                onClick={() => setRunMode('AUTO')}
+                            >
+                                Tự động
+                            </button>
+                        </div>
+
+                        {runMode === 'MANUAL' ? (
+                            <>
+                                <button
+                                    type="button"
+                                    className={styles.primaryButton}
+                                    disabled={reconciling || loading}
+                                    onClick={() => void executeReconciliation(true)}
+                                >
+                                    {reconciling ? 'Đang đối soát...' : 'Quét đối soát'}
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className={styles.secondaryButton}
+                                    disabled={reconciling || loading}
+                                    onClick={handleAutoHealClick}
+                                >
+                                    Tự phục hồi
+                                </button>
+                            </>
+                        ) : (
+                            <div className={styles.autoGroup}>
+                                <select
+                                    className={styles.select}
+                                    value={autoInterval}
+                                    disabled={isAutoRunning}
+                                    onChange={(e) => setAutoInterval(Number(e.target.value))}
+                                    aria-label="Chu kỳ tự động"
+                                >
+                                    <option value={30}>Mỗi 30 giây</option>
+                                    <option value={60}>Mỗi 1 phút</option>
+                                    <option value={300}>Mỗi 5 phút</option>
+                                    <option value={600}>Mỗi 10 phút</option>
+                                </select>
+
+                                <label className={styles.autoActionLabel}>
+                                    <input
+                                        type="checkbox"
+                                        checked={autoHealEnabled}
+                                        disabled={isAutoRunning}
+                                        onChange={(e) => setAutoHealEnabled(e.target.checked)}
+                                    />
+                                    <span>Kèm tự phục hồi</span>
+                                </label>
+
+                                <button
+                                    type="button"
+                                    className={isAutoRunning ? styles.dangerButton : styles.successButton}
+                                    onClick={() => {
+                                        if (!isAutoRunning && autoHealEnabled) {
+                                            setConfirmModal({
+                                                title: 'Kích hoạt tự động phục hồi',
+                                                message: `Hệ thống sẽ đối soát VÀ tự phục hồi định kỳ mỗi ${autoInterval}s. Bạn có chắc chắn muốn kích hoạt?`,
+                                                onConfirm: () => {
+                                                    setConfirmModal(null)
+                                                    setIsAutoRunning(true)
+                                                },
+                                            })
+                                        } else {
+                                            setIsAutoRunning(!isAutoRunning)
+                                        }
+                                    }}
+                                >
+                                    {isAutoRunning ? 'Dừng tự động' : 'Bật tự động'}
+                                </button>
+                            </div>
+                        )}
                         <button
                             type="button"
                             className={styles.primaryButton}
@@ -247,6 +402,20 @@ export function DataReconciliationPage() {
                         <label><input type="checkbox" checked={automatic} onChange={event => setAutomatic(event.target.checked)} /> Tự quét mỗi 5 phút khi mở trang</label>
                     </div>
                 </div>
+
+                {/* BANNER THÔNG BÁO TỰ ĐỘNG CHẠY */}
+                {runMode === 'AUTO' && isAutoRunning && (
+                    <div className={styles.autoStatusBanner}>
+                        <div>
+                            <span className={styles.pulseDot} />
+                            <strong>Đang tự động đối soát:</strong> chu kỳ {autoInterval}s ({autoHealEnabled ? 'Kèm tự phục hồi' : 'Chỉ kiểm tra'})
+                            {lastAutoRunAt && ` • Quét gần nhất: ${lastAutoRunAt}`}
+                        </div>
+                        <div>
+                            Lần quét tiếp theo: <strong>{countdown}s</strong>
+                        </div>
+                    </div>
+                )}
 
                 {/* THÔNG BÁO / CẢNH BÁO */}
                 {error && <div className={`${styles.alertBox} ${styles.alertWarning}`}>{error}</div>}
@@ -497,6 +666,40 @@ export function DataReconciliationPage() {
                     </div>
                 )}
             </div>
+
+            {/* MODAL THÔNG BÁO GIỮA MÀN HÌNH */}
+            {confirmModal && (
+                <div
+                    className={styles.modalBackdrop}
+                    onClick={() => setConfirmModal(null)}
+                >
+                    <div
+                        className={styles.modalCard}
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                    >
+                        <h3 className={styles.modalTitle}>{confirmModal.title}</h3>
+                        <p className={styles.modalContent}>{confirmModal.message}</p>
+                        <div className={styles.modalActions}>
+                            <button
+                                type="button"
+                                className={styles.secondaryButton}
+                                onClick={() => setConfirmModal(null)}
+                            >
+                                Hủy bỏ
+                            </button>
+                            <button
+                                type="button"
+                                className={styles.primaryButton}
+                                onClick={confirmModal.onConfirm}
+                            >
+                                Xác nhận
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
