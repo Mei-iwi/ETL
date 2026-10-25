@@ -239,7 +239,7 @@ class TextFormatValidator(_BaseFormatValidator):
 
 
 class FormatValidatorRegistry:
-    def __init__(self):
+    def __init__(self, *, media_registration=False):
         validators = (
             PdfFormatValidator(), PngFormatValidator(), JpegFormatValidator(),
             OpenXMLFormatValidator('.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -253,6 +253,13 @@ class FormatValidatorRegistry:
         )
         self._validators = {validator.extension: validator for validator in validators}
         self._validators[".jpeg"] = self._validators[".jpg"]
+        if media_registration:
+            from data_sync_etl.domain.media_registration import (
+                Mp3RegistrationValidator,
+                Mp4RegistrationValidator,
+            )
+            for validator in (Mp3RegistrationValidator(), Mp4RegistrationValidator()):
+                self._validators[validator.extension] = validator
 
     def describe(self):
         return [{

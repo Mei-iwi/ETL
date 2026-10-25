@@ -1,6 +1,6 @@
 """Parameterized metadata selection. Latest eligible lifecycle version, never arbitrary history."""
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import and_, exists, func, or_, select
 
 from data_sync_etl.db.models import (
     ContentUnit,
@@ -12,6 +12,7 @@ from data_sync_etl.db.models import (
     ResourceGradeLevel,
     ResourceSubject,
     ResourceVersion,
+    SourceFileImport,
     Subject,
 )
 from data_sync_etl.domain.evaluation import EvaluationError
@@ -21,6 +22,43 @@ SEARCH_TEXT_BATCH_SIZE = 500
 
 
 class SearchRepositoryMixin:
+    def metadata_snapshots(self, filters, access, *, limit):
+        """Batch authority reads; metadata extends only the selected current version."""
+        filters = dict(filters)
+        requested_version = filters.pop('resource_version_id', None)
+        rows = self.search_versions(filters, limit=limit, metadata_access=access)
+        if requested_version:
+            rows = [row for row in rows if row['version_id'] == requested_version]
+        resource_ids = [row['resource_id'] for row in rows]
+        version_ids = [row['version_id'] for row in rows]
+        if not rows:
+            return []
+        resources = {obj.id: self._dict(obj) for obj in self.session.scalars(
+            select(MasterLearningResource).where(MasterLearningResource.id.in_(resource_ids)))}
+        versions = {obj.id: self._dict(obj) for obj in self.session.scalars(
+            select(ResourceVersion).where(ResourceVersion.id.in_(version_ids)))}
+        imports = {}
+        for obj in self.session.scalars(select(SourceFileImport).where(SourceFileImport.target_version_id.in_(version_ids))):
+            imports.setdefault(obj.target_version_id, []).append(self._dict(obj))
+        curriculum = {key: {'subjects': [], 'grades': []} for key in resource_ids}
+        for key, name in self.session.execute(select(ResourceSubject.resource_id, Subject.subject_name).join(
+            Subject, Subject.id == ResourceSubject.subject_id).where(ResourceSubject.resource_id.in_(resource_ids),
+            Subject.is_active.is_(True), Subject.deleted_at.is_(None))):
+            curriculum[key]['subjects'].append(name)
+        for key, name in self.session.execute(select(ResourceGradeLevel.resource_id, MasterGradeLevel.grade_name_vi).join(
+            MasterGradeLevel, MasterGradeLevel.id == ResourceGradeLevel.grade_level_id).where(
+            ResourceGradeLevel.resource_id.in_(resource_ids), MasterGradeLevel.grade_is_active.is_(True),
+            MasterGradeLevel.grade_deleted_at.is_(None), MasterGradeLevel.education_is_active.is_(True),
+            MasterGradeLevel.education_deleted_at.is_(None))):
+            curriculum[key]['grades'].append(name)
+        for fields in curriculum.values():
+            for key in fields:
+                fields[key] = sorted(set(fields[key]))
+                if len(fields[key]) > 32:
+                    raise IndexingError('SEMANTIC_METADATA_LIMIT', 422)
+        return [(row, resources.get(row['resource_id']), versions.get(row['version_id']),
+                 curriculum[row['resource_id']], imports.get(row['version_id'], [])) for row in rows]
+
     def semantic_metadata(self, resource_id):
         """Verified human-readable curriculum labels; no identifiers in model input."""
         title = self.session.scalar(select(MasterLearningResource.title).where(MasterLearningResource.id == resource_id))
@@ -95,7 +133,7 @@ class SearchRepositoryMixin:
             state[name] = rows(select(ranked).where(ranked.c.position == 1).order_by(ranked.c.id), limit * 20)
         return digest(state)
 
-    def search_versions(self, filters, *, limit):
+    def search_versions(self, filters, *, limit, metadata_access=None):
         r, v = MasterLearningResource, ResourceVersion
         conditions = [r.is_active.is_(True), r.deleted_at.is_(None), r.publication_status == 'PUBLISHED']
         if filters.get('resource_id'):
@@ -122,6 +160,24 @@ class SearchRepositoryMixin:
         stmt = select(r.id.label('resource_id'), r.title.label('resource_title'),
                       r.provider_name, r.resource_type_code, ranked.c.version_id,
                       ranked.c.version_number).join(ranked, ranked.c.resource_id == r.id).where(*conditions)
+        if filters.get('resource_format'):
+            format_version = v.__table__.alias('format_version')
+            suffix = filters['resource_format']
+            suffixes = ('.jpg', '.jpeg') if suffix in ('jpg', 'jpeg') else ('.' + suffix,)
+            stmt = stmt.where(exists().where(format_version.c.id == ranked.c.version_id,
+                or_(*(func.lower(format_version.c.storage_object_key).endswith(value, autoescape=True)
+                      for value in suffixes))))
+        if metadata_access is not None:
+            if not metadata_access.internal:
+                return []
+            if metadata_access.scope == 'authenticated_user':
+                access = metadata_access
+                owned = and_(r.id.in_(access.resource_ids), r.created_by == access.owner_id) if access.owner_id else False
+                stmt = stmt.join(v, v.id == ranked.c.version_id)
+                if not access.allow_public:
+                    stmt = stmt.where(owned)
+                stmt = stmt.where(or_(and_(v.final_approved_at.is_not(None), v.final_approved_by.is_not(None)),
+                                      owned if access.allow_owned_unreviewed else False))
         if filters.get('resource_version_id'):
             stmt = stmt.where(ranked.c.version_id == filters['resource_version_id'])
         else:

@@ -11,6 +11,9 @@ export function readSearchView(key: string, now = Date.now()): SearchResponse | 
     return entry.value
 }
 export function saveSearchView(key: string, value: SearchResponse, now = Date.now()) {
+    // Metadata snapshots must revisit live fingerprints/permissions on every
+    // navigation. A tab cache has no authoritative metadata revision channel.
+    if (value.branch_status !== undefined) { entries.clear(); return }
     // Bound retained text, including meaning variants, and page count.
     if (JSON.stringify(value).length > 250_000) return
     entries.delete(key)

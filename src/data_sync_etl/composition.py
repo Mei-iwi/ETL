@@ -35,6 +35,7 @@ from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
 from data_sync_etl.application.evaluation import EvaluationService
 from data_sync_etl.application.file_preview import FilePreviewService
+from data_sync_etl.application.file_reconciliation import FileReconciliationJobs
 from data_sync_etl.application.get_processing_job import GetProcessingJob
 from data_sync_etl.application.get_resource_detail import GetResourceDetail
 from data_sync_etl.application.indexing import IndexingService
@@ -53,7 +54,6 @@ from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.reconciliation_engine import ReconciliationEngine
-from data_sync_etl.application.file_reconciliation import FileReconciliationJobs
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
 from data_sync_etl.application.semantic import SemanticService
@@ -295,9 +295,16 @@ class Container:
                 max_tokens=self.settings.semantic_max_tokens,
                 timeout_seconds=self.settings.index_timeout_seconds),
                 MongoSemanticStore(mongo_database), self.settings)
+        from data_sync_etl.adapters.mongo.metadata_search import MongoMetadataIndex
+        from data_sync_etl.application.metadata_search import MetadataSearchService
+
+        self.metadata_search = (MetadataSearchService(
+            self.uow, self.metadata_documents, MongoMetadataIndex(mongo_database),
+            self.semantic.embedding, self.settings) if self.semantic is not None else None)
         # Attest only the fixed LocalSentenceEmbedding used by HTTP Search.
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
-                                    query_cache_runtime=self.indexing.embedding, semantic=self.semantic)
+                                    query_cache_runtime=self.indexing.embedding, semantic=self.semantic,
+                                    metadata=self.metadata_search)
         if self.settings.semantic_enabled and self.semantic is not None:
             self.capabilities = replace(self.capabilities, embedding_runtime=self.semantic.embedding)
         self.evaluations = EvaluationService(self.search, EvaluationFileStore(
@@ -327,10 +334,10 @@ class Container:
         self.source_file_import = SourceFileImportService(
             self.source, self.source_files, self.storage, self.uow,
             self.process_version, self.retry_processing_job, self.settings,
-            formats=self.format_registry,
+            formats=FormatValidatorRegistry(media_registration=self.settings.source_metadata_media_enabled),
         )
         self.source_resolver = SourceFileResolver(
-            self.uow, self.source, self.source_files, self.storage, self.format_registry,
+            self.uow, self.source, self.source_files, self.storage, self.source_file_import.formats,
             self.settings, SourceTemporaryFiles(self.settings, self.storage.root),
         )
         self.source_file_import.resolver = self.source_resolver

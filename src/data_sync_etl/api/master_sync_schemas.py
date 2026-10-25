@@ -91,7 +91,7 @@ class SourceSyncFile(BaseModel):
     updated_at: datetime
     # UNTRACKED is the metadata view before worker discovery; other states are durable.
     import_status: Literal["UNTRACKED", "PENDING", "FETCHING", "IMPORTED", "PROCESSING", "RETRY_WAIT",
-                           "RETRY_PROCESSING", "FAILED", "RETRY_EXHAUSTED"] = "UNTRACKED"
+                           "RETRY_PROCESSING", "FAILED", "RETRY_EXHAUSTED", "METADATA_ONLY"] = "UNTRACKED"
     retry_eligible: bool = False
     import_job_id: str | None = None
     etl_status: str | None = None

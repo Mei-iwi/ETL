@@ -1,5 +1,6 @@
 export type SearchMethod = 'bow' | 'vector' | 'hybrid'
 export type SearchFilters = {
+    resource_format?: string | null
     domain?: string | null
     subject_id?: string | null
     grade_level_id?: string | null
@@ -21,26 +22,32 @@ export type SearchItem = {
     version_number: number
     provider_name: string | null
     resource_type_code: string
-    bag_id: string
+    bag_id: string | null
     bag_title: string | null
-    unit_type: string
-    representation_mode: 'structured' | 'fallback'
+    unit_type: string | null
+    representation_mode: 'structured' | 'fallback' | 'metadata'
     matched_keywords: string[]
     matched_bag_count: number
     score: number
-    score_components: Partial<Record<'bow' | 'vector', number>>
+    score_components: Record<string, number>
     snippet: string
     page_from: number | null
     page_to: number | null
-    content_unit_id: string
-    context_id: string
-    context_url: string
+    content_unit_id: string | null
+    context_id: string | null
+    context_url: string | null
+    match_origin?: 'METADATA' | 'CONTENT' | 'BOTH'
+    matched_fields?: string[]
+    evidence_kind?: 'METADATA_FIELD' | 'CONTENT_CHUNK'
+    evidence_text?: string
+    resource_format?: string
     can_view_file?: boolean
     context_evidence?: 'lexical' | 'semantic' | 'bag' | null
     meaning_variants?: string[]
     lexical_evidence?: { query_phrase: string; matched_phrase: string; concept_id: string | null; relation: string; field: string; weight: number; sources: { name: string; identifier: string }[] }[]
 }
 export type SearchResponse = {
+    branch_status?: Record<string, string>
     query_expansion?: Record<string, unknown> | null
     search_fingerprint?: string | null
     readiness?: { lexical_ready_bags: number; dense_ready_bags: number; eligible_versions: number; ready_versions: number; reindex_required: boolean } | null

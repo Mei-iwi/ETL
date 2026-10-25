@@ -73,6 +73,16 @@ def parser():
     semantic.add_argument('--limit', type=int, default=20)
     semantic.add_argument('--after-resource-id', default='')
     semantic.add_argument('--apply', action='store_true')
+    schema = commands.add_parser('metadata-search-schema', help='Check additive metadata index; no startup writes')
+    schema.add_argument('--apply', action='store_true')
+    metadata_index = commands.add_parser('metadata-search-index', help='Bounded metadata reconcile; dry-run by default')
+    metadata_index.add_argument('--resource-id')
+    metadata_index.add_argument('--apply', action='store_true')
+    metadata_index.add_argument('--dense', action='store_true')
+    prune = commands.add_parser('metadata-search-prune', help='Bounded orphan tombstones; dry-run by default')
+    prune.add_argument('--after-version-id', default='')
+    prune.add_argument('--limit', type=int, default=100)
+    prune.add_argument('--apply', action='store_true')
     demo = commands.add_parser("demo-run")
     demo.add_argument("--fixture-resource-id", default="resource-1")
     return root
@@ -107,6 +117,32 @@ def demo_run(container, resource_id):
 
 
 def dispatch(container, args):
+    if args.command in ('metadata-search-schema', 'metadata-search-index', 'metadata-search-prune'):
+        if container.metadata_search is None:
+            raise DomainError('METADATA_SCHEMA_NOT_READY')
+        if args.apply:
+            import re
+
+            from sqlalchemy.engine import make_url
+
+            db_name = make_url(container.settings.database_url).database or ''
+            mongo_name = container.metadata_search.store.database.name
+            def isolated(name):
+                return bool(re.search(r'(^|[_-])test([_-]|$)', name, re.I))
+            if (container.settings.app_environment not in ('development', 'test')
+                    or not isolated(db_name) or not isolated(mongo_name)):
+                raise DomainError('METADATA_APPLY_REQUIRES_ISOLATED_TEST_DATABASES')
+        if args.command == 'metadata-search-schema':
+            if args.apply:
+                from data_sync_etl.adapters.mongo.metadata_search import install
+                install(container.metadata_search.store.database)
+            else:
+                container.metadata_search.store.ensure_ready()
+            return {'status': 'READY'}
+        if args.command == 'metadata-search-prune':
+            return container.metadata_search.prune(after=args.after_version_id, limit=args.limit, apply=args.apply)
+        return container.metadata_search.reconcile(
+            {'resource_id': args.resource_id} if args.resource_id else {}, apply=args.apply, dense=args.dense)
     if args.command in ('semantic-schema', 'semantic-index', 'semantic-status'):
         if container.semantic is None:
             raise DomainError('SEMANTIC_SCHEMA_NOT_READY')
@@ -193,6 +229,8 @@ def main():
         with flow():
             result = dispatch(container, args)
         print(json.dumps(result, default=str, ensure_ascii=True, indent=2))
+        if args.command == 'metadata-search-index' and result['status'] == 'PARTIAL':
+            return 1
         if args.command == 'semantic-index' and result['status'] != 'PASS':
             return 1
         if args.command == 'reconcile-master' and result['status'] == 'BLOCKED':
