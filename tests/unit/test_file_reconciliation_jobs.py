@@ -61,7 +61,7 @@ def test_each_file_has_its_own_deadline(source_viewer, monkeypatch):
         copy['version_number'] += 1
         repo.insert('resource_versions', copy)
     clock = [0.]
-    monkeypatch.setattr('data_sync_etl.application.reconciliation_engine.monotonic', lambda: clock[0])
+    monkeypatch.setattr('data_sync_etl.adapters.persistence.reconciliation_engine.monotonic', lambda: clock[0])
     c.reconciliation_engine.file_read_budget_seconds = 5
     monkeypatch.setattr(c.source_resolver, 'resolve', lambda _: SimpleNamespace(ownership='SOURCE_BACKED'))
     @contextmanager
