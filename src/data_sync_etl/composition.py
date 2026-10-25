@@ -296,11 +296,13 @@ class Container:
                 timeout_seconds=self.settings.index_timeout_seconds),
                 MongoSemanticStore(mongo_database), self.settings)
         from data_sync_etl.adapters.mongo.metadata_search import MongoMetadataIndex
+        from data_sync_etl.application.metadata_refresh import MetadataRefresh
         from data_sync_etl.application.metadata_search import MetadataSearchService
 
         self.metadata_search = (MetadataSearchService(
             self.uow, self.metadata_documents, MongoMetadataIndex(mongo_database),
             self.semantic.embedding, self.settings) if self.semantic is not None else None)
+        self.master_sync_worker.metadata_refresh = MetadataRefresh(self.metadata_search, self.settings, self.semantic)
         # Attest only the fixed LocalSentenceEmbedding used by HTTP Search.
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
                                     query_cache_runtime=self.indexing.embedding, semantic=self.semantic,

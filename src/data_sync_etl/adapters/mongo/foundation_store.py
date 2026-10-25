@@ -190,6 +190,28 @@ class MongoMetadataStore:
         # before search can assess them. Unknown field policy fails closed.
         return self._get('learning_resources', ResourceDescriptionDocument, document_id, search=True)
 
+    def get_resources_search(self, document_ids):
+        """Bounded authority hydration; retain privacy and legacy-ID collision checks."""
+        if len(document_ids) > 250:
+            raise DomainError('Mongo read bounds exceeded')
+        ids = sorted({identifier(value) for value in document_ids})
+        if not ids:
+            return {}
+        collection = self.database.learning_resources
+        legacy = [ObjectId(value) for value in ids if ObjectId.is_valid(value)]
+        if legacy and collection.find_one({'_id': {'$in': legacy}}, {'_id': 1}) is not None:
+            raise DomainError('BLOCKED_MONGO_ID_MAPPING')
+        privacy = ('visibility', 'field_visibility', 'private_fields', 'description_private',
+                   'tags_private', 'description_visibility', 'tags_visibility')
+        fields = {key: 1 for key in ('_id', 'created_at', 'updated_at', 'description', 'tags', *privacy)}
+        result = {}
+        for raw in collection.find({'_id': {'$in': ids}}, fields).limit(len(ids) + 1):
+            if raw['_id'] not in ids or raw['_id'] in result or any(key in raw for key in privacy):
+                raise DomainError('METADATA_FIELD_VISIBILITY_UNCONFIRMED')
+            document = checked(ResourceDescriptionDocument, raw)
+            result[document.id] = document
+        return result
+
     def update_resource_description(self, document_id, changes, revision):
         if not changes or set(changes) - {'description', 'authors', 'tags'}:
             raise DomainError('Invalid resource description fields')

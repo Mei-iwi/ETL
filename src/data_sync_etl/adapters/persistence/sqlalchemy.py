@@ -533,6 +533,14 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
 
 
 class SQLAlchemyUnitOfWork:
+    def reconciliation_engine(self, **options):
+        from data_sync_etl.adapters.persistence.reconciliation_engine import ReconciliationEngine
+        return ReconciliationEngine(self, **options)
+
+    def file_reconciliation_jobs(self, engine):
+        from data_sync_etl.adapters.persistence.file_reconciliation import FileReconciliationJobs
+        return FileReconciliationJobs(engine)
+
     def __init__(self, session_factory):
         self.sessions = session_factory
 

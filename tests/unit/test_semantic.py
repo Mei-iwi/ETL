@@ -324,7 +324,7 @@ def test_curriculum_metadata_change_invalidates_semantic_without_changing_bow(se
         subject = repo.find('resource_subjects', {'resource_id': version['resource_id']})[0]
         repo.update('subjects', subject['subject_id'], {'subject_name': 'New verified subject name'})
     c.settings.semantic_enabled = True
-    with pytest.raises(IndexingError, match='SEMANTIC_INDEX_NOT_READY'):
+    with pytest.raises(IndexingError, match='SEMANTIC_INDEX_STALE'):
         c.search.search('semantic description', method='vector')
     assert c.search.search('learning', method='bow') == before
     assert service.build(version['id'], apply=True)['index_id'] != built['index_id']

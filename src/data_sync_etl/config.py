@@ -88,9 +88,18 @@ class Settings(BaseSettings):
     # Opt-in parallel index. Legacy bag vectors/BoW remain the default.
     semantic_enabled: bool = False
     search_metadata_enabled: bool = False
+    search_metadata_indexed_candidates_enabled: bool = False
+    search_metadata_authority_limit: int = Field(default=10000, ge=201, le=20000)
+    search_metadata_match_limit: int = Field(default=2000, ge=1, le=2000)
     search_metadata_content_enabled: bool = True
     search_metadata_max_resources: int = Field(default=200, ge=1, le=2000)
     source_metadata_media_enabled: bool = False
+    search_metadata_auto_refresh_enabled: bool = False
+    search_metadata_refresh_dense: bool = False
+    search_metadata_refresh_content_semantic: bool = False
+    semantic_input_identity_enabled: bool = False
+    search_metadata_refresh_batch_size: int = Field(default=5, ge=1, le=50)
+    search_metadata_refresh_interval_seconds: int = Field(default=30, ge=5, le=3600)
     semantic_strategy: Literal['raw', 'contextual'] = 'contextual'
     semantic_model_path: Path | None = Field(default=None, repr=False)
     semantic_model_revision: str = Field(default='', max_length=40)

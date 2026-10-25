@@ -168,7 +168,7 @@ def contains_phrase(tokens, query):
 
 
 def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
-         dictionary=None, policy=None, domain=None, contextual=True, expansion=None, min_coverage=0.):
+         dictionary=None, policy=None, domain=None, contextual=True, expansion=None, min_coverage=0., corpus=None):
     """Weighted BM25, maximum alternative per concept (no alias stacking).
 
     N, avgdl and DF cover ALL authorized verified bags including nonhits.
@@ -194,8 +194,11 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         for mention in expansion.recognized:
             if mention.concept_id in groups:
                 terms.difference_update(surface_tokens(mention.phrase))
-    n = len(documents)
-    avgdl = sum(doc.length for doc in documents.values()) / n or 1
+    n, total_length = (len(documents), sum(doc.length for doc in documents.values())) if corpus is None else corpus
+    if (type(n) is not int or type(total_length) is not int or n < len(documents)
+            or total_length < sum(doc.length for doc in documents.values())):
+        raise ValueError('Invalid authorized BM25 corpus statistics')
+    avgdl = total_length / n or 1
     df = Counter(term for doc in documents.values() for term in doc.terms)
     observed = {}
     for key, doc in documents.items():

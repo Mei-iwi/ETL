@@ -75,6 +75,8 @@ def parser():
     semantic.add_argument('--apply', action='store_true')
     schema = commands.add_parser('metadata-search-schema', help='Check additive metadata index; no startup writes')
     schema.add_argument('--apply', action='store_true')
+    schema.add_argument('--candidates', action='store_true', help='Check/install opt-in surface candidate index')
+    commands.add_parser('metadata-search-diagnostics', help='Private operator storage counts/checkpoint; no resource IDs or writes')
     metadata_index = commands.add_parser('metadata-search-index', help='Bounded metadata reconcile; dry-run by default')
     metadata_index.add_argument('--resource-id')
     metadata_index.add_argument('--apply', action='store_true')
@@ -117,9 +119,11 @@ def demo_run(container, resource_id):
 
 
 def dispatch(container, args):
-    if args.command in ('metadata-search-schema', 'metadata-search-index', 'metadata-search-prune'):
+    if args.command in ('metadata-search-schema', 'metadata-search-index', 'metadata-search-prune', 'metadata-search-diagnostics'):
         if container.metadata_search is None:
             raise DomainError('METADATA_SCHEMA_NOT_READY')
+        if args.command == 'metadata-search-diagnostics':
+            return container.metadata_search.diagnostics()
         if args.apply:
             import re
 
@@ -135,9 +139,11 @@ def dispatch(container, args):
         if args.command == 'metadata-search-schema':
             if args.apply:
                 from data_sync_etl.adapters.mongo.metadata_search import install
-                install(container.metadata_search.store.database)
+                install(container.metadata_search.store.database, candidates=args.candidates)
             else:
                 container.metadata_search.store.ensure_ready()
+            if args.candidates:
+                container.metadata_search.store.ensure_candidates_ready()
             return {'status': 'READY'}
         if args.command == 'metadata-search-prune':
             return container.metadata_search.prune(after=args.after_version_id, limit=args.limit, apply=args.apply)

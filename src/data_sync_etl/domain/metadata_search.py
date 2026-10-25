@@ -4,13 +4,41 @@ import re
 import unicodedata
 
 from data_sync_etl.domain.indexing import IndexingError, digest
-from data_sync_etl.domain.lexical import ANALYZER_VERSION, lexical_document
+from data_sync_etl.domain.lexical import (
+    ANALYZER_VERSION,
+    lexical_document,
+    query_terms,
+    surface_tokens,
+)
 from data_sync_etl.domain.search_access import denied
 
 TEMPLATE = 'resource-metadata-v1'
 GENERATION = 1
 SEARCH_FIELDS = ('title', 'description', 'tags')
 CONTEXT_FIELDS = ('subject', 'grade')
+
+
+class IndexedMetadataCorpus(dict):
+    """Request-local authority snapshot plus verified corpus statistics, not a cache."""
+    ready_keys = None
+    lengths = None
+    index_fingerprint = None
+
+
+def candidate_terms(fields):
+    return sorted({term for name in SEARCH_FIELDS for term in surface_tokens(fields.get(name, ''))})
+
+
+def candidate_query(query, dictionary, policy, domain=None):
+    if not query_terms(query):
+        return []
+    expansion = dictionary.expand(query, domain=domain, policy=policy)
+    terms = set(surface_tokens(query))
+    for term in expansion.terms:
+        terms.update(surface_tokens(term.term))
+    if len(terms) > 512:
+        raise IndexingError('METADATA_QUERY_LIMIT', 422)
+    return sorted(terms)
 
 
 def metadata_allowed(resource, version, access):

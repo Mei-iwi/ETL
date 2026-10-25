@@ -14,6 +14,10 @@ class MemorySemanticStore:
     def manifest(self, key):
         return deepcopy(self.manifests.get(key))
 
+    def has_ready_version(self, version_id):
+        return any(row.get('resource_version_id') == version_id and row.get('status') == 'READY'
+                   for row in self.manifests.values())
+
     def claim(self, plan, lease_seconds):
         if self.manifests.get(plan['_id'], {}).get('status') == 'RUNNING':
             raise IndexingError('SEMANTIC_INDEX_BUSY', 409)

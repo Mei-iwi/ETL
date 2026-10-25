@@ -60,6 +60,12 @@ def setup_import(source, c, tmp_path):
         ), {"hash": sha256(path.read_bytes()).hexdigest(), "user": user})
     c.source = source.adapter
     c.source_file_import.source = source.adapter
+    c.source_resolver.source = source.adapter
+    # Explicit isolated-test opt-in for the existing SOURCE-reference pipeline;
+    # production defaults stay fail-closed and no managed SOURCE copy is used.
+    for settings in (c.settings, c.source_file_import.settings, c.source_resolver.settings):
+        settings.source_reference_enabled = True
+        settings.source_temporary_files_enabled = True
     c.source_files.root = root
     c.sync = MasterSync(source.adapter, c.uow, batch_size=2)
     c.master_sync_worker.sync = c.sync

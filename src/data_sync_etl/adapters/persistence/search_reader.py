@@ -22,6 +22,12 @@ SEARCH_TEXT_BATCH_SIZE = 500
 
 
 class SearchRepositoryMixin:
+    def metadata_refresh_page(self, after, limit):
+        query = select(MasterLearningResource.id).order_by(MasterLearningResource.id).limit(limit)
+        if after:
+            query = query.where(MasterLearningResource.id > after)
+        return list(self.session.scalars(query))
+
     def metadata_snapshots(self, filters, access, *, limit):
         """Batch authority reads; metadata extends only the selected current version."""
         filters = dict(filters)
@@ -136,6 +142,8 @@ class SearchRepositoryMixin:
     def search_versions(self, filters, *, limit, metadata_access=None):
         r, v = MasterLearningResource, ResourceVersion
         conditions = [r.is_active.is_(True), r.deleted_at.is_(None), r.publication_status == 'PUBLISHED']
+        if filters.get('_after_resource_id'):
+            conditions.append(r.id > filters['_after_resource_id'])
         if filters.get('resource_id'):
             conditions.append(r.id == filters['resource_id'])
         if filters.get('resource_type_code'):
@@ -149,7 +157,8 @@ class SearchRepositoryMixin:
                 ResourceGradeLevel.resource_id == r.id,
                 ResourceGradeLevel.grade_level_id == filters['grade_level_id'],
                 MasterGradeLevel.id == ResourceGradeLevel.grade_level_id,
-                MasterGradeLevel.grade_is_active.is_(True), MasterGradeLevel.grade_deleted_at.is_(None)))
+                MasterGradeLevel.grade_is_active.is_(True), MasterGradeLevel.grade_deleted_at.is_(None),
+                MasterGradeLevel.education_is_active.is_(True), MasterGradeLevel.education_deleted_at.is_(None)))
         # INGESTED is the local upload lifecycle. READY processing/index checks are
         # independent and mandatory in the application. Draft/rejected versions never qualify.
         eligible = ('INGESTED', 'APPROVED', 'PUBLISHED')

@@ -168,40 +168,20 @@ export function DataReconciliationPage() {
         return () => { loadRevision.current++ }
     }, [loadData])
 
-    const executeReconciliation = useCallback(async (dryRun: boolean, isAuto: boolean = false) => {
-        setReconciling(true)
-        if (!isAuto) {
-            setError('')
-            setMessage('')
-        }
-        try {
-            const result = await triggerReconciliation(selectedStream, dryRun)
-            if (result.status === 'BLOCKED') {
-                setMessage('Đợt đối soát đã bị khóa do sai lệch vượt ngưỡng 10%.')
-            } else if (!isAuto) {
-                setMessage(
-                    dryRun
-                        ? 'Đã quét xong đối soát (Dry-run).'
-                        : 'Đã hoàn tất tự phục hồi dữ liệu.',
-                )
-            }
-            if (isAuto) {
-                setLastAutoRunAt(new Date().toLocaleTimeString('vi-VN'))
-            }
     useEffect(() => {
         if (!reconciling) return
         const timer = window.setInterval(() => { void loadData() }, 2000)
         return () => window.clearInterval(timer)
     }, [reconciling, loadData])
 
-    const handleRunReconcile = useCallback(async () => {
+    const handleRunReconcile = useCallback(async (dryRun: boolean = true) => {
         if (running.current) return
         running.current = true
         posting.current = true
         setReconciling(true)
         setError('')
         try {
-            const result = await triggerReconciliation(selectedStream, true)
+            const result = await triggerReconciliation(selectedStream, dryRun)
             if (result.status === 'RUNNING') {
                 startedRun.current = result.reports.find(row => row.stream_name === 'files')?.run_id ?? null
                 setPage(1)
@@ -226,9 +206,14 @@ export function DataReconciliationPage() {
         }
     }, [selectedStream, loadData])
 
+    const executeReconciliation = useCallback(async (dryRun: boolean, isAuto: boolean = false) => {
+        await handleRunReconcile(dryRun)
+        if (isAuto) setLastAutoRunAt(new Date().toLocaleTimeString('vi-VN'))
+    }, [handleRunReconcile])
+
     // TIMER CHẠY TỰ ĐỘNG
     useEffect(() => {
-        if (runMode !== 'AUTO' || !isAutoRunning) {
+        if (selectedStream === 'files' || runMode !== 'AUTO' || !isAutoRunning) {
             return
         }
 
@@ -245,7 +230,7 @@ export function DataReconciliationPage() {
         }, 1000)
 
         return () => clearInterval(timer)
-    }, [runMode, isAutoRunning, autoInterval, autoHealEnabled, executeReconciliation])
+    }, [selectedStream, runMode, isAutoRunning, autoInterval, autoHealEnabled, executeReconciliation])
 
     function handleAutoHealClick() {
         setConfirmModal({
@@ -259,12 +244,12 @@ export function DataReconciliationPage() {
         })
     }
     useEffect(() => {
-        if (!automatic) return
+        if (!automatic || selectedStream !== 'files') return
         const timer = window.setInterval(() => {
             if (document.visibilityState === 'visible' && !running.current) void handleRunReconcile()
         }, 300_000)
         return () => window.clearInterval(timer)
-    }, [automatic, handleRunReconcile])
+    }, [automatic, selectedStream, handleRunReconcile])
 
     const hasBlockedRun = report?.stream_reports?.some((r) => r.status === 'BLOCKED')
     const blockedReason = report?.stream_reports?.find((r) => r.summary_meta?.reason)?.summary_meta?.reason
@@ -290,6 +275,8 @@ export function DataReconciliationPage() {
                             disabled={reconciling || loading}
                             onChange={(e) => {
                                 setSelectedStream(e.target.value)
+                                setIsAutoRunning(false)
+                                setAutomatic(false)
                                 setPage(1)
                             }}
                             aria-label="Chọn luồng dữ liệu"
@@ -302,6 +289,7 @@ export function DataReconciliationPage() {
                             <option value="users">Người dùng</option>
                         </select>
 
+                        {selectedStream !== 'files' ? <>
                         {/* NÚT CHUYỂN ĐỔI CHẾ ĐỘ THỦ CÔNG / TỰ ĐỘNG */}
                         <div className={styles.segmentedControl} role="group" aria-label="Chế độ đối soát">
                             <button
@@ -390,6 +378,7 @@ export function DataReconciliationPage() {
                                 </button>
                             </div>
                         )}
+                        </> : <>
                         <button
                             type="button"
                             className={styles.primaryButton}
@@ -400,11 +389,12 @@ export function DataReconciliationPage() {
                         </button>
 
                         <label><input type="checkbox" checked={automatic} onChange={event => setAutomatic(event.target.checked)} /> Tự quét mỗi 5 phút khi mở trang</label>
+                        </>}
                     </div>
                 </div>
 
                 {/* BANNER THÔNG BÁO TỰ ĐỘNG CHẠY */}
-                {runMode === 'AUTO' && isAutoRunning && (
+                {selectedStream !== 'files' && runMode === 'AUTO' && isAutoRunning && (
                     <div className={styles.autoStatusBanner}>
                         <div>
                             <span className={styles.pulseDot} />

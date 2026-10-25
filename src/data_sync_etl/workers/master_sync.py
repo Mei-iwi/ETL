@@ -6,15 +6,21 @@ from data_sync_etl.workers.lifecycle import tick, worker_lifecycle
 
 
 class MasterSyncWorker:
-    def __init__(self, sync, coordinator, poll_seconds=5):
+    def __init__(self, sync, coordinator, poll_seconds=5, metadata_refresh=None):
         self.sync = sync
         self.coordinator = coordinator
         self.poll_seconds = poll_seconds
+        self.metadata_refresh = metadata_refresh
+
+    def refresh_metadata(self):
+        if self.metadata_refresh is not None:
+            self.metadata_refresh.tick()
 
     def once(self, worker_id: str):
         with flow():
             streams = self.coordinator.heartbeat_and_claim(worker_id)
             if not streams:
+                self.refresh_metadata()
                 return {"action": "IDLE"}
 
             stop = Event()
@@ -52,6 +58,7 @@ class MasterSyncWorker:
                 thread.join(timeout=5)
                 self.coordinator.complete(worker_id, error_code)
             event(stage="master_sync", action=f"AUTO_{action}")
+            self.refresh_metadata()
             return {"action": action}
 
     def run(self, worker_id: str, once=False):

@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import {updateResourceMetadata } from '../services/resourceApi'
+import { clearSearchViewCache } from '../pages/search/searchViewCache'
 import type {
     UpdateResourceMetadataRequest,
     UpdateResourceMetadataResponse,
@@ -26,6 +27,7 @@ export function useUpdateResourceMetadata(){
 
         try {
             const result = await updateResourceMetadata(resourceId, payload)
+            clearSearchViewCache()
             setData(result)
             return result
         }catch (cause: unknown){

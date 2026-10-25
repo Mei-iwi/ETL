@@ -46,6 +46,19 @@ def test_metadata_outage_keeps_content(searchable):
     assert 'sensitive' not in str(result)
 
 
+def test_metadata_candidate_cap_keeps_authorized_content(searchable):
+    from data_sync_etl.domain.search import SearchError
+    c, _ = searchable
+    c.settings.search_metadata_enabled = True
+    class Bounded:
+        def retrieve(self, *args, **kwargs):
+            raise SearchError('METADATA_CANDIDATE_LIMIT', 422)
+    c.search.metadata = Bounded()
+    result = c.search.search('Page one text', 'bow')
+    assert result['total'] == 1
+    assert result['branch_status']['metadata'] == 'METADATA_CANDIDATE_LIMIT'
+
+
 def test_stale_contextual_content_is_explicit_metadata_still_searchable(searchable, monkeypatch):
     from data_sync_etl.domain.search import SearchError
     c, _ = searchable
