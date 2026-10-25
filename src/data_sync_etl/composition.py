@@ -302,7 +302,7 @@ class Container:
         self.metadata_search = (MetadataSearchService(
             self.uow, self.metadata_documents, MongoMetadataIndex(mongo_database),
             self.semantic.embedding, self.settings) if self.semantic is not None else None)
-        self.master_sync_worker.metadata_refresh = MetadataRefresh(self.metadata_search, self.settings)
+        self.master_sync_worker.metadata_refresh = MetadataRefresh(self.metadata_search, self.settings, self.semantic)
         # Attest only the fixed LocalSentenceEmbedding used by HTTP Search.
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
                                     query_cache_runtime=self.indexing.embedding, semantic=self.semantic,

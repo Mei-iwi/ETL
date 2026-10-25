@@ -381,9 +381,20 @@ class SearchService:
             except (SearchError, IndexingError) as exc:
                 if exc.code not in ('SEARCH_SCHEMA_UNAVAILABLE', 'BLOCKED_INDEX_SCHEMA', 'BLOCKED_EMBEDDING_RUNTIME',
                                     'SEMANTIC_SCHEMA_NOT_READY', 'SEMANTIC_MODEL_UNAVAILABLE',
-                                    'SEMANTIC_INDEX_STALE', 'SEARCH_INDEX_STALE'):
+                                    'SEMANTIC_INFERENCE_FAILED', 'SEMANTIC_MODEL_IDENTITY_CHANGED',
+                                    'SEMANTIC_INDEX_STALE', 'SEMANTIC_INDEX_NOT_READY',
+                                    'SEMANTIC_INDEX_INCOMPLETE', 'SEARCH_INDEX_STALE') and not (
+                        self.settings.search_metadata_indexed_candidates_enabled and exc.code == 'SEARCH_LIMIT_EXCEEDED'):
                     raise
                 status['content'] = exc.code
+                if method == 'hybrid' and exc.code in ('SEMANTIC_INDEX_STALE', 'SEMANTIC_INDEX_NOT_READY',
+                        'SEMANTIC_INDEX_INCOMPLETE', 'SEMANTIC_MODEL_UNAVAILABLE',
+                        'SEMANTIC_INFERENCE_FAILED', 'SEMANTIC_MODEL_IDENTITY_CHANGED'):
+                    content_branches.clear()
+                    content = self._content_search(query, 'bow', filters, 1, self.settings.search_max_bags,
+                        **options, _branch_capture=content_branches)
+                    content['method'] = method
+                    status.update(content='PARTIAL', content_dense=exc.code, content_lexical=content['message'])
         else:
             status['content'] = 'DISABLED'
         # Metadata final validation follows all content inference. A failed live
@@ -396,8 +407,9 @@ class SearchService:
                     checkpoint=lambda: self._deadline(started))
                 if metadata_hit_count and not metadata_items:
                     status['metadata'] = 'STALE'
-                content['items'] = self.metadata.final_validate(content['items'], snapshots, filters, access,
-                    checkpoint=lambda: self._deadline(started), content=True)
+                if content['items']:
+                    content['items'] = self.metadata.final_validate(content['items'], snapshots, filters, access,
+                        checkpoint=lambda: self._deadline(started), content=True)
             except SearchError:
                 raise
             except Exception:
@@ -410,10 +422,13 @@ class SearchService:
         rows = fuse_results(content['items'], metadata_items, branches)
         self._deadline(started)
         offset, total = (page - 1) * size, len(rows)
+        metadata_ready = bool(snapshots) and status.get('metadata') == 'READY' and (
+            (method in ('bow', 'hybrid') and status.get('metadata_lexical') == 'READY')
+            or (method in ('vector', 'hybrid') and status.get('metadata_dense') == 'READY'))
         return {**content, 'page': page, 'size': size, 'items': rows[offset:offset + size],
                 'total': total, 'total_pages': (total + size - 1) // size, 'branch_status': status,
                 'ranking_algorithm': 'metadata-content-four-source-version-rrf-opt-in-v1',
-                'message': 'OK' if rows else content['message']}
+                'message': 'OK' if rows or metadata_ready else content['message']}
 
     def _content_search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
                         _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None,

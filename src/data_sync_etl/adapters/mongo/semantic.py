@@ -72,6 +72,9 @@ class MongoSemanticStore:
     def manifest(self, index_id):
         return self.indexes.find_one({'_id': index_id})
 
+    def has_ready_version(self, version_id):
+        return self.indexes.find_one({'resource_version_id': version_id, 'status': 'READY'}, {'_id': 1}) is not None
+
     def claim(self, plan, lease_seconds):
         now, owner = datetime.now(UTC), uuid4().hex
         try:

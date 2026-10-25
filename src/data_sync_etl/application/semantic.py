@@ -34,6 +34,7 @@ class SemanticService:
         roots = bag_structure(snapshot[2])
         leaf_root = {leaf: root for root, leaves in roots.items() for leaf in leaves}
         records = []
+        prepared = []
         for chunk in self.indexing._preview(snapshot):
             root = leaf_root.get(chunk['content_unit_id'])
             if root is None:
@@ -41,6 +42,11 @@ class SemanticService:
             text = embedding_input(chunk, title=metadata.get('title'), strategy=strategy,
                 subjects=metadata.get('subjects', ()), grades=metadata.get('grades', ()),
                 headings=context_headings(snapshot[2], chunk['content_unit_id']))
+            prepared.append((chunk, root, text))
+        if self.settings.semantic_input_identity_enabled:
+            fingerprint = digest([snapshot[3], identity, strategy, CONTEXT_FORMAT,
+                [(chunk['id'], digest(text)) for chunk, _, text in prepared]])
+        for chunk, root, text in prepared:
             records.append({
                 '_id': record_identity(fingerprint, chunk['id']), 'index_id': fingerprint,
                 'chunk_id': chunk['id'], 'content_unit_id': chunk['content_unit_id'],
@@ -148,12 +154,23 @@ class SemanticService:
         rows = self.store.records(plan['_id'], len(expected) + 1)
         state = manifest['status'] if manifest else 'NOT_STARTED'
         code = manifest.get('error_code') if manifest else None
+        if manifest is None and self.store.has_ready_version(version_id):
+            state, code = 'STALE', 'SEMANTIC_INDEX_STALE'
         if state == 'READY':
             self._validated(rows, expected)
         return {'index_id': plan['_id'], 'status': state, 'error_code': code,
                 'expected_chunks': len(expected), 'persisted_chunks': len(rows),
                 'coverage_verified': state == 'READY', 'model_identity': plan['model_identity'],
                 'strategy': plan['strategy']}
+
+    def refresh_existing(self, version_id):
+        """Selective re-embed only pre-existing semantic generations; never OCR."""
+        if not self.store.has_ready_version(version_id):
+            return {'status': 'NOT_INDEXED', 'action': 'SKIPPED'}
+        status = self.status(version_id)
+        if status['status'] == 'READY':
+            return {**status, 'action': 'UNCHANGED'}
+        return self.build(version_id, apply=True)
 
     def scores(self, snapshot, title, roots, allowed, vector, deadline, budget, *, evidence_candidates=None,
                query_vectors=()):
@@ -170,6 +187,8 @@ class SemanticService:
         plan, expected = self.plan(snapshot, title)
         manifest = self.store.manifest(plan['_id'])
         if not manifest or manifest.get('status') != 'READY':
+            if manifest is None and self.store.has_ready_version(snapshot[0]['id']):
+                raise IndexingError('SEMANTIC_INDEX_STALE', 409)
             raise IndexingError('SEMANTIC_INDEX_NOT_READY', 503)
         if manifest.get('chunk_count') != len(expected):
             raise IndexingError('SEMANTIC_INDEX_INCOMPLETE', 409)

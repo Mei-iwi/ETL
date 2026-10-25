@@ -142,6 +142,8 @@ class SearchRepositoryMixin:
     def search_versions(self, filters, *, limit, metadata_access=None):
         r, v = MasterLearningResource, ResourceVersion
         conditions = [r.is_active.is_(True), r.deleted_at.is_(None), r.publication_status == 'PUBLISHED']
+        if filters.get('_after_resource_id'):
+            conditions.append(r.id > filters['_after_resource_id'])
         if filters.get('resource_id'):
             conditions.append(r.id == filters['resource_id'])
         if filters.get('resource_type_code'):

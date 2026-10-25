@@ -3,12 +3,21 @@
 from time import monotonic
 
 from data_sync_etl.domain.core import DomainError, now
-from data_sync_etl.domain.indexing import IndexingError, validate_vector
-from data_sync_etl.domain.lexical import LexicalDocument, bm25, snippet_text, surface_tokens
+from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector
+from data_sync_etl.domain.lexical import (
+    ANALYZER_VERSION,
+    LexicalDocument,
+    bm25,
+    snippet_text,
+    surface_tokens,
+)
 from data_sync_etl.domain.metadata_search import (
     GENERATION,
     SEARCH_FIELDS,
     TEMPLATE,
+    IndexedMetadataCorpus,
+    candidate_query,
+    candidate_terms,
     lexical_fields,
     metadata_allowed,
     projection,
@@ -22,6 +31,16 @@ class MetadataSearchService:
     def __init__(self, uow, documents, store: MetadataIndexPort, embedding, settings):
         self.uow, self.documents, self.store = uow, documents, store
         self.embedding, self.settings = embedding, settings
+
+    def diagnostics(self):
+        from data_sync_etl.application.metadata_refresh import CHECKPOINT
+        counts = self.store.status_counts()
+        with self.uow() as repo:
+            checkpoint = repo.get('sync_checkpoints', CHECKPOINT)
+        return {**counts, 'checkpoint': {
+            'has_cursor': bool(checkpoint and checkpoint['last_id']),
+            'updated_at': str(checkpoint['updated_at']) if checkpoint else None,
+            'last_completed_sweep_at': str(checkpoint['last_updated_at']) if checkpoint and checkpoint['last_updated_at'] else None}}
 
     def prune(self, *, after='', limit=100, apply=False):
         """Explicit bounded tombstones for deleted/superseded versions; resumable.
@@ -45,43 +64,85 @@ class MetadataSearchService:
                     report['invalidated'] += 1
         return report
 
-    def snapshots(self, filters, access, *, checkpoint=lambda: None):
-        cap = self.settings.search_metadata_max_resources
+    def mapping_allowed(self, resource, version, imports):
+        if resource.get('source_origin') == 'POSTGRESQL':
+            return (len(imports) == 1 and imports[0]['status'] in ('METADATA_ONLY', 'IMPORTED', 'PROCESSING')
+                    and imports[0]['last_error_code'] in (None, 'UNSUPPORTED_SOURCE_FORMAT')
+                    and imports[0]['source_resource_active']
+                    and imports[0]['source_lifecycle_status'] in self.settings.source_file_allowed_statuses
+                    and imports[0]['resource_id'] == resource['id']
+                    and imports[0]['source_version_number'] == version['version_number']
+                    and imports[0]['source_hash'] == version['source_hash'])
+        return resource.get('source_origin') == 'LOCAL' and not imports
+
+    def snapshots(self, filters, access, *, checkpoint=lambda: None, _page=False):
+        cap = 250 if _page else self.settings.search_metadata_max_resources
         with self.uow() as repo:
-            rows = repo.metadata_snapshots({k: v for k, v in filters.items() if k != 'domain'}, access, limit=cap + 1)
+            rows = repo.metadata_snapshots({k: v for k, v in filters.items() if k != 'domain'}, access, limit=cap if _page else cap + 1)
             if len(rows) > cap:
                 raise SearchError('METADATA_CANDIDATE_LIMIT', 422)
-            result = {}
-            for row, resource, version, curriculum, imports in rows:
-                checkpoint()
-                if not metadata_allowed(resource, version, access):
-                    continue
-                if resource.get('source_origin') == 'POSTGRESQL':
-                    if (len(imports) != 1 or imports[0]['status'] not in ('METADATA_ONLY', 'IMPORTED', 'PROCESSING')
-                            or imports[0]['last_error_code'] not in (None, 'UNSUPPORTED_SOURCE_FORMAT')
-                            or not imports[0]['source_resource_active']
-                            or imports[0]['source_lifecycle_status'] not in self.settings.source_file_allowed_statuses
-                            or imports[0]['resource_id'] != resource['id']
-                            or imports[0]['source_version_number'] != version['version_number']
-                            or imports[0]['source_hash'] != version['source_hash']):
-                        continue
-                elif resource.get('source_origin') != 'LOCAL' or imports:
-                    continue
-                extension = None
-                if resource.get('mongo_id'):
-                    if self.documents is None:
-                        raise IndexingError('METADATA_AUTHORITY_UNAVAILABLE')
-                    try:
-                        reader = getattr(self.documents, 'get_resource_search', self.documents.get_resource)
-                        extension = reader(resource['mongo_id'])
-                    except DomainError:
-                        raise IndexingError('METADATA_AUTHORITY_UNAVAILABLE') from None
-                    if extension is not None and extension.id != resource['mongo_id']:
-                        raise IndexingError('METADATA_AUTHORITY_UNAVAILABLE')
-                snap = projection(resource, version, curriculum, extension)
-                if snap:
-                    result[version['id']] = (row, snap)
-            return result
+        cursor, count = (rows[-1][0]['resource_id'] if rows else None), len(rows)
+        rows = [entry for entry in rows if metadata_allowed(entry[1], entry[2], access)
+                and self.mapping_allowed(entry[1], entry[2], entry[4])]
+        extensions = None
+        # Explicit class capability avoids auto-created methods on MagicMock.
+        if self.documents is not None and callable(getattr(type(self.documents), 'get_resources_search', None)):
+            ids = sorted({r['mongo_id'] for _, r, _, _, _ in rows if r.get('mongo_id')})
+            try:
+                extensions = self.documents.get_resources_search(ids)
+            except DomainError:
+                raise IndexingError('METADATA_AUTHORITY_UNAVAILABLE') from None
+        # Projection runs after the PG transaction has closed.
+        result = {}
+        for row, resource, version, curriculum, _imports in rows:
+            checkpoint()
+            if not metadata_allowed(resource, version, access):
+                continue
+            extension = None
+            if resource.get('mongo_id'):
+                if self.documents is None:
+                    raise IndexingError('METADATA_AUTHORITY_UNAVAILABLE')
+                try:
+                    reader = getattr(self.documents, 'get_resource_search', self.documents.get_resource)
+                    extension = extensions.get(resource['mongo_id']) if extensions is not None else reader(resource['mongo_id'])
+                except DomainError:
+                    raise IndexingError('METADATA_AUTHORITY_UNAVAILABLE') from None
+                if extension is not None and extension.id != resource['mongo_id']:
+                    raise IndexingError('METADATA_AUTHORITY_UNAVAILABLE')
+            snap = projection(resource, version, curriculum, extension)
+            if snap:
+                result[version['id']] = (row, snap)
+        return (result, cursor, count) if _page else result
+
+    def indexed_snapshots(self, filters, access, *, checkpoint=lambda: None):
+        self.store.ensure_candidates_ready()
+        result, headers, after, scanned = IndexedMetadataCorpus(), {}, None, 0
+        while True:
+            page, cursor, count = self.snapshots({**filters, '_after_resource_id': after}, access, checkpoint=checkpoint, _page=True)
+            scanned += count
+            if scanned > self.settings.search_metadata_authority_limit:
+                raise SearchError('METADATA_CANDIDATE_LIMIT', 422)
+            result.update(page)
+            headers.update(self.store.get_headers(list(page)))
+            checkpoint()
+            if count < 250:
+                break
+            after = cursor
+        ready, lengths = set(), {field: 0 for field in SEARCH_FIELDS}
+        for key, (_, snap) in result.items():
+            row = headers.get(key, {})
+            if (row.get('status') != 'READY' or row.get('template') != TEMPLATE
+                    or row.get('generation') != GENERATION or row.get('candidate_analyzer') != ANALYZER_VERSION
+                    or row.get('candidate_terms') != candidate_terms(snap['fields'])
+                    or any(row.get(field) != snap[field] for field in
+                           ('projection_fingerprint', 'lexical_fingerprint', 'dense_input_fingerprint'))):
+                continue
+            ready.add(key)
+            for field in SEARCH_FIELDS:
+                lengths[field] += len(surface_tokens(snap['fields'].get(field, '')))
+        result.ready_keys, result.lengths = ready, lengths
+        result.index_fingerprint = digest(headers)
+        return result
 
     def reconcile(self, filters=None, *, apply=False, dense=False, access=None):
         if apply:
@@ -116,6 +177,9 @@ class MetadataSearchService:
             if (previous.get('projection_fingerprint') == snap['projection_fingerprint']
                     and previous.get('lexical_fingerprint') == snap['lexical_fingerprint']
                     and (previous.get('dense_status') != 'READY' or dense_same)
+                    and (not self.settings.search_metadata_indexed_candidates_enabled or (
+                        previous.get('candidate_analyzer') == ANALYZER_VERSION
+                        and previous.get('candidate_terms') == candidate_terms(snap['fields'])))
                     and (not dense or dense_same)):
                 report['unchanged'] += 1
                 report['ready'] += 1
@@ -125,6 +189,8 @@ class MetadataSearchService:
                       'vector': previous.get('vector') if dense_same else None,
                       'model_identity': current_identity if dense_same else identity,
                       'dense_status': 'READY' if dense_same else 'NOT_INDEXED'}
+            if self.settings.search_metadata_indexed_candidates_enabled:
+                record.update(candidate_analyzer=ANALYZER_VERSION, candidate_terms=candidate_terms(snap['fields']))
             pending.append((key, record, dense and not dense_same))
         report['would_write'] = len(pending)
         report['would_embed'] = sum(needs_dense for _, _, needs_dense in pending)
@@ -164,8 +230,20 @@ class MetadataSearchService:
 
     def retrieve(self, query, method, filters, access, *, dictionary, policy, checkpoint=lambda: None):
         self.store.ensure_ready()
-        snapshots = self.snapshots(filters, access, checkpoint=checkpoint)
-        stored = self.store.get_many(list(snapshots))
+        indexed = self.settings.search_metadata_indexed_candidates_enabled
+        snapshots = self.indexed_snapshots(filters, access, checkpoint=checkpoint) if indexed else self.snapshots(filters, access, checkpoint=checkpoint)
+        dense_blocked = indexed and len(snapshots.ready_keys) > self.settings.search_metadata_max_resources
+        if indexed:
+            if method != 'bow' and not dense_blocked:
+                keys = sorted(snapshots.ready_keys)
+            elif method == 'vector':
+                keys = []  # Never substitute a lexical shortlist for semantic candidates.
+            else:
+                keys = self.store.candidates(candidate_query(query, dictionary, policy, filters.get('domain')),
+                    sorted(snapshots.ready_keys), limit=self.settings.search_metadata_match_limit)
+            stored = self.store.get_many(keys)
+        else:
+            stored = self.store.get_many(list(snapshots))
         verified = {}
         for key, record in stored.items():
             checkpoint()
@@ -180,18 +258,21 @@ class MetadataSearchService:
             if record.get('lexical') != {name: doc.model_dump() for name, doc in lexical_fields(snap).items()}:
                 continue
             verified[key] = record
+        if indexed and (set(keys) != set(stored) or set(keys) != set(verified)):
+            raise IndexingError('METADATA_INDEX_STALE', 409)
         lexical, dense, matched = {}, {}, {}
         if method in ('bow', 'hybrid'):
             fields = []
             for field in SEARCH_FIELDS:
                 documents = {key: LexicalDocument.model_validate(row['lexical'][field]) for key, row in verified.items()}
-                scores = bm25(query, documents, dictionary=dictionary, policy=policy, domain=filters.get('domain'))
+                corpus = (len(snapshots.ready_keys), snapshots.lengths[field]) if indexed else None
+                scores = bm25(query, documents, dictionary=dictionary, policy=policy, domain=filters.get('domain'), corpus=corpus)
                 fields.append(scores)
                 for key in scores:
                     matched.setdefault(key, []).append(field.upper())
             lexical = rrf(*fields)
-        dense_status = 'NOT_REQUESTED'
-        if method in ('vector', 'hybrid'):
+        dense_status = 'BLOCKED_SCALE' if dense_blocked and method != 'bow' else 'NOT_REQUESTED'
+        if method in ('vector', 'hybrid') and not dense_blocked:
             identity = self.embedding.model_identity()
             eligible = {key: row for key, row in verified.items()
                         if row.get('dense_status') == 'READY' and row.get('model_identity') == identity}
@@ -223,14 +304,16 @@ class MetadataSearchService:
                 'page_from': None, 'page_to': None, 'content_unit_id': None, 'context_id': None,
                 'context_url': None, 'can_view_file': False})
         status = {'lexical': ('STALE' if len(stored) > len(verified) else
-                              'NOT_READY' if len(stored) < len(snapshots) else 'READY'),
+                              'NOT_READY' if (len(snapshots.ready_keys) if indexed else len(stored)) < len(snapshots) else 'READY'),
                   'dense': dense_status,
                   'extension': 'PARTIAL' if any('description' not in snap['fields'] and 'tags' not in snap['fields']
                                                for _, snap in snapshots.values()) else 'READY'}
         return items, snapshots, status, {'metadata_lexical': lexical, 'metadata_dense': dense}
 
     def final_validate(self, items, snapshots, filters, access, *, checkpoint=lambda: None, content=False):
-        fresh = self.snapshots(filters, access, checkpoint=checkpoint)
+        fresh = self.indexed_snapshots(filters, access, checkpoint=checkpoint) if isinstance(snapshots, IndexedMetadataCorpus) else self.snapshots(filters, access, checkpoint=checkpoint)
+        if isinstance(snapshots, IndexedMetadataCorpus) and fresh.index_fingerprint != snapshots.index_fingerprint:
+            return []
         if not content:
             # A revoked/nonhit document can change corpus IDF and therefore the
             # ranking of every survivor. Do not publish old BM25/cosine ranks

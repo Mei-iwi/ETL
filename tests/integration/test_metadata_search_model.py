@@ -119,7 +119,26 @@ def test_offline_metadata_bge_m3_actual_checkpoint(metadata, monkeypatch):
               'encoder_counts': counts, 'resident_model_reused': model._model is resident,
               'content_dense_quality': 'NOT_RUN', 'L3': 'same lexical policy as L2; subject/grade are filters/context',
               'D4': 'not selected; no production strategy tuning'}
-    destination = root / 'research/metadata-retrieval/model-current.json'
+    # Keep earlier audit evidence immutable when a task requests a new run.
+    target = os.environ.get('ETL_METADATA_MODEL_EVIDENCE')
+    destination = Path(target) if target else root / 'research/metadata-retrieval/model-current.json'
+    if target and (destination.exists() or not destination.resolve().is_relative_to((root / '.test-tmp').resolve())):
+        raise ValueError('Fresh private model evidence path required')
+    from tests.unit.test_metadata_indexed_candidates import IndexedStore
+    previous = service.store.rows
+    service.store = IndexedStore()
+    service.store.rows = previous
+    c.settings.search_metadata_indexed_candidates_enabled = True
+    initial = counts['document_texts']
+    refreshed = service.reconcile(apply=True, dense=True)
+    assert counts['document_texts'] == initial and refreshed['embeds'] == 0
+    hits, _, readiness, _ = service.retrieve('completelyunmatchedliteral', 'vector', {}, SearchAccess('local_demo'),
+        dictionary=c.search.dictionary, policy=c.settings.search_expansion)
+    assert len(hits) == 2 and not service.store.candidate_reads
+    assert readiness['dense'] == 'READY' and all(row['matched_fields'] == [] for row in hits)
+    result['indexed_small_dense_pool'] = {'semantic_pool_preserved': True,
+        'lexical_shortlist_used': False, 'backfill_embeds': 0,
+        'no_answer_behavior': 'UNTHRESHOLDED_TWO_HITS_NOT_A_QUALITY_PASS'}
     destination.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     assert all(len(row['vector']) == 1024 for row in service.store.rows.values())
     assert model._model is resident
