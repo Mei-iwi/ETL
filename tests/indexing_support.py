@@ -54,6 +54,12 @@ class MemoryBags:
     def ensure_ready(self):
         pass
 
+    def ensure_lexical_ready(self):
+        pass
+
+    def ensure_meanings_ready(self):
+        pass
+
     def invalidate_other_roots(self, version_id, root_ids, generation):
         for key, doc in self.rows.items():
             if doc.resource_version_id == version_id and key not in root_ids and doc.projection_generation <= generation:
@@ -70,6 +76,9 @@ class MemoryBags:
 
 
 def setup_index(c):
+    # Legacy tests intentionally exercise the old representation; meaning tests
+    # opt in explicitly and test its separate source/model readiness contract.
+    c.settings.index_meaning_bags_enabled = False
     reader = MemoryReader(c.documents)
     c.settings.index_embedding_dimension = 3
     c.settings.admin_enabled = True

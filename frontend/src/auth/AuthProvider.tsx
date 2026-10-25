@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { ReactNode } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router'
 import { clearAuthRequests, setAuthMode } from './transport'
+import { clearSearchViewCache } from '../pages/search/searchViewCache'
 
 export type Principal = { id?: string; role: 'ADMIN' | 'OPERATOR' | 'VIEWER'; mode: string; admin_feature_enabled: boolean;
     roles?: string[]; display_name?: string; email?: string; must_change_password?: boolean; permissions?: string[]; resource_ids?: string[] }
@@ -17,18 +18,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [principal, setPrincipal] = useState<Principal>()
     const revision = useRef(0)
     const currentScope = useRef('')
-    const expired = useCallback(() => { revision.current++; clearAuthRequests(); setPrincipal(undefined); setStatus('anonymous') }, [])
+    const pendingCheck = useRef<AbortController | null>(null)
+    const expired = useCallback(() => { revision.current++; pendingCheck.current?.abort(); clearAuthRequests(); clearSearchViewCache(); setPrincipal(undefined); setStatus('anonymous') }, [])
     const refresh = useCallback(async () => {
+        clearSearchViewCache()
         const expected = ++revision.current
+        pendingCheck.current?.abort()
+        const controller = new AbortController()
+        pendingCheck.current = controller
+        // One deadline includes config, session and response-body reads.
+        const deadline = window.setTimeout(() => controller.abort(), 8000)
         try {
-            const config = await fetch('/api/v1/auth/config')
+            const config = await fetch('/api/v1/auth/config', { signal: controller.signal })
             if (!config.ok) throw new Error('Auth unavailable')
             const value = await config.json()
             if (expected !== revision.current) return
             if (!['single_admin', 'db_users', 'master_users', 'local_demo', 'legacy_local'].includes(value.mode)) throw new Error('Invalid auth mode')
             setMode(value.mode); setAuthMode(value.mode)
             if (value.mode === 'legacy_local') { setPrincipal(undefined); setStatus('authenticated'); return }
-            const response = await fetch('/api/v1/auth/me')
+            const response = await fetch('/api/v1/auth/me', { signal: controller.signal })
             if (expected !== revision.current) return
             if (response.status === 401) { expired(); return }
             if (value.mode === 'master_users' && response.status === 503) {
@@ -48,6 +56,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             currentScope.current = nextScope
             setPrincipal(user); setStatus('authenticated')
         } catch { if (expected === revision.current) { setPrincipal(undefined); setStatus('unavailable') } }
+        finally {
+            window.clearTimeout(deadline)
+            if (pendingCheck.current === controller) pendingCheck.current = null
+        }
     }, [expired])
     useEffect(() => {
         void refresh()
@@ -58,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.addEventListener('pageshow', restored)
         const onFocus = () => { void refresh() }
         window.addEventListener('focus', onFocus)
-        return () => { window.removeEventListener('etl:session-expired', expired); window.removeEventListener('pageshow', restored); window.removeEventListener('focus', onFocus); channel.close() }
+        return () => { revision.current++; pendingCheck.current?.abort(); window.removeEventListener('etl:session-expired', expired); window.removeEventListener('pageshow', restored); window.removeEventListener('focus', onFocus); channel.close() }
     }, [refresh, expired])
     const logout = async () => {
         const response = await fetch('/api/v1/auth/logout', { method: 'POST' })
@@ -95,6 +107,7 @@ export function canVisit(path: string, user?: Principal) {
     if (user.must_change_password) return path === '/account/password'
     if (path === '/account/password' || path === '/account/profile' || path === '/' || path.startsWith('/overview') || path.startsWith('/search')) return true
     if (user.role === 'ADMIN') return true
+    if (path === '/library/source-sync/reconciliation') return false
     if (path === '/library' || path === '/library/list') return true
     const resource = /^\/library\/([^/]+)(?:\/versions)?$/.exec(path)
     // Detail URLs are read-only candidates. Backend checks public file rights;

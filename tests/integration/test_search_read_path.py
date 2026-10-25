@@ -38,7 +38,7 @@ def test_physical_read_path(searchable, mongo_test_database, monkeypatch):
     c, first = searchable
     root = Path.cwd().resolve()
     target = Path(os.environ['ETL_READPATH_METRICS']).resolve()
-    assert target.is_relative_to(root / 'docs/audits/search-read-path') and not target.exists()
+    assert target.is_relative_to(root / '.test-tmp/audits/search-read-path') and not target.exists()
     model_path = Path(os.environ['ETL_QUERY_CACHE_MODEL_PATH']).resolve(strict=True)
     revision = (model_path / 'etl-model-revision.txt').read_text(encoding='utf-8').strip()
     assert revision == 'e8f8c211226b894fcb81acc59f3b34ba3efd5f42'

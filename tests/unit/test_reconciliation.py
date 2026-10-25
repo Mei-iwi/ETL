@@ -65,6 +65,7 @@ def test_verify_file_blobs_fast_and_deep_check(container, tmp_path):
         res_id = new_id()
         repo.insert("master_learning_resources", {
             "id": res_id,
+            "source_origin": "LOCAL",
             "resource_type_id": "type-1",
             "resource_type_code": "SGK",
             "resource_type_name_vi": "Sach giao khoa",

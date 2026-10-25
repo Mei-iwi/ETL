@@ -12,6 +12,7 @@ from data_sync_etl.api.auth_boundary import AuthBoundary, auth_error
 from data_sync_etl.api.auth_routes import router as auth_router
 from data_sync_etl.api.profile_routes import router as profile_router
 from data_sync_etl.api.reconciliation_routes import router as reconciliation_router
+from data_sync_etl.api.resource_description_routes import router as resource_description_router
 from data_sync_etl.api.routes import router
 from data_sync_etl.composition import Container
 from data_sync_etl.config import Settings
@@ -98,6 +99,21 @@ class UploadBodyLimitMiddleware:
                 await send(message)
 
 
+async def shutdown_runtime(embedding, close=None):
+    """Signal before awaiting a worker; cancellation must not skip owned cleanup."""
+    try:
+        request_stop = getattr(embedding, 'request_stop', None)
+        if request_stop is not None:
+            request_stop()
+        stop = getattr(embedding, 'stop_preload', None)
+        if stop is not None:
+            from starlette.concurrency import run_in_threadpool
+            await run_in_threadpool(stop)
+    finally:
+        if close is not None:
+            close()
+
+
 def create_app(container=None):
     @asynccontextmanager
     async def lifespan(app):
@@ -107,6 +123,8 @@ def create_app(container=None):
         app.state.container = container or Container()
         configure(app.state.container.settings.log_level)
         embedding = getattr(getattr(app.state.container, 'indexing', None), 'embedding', None)
+        if app.state.container.settings.semantic_enabled and app.state.container.semantic is not None:
+            embedding = app.state.container.semantic.embedding
         preload = getattr(embedding, 'start_preload', None)
         if preload is not None:
             preload()
@@ -115,14 +133,16 @@ def create_app(container=None):
                 "Admin API enabled without authentication; bind only to 127.0.0.1 for local development"
             )
         try:
+            # Load the pinned tokenizer before serving requests. Its first
+            # native import/model load must not consume a search deadline.
+            from starlette.concurrency import run_in_threadpool
+
+            from data_sync_etl.domain.lexical import analyze
+
+            await run_in_threadpool(analyze, 'Kiểm tra bộ phân tích')
             yield
         finally:
-            stop = getattr(embedding, 'stop_preload', None)
-            if stop is not None:
-                from starlette.concurrency import run_in_threadpool
-                await run_in_threadpool(stop)
-            if container is None:
-                app.state.container.close()
+            await shutdown_runtime(embedding, app.state.container.close if container is None else None)
 
     app = FastAPI(title="Data Sync + ETL (local admin/dev)", lifespan=lifespan)
     configured = container.settings if container is not None else Settings()
@@ -209,6 +229,7 @@ def create_app(container=None):
     app.include_router(account_router)
     app.include_router(profile_router)
     app.include_router(reconciliation_router)
+    app.include_router(resource_description_router)
     app.add_middleware(
         UploadBodyLimitMiddleware,
         max_bytes=configured.upload_request_max_bytes,

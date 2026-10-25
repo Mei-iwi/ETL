@@ -1,0 +1,22 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Protocol
+
+QUERY_ENCODINGS = ContextVar('metadata_content_query_encodings', default=None)
+
+
+@contextmanager
+def query_encoding_scope():
+    token = QUERY_ENCODINGS.set({})
+    try:
+        yield
+    finally:
+        QUERY_ENCODINGS.reset(token)
+
+
+class MetadataIndexPort(Protocol):
+    def ensure_ready(self) -> None: ...
+    def get_many(self, version_ids: list[str]) -> dict[str, dict]: ...
+    def upsert(self, record: dict) -> None: ...
+    def invalidate(self, version_id: str) -> None: ...
+    def page(self, after: str, *, limit: int) -> list[dict]: ...

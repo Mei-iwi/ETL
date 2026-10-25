@@ -15,7 +15,7 @@ export function readSearch(params: URLSearchParams): SearchRequest {
     return {
         query: (params.get('q') || '').normalize('NFC').trim(),
         method: methods.some(item => item.value === method) ? method as SearchMethod : 'hybrid',
-        filters: Object.fromEntries(['subject_id', 'grade_level_id', 'resource_type_code', 'resource_id', 'resource_version_id']
+        filters: Object.fromEntries(['domain', 'subject_id', 'grade_level_id', 'resource_type_code', 'resource_format', 'resource_id', 'resource_version_id']
             .map(key => [key, params.get(key) || null])),
         page: number('page', 1, 10001), size: 5,
     }

@@ -1,82 +1,45 @@
+import { Link } from 'react-router'
+import { canVisit, useAuth } from '../../auth/AuthProvider'
+import { OverviewLayout } from './OverviewLayout'
 import style from './OverviewSummary.module.css'
-import pha from '../../assets/img/Pha.png'
+
+const methods = [
+    { number: '01', name: 'BoW', label: 'Truy hồi từ vựng', technique: 'BM25', text: 'Đối sánh từ và cụm từ trong nội dung; ưu tiên các thuật ngữ mang thông tin.' },
+    { number: '02', name: 'Vector', label: 'Truy hồi ngữ nghĩa', technique: 'BGE-M3', text: 'Tìm nội dung gần nghĩa với truy vấn, kể cả khi cách diễn đạt khác nhau.' },
+    { number: '03', name: 'Hybrid', label: 'Kết hợp phương pháp', technique: 'RRF', text: 'Kết hợp kết quả tìm kiếm từ khóa và ngữ nghĩa.' },
+]
+const tools = [
+    { title: 'Kho học liệu', text: 'Học liệu, nguồn tham chiếu và lịch sử phiên bản', path: '/library/list' },
+    { title: 'Xử lý và chuẩn hóa', text: 'Trích xuất văn bản, OCR và kiểm tra nội dung', path: '/library/processing' },
+    { title: 'Biểu diễn và chỉ mục', text: 'ContentUnit, ContentBag và trạng thái sẵn sàng', path: '/library/indexing' },
+]
 
 export function OverviewSummary() {
-    return (
-        <section className={style.page}>
-            <header className={style.hero}>
-                <h1>Tổng quan hệ thống</h1>
-
-            </header>
-
-            <section className={style.section}>
-                <h2>1. Giới thiệu về hệ thống</h2>
-                <p className={style.content}>
-                    Tiếp nhận tài liệu và hình ảnh, chuẩn hóa nội dung và lập chỉ mục
-                    phục vụ tìm kiếm từ khóa, ngữ nghĩa và kết hợp.
-                </p>
-            </section>
-
-            <section className={style.section}>
-                <h2>2. Bài toán hệ thống giải quyết</h2>
-                <ol className={style.challengeList}>
-                    <li><strong>Dữ liệu đa dạng:</strong>
-                        <span>Học liệu được lưu ở nhiều định dạng, có thể chứa cả nội dung có cấu trúc và phi cấu trúc.</span>
-                    </li>
-                    <li><strong>Khó khai thác nội dung chi tiết:</strong>
-                        <span>Việc chỉ tìm theo tên tài liệu hoặc metadata chưa đủ để xác định chính xác nội dung người dùng cần.</span>
-                    </li>
-                    <li><strong>Nhu cầu xử lý và truy vấn thống nhất:</strong>
-                        <span>Cần một quy trình chuyển dữ liệu gốc thành nội dung chuẩn hóa, các đoạn dữ liệu và chỉ mục phục vụ tra cứu.</span>
-                    </li>
-                </ol>
-            </section>
-
-            <section className={style.section}>
-                <h2>3. Các chức năng chính</h2>
-                <div className={style.grid}>
-                    <article className={style.card}>
-                        <h3>Quản lý học liệu</h3>
-                        <p>Tiếp nhận tệp, metadata và quản lý phiên bản.</p>
-                    </article>
-                    <article className={style.card}>
-                        <h3>Xử lý dữ liệu</h3>
-                        <p>Trích xuất, làm sạch, chuẩn hóa và tổ chức nội dung.</p>
-                    </article>
-                    <article className={style.card}>
-                        <h3>Biểu diễn dữ liệu</h3>
-                        <p>Phân đoạn, Bag of Words, vector hóa và lập chỉ mục.</p>
-                    </article>
-                    <article className={style.card}>
-                        <h3>Tra cứu học liệu</h3>
-                        <p>Tìm kiếm BoW, Vector và Hybrid kèm nguồn tham chiếu.</p>
-                    </article>
-                    <article className={style.card}>
-                        <h3>Đánh giá thuật toán</h3>
-                        <p>Chạy thực nghiệm, đo độ chính xác và so sánh kết quả.</p>
-                    </article>
-                    <article className={style.card}>
-                        <h3>Theo dõi hệ thống</h3>
-                        <p>Kiểm tra trạng thái kết nối và khả năng xử lý.</p>
-                    </article>
-                </div>
-            </section>
-
-            <section className={style.section}>
-                <h2>4. Mô hình hoạt động hai pha</h2>
-                <figure className={style.diagramFigure}>
-                    <div className={style.diagramViewport}>
-                        <img
-                            className={style.diagram}
-                            src={pha}
-                            alt="Sơ đồ gồm pha chuẩn bị dữ liệu và pha tra cứu dữ liệu"
-                        />
-                    </div>
-                    <figcaption className={style.diagramCaption}>
-                        Quy trình xử lý và tra cứu dữ liệu của hệ thống
-                    </figcaption>
-                </figure>
-            </section>
+    const { principal } = useAuth()
+    const available = tools.filter(item => canVisit(item.path, principal))
+    return <OverviewLayout title={'Quản lý và\ntra cứu học liệu'}
+        introduction="Đồng bộ học liệu, xử lý nội dung và tìm kiếm theo từ khóa hoặc ngữ nghĩa.">
+        <section className={style.section}>
+            <div className={style.sectionHeading}>
+                <div><h2>Phương pháp tìm kiếm</h2></div>
+                <p>Tìm học liệu bằng từ khóa, ngữ nghĩa hoặc kết hợp cả hai. Kết quả hiển thị theo quyền truy cập.</p>
+            </div>
+            <div className={style.methods}>{methods.map(method => <article key={method.name}>
+                <div className={style.methodTop}><span>{method.number}</span><span>{method.technique}</span></div>
+                <h3>{method.name}</h3><h4>{method.label}</h4><p>{method.text}</p>
+            </article>)}</div>
         </section>
-    )
+        <section className={style.experiment}>
+            <div><h2>Đánh giá tìm kiếm</h2></div>
+            <div><p>So sánh các phương pháp trên tập truy vấn có nhãn liên quan; kiểm tra đoạn nội dung và nguồn tham chiếu.</p>
+                <div className={style.metrics}><span>Recall@k</span><span>nDCG@k</span><span>MRR</span></div>
+                </div>
+        </section>
+        <section className={style.section}>
+            <div className={style.sectionHeading}><div><h2>Quản lý học liệu</h2></div></div>
+            <div className={style.tools}>{available.map(({ title, text, path }, index) => <Link key={path} to={path}>
+                <span className={style.toolNumber}>{String(index + 1).padStart(2, '0')}</span><div><h3>{title}</h3><p>{text}</p></div>
+            </Link>)}</div>
+        </section>
+    </OverviewLayout>
 }

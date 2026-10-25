@@ -11,6 +11,32 @@ from urllib.request import urlopen
 
 CONNECTION_KEYS = {'DATABASE_URL', 'SOURCE_DATABASE_URL', 'MONGO_URI', 'MONGO_DATABASE'}
 WORKERS = {'run-master-sync-worker': 'master-sync', 'run-source-file-worker': 'source-file', 'run-ocr-worker': 'ocr'}
+SOURCE_CA_FILE = Path('/run/secrets/source-database-ca.pem')
+
+
+def validate_source_neon(values):
+    """Remote SOURCE only; local service names cannot hide other remote databases."""
+    source = urlsplit(values['SOURCE_DATABASE_URL'])
+    query = parse_qs(source.query, keep_blank_values=True)
+    if (source.scheme != 'postgresql+psycopg' or not source.hostname
+            or not source.hostname.endswith('.neon.tech')):
+        raise ValueError('SOURCE_NEON_HOST_REQUIRED')
+    if not source.username or source.username in ('neondb_owner', 'postgres'):
+        raise ValueError('SOURCE_PRIVILEGED_ROLE_FORBIDDEN')
+    if (query.get('sslmode') != ['verify-full'] or query.get('channel_binding') != ['require']
+            or query.get('sslrootcert') != [str(SOURCE_CA_FILE)]):
+        raise ValueError('SOURCE_NEON_TLS_REQUIRED')
+    if set(query) - {'sslmode', 'sslrootcert', 'channel_binding', 'connect_timeout', 'application_name'}:
+        raise ValueError('SOURCE_NEON_CONNECTION_OVERRIDE_FORBIDDEN')
+    if not SOURCE_CA_FILE.is_file():
+        raise ValueError('SOURCE_NEON_CA_REQUIRED')
+    master, mongo = urlsplit(values['DATABASE_URL']), urlsplit(values['MONGO_URI'])
+    overrides = {'host', 'hostaddr', 'port', 'dbname', 'user', 'password', 'service', 'servicefile'}
+    if (master.scheme != 'postgresql+psycopg' or master.hostname not in ('postgres', 'master-postgres')
+            or overrides.intersection(parse_qs(master.query, keep_blank_values=True))):
+        raise ValueError('SOURCE_NEON_MASTER_LOCAL_REQUIRED')
+    if mongo.scheme != 'mongodb' or mongo.hostname != 'mongo' or ',' in mongo.netloc:
+        raise ValueError('SOURCE_NEON_MONGO_LOCAL_REQUIRED')
 
 
 class DatabaseSchemaNotReady(ValueError):
@@ -49,19 +75,24 @@ def load_connections():
         raise ValueError('CONNECTIONS_SECRET_KEYS_INVALID')
     if any(not isinstance(value, str) or not value.strip() or 'CHANGE_ME' in value for value in values.values()):
         raise ValueError('CONNECTIONS_SECRET_VALUES_INVALID')
-    os.environ.update(values)
     if 'SOURCE_MIGRATION_DATABASE_URL' in os.environ:
         raise ValueError('SOURCE_MIGRATION_CREDENTIAL_FORBIDDEN')
+    mode = os.environ.get('ETL_DATABASE_MODE', 'same-host')
+    if mode not in ('same-host', 'remote', 'source-neon'):
+        raise ValueError('DATABASE_MODE_INVALID')
     for key in ('DATABASE_URL', 'SOURCE_DATABASE_URL', 'MONGO_URI'):
         url = urlsplit(values[key])
         if not url.hostname or url.hostname in ('localhost', '127.0.0.1', '::1'):
             raise ValueError('DATABASE_CONTAINER_HOST_INVALID')
-        if os.environ.get('ETL_DATABASE_MODE', 'same-host') == 'remote':
+        if mode == 'remote':
             query = parse_qs(url.query)
             if key != 'MONGO_URI' and query.get('sslmode') != ['verify-full']:
                 raise ValueError('REMOTE_POSTGRES_TLS_REQUIRED')
             if key == 'MONGO_URI' and (query.get('tls') != ['true'] or any(k.lower().startswith(('tlsallowinvalid', 'tlsinsecure')) for k in query)):
                 raise ValueError('REMOTE_MONGO_TLS_REQUIRED')
+    if mode == 'source-neon':
+        validate_source_neon(values)
+    os.environ.update(values)
 
 
 def verify_runtime(role):
@@ -165,6 +196,11 @@ def main():
         if action == 'api':
             verify_runtime('api')
             os.execvp('uvicorn', ['uvicorn', 'data_sync_etl.main:app', '--host', '0.0.0.0', '--port', '8000', '--no-proxy-headers'])
+        if action in ('semantic-schema', 'semantic-index', 'semantic-status'):
+            # Operator-only CLI inside the container, not a new HTTP admin route.
+            # Runtime secrets still pass through the existing network/TLS checks.
+            load_connections()
+            os.execvp('python', ['python', '-m', 'data_sync_etl.cli.main', *sys.argv[1:]])
         if action == 'worker' and len(sys.argv) == 3 and sys.argv[2] in WORKERS:
             command = sys.argv[2]
             role = WORKERS[command]

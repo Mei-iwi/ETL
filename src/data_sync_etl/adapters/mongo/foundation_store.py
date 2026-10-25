@@ -2,10 +2,12 @@
 
 import hashlib
 import json
+from copy import deepcopy
 from datetime import UTC
 
-from bson import ObjectId
+from bson import BSON, ObjectId
 from bson.codec_options import CodecOptions
+from bson.errors import BSONError
 from pydantic import TypeAdapter, ValidationError
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
@@ -22,13 +24,37 @@ from data_sync_etl.domain.mongo_documents import (
     UserProfileDocument,
     normalize_keywords,
 )
+from data_sync_etl.ports.search import SEARCH_DOCUMENT_VALIDATION
+
+
+def _copy_search_bag(document):
+    # Validated embedding elements are immutable floats. Copy their lists in C
+    # instead of asking deepcopy to visit millions of individual coordinates.
+    vectors = [document.embedding]
+    if document.meanings is not None:
+        vectors.extend(member.embedding for member in document.meanings.members)
+    return deepcopy(document, {id(vector): vector.copy() for vector in vectors})
 
 
 def checked(model, value):
     try:
         if isinstance(value, Document):
             value = value.bson()
-        return model.model_validate(value)
+        scope, key = SEARCH_DOCUMENT_VALIDATION.get(), None
+        if scope is not None and model is ContentBagDocument and isinstance(value, dict):
+            try:
+                # Compare the FULL freshly read BSON, including unknown fields.
+                # Neither IDs nor caller-supplied fingerprints prove equality.
+                key = BSON.encode(value)
+            except (BSONError, OverflowError):
+                pass  # Preserve strict DTO validation for non-BSON test inputs.
+            if key is not None and key in scope['documents']:
+                return _copy_search_bag(scope['documents'][key])
+        document = model.model_validate(value)
+        if key is not None and scope['bytes'] + len(key) <= 16 * 1024 * 1024:
+            scope['documents'][key] = _copy_search_bag(document)
+            scope['bytes'] += len(key)
+        return document
     except ValidationError:
         raise DomainError("Invalid Mongo document") from None
 
@@ -101,7 +127,7 @@ class MongoMetadataStore:
             update["$unset"] = unset
         self.database[collection].update_one({"_id": data["_id"]}, update, upsert=True)
 
-    def _get(self, collection, model, document_id):
+    def _get(self, collection, model, document_id, *, search=False):
         document_id = identifier(document_id)
         if ObjectId.is_valid(document_id) and self.database[collection].find_one(
             {'_id': ObjectId(document_id)}, {'_id': 1},
@@ -109,7 +135,13 @@ class MongoMetadataStore:
             raise DomainError('BLOCKED_MONGO_ID_MAPPING')
         # Whitelist avoids returning any legacy authentication fields.
         fields = {f.alias or name: 1 for name, f in model.model_fields.items()}
+        privacy_fields = ('visibility', 'field_visibility', 'private_fields', 'description_private',
+                          'tags_private', 'description_visibility', 'tags_visibility')
+        if search:
+            fields.update({key: 1 for key in privacy_fields})
         result = self.database[collection].find_one({"_id": document_id}, fields)
+        if search and result is not None and any(key in result for key in privacy_fields):
+            raise DomainError('METADATA_FIELD_VISIBILITY_UNCONFIRMED')
         return checked(model, result) if result is not None else None
 
     def upsert_user(self, document: UserProfileDocument):
@@ -152,6 +184,41 @@ class MongoMetadataStore:
 
     def get_resource(self, document_id):
         return self._get("learning_resources", ResourceDescriptionDocument, document_id)
+
+    def get_resource_search(self, document_id):
+        # Ad-hoc legacy privacy fields must not disappear through projection
+        # before search can assess them. Unknown field policy fails closed.
+        return self._get('learning_resources', ResourceDescriptionDocument, document_id, search=True)
+
+    def update_resource_description(self, document_id, changes, revision):
+        if not changes or set(changes) - {'description', 'authors', 'tags'}:
+            raise DomainError('Invalid resource description fields')
+        document_id = identifier(document_id)
+        self.get_resource(document_id)  # Reject ambiguous legacy ObjectId identities.
+        collection = self.database.learning_resources
+        fields = {field.alias or name: 1 for name, field in ResourceDescriptionDocument.model_fields.items()}
+        raw = collection.find_one({'_id': document_id}, fields)
+        current = checked(ResourceDescriptionDocument, raw) if raw is not None else None
+        if user_profile_revision(current) != revision:
+            raise ProfileConflict('Resource description changed')
+        stamp = now()
+        candidate = checked(ResourceDescriptionDocument, {
+            **(current.bson() if current else {'_id': document_id, 'created_at': stamp}),
+            **changes, 'updated_at': stamp})
+        if raw is None:
+            try:
+                collection.insert_one(candidate.bson())
+            except DuplicateKeyError:
+                raise ProfileConflict('Resource description changed') from None
+        else:
+            conditions = [{key: {'$exists': False}} if key not in raw else
+                          {key: {'$exists': True, '$eq': raw[key]}} for key in fields if key != '_id']
+            values = candidate.bson()
+            result = collection.update_one({'_id': document_id, '$and': conditions},
+                {'$set': {key: values[key] for key in (*changes, 'updated_at')}})
+            if not result.matched_count:
+                raise ProfileConflict('Resource description changed')
+        return self.get_resource(document_id)
 
     def sync_source_metadata(self, stream, document):
         if stream not in ('users', 'resources'):
@@ -338,6 +405,63 @@ class MongoContentReader:
 
 
 class MongoBagStore:
+    def search_phase(self, version_ids, *, limit, max_chars=10_000_000):
+        """One bounded fresh read phase, reused only within the calling Search.
+
+        Full Bag BSON is read before content fingerprints. The final phase must
+        be created independently; PostgreSQL snapshots and _verified still read
+        live content separately. No timestamp-only or cross-request cache.
+        """
+        versions = tuple(identifier(value) for value in version_ids)
+        if (len(versions) > 10000 or len(set(versions)) != len(versions) or not 1 <= limit <= 10001
+                or type(max_chars) is not int or not 1 <= max_chars <= 50_000_000):
+            raise DomainError('Search phase bounds exceeded')
+        documents, content = {}, {version: [] for version in versions}
+        selector = {'resource_version_id': {'$in': list(versions)}, 'is_current': True}
+        rows = list(self.database.content_bags.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000))
+        if len(rows) >= limit:
+            from data_sync_etl.domain.search import SearchError
+            raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+        for raw in rows:
+            doc = checked(ContentBagDocument, raw)
+            if doc.resource_version_id not in content or doc.id in documents:
+                raise DomainError('Search phase identity mismatch')
+            documents[doc.id] = doc
+        # Keep the global read bounded even when many versions contain leaves.
+        rows = self.database.mongo_content_units.find(selector, {
+            '_id': 1, 'resource_version_id': 1, 'text': 1, 'keywords': 1,
+            'projection_generation': 1}).sort('_id', 1).limit(10001).max_time_ms(5000)
+        total_chars = 0
+        for ordinal, raw in enumerate(rows, 1):
+            if not isinstance(raw.get('text'), str):
+                raise DomainError('Invalid search content phase text')
+            total_chars += len(raw.get('text', ''))
+            if ordinal > 10000 or total_chars > max_chars:
+                from data_sync_etl.domain.search import SearchError
+                raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+            version = raw.get('resource_version_id')
+            if version not in content:
+                raise DomainError('Search content phase identity mismatch')
+            content[version].append({key: value for key, value in raw.items() if key != 'resource_version_id'})
+        fingerprints = {version: hashlib.sha256(json.dumps(records, ensure_ascii=False,
+            sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+            for version, records in content.items() if records}
+
+        def read(root_ids, *, version_id, generation):
+            ids = tuple(identifier(value) for value in root_ids)
+            if (version_id not in content or len(ids) > 10000 or len(set(ids)) != len(ids)
+                    or type(generation) is not int or generation < 0):
+                raise DomainError('Search phase request bounds exceeded')
+            records = content[version_id]
+            if not records or any(row.get('projection_generation') != generation for row in records):
+                return {key: None for key in ids}
+            return {key: doc if (doc is not None and doc.resource_version_id == version_id
+                and doc.projection_generation == generation
+                and doc.content_fingerprint == fingerprints[version_id]
+                and len(doc.embedding) == self.dimension) else None
+                for key in ids for doc in [documents.get(key)]}
+        return read
+
     def search_bags(self, root_ids, *, version_id, generation):
         """Fresh, version-bounded read phase for Search ONLY; never a cache.
 
@@ -405,11 +529,31 @@ class MongoBagStore:
         )
 
     def ensure_ready(self):
+        from data_sync_etl.adapters.mongo.lexical_schema import check_lexical_schema
+        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
         from data_sync_etl.adapters.mongo.schema import check_schema
         from data_sync_etl.domain.indexing import IndexingError
 
-        if not check_schema(self.database, dimension=self.dimension,
-                            historical_dimensions=self.historical_dimensions)['schema_ready']:
+        if (not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
+                and not check_lexical_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
+                and not check_schema(self.database, dimension=self.dimension,
+                                    historical_dimensions=self.historical_dimensions)['schema_ready']):
+            raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+
+    def ensure_lexical_ready(self):
+        from data_sync_etl.adapters.mongo.lexical_schema import check_lexical_schema
+        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
+        from data_sync_etl.domain.indexing import IndexingError
+
+        if (not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
+                and not check_lexical_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']):
+            raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
+
+    def ensure_meanings_ready(self):
+        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
+        from data_sync_etl.domain.indexing import IndexingError
+
+        if not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']:
             raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
 
     def _current(self, document):

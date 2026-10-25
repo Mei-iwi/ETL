@@ -19,19 +19,42 @@ const nullableText = (value: unknown) => value === null || typeof value === 'str
 const pageNumber = (value: unknown) => value === null || integer(value)
 const scope = (value: Record<string, unknown>) => value.access_scope === undefined || value.access_scope === 'public' || value.access_scope === 'local_demo' || value.access_scope === 'authenticated_admin' || value.access_scope === 'authenticated_user'
 
+function validLexicalEvidence(value: unknown) {
+    return record(value) && textFields(value, ['query_phrase', 'matched_phrase', 'relation', 'field'])
+        && nullableText(value.concept_id) && finite(value.weight) && value.weight >= 0
+        && ['title', 'content'].includes(value.field as string)
+        && Array.isArray(value.sources) && value.sources.every(source => record(source) && textFields(source, ['name', 'identifier']))
+}
+
 function validItem(value: unknown) {
     return record(value) && textFields(value, ['resource_id', 'resource_title', 'resource_version_id', 'resource_type_code',
-        'bag_id', 'unit_type', 'snippet', 'content_unit_id', 'context_id', 'context_url'])
+        'snippet'])
+        && ['bag_id', 'unit_type', 'content_unit_id', 'context_id', 'context_url'].every(key => nullableText(value[key]))
+        && (value.match_origin === undefined || ['METADATA', 'CONTENT', 'BOTH'].includes(value.match_origin as string))
+        && (value.resource_format === undefined || typeof value.resource_format === 'string')
+        && (value.evidence_kind === undefined || ['METADATA_FIELD', 'CONTENT_CHUNK'].includes(value.evidence_kind as string))
+        && (value.evidence_text === undefined || typeof value.evidence_text === 'string')
+        && (value.matched_fields === undefined || (Array.isArray(value.matched_fields) && value.matched_fields.every(field => typeof field === 'string')))
+        && (value.representation_mode !== 'metadata' || (value.match_origin === 'METADATA' && value.context_id === null && value.context_url === null && value.content_unit_id === null && value.bag_id === null && value.can_view_file === false))
         && integer(value.version_number, 1) && nullableText(value.provider_name) && nullableText(value.bag_title)
         && (value.can_view_file === undefined || typeof value.can_view_file === 'boolean')
-        && ['structured', 'fallback'].includes(value.representation_mode as string)
+        && ['structured', 'fallback', 'metadata'].includes(value.representation_mode as string)
+        && (value.context_evidence == null || ['lexical', 'semantic', 'bag'].includes(value.context_evidence as string))
+        && (value.meaning_variants === undefined || (Array.isArray(value.meaning_variants) && value.meaning_variants.every(item => typeof item === 'string')))
+        && (value.lexical_evidence === undefined || (Array.isArray(value.lexical_evidence) && value.lexical_evidence.length <= 64 && value.lexical_evidence.every(validLexicalEvidence)))
         && Array.isArray(value.matched_keywords) && value.matched_keywords.every(word => typeof word === 'string')
-        && integer(value.matched_bag_count, 1) && finite(value.score) && record(value.score_components)
+        && integer(value.matched_bag_count, value.representation_mode === 'metadata' ? 0 : 1) && finite(value.score) && record(value.score_components)
         && Object.values(value.score_components).every(finite) && pageNumber(value.page_from) && pageNumber(value.page_to)
 }
 
 function validSearch(value: unknown, request: SearchRequest): value is SearchResponse {
     return record(value) && !('detail' in value) && !('error' in value) && scope(value)
+        && (value.branch_status === undefined || (record(value.branch_status) && Object.values(value.branch_status).every(item => typeof item === 'string')))
+        && (value.readiness == null || (record(value.readiness)
+            && integer(value.readiness.lexical_ready_bags) && integer(value.readiness.dense_ready_bags)
+            && integer(value.readiness.eligible_versions) && integer(value.readiness.ready_versions)
+            && value.readiness.ready_versions <= value.readiness.eligible_versions
+            && typeof value.readiness.reindex_required === 'boolean'))
         && value.query === request.query.normalize('NFC').trim() && value.method === request.method
         && value.page === request.page && value.size === request.size && integer(value.page, 1) && integer(value.size, 1)
         && integer(value.total) && integer(value.total_pages) && value.total_pages === Math.ceil(value.total / value.size)
@@ -53,6 +76,7 @@ function validContext(value: unknown, id: string, neighbors: number): value is C
 }
 
 const messages: Record<string, string> = {
+    BLOCKED_LEXICAL_ANALYZER: 'Bộ phân tích chỉ mục chưa sẵn sàng. Vui lòng liên hệ quản trị viên.',
     SEARCH_MODEL_LOADING: 'Đang chuẩn bị tìm kiếm. Có thể chọn BoW.',
     SEARCH_RUNTIME_BUSY: 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
     SEARCH_ACCESS_RESTRICTED: 'Truy cập tìm kiếm nội bộ bị hạn chế.',

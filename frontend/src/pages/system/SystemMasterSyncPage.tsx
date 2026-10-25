@@ -16,6 +16,7 @@ import type {
 } from '../../types/masterSync'
 import styles from './SystemMasterSyncPage.module.css'
 import { acceptStatusPoll, configuredModeLabel, selectSyncResults } from './masterSyncResults'
+import { canVisit, useAuth } from '../../auth/AuthProvider'
 import type { ManualSyncResult } from './masterSyncResults'
 
 const streamLabels: Record<string, string> = {
@@ -39,12 +40,13 @@ const autoUnavailableLabels: Record<string, string> = {
 }
 
 export function SystemMasterSyncLayout() {
+    const { principal } = useAuth()
     return <section className={styles.page}>
         <h1>Đồng bộ dữ liệu nguồn</h1>
         <nav className={styles.errorTabs} aria-label="Nhóm đồng bộ dữ liệu">
             <NavLink to="/library/source-sync" end>Cấu hình đồng bộ</NavLink>
             <NavLink to="/library/source-sync/files" end>Tệp học liệu từ nguồn</NavLink>
-            <NavLink to="/library/source-sync/reconciliation" end>Đối soát toàn vẹn dữ liệu</NavLink>
+            {canVisit('/library/source-sync/reconciliation', principal) && <NavLink to="/library/source-sync/reconciliation" end>Đối soát toàn vẹn dữ liệu</NavLink>}
         </nav>
         <Outlet />
     </section>
@@ -419,7 +421,7 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
 
     const importLabels: Record<string, string> = {
         UNTRACKED: 'Chưa có ánh xạ', PENDING: 'Đang chờ', FETCHING: 'Đang nhập',
-        IMPORTED: 'Đã nhập', PROCESSING: 'Đã nhập', RETRY_WAIT: 'Chờ thử lại',
+        IMPORTED: 'Đã nhập', PROCESSING: 'Đã nhập', METADATA_ONLY: 'Đã đăng ký thông tin; chưa có nội dung', RETRY_WAIT: 'Chờ thử lại',
         RETRY_PROCESSING: 'Chờ thử lại ETL', FAILED: 'Lỗi', RETRY_EXHAUSTED: 'Hết lượt tự thử',
     }
     const etlLabels: Record<string, string> = {

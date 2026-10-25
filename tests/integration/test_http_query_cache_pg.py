@@ -223,7 +223,7 @@ def test_real_pg_mongo_paired_query_cache_and_live_changes(searchable, mongo_tes
                 'DEV_LIVE_NOT_RUN': True, 'OAUTH_NOT_RUN': True, 'GROUND_TRUTH_NOT_CONFIRMED': True,
             }
             target = Path(os.environ['ETL_QUERY_CACHE_METRICS']).resolve()
-            assert target.is_relative_to(Path.cwd().resolve() / 'docs/audits/search-query-vector-cache')
+            assert target.is_relative_to(Path.cwd().resolve() / '.test-tmp/audits/search-query-vector-cache')
             target.parent.mkdir(parents=True, exist_ok=True)
             report['live_mutation_status'] = 'NOT_RUN'
             report['code_sha256'] = {path: hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in (

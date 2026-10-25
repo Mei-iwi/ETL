@@ -327,7 +327,7 @@ def test_manual_postprocess_cannot_overlap_projection(container, monkeypatch):
             with pytest.raises(DomainError, match="already running"):
                 container.postprocess.run(version["id"])
             with TestClient(create_app(container)) as api:
-                response = api.post(f"/admin/resource-versions/{version['id']}/postprocess")
+                response = api.post(f"/api/v1/resource-versions/{version['id']}/postprocess")
                 assert response.status_code == 400
         finally:
             release.set()

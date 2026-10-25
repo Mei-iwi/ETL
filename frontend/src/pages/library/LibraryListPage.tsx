@@ -134,6 +134,9 @@ export function LibraryListPage() {
                 <div>
                     <h1>Danh sách học liệu</h1>
                 </div>
+                {canVisit('/library/add', principal) && <Link className={styles.addButton} to="/library/add">
+                    <span aria-hidden="true">+</span> Thêm học liệu
+                </Link>}
             </header>
 
             <form className={styles.searchForm} onSubmit={handleSearch}>
@@ -195,10 +198,10 @@ export function LibraryListPage() {
                                     <td>{resource.publication_status}</td>
                                     <td>
                                         {resource.latest_version ? <div className={styles.versionSummary}>
-                                            <Link className={styles.link} to={`/library/${encodeURIComponent(resource.id)}/versions`}
+                                            <span
                                                 title={resource.latest_version.source_version_id ? `Nguồn: ${resource.latest_version.source_version_id}` : undefined}>
                                                 Phiên bản {resource.latest_version.version_number}
-                                            </Link>
+                                            </span>
                                             <span className={resource.latest_version.lifecycle_status === 'REJECTED' || resource.latest_version.processing_status.includes('FAILED') ? styles.failed
                                                 : resource.latest_version.processing_status === 'CONTENT_READY' ? styles.ready : styles.pending}>
                                                 {resource.latest_version.lifecycle_status === 'REJECTED' ? 'Bị từ chối' : ({

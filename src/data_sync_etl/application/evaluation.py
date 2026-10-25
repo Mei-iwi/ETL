@@ -9,6 +9,7 @@ from time import perf_counter
 
 from data_sync_etl.application.content_bags import bag_structure
 from data_sync_etl.application.search import QueryEmbeddingContext
+from data_sync_etl.domain import concepts, context_ranking, lexical, meaning_bags
 from data_sync_etl.domain.core import new_id, now
 from data_sync_etl.domain.evaluation import (
     METHODS,
@@ -62,16 +63,45 @@ class EvaluationService:
                                      'index_run_id': search.indexing._runs(repo, row['version_id'])[0]['id'],
                                      'metadata_hash': checksum(row), 'allowed_units_hash': checksum(sorted(allowed)),
                                      'bags': bags})
+                    if self.settings.semantic_enabled:
+                        if search.semantic is None:
+                            raise EvaluationError('SEMANTIC_SCHEMA_NOT_READY', 503)
+                        plan, _ = search.semantic.plan(snapshot, repo.semantic_metadata(row['resource_id']))
+                        manifest = search.semantic.store.manifest(plan['_id'])
+                        if not manifest or manifest['status'] != 'READY':
+                            raise EvaluationError('SEMANTIC_INDEX_NOT_READY', 503)
+                        versions[-1]['semantic_index_id'] = plan['_id']
         if not versions:
             raise EvaluationError('EVALUATION_NO_READY_CORPUS', 409)
         model = search.indexing.embedding
         snapshot = {'scope': access.scope, 'relevance_unit': 'resource', 'versions': versions,
                     'model': {'id': model.model_id, 'version': model.version, 'dimension': model.dimension},
                     'search_version': checksum([inspect.getsource(type(search)), inspect.getsource(binary_score),
-                                                inspect.getsource(cosine), inspect.getsource(rrf)]),
+                                                inspect.getsource(cosine), inspect.getsource(rrf),
+                                                inspect.getsource(lexical), inspect.getsource(concepts),
+                                                inspect.getsource(context_ranking), inspect.getsource(meaning_bags)]),
                     'policy_version': checksum(inspect.getsource(SearchAccess)),
                     'filters': filters, 'search_max_bags': self.settings.search_max_bags,
+                    'search_vector_min_similarity': self.settings.search_vector_min_similarity,
+                    'meaning_context_fallback': [self.settings.search_meaning_context_fallback_enabled,
+                        self.settings.search_meaning_fallback_min_similarity,
+                        self.settings.search_meaning_fallback_min_context_similarity],
+                    'meaning_context_margin': self.settings.search_meaning_context_margin,
+                    'bow_min_coverage': self.settings.search_bow_min_coverage,
+                    'concept_dictionary': search.dictionary.snapshot.fingerprint,
+                    'expansion_policy': self.settings.search_expansion.model_dump(),
+                    'meaning_bags': [self.settings.index_meaning_bags_enabled, self.settings.index_meaning_group_threshold],
                     'search_timeout_seconds': self.settings.search_timeout_seconds}
+        if self.settings.semantic_enabled:
+            semantic = search.semantic.embedding
+            snapshot['model'] = {'id': semantic.model_identity()['model_id'],
+                'version': semantic.model_revision, 'dimension': semantic.dimension}
+            snapshot['semantic'] = {'identity': semantic.model_identity(),
+                'strategy': self.settings.semantic_strategy,
+                'rerank_enabled': self.settings.semantic_rerank_enabled,
+                'rerank_top_k': self.settings.semantic_rerank_top_k,
+                'min_score': self.settings.semantic_min_score,
+                'max_candidates': self.settings.semantic_max_candidates}
         return snapshot, checksum(snapshot)
 
     @staticmethod
@@ -244,9 +274,19 @@ class EvaluationService:
             marker = repo.evaluation_state(filters, limit=self.settings.evaluation_max_corpus_versions,
                                            max_units=self.settings.index_max_units)
         model = self.search.indexing.embedding
-        return checksum([marker, access.scope, model.model_id, model.version, model.dimension,
+        semantic = ([self.search.semantic.embedding.model_identity(), self.settings.semantic_strategy,
+                     self.settings.semantic_rerank_enabled, self.settings.semantic_rerank_top_k,
+                     self.settings.semantic_min_score, self.settings.semantic_max_candidates]
+                    if self.settings.semantic_enabled and self.search.semantic is not None else None)
+        return checksum([marker, access.scope, model.model_id, model.version, model.dimension, semantic,
                          self.settings.chunk_size_words, self.settings.chunk_overlap_words,
-                         self.settings.search_max_bags, self.settings.search_timeout_seconds])
+                         self.settings.search_max_bags, self.settings.search_timeout_seconds,
+                         self.settings.search_vector_min_similarity, self.settings.index_meaning_bags_enabled,
+                         self.settings.index_meaning_group_threshold,
+                         self.settings.search_meaning_context_fallback_enabled,
+                         self.settings.search_meaning_fallback_min_similarity,
+                         self.settings.search_meaning_fallback_min_context_similarity,
+                         self.settings.search_meaning_context_margin, self.settings.search_bow_min_coverage])
 
     def check_marker(self, dataset, access, expected):
         try:

@@ -1,7 +1,7 @@
 export interface ReconciliationRunReport {
     run_id: string
     stream_name: string
-    status: 'RUNNING' | 'COMPLETED' | 'BLOCKED' | 'FAILED'
+    status: 'RUNNING' | 'COMPLETED' | 'BLOCKED' | 'FAILED' | 'PARTIAL'
     started_at: string
     finished_at?: string | null
     source_count: number
@@ -19,6 +19,13 @@ export interface ReconciliationRunReport {
         guard_alert?: string
         reason?: string
         dry_run?: boolean
+        unverified_source_files?: number
+        unverified_metadata_records?: number
+        verified_file_count?: number
+        verification_reason_counts?: Record<string, number>
+        processed_files?: number
+        total_files?: number
+        verified_bytes?: number
     } | null
 }
 

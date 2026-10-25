@@ -23,8 +23,7 @@ TREES = {
     "scripts": {".py", ".sql"},
     "alembic": {".py", ".mako"},
     "alembic_source": {".py", ".sql"},
-    "docs": {".md", ".json"},
-    "fixtures/source": {".json"},
+    "fixtures": {".json"},
 }
 LOCAL_DIRECTORIES = {"venv", "node_modules", "build", "dist", "volumes", "local_data", "secrets", "credentials", "keys"}
 

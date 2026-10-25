@@ -1,0 +1,589 @@
+{
+  "label_status": "AGENT_REVIEWED_DRAFT_REQUIRES_DOMAIN_REVIEW",
+  "provenance": "Labels chosen from frozen local content/evidence, before model ranking. No teacher signoff. Unlisted positives may remain; metrics exploratory.",
+  "queries": [
+    {
+      "query_id": "A1",
+      "query": "Cách cộng hai phân số khác mẫu số",
+      "language": "vi",
+      "category": "exact",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R013",
+            "HL26_XDRV_R001"
+          ],
+          "anchors": [
+            "4/6 + 5/6"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "A2",
+      "query": "Tìm mẫu số chung rồi cộng các tử số",
+      "language": "vi",
+      "category": "paraphrase",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R013",
+            "HL26_XDRV_R001"
+          ],
+          "anchors": [
+            "4/6 + 5/6"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "A3",
+      "query": "How to add fractions with different denominators?",
+      "language": "en",
+      "category": "cross_lingual",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R013",
+            "HL26_XDRV_R001"
+          ],
+          "anchors": [
+            "4/6 + 5/6"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "A4",
+      "query": "Bài giảng fractions và quy đồng mẫu số",
+      "language": "mixed",
+      "category": "code_mixed",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R013",
+            "HL26_XDRV_R001"
+          ],
+          "anchors": [
+            "mẫu số chung"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "B1",
+      "query": "Quang hợp ở thực vật",
+      "language": "vi",
+      "category": "multimodal",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "Quang hợp là quá trình"
+          ],
+          "grade": 3
+        },
+        {
+          "resource_ids": [
+            "HL26_GDRV_R007"
+          ],
+          "anchors": [
+            "LÁ XANH"
+          ],
+          "grade": 2
+        }
+      ]
+    },
+    {
+      "query_id": "B2",
+      "query": "How do plants make food using sunlight?",
+      "language": "en",
+      "category": "cross_lingual",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "Quang hợp là quá trình"
+          ],
+          "grade": 3
+        },
+        {
+          "resource_ids": [
+            "HL26_GDRV_R007"
+          ],
+          "anchors": [
+            "LÁ XANH"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "B3",
+      "query": "Tree hấp thụ khí như thế nào?",
+      "language": "mixed",
+      "category": "contextual",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "khí khổng tham gia trao đổi khí"
+          ],
+          "grade": 2
+        },
+        {
+          "resource_ids": [
+            "HL26_GDRV_R007"
+          ],
+          "anchors": [
+            "KHÍ CO2"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "B4",
+      "query": "Trao đổi chất khí ở cây",
+      "language": "vi",
+      "category": "contextual",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "khí khổng tham gia trao đổi khí"
+          ],
+          "grade": 2
+        },
+        {
+          "resource_ids": [
+            "HL26_GDRV_R007"
+          ],
+          "anchors": [
+            "KHÍ CO2"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "C1",
+      "query": "Làm gì khi có người yêu cầu mã OTP?",
+      "language": "vi",
+      "category": "contextual",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R017",
+            "HL26_XDRV_R005"
+          ],
+          "anchors": [
+            "từ chối cung cấp mã"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "C2",
+      "query": "How to protect an online account?",
+      "language": "en",
+      "category": "cross_lingual",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R017",
+            "HL26_XDRV_R005"
+          ],
+          "anchors": [
+            "Mật khẩu nên dài"
+          ],
+          "grade": 3
+        },
+        {
+          "resource_ids": [
+            "HL26_GDRV_R005"
+          ],
+          "anchors": [
+            "Bước 4: Sử dụng xác thực nhiều yếu tố"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "C3",
+      "query": "Tôi nghi tài khoản bị lộ, cần làm gì trước?",
+      "language": "vi",
+      "category": "paraphrase",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R017",
+            "HL26_XDRV_R005"
+          ],
+          "anchors": [
+            "Đổi mật khẩu từ thiết bị"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "C4",
+      "query": "Xác thực nhiều yếu tố có thay thế việc kiểm tra tên miền không?",
+      "language": "vi",
+      "category": "hard_negative",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R017",
+            "HL26_XDRV_R005"
+          ],
+          "anchors": [
+            "không thay thế thói quen"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "N1",
+      "query": "Cách lập trình bộ điều khiển động cơ tên lửa",
+      "language": "vi",
+      "category": "no_result",
+      "split": "validation",
+      "annotations": []
+    },
+    {
+      "query_id": "N2",
+      "query": "How to diagnose a broken quantum computer?",
+      "language": "en",
+      "category": "no_result",
+      "split": "validation",
+      "annotations": []
+    },
+    {
+      "query_id": "D1",
+      "query": "Làm sao cộng 2/3 và 5/6?",
+      "language": "vi",
+      "category": "versions_duplicates",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R013",
+            "HL26_XDRV_R001"
+          ],
+          "anchors": [
+            "4/6 + 5/6"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "D2",
+      "query": "Explain how to find a common denominator.",
+      "language": "en",
+      "category": "hard_negative",
+      "split": "validation",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R013",
+            "HL26_XDRV_R001"
+          ],
+          "anchors": [
+            "4/6 + 5/6"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "E1",
+      "query": "Cách tìm ước chung lớn nhất của 24 và 36",
+      "language": "vi",
+      "category": "hard_negative",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R020",
+            "HL26_XDRV_R008"
+          ],
+          "anchors": [
+            "UCLN(24,36)"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "E2",
+      "query": "How do I find the least common multiple of 12 and 18?",
+      "language": "en",
+      "category": "cross_lingual",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R020",
+            "HL26_XDRV_R008"
+          ],
+          "anchors": [
+            "BCNN(12,18)"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "E3",
+      "query": "Chia đều 24 bút và 36 vở thành nhiều phần quà nhất",
+      "language": "vi",
+      "category": "contextual",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R020",
+            "HL26_XDRV_R008"
+          ],
+          "anchors": [
+            "Số phần quà tối đa"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "F1",
+      "query": "Làm thế nào tách muối từ nước muối?",
+      "language": "vi",
+      "category": "exact",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R014",
+            "HL26_XDRV_R002"
+          ],
+          "anchors": [
+            "Cô cạn thích hợp"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "F2",
+      "query": "How can salt be recovered from saltwater?",
+      "language": "en",
+      "category": "cross_lingual",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R014",
+            "HL26_XDRV_R002"
+          ],
+          "anchors": [
+            "Cô cạn thích hợp"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "F3",
+      "query": "Có nên dùng giấy lọc để tách muối đã hòa tan không?",
+      "language": "vi",
+      "category": "hard_negative",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R014",
+            "HL26_XDRV_R002"
+          ],
+          "anchors": [
+            "Cô cạn thích hợp",
+            "Lọc thích hợp"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "G1",
+      "query": "Dùng hàm SUM tính tổng lượt mượn mỗi tháng",
+      "language": "vi",
+      "category": "multimodal",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R018",
+            "HL26_XDRV_R006"
+          ],
+          "anchors": [
+            "Dùng hàm SUM"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "G2",
+      "query": "Cách tính average từng thể loại sách trong Excel",
+      "language": "mixed",
+      "category": "code_mixed",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R018",
+            "HL26_XDRV_R006"
+          ],
+          "anchors": [
+            "Sử dụng AVERAGE"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H1",
+      "query": "Làm sao xác định người kể chuyện?",
+      "language": "vi",
+      "category": "ambiguous",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R015",
+            "HL26_XDRV_R003"
+          ],
+          "anchors": [
+            "Đoạn truyện được kể ở ngôi thứ ba"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H2",
+      "query": "How to write an argumentative paragraph?",
+      "language": "en",
+      "category": "cross_lingual",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R021",
+            "HL26_XDRV_R009"
+          ],
+          "anchors": [
+            "Mở đoạn nêu ý kiến"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H3",
+      "query": "Lí lẽ khác bằng chứng trong đoạn nghị luận như thế nào?",
+      "language": "vi",
+      "category": "hard_negative",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R021",
+            "HL26_XDRV_R009"
+          ],
+          "anchors": [
+            "Lí lẽ giải thích vì sao"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "N3",
+      "query": "Hướng dẫn điều trị gãy xương đùi ở trẻ sơ sinh",
+      "language": "vi",
+      "category": "no_result",
+      "split": "test",
+      "annotations": []
+    },
+    {
+      "query_id": "N4",
+      "query": "How do plants breathe and release energy by cellular respiration?",
+      "language": "en",
+      "category": "hard_negative",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "khí khổng tham gia trao đổi khí"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "N5",
+      "query": "Sự khác biệt giữa quang hợp và hô hấp tế bào",
+      "language": "vi",
+      "category": "hard_negative",
+      "split": "test",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "Quang hợp là quá trình"
+          ],
+          "grade": 1
+        }
+      ]
+    }
+  ]
+}

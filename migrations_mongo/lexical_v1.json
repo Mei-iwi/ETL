@@ -1,0 +1,15 @@
+{
+  "schema_version": "etl-bag-lexical-v1",
+  "mode": "PREPARED_NOT_APPLIED",
+  "foundation": "etl-mongo-foundation-v1",
+  "collection": "content_bags",
+  "dimension_for_digest": 384,
+  "validator_sha256": "eefddec64465aadd905020dfdac8cdd6b22494f819853c5db4f572b47f1eb915",
+  "analyzer": "pyvi-0.1.1-nfc-surface-compound-alnum-v1",
+  "representation": "bag-lexical-tf-v1",
+  "collections_added": [],
+  "indexes_added": [],
+  "installer": "python scripts/reindex_lexical.py",
+  "apply_policy": "Explicit --apply --writers-stopped --backup PATH after dry-run; stop all writers; preserve model/dimension; no .env changes.",
+  "rollback": "Same script --rollback --writers-stopped --backup PATH; restore compatible application checkout after rollback."
+}

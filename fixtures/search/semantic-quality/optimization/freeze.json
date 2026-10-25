@@ -1,0 +1,37 @@
+{
+  "corpus_checksum": "9f96ed218bae04555e3bae7b357ffdf3aa25b795ac6134fa4431ab37b75e87bf",
+  "specification_checksum": "71ea35f35261f842ef5068783e0909fad781cfa1e8f66daf11519a51a1e5fd49",
+  "qrels_checksum": "1110366294f7506b2456f63dd01e9b70e39b244472692909dc7b8a94fcfc4891",
+  "holdout_ids": [
+    "H01",
+    "H02",
+    "H03",
+    "H04",
+    "H05",
+    "H06",
+    "H07",
+    "H08",
+    "H09",
+    "H10",
+    "H11",
+    "H12",
+    "H13",
+    "H14",
+    "H15",
+    "H16",
+    "H17",
+    "H18",
+    "H19",
+    "H20"
+  ],
+  "selection_rule": "validation only; recall5>=.95 and false_abstention<=.05; minimize no-answer FPR; no test tuning",
+  "candidate_grid": "best; bounded mean N2/3; contextual/raw agreement alpha0/.25/.5/.75/1 N3",
+  "ablations": [
+    "raw_content",
+    "title_content",
+    "title_heading_content",
+    "subject_grade_content",
+    "verified_full_context"
+  ],
+  "status": "FROZEN_BEFORE_NEW_RANKINGS_DRAFT_LABELS"
+}

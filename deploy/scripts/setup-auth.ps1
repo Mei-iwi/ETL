@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Directory,
     [Parameter(Mandatory=$true)][string]$AdminEmail,
-    [string]$Image='etl-portable-backend:auth-20261022'
+    [string]$Image='etl-portable-backend:local'
 )
 $ErrorActionPreference='Stop'
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..')).TrimEnd('\','/')
@@ -13,7 +13,7 @@ New-Item -ItemType Directory -Path $target -Force | Out-Null
 if($LASTEXITCODE -ne 0) { throw 'Auth secret initialization failed; existing files are never overwritten' }
 $portable=$target.Replace('\','/')
 Write-Output @"
-# Add to the EXTERNAL app.env alongside deployment paths; this output contains no secret values.
+# Add to docker.env alongside deployment paths; this output contains no secret values.
 AUTH_MODE=single_admin
 AUTH_APP_ENVIRONMENT=production
 ADMIN_ENABLED=true
