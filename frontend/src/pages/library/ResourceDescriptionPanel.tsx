@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Pencil } from 'lucide-react'
+import { clearSearchViewCache } from '../search/searchViewCache'
 import styles from './LibraryResourceDetailPage.module.css'
 
 type Author = { name: string; organization: string | null; role: string | null }
@@ -60,6 +61,7 @@ export function ResourceDescriptionPanel({ resourceId, children }: { resourceId:
                 ? 'Kiểm tra thông tin nhập: tác giả cần có tên, tối đa 50 tác giả và 50 thẻ.'
                 : 'Không thể cập nhật thông tin. Vui lòng kiểm tra quyền hoặc thử lại.')
             const value: Description = await response.json()
+            clearSearchViewCache()
             if (!signal?.aborted) { apply(value); setNotice('Đã cập nhật thông tin học liệu.') }
         } catch (e) { if (!signal?.aborted) setError(e instanceof Error ? e.message : 'Không thể cập nhật.') }
         finally { inFlight.current = false; if (!signal?.aborted) setSaving(false) }

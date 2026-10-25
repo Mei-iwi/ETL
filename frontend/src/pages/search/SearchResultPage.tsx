@@ -84,9 +84,10 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                                 <li key={i}>“{e.query_phrase}” → “{e.matched_phrase}”{e.field === 'title' ? ' (tiêu đề)' : ''}</li>)}</ul>
                         </details>}
                         {item.context_id && <SearchContext id={item.context_id} evidence={item.context_evidence} />}
-                        {item.match_origin && <p className={styles.metadata}>{item.matched_fields?.length
-                            ? item.matched_fields.map(field => ({ TITLE: 'Kh?p ti?u ??', DESCRIPTION: 'Kh?p m? t?', TAGS: 'Kh?p th?/t? kh?a', CONTENT: 'Kh?p n?i dung' }[field] || field)).join(' ? ')
-                            : 'Li?n quan theo th?ng tin m? t?'}</p>}
+                        {item.match_origin && <p className={styles.metadata}>
+                            {item.match_origin === 'BOTH' && 'Khớp nội dung và thông tin học liệu · '}{item.matched_fields?.length
+                            ? item.matched_fields.map(field => ({ TITLE: 'Khớp tiêu đề', DESCRIPTION: 'Khớp mô tả', TAGS: 'Khớp thẻ/từ khóa', CONTENT: 'Khớp nội dung' }[field] || field)).join(' · ')
+                            : 'Khớp thông tin học liệu'}</p>}
                         {!!item.meaning_variants?.length && <details className={styles.more}><summary>Các cách diễn đạt trong nhóm nghĩa khớp</summary>
                             <ul>{item.meaning_variants.map(value => <li key={value}>{value}</li>)}</ul></details>}
                         {item.context_evidence === 'bag' && <p className={styles.metadata}>Kết quả khớp ở cấp học liệu; đoạn trích là đoạn tham khảo, chưa xác định được đoạn khớp trực tiếp.</p>}

@@ -24,6 +24,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     let authRole = null
     let canViewFile = true
     let contextEvidence = 'lexical'
+    let metadataFields = ['TITLE']
     let holdAuthConfig = true
     const reconciliationBodies = []
     let reconciliationPolls = 0
@@ -87,6 +88,12 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
                     concept_id: 'etl:machine_learning', relation: 'translation', field: 'content', weight: 0.65,
                     sources: [{ name: 'curated', identifier: 'fixture' }] }] : [],
                 meaning_variants: contextEvidence === 'semantic' ? ['học máy', 'machine learning', 'hệ thống học từ dữ liệu'] : [],
+                ...(mode === 'metadata' ? { match_origin: 'METADATA', matched_fields: metadataFields,
+                    evidence_kind: 'METADATA_FIELD', evidence_text: 'Thông tin học liệu đã đồng bộ', resource_format: 'mp4',
+                    representation_mode: 'metadata', bag_id: null, content_unit_id: null, context_id: null,
+                    context_url: null, can_view_file: false, matched_bag_count: 0, matched_keywords: [],
+                    page_from: null, page_to: null, snippet: 'Thông tin học liệu đã đồng bộ' } : {}),
+                ...(mode === 'both' ? { match_origin: 'BOTH', matched_fields: ['CONTENT', 'TITLE'], resource_format: 'pdf' } : {}),
             })) })
         }
         if (url.pathname === '/api/v1/chunks/token-1/context') {
@@ -369,6 +376,23 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("Array.from(document.querySelectorAll('a')).find(link => link.textContent.includes('Quay lại danh sách học liệu'))?.getAttribute('href')"), '/library/list')
         await evaluate('history.back()')
         await waitFor(() => evaluate("!!document.querySelector('article')"))
+        mode = 'metadata'; resultCount = 1
+        for (const [fields, label] of [[['TITLE'], 'Khớp tiêu đề'], [['DESCRIPTION'], 'Khớp mô tả'],
+            [['TAGS'], 'Khớp thẻ/từ khóa'], [[], 'Khớp thông tin học liệu']]) {
+            metadataFields = fields
+            const contextsBefore = contextCount
+            await open('/search/result?q=metadata&method=vector')
+            await waitFor(() => evaluate(`document.body.textContent.includes(${JSON.stringify(label)})`))
+            assert.equal(await evaluate("document.querySelectorAll('article').length"), 1)
+            assert.equal(await evaluate("document.querySelector('article a')?.getAttribute('href').includes('versionId=v1')"), true)
+            assert.equal(contextCount, contextsBefore)
+            assert.equal(await evaluate("document.body.textContent.includes('Kh?p')"), false)
+        }
+        mode = 'both'
+        await open('/search/result?q=both&method=hybrid')
+        await waitFor(() => evaluate("document.body.textContent.includes('Khớp nội dung và thông tin học liệu')"))
+        assert.equal(await evaluate("document.querySelectorAll('article').length"), 1)
+        resultCount = 8
         mode = 'error'
         await open('/search/result?q=toán&method=vector')
         await waitFor(() => evaluate("document.querySelector('[role=alert]')?.textContent.includes('Chưa thể chuẩn bị tìm kiếm')"))
