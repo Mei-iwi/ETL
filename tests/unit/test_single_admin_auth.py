@@ -1,4 +1,5 @@
 import json
+import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -165,13 +166,22 @@ def test_admin_flag_is_not_login_and_disables_management(configured):
 def test_anonymous_exhaustive_routes_deny_before_handler(configured):
     with make_client(configured) as api:
         checked = 0
-        from data_sync_etl.api.routes import router
-        for route in router.routes:
+        # Include separately registered metadata/reconciliation routers too.
+        from data_sync_etl.main import (
+            account_router,
+            profile_router,
+            reconciliation_router,
+            resource_description_router,
+            router,
+        )
+        routes = [route for group in (router, account_router, profile_router,
+                  reconciliation_router, resource_description_router) for route in group.routes]
+        for route in routes:
             path = getattr(route, 'path', '')
             if not (path.startswith('/api/') or path.startswith('/admin/')) or path.startswith('/api/v1/auth/'):
                 continue
             for method in route.methods - {'HEAD', 'OPTIONS'}:
-                url = path.replace('{id}', 'unknown').replace('{job_id}', 'unknown').replace('{file_id}', 'unknown').replace('{context_id}', 'unknown')
+                url = re.sub(r'\{[^}]+\}', 'unknown', path)
                 response = api.request(method, url, json={})
                 assert response.status_code == 401, (method, path, response.status_code)
                 checked += 1

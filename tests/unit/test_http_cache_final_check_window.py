@@ -20,7 +20,7 @@ ACCESS = SearchAccess('local_demo')
 def test_existing_post_validation_writer_window_same_off_on(searchable, monkeypatch):
     c, version = searchable
     configure(c, version)
-    lines, offset = inspect.getsourcelines(SearchService.search)
+    lines, offset = inspect.getsourcelines(SearchService._content_search)
     tree = ast.parse(textwrap.dedent(''.join(lines))).body[0]
     # Search may also check its deadline before expensive work. This probe must
     # remain AFTER the final metadata/snapshot validation, not at the first check.
@@ -38,7 +38,7 @@ def test_existing_post_validation_writer_window_same_off_on(searchable, monkeypa
         def after_last_check(started, checked=checked, release=release):
             original(started)
             caller = sys._getframe(1)
-            if caller.f_code is SearchService.search.__code__ and caller.f_lineno == line:
+            if caller.f_code is SearchService._content_search.__code__ and caller.f_lineno == line:
                 checked.set()
                 assert release.wait(10)
         with monkeypatch.context() as patch:
