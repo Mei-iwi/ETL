@@ -2,6 +2,7 @@ import type {
     DiscrepancyListResponse,
     ReconciliationLatestReport,
     ReconciliationRunReport,
+    ReconcileTriggerResponse,
 } from '../types/reconciliation'
 
 async function getErrorMessage(response: Response) {
@@ -15,8 +16,9 @@ async function getErrorMessage(response: Response) {
 export async function triggerReconciliation(
     stream: string = 'all',
     dryRun: boolean = true,
+    mode: 'INCREMENTAL' | 'FULL' = 'INCREMENTAL',
     signal?: AbortSignal,
-): Promise<{ status: string; reports: ReconciliationRunReport[] }> {
+): Promise<ReconcileTriggerResponse> {
     const response = await fetch('/api/v1/reconciliation/runs', {
         method: 'POST',
         signal,
@@ -24,7 +26,7 @@ export async function triggerReconciliation(
             'Content-Type': 'application/json',
             Accept: 'application/json',
         },
-        body: JSON.stringify({ stream, dry_run: dryRun }),
+        body: JSON.stringify({ stream, dry_run: dryRun, mode }),
     })
     if (!response.ok) throw new Error(await getErrorMessage(response))
     return response.json()

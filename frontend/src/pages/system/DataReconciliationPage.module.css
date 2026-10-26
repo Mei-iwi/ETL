@@ -380,36 +380,77 @@
     gap: 10px;
 }
 
-/* CHẾ ĐỘ CHẠY: THỦ CÔNG / TỰ ĐỘNG */
-.segmentedControl {
-    display: inline-flex;
-    background-color: #f1f5f9;
-    padding: 3px;
-    border-radius: 8px;
-    border: 1px solid #e2e8f0;
+/* CÔNG TẮC BẬT/TẮT TỰ ĐỘNG */
+.autoSwitchContainer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 4px;
 }
 
-.segmentedBtn {
-    padding: 6px 14px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: #64748b;
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 38px;
+    height: 22px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #cbd5e1;
+    transition: 0.2s;
+    border-radius: 22px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.2s;
+    border-radius: 50%;
+}
+
+.switch input:checked + .slider {
+    background-color: #166534;
+}
+
+.switch input:checked + .slider:before {
+    transform: translateX(16px);
+}
+
+.switchLabel {
     font-size: 13px;
     font-weight: 500;
+    color: #334155;
+    user-select: none;
     cursor: pointer;
-    transition: all 0.15s ease;
 }
 
-.segmentedBtn:hover:not(.segmentedBtnActive) {
-    color: #1e293b;
-}
-
-.segmentedBtnActive {
-    background-color: #ffffff;
-    color: #1e3a8a;
-    font-weight: 600;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+.executionBadge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background-color: #f8fafc;
+    color: #475569;
+    border: 1px solid #e2e8f0;
+    font-size: 12px;
+    font-weight: 500;
 }
 
 .autoGroup {
@@ -433,40 +474,6 @@
     cursor: pointer;
     width: 15px;
     height: 15px;
-}
-
-.successButton {
-    min-height: 36px;
-    padding: 8px 16px;
-    background-color: #166534;
-    color: #ffffff;
-    border: none;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.15s ease;
-}
-
-.successButton:hover:not(:disabled) {
-    background-color: #14532d;
-}
-
-.dangerButton {
-    min-height: 36px;
-    padding: 8px 16px;
-    background-color: #dc2626;
-    color: #ffffff;
-    border: none;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.15s ease;
-}
-
-.dangerButton:hover:not(:disabled) {
-    background-color: #b91c1c;
 }
 
 .autoStatusBanner {
