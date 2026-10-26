@@ -51,12 +51,10 @@ class RetryProcessingJob:
                 ):
                     raise ProcessingRetryConflict("Learning resource is unavailable")
 
-                if version["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
-                    raise ProcessingRetryConflict('Unsupported processing format')
                 state = processing_state(repo, job)
                 if job["status"] in ("PENDING", "RUNNING"):
                     return self._result(job, "ALREADY_IN_PROGRESS", state)
-                if state == "CONTENT_READY":
+                if state in ("CONTENT_READY", "NO_EXTRACTABLE_CONTENT"):
                     return self._result(job, "ALREADY_COMPLETED", state)
                 if job["status"] in ("FAILED", "COMPLETED_WITH_ERRORS"):
                     return self._retry_ocr(repo, job)

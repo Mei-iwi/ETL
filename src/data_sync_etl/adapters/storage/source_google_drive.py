@@ -7,6 +7,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 
+from data_sync_etl.adapters.media import probe
 from data_sync_etl.domain.core import SourceFileError
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 
@@ -23,7 +24,10 @@ class SourceGoogleDriveFileReader:
     def __init__(self, settings, *, session_factory=None, clock=time.monotonic, sleep=time.sleep):
         self.settings, self.roots = settings, dict(settings.source_drive_buckets)
         self.session_factory, self.clock, self.sleep = session_factory, clock, sleep
-        self.formats = FormatValidatorRegistry(media_registration=settings.source_metadata_media_enabled)
+        self.formats = FormatValidatorRegistry(media_registration=settings.source_metadata_media_enabled,
+                                             media_processing=not settings.source_metadata_media_enabled,
+                                             media_probe=lambda path, extension: probe(path, settings, extension),
+                                             media_max_size_bytes=settings.media_max_size_bytes)
         if any(not BUCKET.fullmatch(k) or not ID.fullmatch(v) for k, v in self.roots.items()):
             raise SourceFileError('INVALID_DRIVE_BUCKET_CONFIG')
 

@@ -20,14 +20,12 @@ class GetProcessingJob:
                 order=("-created_at", "-id"),
                 limit=20,
             )
-            version = repo.get("resource_versions", job["resource_version_id"])
-            unsupported = version["storage_object_key"].lower().endswith(('.mp3', '.mp4'))
             failures = repo.find('ocr_page_tasks', {'job_id': job_id, 'status': 'FAILED'}, limit=1)
             error_code = failures[0]['error_message'] if failures else None
 
             return {
                 "id": job["id"],
-                "error_code": "UNSUPPORTED_PROCESSING_FORMAT" if unsupported else error_code if error_code in PUBLIC_PROCESSING_ERROR_CODES else None,
+                "error_code": error_code if error_code in PUBLIC_PROCESSING_ERROR_CODES else None,
                 "resource_version_id": job["resource_version_id"],
                 "status": job["status"],
                 "processing_status": processing_state(repo, job),

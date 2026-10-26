@@ -24,6 +24,7 @@ class ProcessVersionResponse(BaseModel):
         "FINALIZING",
         "FINALIZATION_FAILED",
         "CONTENT_READY",
+        "NO_EXTRACTABLE_CONTENT",
     ]
     status_url: str
 
@@ -50,6 +51,7 @@ class ProcessingJobStatusResponse(BaseModel):
         "FINALIZING",
         "FINALIZATION_FAILED",
         "CONTENT_READY",
+        "NO_EXTRACTABLE_CONTENT",
     ]
     total_pages: int
     completed_pages: int

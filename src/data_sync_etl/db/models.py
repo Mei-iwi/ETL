@@ -174,6 +174,7 @@ class ResourceGradeLevel(Base):
 
 class ResourceVersion(Base):
     __tablename__ = "resource_versions"
+    processing_options = Column(JSON_TYPE, nullable=True)
     __table_args__ = (
         Index('uq_resource_versions_mongo_id', 'mongo_id', unique=True),
         UniqueConstraint("resource_id", "version_number"),
@@ -211,6 +212,7 @@ class ResourceVersion(Base):
 
 class ContentUnit(Base):
     __tablename__ = "content_units"
+    source_locator = Column(JSON_TYPE, nullable=True)
     __table_args__ = (
         Index('uq_content_units_mongo_id', 'mongo_id', unique=True),
         UniqueConstraint("resource_version_id", "sequence_no"),

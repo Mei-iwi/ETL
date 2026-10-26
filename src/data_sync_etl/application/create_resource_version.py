@@ -61,6 +61,7 @@ class CreateResourceVersionUseCase:
                 command.file_stream,
                 max_size_bytes=validator.max_size_bytes,
                 suffix=validator.extension,
+                validate_path=validator.validate_path if validator.extension in ('.mp3', '.mp4') else None,
             )
         except DomainError as exc:
             raise InvalidResourceVersion(str(exc)) from None
@@ -101,6 +102,7 @@ class CreateResourceVersionUseCase:
                                 "storage_bucket": stored.bucket,
                                 "storage_object_key": stored.object_key,
                                 "source_hash": stored.source_hash,
+                                "processing_options": {'original_filename': command.filename},
                                 "uploaded_by": command.uploaded_by.strip() if command.uploaded_by else None,
                             },
                         )

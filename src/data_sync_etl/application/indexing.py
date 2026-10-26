@@ -91,7 +91,8 @@ class IndexingService:
             **({'deletion_revision': deletion_revision} if deletion_revision else {}),
             'version': version_id, 'source_hash': version['source_hash'], 'projection': projections[0]['id'], 'generation': generation,
             'units': [{k: u[k] for k in ('id', 'parent_unit_id', 'unit_type', 'title', 'sequence_no',
-                                        'text', 'page_from', 'page_to', 'review_status', 'retrieval_eligible')} for u in content],
+                                        'text', 'page_from', 'page_to', 'review_status', 'retrieval_eligible')}
+                      | ({'source_locator': u['source_locator']} if u.get('source_locator') else {}) for u in content],
             'keywords': keywords, 'extractor': self.extractor.version, 'bag_algorithm': 'pg-structured-leaf-fallback-v2',
             'membership': membership, 'lexical': [REPRESENTATION_VERSION, ANALYZER_VERSION],
             **({'meanings': [MEANING_VERSION, self.settings.index_meaning_group_threshold]}

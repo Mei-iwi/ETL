@@ -31,9 +31,9 @@ class Postprocessor:
                        heading)
 
     @staticmethod
-    def _save_unit(repo, version_id, sequence, page, title, unit_type, result, text, parent_id=None):
+    def _save_unit(repo, version_id, sequence, page, title, unit_type, result, text, parent_id=None, locator=None):
         values = dict(page_from=page, page_to=page, title=title, unit_type=unit_type,
-                      parent_unit_id=parent_id)
+                      parent_unit_id=parent_id, source_locator=locator)
         units = repo.find('content_units', {'resource_version_id': version_id, 'sequence_no': sequence}, limit=1)
         if units:
             unit = units[0]
@@ -127,7 +127,7 @@ class Postprocessor:
                                 result["id"],
                                 {"normalized_text": normalized, "updated_at": now()},
                             )
-                        for text, source_page, title, unit_type, heading in self._text_units(result, page):
+                        for logical_index, (text, source_page, title, unit_type, heading) in enumerate(self._text_units(result, page)):
                             text = self.normalizer(text)
                             if not text:
                                 continue
@@ -135,7 +135,19 @@ class Postprocessor:
                             if heading is not None:
                                 outline_parents = {level: key for level, key in outline_parents.items() if level < heading}
                             parent = outline_parents[max(outline_parents)] if outline_parents else None
-                            unit_id = self._save_unit(repo, version_id, count, source_page, title, unit_type, result, text, parent)
+                            metadata = result['result_metadata'] or {}
+                            logical = metadata.get('logical_units', [])
+                            locator = logical[logical_index].get('locator', {}) if logical else None
+                            if locator:
+                                locator = {key: value for key, value in locator.items() if key != 'frame'}
+                                paired = [s for s in metadata.get('paired_segments', [])
+                                          if logical[logical_index]['start'] <= s['raw_start'] < logical[logical_index]['end']]
+                                locator['segment_ids'] = [s['segment_id'] for s in paired]
+                            if metadata.get('source_type') == 'media' and locator:
+                                # Reuse the deployed text bag schema; extraction modality
+                                # lives in provenance rather than a new Mongo enum.
+                                unit_type = 'TXT_TEXT'
+                            unit_id = self._save_unit(repo, version_id, count, source_page, title, unit_type, result, text, parent, locator)
                             if heading is not None:
                                 outline_parents[heading] = unit_id
                     if count == 0:

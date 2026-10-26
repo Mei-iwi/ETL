@@ -144,6 +144,14 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         ).limit(1)) is not None:
             raise DomainError('BLOCKED_MONGO_ID_MAPPING')
 
+    def translation_candidates(self, limit=20):
+        statement = (select(ResourceVersion)
+                     .where(ResourceVersion.processing_options['translation_pending'].as_boolean().is_(True))
+                     .join(OcrJob, OcrJob.resource_version_id == ResourceVersion.id)
+                     .where(OcrJob.status.in_(['COMPLETED', 'COMPLETED_WITH_ERRORS']))
+                     .order_by(ResourceVersion.updated_at, ResourceVersion.id).limit(limit))
+        return [self._dict(row) for row in self.session.scalars(statement)]
+
     def content_units(self, version_id, *, offset=0, limit=50, search=""):
         conditions = [ContentUnit.resource_version_id == version_id]
         if search:
