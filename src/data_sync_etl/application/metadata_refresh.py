@@ -30,6 +30,9 @@ class MetadataRefresh:
                     return {'status': 'BUSY'}
                 # A missing collection is a provisioning blocker, never auto-create it.
                 self.service.store.ensure_ready()
+                if callable(getattr(type(self.service), 'propagate_deletions', None)):
+                    report['deletion_events'] = self.service.propagate_deletions(
+                        self.settings.search_metadata_refresh_batch_size)
                 with self.service.uow() as repo:
                     repo.ensure_checkpoint(CHECKPOINT)
                     checkpoint = repo.get('sync_checkpoints', CHECKPOINT)

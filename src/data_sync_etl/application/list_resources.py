@@ -16,6 +16,7 @@ class ListResources:
             grade_level_id: str | None = None,
             resource_type_code: str | None = None,
             allowed_resource_ids: frozenset[str] | None = None,
+            deleted_only: bool = False,
     ) -> dict:
 
         offset = (page - 1) * size
@@ -28,6 +29,7 @@ class ListResources:
                 resource_type_code = resource_type_code,
                 offset = offset,
                 limit = size,
+                **({'deleted_only': True} if deleted_only else {}),
                 **({'allowed_resource_ids': allowed_resource_ids} if allowed_resource_ids is not None else {}),
             )
             summaries = repo.resource_version_summaries([row['id'] for row in rows])
@@ -48,6 +50,8 @@ class ListResources:
                 'resource_type_name_vi': row['resource_type_name_vi'],
                 'publication_status': row['publication_status'],
                 'updated_at': row['updated_at'],
+                'deletion_revision': row.get('deletion_revision', 0),
+                'master_deleted_at': row.get('master_deleted_at'),
                 'latest_version': latest_version(row['id']),
             }
             for row in rows

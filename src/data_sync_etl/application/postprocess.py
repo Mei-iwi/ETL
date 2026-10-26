@@ -61,8 +61,13 @@ class Postprocessor:
         """Run only while the caller holds the version's processing lock."""
         with flow():
             with self.uow() as repo:
-                if not repo.get("resource_versions", version_id):
+                version = repo.get("resource_versions", version_id)
+                if not version:
                     raise DomainError("Resource version not found")
+                from data_sync_etl.domain.resource_deletion import resource_deleted
+                resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
+                if not resource or resource_deleted(resource):
+                    raise DomainError('RESOURCE_NOT_AVAILABLE')
                 stage = repo.insert(
                     "etl_stage_runs",
                     dict(

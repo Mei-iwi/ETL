@@ -15,6 +15,9 @@ class ResourceMetadataOwnershipError(DomainError):
 
 
 def assert_resource_metadata_editable(resource):
+    from data_sync_etl.domain.resource_deletion import resource_deleted
+    if resource_deleted(resource):
+        raise DomainError('RESOURCE_NOT_AVAILABLE')
     if resource.get('source_origin') != 'LOCAL':
         raise ResourceMetadataOwnershipError(resource.get('source_origin'))
 

@@ -11,6 +11,7 @@ from data_sync_etl.adapters.mongo.foundation_store import ProfileConflict, user_
 from data_sync_etl.api.admin_access import require_local_admin
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.mongo_documents import normalize_keywords
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.security.auth import AuthError
 from data_sync_etl.security.authorization import owns_resource
 
@@ -70,7 +71,7 @@ def target(request, resource_id):
     container = require_local_admin(request)
     with container.uow() as repo:
         row = repo.get('master_learning_resources', resource_id)
-    if not row or not row['is_active'] or row.get('deleted_at') or row.get('source_missing_at'):
+    if not row or not row['is_active'] or resource_deleted(row) or row.get('source_missing_at'):
         raise HTTPException(404, 'Resource not found')
     principal = getattr(request.state, 'auth_principal', None)
     editable = container.settings.admin_enabled and (

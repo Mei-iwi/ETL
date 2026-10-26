@@ -2,9 +2,11 @@
 
 from dataclasses import dataclass
 
+from data_sync_etl.domain.resource_deletion import resource_deleted
+
 
 def denied(record):
-    if (record.get('deleted_at') is not None or record.get('source_missing_at') is not None
+    if (resource_deleted(record) or record.get('source_missing_at') is not None
             or record.get('visibility', 'PUBLIC') != 'PUBLIC'
             or record.get('review_status', 'UNREVIEWED') not in ('UNREVIEWED', 'APPROVED', 'REVIEWED')
             or record.get('is_current', True) is not True or record.get('is_active', True) is not True):
@@ -39,7 +41,7 @@ class SearchAccess:
         # Callers must additionally verify CONTENT_READY, completed INDEX_BUILD,
         # current projection/generation and Bag fingerprint through IndexingService.
         if (resource.get('publication_status') != 'PUBLISHED' or resource.get('is_active') is not True
-                or resource.get('deleted_at') is not None
+                or resource_deleted(resource)
                 or version.get('resource_id') != resource.get('id')
                 or version.get('lifecycle_status') not in ('INGESTED', 'APPROVED', 'PUBLISHED')
                 or unit.get('resource_version_id') != version.get('id')):

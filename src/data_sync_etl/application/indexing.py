@@ -17,6 +17,7 @@ from data_sync_etl.domain.lexical import ANALYZER_VERSION, REPRESENTATION_VERSIO
 from data_sync_etl.domain.meaning_bags import VERSION as MEANING_VERSION
 from data_sync_etl.domain.meaning_bags import verify_meanings
 from data_sync_etl.domain.mongo_documents import normalize_keywords
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.ports.indexing import IndexContentPort, IndexEmbeddingPort
 from data_sync_etl.ports.mongo_foundation import (
     ContentBagPort,
@@ -33,7 +34,7 @@ class IndexingService:
     def _version(self, repo, version_id):
         version = repo.get('resource_versions', version_id)
         resource = repo.get('master_learning_resources', version['resource_id']) if version else None
-        if not resource or not resource['is_active'] or resource['deleted_at'] is not None:
+        if not resource or not resource['is_active'] or resource_deleted(resource):
             raise IndexingError('VERSION_NOT_FOUND', 404)
         jobs = repo.find('ocr_jobs', {'resource_version_id': version_id}, order=('-created_at', '-id'), limit=1)
         return version, processing_state(repo, jobs[0]) if jobs else 'NOT_STARTED'
@@ -85,7 +86,9 @@ class IndexingService:
             membership = bag_structure(content)
         except DomainError:
             membership = {'invalid_hierarchy': []}  # Preview remains independent; _roots rejects indexing.
+        deletion_revision = repo.get('master_learning_resources', version['resource_id']).get('deletion_revision', 0)
         fingerprint = digest({
+            **({'deletion_revision': deletion_revision} if deletion_revision else {}),
             'version': version_id, 'source_hash': version['source_hash'], 'projection': projections[0]['id'], 'generation': generation,
             'units': [{k: u[k] for k in ('id', 'parent_unit_id', 'unit_type', 'title', 'sequence_no',
                                         'text', 'page_from', 'page_to', 'review_status', 'retrieval_eligible')} for u in content],
@@ -212,6 +215,10 @@ class IndexingService:
                 with self.uow() as repo:
                     current = repo.get('etl_stage_runs', run['id'], lock=True)
                     if current['status'] not in ('PENDING', 'RUNNING'):
+                        continue
+                    version = repo.get('resource_versions', run['resource_version_id'])
+                    resource = repo.get('master_learning_resources', version['resource_id'], lock=True) if version else None
+                    if not resource or resource_deleted(resource):
                         continue
                     repo.update('etl_stage_runs', run['id'], {'status': 'RUNNING', 'started_at': now()})
                 self._build(run)

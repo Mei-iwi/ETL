@@ -597,9 +597,14 @@ def list_resources(
     ] = None,
     resource_type_code: Annotated[
         str | None, Query(max_length=50)
-    ] = None
+    ] = None,
+    deleted_only: bool = False,
 ) -> ResouceListResponse:
     principal = getattr(request.state, 'auth_principal', None)
+    if deleted_only:
+        from data_sync_etl.security.auth import AuthError
+        if not request.app.state.container.settings.admin_enabled or principal is None or principal.role != 'ADMIN':
+            raise AuthError('AUTH_FORBIDDEN', 403)
     allowed = (frozenset(principal.resource_ids) if principal is not None
                and principal.mode in ('db_users', 'master_users') and principal.role != 'ADMIN' else None)
     result = (
@@ -610,6 +615,7 @@ def list_resources(
             subject_id=subject_id,
             grade_level_id=grade_level_id,
             resource_type_code=resource_type_code,
+            **({'deleted_only': True} if deleted_only else {}),
             **({'allowed_resource_ids': allowed} if allowed is not None else {}),
         )
     )

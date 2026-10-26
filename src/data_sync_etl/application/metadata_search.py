@@ -22,6 +22,7 @@ from data_sync_etl.domain.metadata_search import (
     metadata_allowed,
     projection,
 )
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search import SearchError, cosine, ranks, rrf
 from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.ports.metadata_search import MetadataIndexPort
@@ -31,6 +32,27 @@ class MetadataSearchService:
     def __init__(self, uow, documents, store: MetadataIndexPort, embedding, settings):
         self.uow, self.documents, self.store = uow, documents, store
         self.embedding, self.settings = embedding, settings
+
+    def propagate_deletions(self, limit=50):
+        # PG audit doubles as a durable outbox. RPC is outside the PG transaction;
+        # a crash before acknowledgement replays idempotent invalidations.
+        with self.uow() as repo:
+            events = repo.find('resource_deletion_events', {'propagated_at': None},
+                               order=('created_at', 'id'), limit=limit)
+        delivered = 0
+        for event in events:
+            with self.uow() as repo:
+                resource = repo.get('master_learning_resources', event['resource_id'])
+                versions = repo.find('resource_versions', {'resource_id': event['resource_id']}, limit=1001)
+            if len(versions) > 1000:
+                raise IndexingError('DELETION_PROPAGATION_LIMIT')
+            if resource_deleted(resource):
+                for version in versions:
+                    self.store.invalidate(version['id'])
+            with self.uow() as repo:
+                repo.update('resource_deletion_events', event['id'], {'propagated_at': now()})
+            delivered += 1
+        return delivered
 
     def diagnostics(self):
         from data_sync_etl.application.metadata_refresh import CHECKPOINT

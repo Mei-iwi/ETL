@@ -13,6 +13,9 @@ class MongoContentProjector:
         self.documents = documents
 
     def _assert_owner(self, version_id: str, stage_id: str | None) -> None:
+        from data_sync_etl.domain.resource_deletion import require_live_version
+        with self.uow() as repo:
+            require_live_version(repo, version_id)
         if stage_id is None:
             return
         with self.uow() as repo:
@@ -34,6 +37,8 @@ class MongoContentProjector:
         generation: int | None = None,
     ) -> dict:
         with self.uow() as repo:
+            from data_sync_etl.domain.resource_deletion import require_live_version
+            require_live_version(repo, version_id)
             version = repo.get("resource_versions", version_id)
 
             job = repo.get("ocr_jobs", job_id)

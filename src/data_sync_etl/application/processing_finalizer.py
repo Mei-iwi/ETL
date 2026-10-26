@@ -29,6 +29,11 @@ class ProcessingFinalizer:
 
     def _finalize_locked(self, job_id, version_id):
         with self.uow() as repo:
+            from data_sync_etl.domain.resource_deletion import resource_deleted
+            version = repo.get('resource_versions', version_id)
+            resource = repo.get('master_learning_resources', version['resource_id'])
+            if resource_deleted(resource):
+                return {'status': 'RESOURCE_SOFT_DELETED'}
             job = repo.get("ocr_jobs", job_id)
             if (
                 job["status"] != "COMPLETED"
@@ -140,6 +145,10 @@ class ProcessingFinalizer:
                     )[0]
             result = self.projector.project(version_id, job_id, stage["id"], len(attempts) + 1)
             with self.uow() as repo:
+                live = repo.get('master_learning_resources', version['resource_id'], lock=True)
+                if resource_deleted(live) or live['deletion_revision'] != resource['deletion_revision']:
+                    from data_sync_etl.domain.core import DomainError
+                    raise DomainError('RESOURCE_VISIBILITY_CHANGED')
                 current = repo.get("etl_stage_runs", stage["id"], lock=True)
                 if current["status"] != "RUNNING":
                     raise RuntimeError("Finalization ownership lost")

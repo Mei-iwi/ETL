@@ -292,6 +292,14 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("!!document.querySelector('#search-query')"), true)
         await waitFor(() => evaluate("document.querySelector('#search-query')?.value === 'toán'"))
         await waitFor(() => evaluate("document.querySelector('#search-grade')?.value === 'g1'"))
+        mode = 'empty'
+        const beforeVisibilityChange = postCount
+        await evaluate("window.dispatchEvent(new Event('focus'))")
+        await waitFor(() => postCount > beforeVisibilityChange)
+        await waitFor(() => evaluate("document.querySelectorAll('article').length === 0 && document.body.textContent.includes('Chưa tìm thấy học liệu')"))
+        mode = 'results'
+        await click('Cập nhật kết quả')
+        await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 1')"))
         // Explicit refresh must validate with the server and discard cached
         // snapshots on access/revision failures, rather than resurrect old text.
         for (const failure of ['revoked', 'denied', 'stale', 'busy']) {
