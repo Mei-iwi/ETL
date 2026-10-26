@@ -53,10 +53,12 @@ def trigger_reconciliation(
         raise HTTPException(409, 'Đối soát chỉ phát hiện sai lệch. Dùng chức năng đồng bộ để cập nhật dữ liệu.')
     try:
         if body.stream in ('files', 'all'):
-            result = request.app.state.container.reconciliation_jobs.start(body.stream)
+            result = request.app.state.container.reconciliation_jobs.start(body.stream, mode=body.mode)
+            result.setdefault('mode', body.mode)
+            result.setdefault('execution_time_ms', 0)
             response.status_code = 202
             return result
-        result = engine.execute_stream_reconcile(stream_name=body.stream, dry_run=body.dry_run)
+        result = engine.execute_stream_reconcile(stream_name=body.stream, dry_run=body.dry_run, mode=body.mode)
     except DomainError as exc:
         if str(exc) == 'RECONCILIATION_BUSY':
             raise HTTPException(409, 'Một đợt đối soát đang chạy. Vui lòng chờ hoàn tất.') from None
@@ -131,11 +133,16 @@ def get_latest_reconciliation_report(
         for r in latest_runs:
             pop = max(1, max(r.source_count, r.target_count))
             match_pct = round((r.matched_count / pop) * 100, 2)
+            meta = r.summary_meta or {}
+            run_mode = meta.get("mode", "INCREMENTAL")
+            run_exec_ms = meta.get("execution_time_ms", 0.0)
             stream_reports.append(
                 ReconciliationRunReport(
                     run_id=r.run_id,
                     stream_name=r.stream_name,
                     status=displayed_status(r),
+                    mode=run_mode,
+                    execution_time_ms=run_exec_ms,
                     started_at=r.started_at.isoformat(),
                     finished_at=r.finished_at.isoformat() if r.finished_at else None,
                     source_count=r.source_count,
@@ -147,8 +154,8 @@ def get_latest_reconciliation_report(
                     target_total_bytes=r.target_total_bytes,
                     source_table_hash=r.source_table_hash,
                     target_table_hash=r.target_table_hash,
-                    summary_meta=({**(r.summary_meta or {}), 'reason': 'RECONCILIATION_INTERRUPTED'}
-                                  if displayed_status(r) != r.status else r.summary_meta),
+                    summary_meta=({**meta, 'reason': 'RECONCILIATION_INTERRUPTED'}
+                                  if displayed_status(r) != r.status else meta),
                 )
             )
 

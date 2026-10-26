@@ -19,12 +19,12 @@ class FileReconciliationJobs:
         self.cancelled = Event()
         self.thread = None
 
-    def start(self, stream='files'):
+    def start(self, stream='files', mode='INCREMENTAL'):
         if not self.engine._run_lock.acquire(blocking=False):
             raise DomainError('RECONCILIATION_BUSY')
         self.cancelled.clear()
         ready, state = Event(), {'error': None, 'initial': None}
-        self.thread = Thread(target=self._run, args=(stream, ready, state), daemon=True, name='file-reconciliation')
+        self.thread = Thread(target=self._run, args=(stream, ready, state, mode), daemon=True, name='file-reconciliation')
         try:
             self.thread.start()
         except Exception:
@@ -35,7 +35,7 @@ class FileReconciliationJobs:
             raise DomainError('RECONCILIATION_START_TIMEOUT')
         if state['error']:
             raise DomainError(state['error'])
-        return {'status': 'RUNNING', 'executed_at': now().isoformat(), 'dry_run': True,
+        return {'status': 'RUNNING', 'executed_at': now().isoformat(), 'dry_run': True, 'mode': mode,
                 'total_streams': 5 if stream == 'all' else 1, 'reports': [state['initial']]}
 
     def close(self):
@@ -49,7 +49,7 @@ class FileReconciliationJobs:
         with self.engine.uow.processing_lock('reconciliation-files') as acquired:
             return acquired
 
-    def _run(self, stream, ready, state):
+    def _run(self, stream, ready, state, mode='INCREMENTAL'):
         run_id = None
         try:
             # Same UoW fence used for processing: one audit owner across API processes.
@@ -81,11 +81,11 @@ class FileReconciliationJobs:
                     record = SyncReconciliationRun(run_id=run_id, stream_name='files', status='RUNNING',
                         started_at=now(), source_count=0, target_count=len(versions), matched_count=0,
                         mismatched_count=0, source_total_bytes=0, target_total_bytes=0,
-                        summary_meta={'dry_run': True, 'processed_files': 0, 'total_files': len(versions),
+                        summary_meta={'dry_run': True, 'mode': mode, 'processed_files': 0, 'total_files': len(versions),
                                       'resume_after_id': resume, 'unverified_source_files': 0})
                     repo.session.add(record)
                     repo.session.flush()
-                    state['initial'] = dict(run_id=run_id, stream_name='files', status='RUNNING',
+                    state['initial'] = dict(run_id=run_id, stream_name='files', status='RUNNING', mode=mode,
                         started_at=record.started_at.isoformat(), source_count=0, target_count=len(versions),
                         matched_count=0, mismatched_count=0, match_rate_percent=0, summary_meta=record.summary_meta)
                 ready.set()  # SOURCE network I/O starts AFTER the accepted response is available.
@@ -95,7 +95,7 @@ class FileReconciliationJobs:
                         if self.cancelled.is_set():
                             break
                         try:
-                            self.engine._execute_stream_reconcile(name, dry_run=True)
+                            self.engine._execute_stream_reconcile(name, dry_run=True, mode=mode)
                         except Exception:
                             metadata_failed = True
                 source = {'count': 0}

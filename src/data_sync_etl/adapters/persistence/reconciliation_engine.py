@@ -20,6 +20,7 @@ Kiến trúc kỹ thuật:
 from __future__ import annotations
 
 import hashlib
+import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,7 +28,7 @@ from threading import Event, Lock
 from time import monotonic
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from data_sync_etl.db.models import (
@@ -95,6 +96,7 @@ class ReconciliationEngine:
         self.source_resolver = None
         self.file_read_budget_seconds = 30
         self.file_cancelled = None
+        self._file_hash_cache: dict[str, tuple[int, float, str]] = {}
 
     def compute_table_summary(
         self,
@@ -183,16 +185,26 @@ class ReconciliationEngine:
         storage_root: Path | None = None,
         sample_limit: int | None = None,
         version_ids: list[str] | None = None,
+        mode: str = "INCREMENTAL",
+        since: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """Kiểm tra toàn vẹn dung lượng file vật lý 2 cấp:
 
         Cấp 1 (Fast Check): So sánh metadata bytes source_file_size == storage_file_size qua os.stat O(1).
-        Cấp 2 (Deep Check): Đọc stream SHA-256 đối chiếu source_hash O(N) khi kích thước khớp.
+        Cấp 2 (Deep Check): Đọc stream SHA-256 đối chiếu source_hash O(N) khi kích thước khớp (có Smart Cache).
         """
         root = Path(storage_root or self.storage_root)
         stmt = select(ResourceVersion).order_by(ResourceVersion.id).limit(10001)
         if version_ids is not None:
             stmt = stmt.where(ResourceVersion.id.in_(version_ids))
+        elif mode == "INCREMENTAL" and since is not None:
+            stmt = stmt.where(
+                or_(
+                    ResourceVersion.updated_at >= since,
+                    ResourceVersion.storage_file_size.is_(None),
+                    ResourceVersion.storage_file_size <= 0,
+                )
+            )
         if sample_limit:
             stmt = stmt.limit(sample_limit)
 
@@ -309,12 +321,22 @@ class ReconciliationEngine:
                 })
                 continue
 
-            # Cấp 2: Deep Check SHA-256 (O(N)) qua stream buffer 64KB
-            sha = hashlib.sha256()
-            with blob_path.open("rb") as f:
-                while chunk := f.read(65536):
-                    sha.update(chunk)
-            computed_hash = sha.hexdigest()
+            # Cấp 2: Deep Check SHA-256 (O(N)) qua stream buffer 64KB kèm Smart Cache
+            st_mtime = blob_path.stat().st_mtime
+            cache_key = str(blob_path)
+            cached = getattr(self, "_file_hash_cache", {}).get(cache_key)
+
+            if cached and cached[0] == st_size and cached[1] == st_mtime:
+                computed_hash = cached[2]
+            else:
+                sha = hashlib.sha256()
+                with blob_path.open("rb") as f:
+                    while chunk := f.read(65536):
+                        sha.update(chunk)
+                computed_hash = sha.hexdigest()
+                if not hasattr(self, "_file_hash_cache"):
+                    self._file_hash_cache = {}
+                self._file_hash_cache[cache_key] = (st_size, st_mtime, computed_hash)
 
             if computed_hash != ver.source_hash:
                 # Dung lượng khớp nhưng nội dung bị hỏng / sửa đổi ngầm (Silent corruption)
@@ -351,8 +373,10 @@ class ReconciliationEngine:
 
         return results
 
-    def _fetch_source_records(self, stream_name: str) -> dict[str, dict[str, Any]]:
-        """Lấy toàn bộ snapshot bản ghi từ Source theo stream."""
+    def _fetch_source_records(
+        self, stream_name: str, mode: str = "INCREMENTAL", since: datetime | None = None
+    ) -> dict[str, dict[str, Any]]:
+        """Lấy snapshot bản ghi từ Source theo stream. Hỗ trợ INCREMENTAL."""
         if self.source_adapter is None:
             return {}
 
@@ -360,8 +384,17 @@ class ReconciliationEngine:
         # Nếu là PostgreSQLSourceAdapter có engine
         if hasattr(self.source_adapter, "engine"):
             tbl = STREAM_TABLE_MAPPING.get(stream_name, {}).get("source_table", stream_name)
+            where_sql = ""
+            params: dict[str, Any] = {}
+            if mode == "INCREMENTAL" and since is not None:
+                where_sql = " WHERE updated_at >= :since"
+                params["since"] = since
+
             with self.source_adapter.engine.connect() as conn:
-                rows = conn.execute(text(f"SELECT * FROM {tbl} LIMIT 10001")).mappings().all()
+                try:
+                    rows = conn.execute(text(f"SELECT * FROM {tbl}{where_sql} LIMIT 10001"), params).mappings().all()
+                except Exception:
+                    rows = conn.execute(text(f"SELECT * FROM {tbl} LIMIT 10001")).mappings().all()
                 if len(rows) > 10000:
                     raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
                 for r in rows:
@@ -396,12 +429,12 @@ class ReconciliationEngine:
         return source_records
 
     def execute_stream_reconcile(
-        self, stream_name: str = 'all', dry_run: bool = True,
+        self, stream_name: str = 'all', dry_run: bool = True, mode: str = "INCREMENTAL",
     ) -> dict[str, Any]:
         if not self._run_lock.acquire(blocking=False):
             raise DomainError('RECONCILIATION_BUSY')
         try:
-            return self._execute_stream_reconcile(stream_name, dry_run)
+            return self._execute_stream_reconcile(stream_name, dry_run, mode=mode)
         finally:
             self._run_lock.release()
 
@@ -409,6 +442,7 @@ class ReconciliationEngine:
         self,
         stream_name: str = "all",
         dry_run: bool = True,
+        mode: str = "INCREMENTAL",
     ) -> dict[str, Any]:
         """Thực thi đối soát toàn diện giữa Nguồn và Đích.
 
@@ -417,6 +451,7 @@ class ReconciliationEngine:
         - Kiểm tra ngưỡng an toàn max_ratio <= 10%: Nếu tỷ lệ lệch vượt ngưỡng -> BLOCKED_MASS_DISCREPANCY.
         - Ghi kết quả vào sync_reconciliation_runs và sync_reconciliation_discrepancies.
         """
+        t_start_total = time.perf_counter()
         streams_to_run = (
             ["grades", "subjects", "users", "resources", "files"]
             if stream_name == "all"
@@ -439,6 +474,7 @@ class ReconciliationEngine:
                 target_tbl = mapping["target_table"]
                 run_id = new_id()
                 started = now()
+                stream_start = time.perf_counter()
 
                 # 1. Tính toán đối soát vĩ mô cho Đích (Master)
                 target_summary = self.compute_table_summary(session, target_tbl, stream)
@@ -459,12 +495,27 @@ class ReconciliationEngine:
                             "total_bytes": 0,
                         }
 
+                # Xác định mốc thời gian since nếu là INCREMENTAL
+                since = None
+                if mode == "INCREMENTAL":
+                    last_run = session.scalar(
+                        select(SyncReconciliationRun)
+                        .where(
+                            SyncReconciliationRun.stream_name == stream,
+                            SyncReconciliationRun.status.in_(("COMPLETED", "PARTIAL")),
+                        )
+                        .order_by(SyncReconciliationRun.started_at.desc())
+                        .limit(1)
+                    )
+                    if last_run and last_run.started_at:
+                        since = last_run.started_at
+
                 # 3. Quét chi tiết từng bản ghi để so sánh song song
                 discrepancies: list[dict[str, Any]] = []
 
                 if stream == "files":
                     # Luồng tệp học liệu: thực hiện Fast Check và Deep Check trên Storage
-                    file_results = self.verify_file_blobs(session, self.storage_root)
+                    file_results = self.verify_file_blobs(session, self.storage_root, mode=mode, since=since)
                     for fr in file_results:
                         if fr["discrepancy_flag"] != FLAG_SYNCED:
                             discrepancies.append({
@@ -476,7 +527,7 @@ class ReconciliationEngine:
                             })
                 else:
                     # Luồng metadata: lấy dữ liệu 2 bên
-                    source_dict = self._fetch_source_records(stream)
+                    source_dict = self._fetch_source_records(stream, mode=mode, since=since)
                     target_rows = repo.find(target_tbl, limit=10001)
                     if len(target_rows) > 10000:
                         raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
@@ -584,6 +635,9 @@ class ReconciliationEngine:
                                 d["resolution_status"] = "AUTO_HEALED"
 
                 finished = now()
+                stream_elapsed_ms = round((time.perf_counter() - stream_start) * 1000, 2)
+                summary_meta["mode"] = mode
+                summary_meta["execution_time_ms"] = stream_elapsed_ms
 
                 # 5. Lưu kết quả chạy vào sync_reconciliation_runs
                 run_record = SyncReconciliationRun(
@@ -623,11 +677,14 @@ class ReconciliationEngine:
 
                 session.flush()
 
+                stream_elapsed_ms = round((time.perf_counter() - stream_start) * 1000, 2)
                 match_rate = round((matched_count / max_population) * 100, 2)
                 overall_reports.append({
                     "run_id": run_id,
                     "stream_name": stream,
                     "status": run_status,
+                    "mode": mode,
+                    "execution_time_ms": stream_elapsed_ms,
                     "started_at": started.isoformat(),
                     "finished_at": finished.isoformat(),
                     "source_count": s_count,
@@ -643,11 +700,14 @@ class ReconciliationEngine:
                     "summary_meta": summary_meta,
                 })
 
+        total_elapsed_ms = round((time.perf_counter() - t_start_total) * 1000, 2)
         return {
             "status": next((status for status in ('BLOCKED', 'PARTIAL')
                             if any(row['status'] == status for row in overall_reports)), 'COMPLETED'),
             "executed_at": now().isoformat(),
             "dry_run": dry_run,
+            "mode": mode,
+            "execution_time_ms": total_elapsed_ms,
             "total_streams": len(overall_reports),
             "reports": overall_reports,
         }

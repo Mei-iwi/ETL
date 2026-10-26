@@ -142,6 +142,11 @@ def create_app(container=None):
             from data_sync_etl.domain.lexical import analyze
 
             await run_in_threadpool(analyze, 'Kiểm tra bộ phân tích')
+        except Exception as exc:
+            logging.getLogger("etl").warning(
+                "Lexical analyzer warmup skipped: %s", exc
+            )
+        try:
             yield
         finally:
             await shutdown_runtime(embedding, app.state.container.close if container is None else None)

@@ -15,6 +15,10 @@ class ReconcileTriggerRequest(BaseModel):
         default=True,
         description="Nếu True chỉ phát hiện và báo cáo; Nếu False cho phép tự động xử lý lệch an toàn",
     )
+    mode: Literal["INCREMENTAL", "FULL"] = Field(
+        default="INCREMENTAL",
+        description="Chế độ đối soát: INCREMENTAL (chỉ file mới/thay đổi) hoặc FULL (toàn bộ kho)",
+    )
 
 
 class ReconciliationRunReport(BaseModel):
@@ -22,6 +26,8 @@ class ReconciliationRunReport(BaseModel):
     run_id: str
     stream_name: str
     status: str
+    mode: str = "INCREMENTAL"
+    execution_time_ms: float = 0.0
     started_at: str
     finished_at: str | None = None
     source_count: int
@@ -42,6 +48,8 @@ class ReconcileTriggerResponse(BaseModel):
     status: str
     executed_at: str
     dry_run: bool
+    mode: str = "INCREMENTAL"
+    execution_time_ms: float = 0.0
     total_streams: int
     reports: list[ReconciliationRunReport]
 

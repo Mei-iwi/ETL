@@ -100,13 +100,14 @@ export function DataReconciliationPage() {
     const startedRun = useRef<string | null>(null)
     const loadRevision = useRef(0)
 
-    // CHẾ ĐỘ CHẠY: THỦ CÔNG / TỰ ĐỘNG
-    const [runMode, setRunMode] = useState<'MANUAL' | 'AUTO'>('MANUAL')
+    // CHẾ ĐỘ CHẠY & PHẠM VI ĐỐI SOÁT
+    const [reconcileMode, setReconcileMode] = useState<'INCREMENTAL' | 'FULL'>('INCREMENTAL')
+    const [isAutoRunning, setIsAutoRunning] = useState<boolean>(false)
     const [autoInterval, setAutoInterval] = useState<number>(60)
     const [autoHealEnabled, setAutoHealEnabled] = useState<boolean>(false)
-    const [isAutoRunning, setIsAutoRunning] = useState<boolean>(false)
     const [countdown, setCountdown] = useState<number>(60)
     const [lastAutoRunAt, setLastAutoRunAt] = useState<string | null>(null)
+    const [lastExecutionTimeMs, setLastExecutionTimeMs] = useState<number | null>(null)
 
     // MODAL THÔNG BÁO GIỮA MÀN HÌNH
     const [confirmModal, setConfirmModal] = useState<{
@@ -181,18 +182,25 @@ export function DataReconciliationPage() {
         setReconciling(true)
         setError('')
         try {
-            const result = await triggerReconciliation(selectedStream, dryRun)
+            const result = await triggerReconciliation(selectedStream, dryRun, reconcileMode)
+            if (result.execution_time_ms !== undefined) {
+                setLastExecutionTimeMs(result.execution_time_ms)
+            }
             if (result.status === 'RUNNING') {
                 startedRun.current = result.reports.find(row => row.stream_name === 'files')?.run_id ?? null
                 setPage(1)
                 await loadData()
                 return
             }
+            const modeText = reconcileMode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'
+            const timeText = result.execution_time_ms !== undefined ? ` (${result.execution_time_ms}ms)` : ''
             setNotice({ title: 'Kết quả đối soát', message: result.status === 'BLOCKED'
-                ? 'Đã quét xong. Có sai lệch vượt ngưỡng an toàn; dữ liệu chưa được thay đổi.'
+                ? `Đã quét xong đối soát (${modeText}). Có sai lệch vượt ngưỡng an toàn; dữ liệu chưa được thay đổi.`
                 : result.reports.some(report => report.status === 'PARTIAL')
-                    ? 'Đã đối soát. Một phần dữ liệu chưa đủ điều kiện xác minh; tệp SOURCE chưa được đọc kiểm tra sẽ không tính là toàn vẹn.'
-                    : 'Đã quét xong đối soát. Dữ liệu nghiệp vụ không thay đổi.' })
+                    ? `Đã đối soát (${modeText})${timeText}. Một phần dữ liệu chưa đủ điều kiện xác minh; tệp SOURCE chưa được đọc kiểm tra sẽ không tính là toàn vẹn.`
+                    : dryRun
+                        ? `Đã quét xong đối soát (${modeText})${timeText}. Dữ liệu nghiệp vụ không thay đổi.`
+                        : `Đã hoàn tất tự phục hồi dữ liệu (${modeText})${timeText}.` })
             setPage(1)
             await loadData()
         } catch (err) {
@@ -204,7 +212,7 @@ export function DataReconciliationPage() {
                 running.current = false
             }
         }
-    }, [selectedStream, loadData])
+    }, [selectedStream, reconcileMode, loadData])
 
     const executeReconciliation = useCallback(async (dryRun: boolean, isAuto: boolean = false) => {
         await handleRunReconcile(dryRun)
@@ -213,7 +221,7 @@ export function DataReconciliationPage() {
 
     // TIMER CHẠY TỰ ĐỘNG
     useEffect(() => {
-        if (selectedStream === 'files' || runMode !== 'AUTO' || !isAutoRunning) {
+        if (!isAutoRunning) {
             return
         }
 
@@ -230,7 +238,22 @@ export function DataReconciliationPage() {
         }, 1000)
 
         return () => clearInterval(timer)
-    }, [selectedStream, runMode, isAutoRunning, autoInterval, autoHealEnabled, executeReconciliation])
+    }, [isAutoRunning, autoInterval, autoHealEnabled, executeReconciliation])
+
+    const handleToggleAuto = (enabled: boolean) => {
+        if (enabled && autoHealEnabled) {
+            setConfirmModal({
+                title: 'Kích hoạt tự động phục hồi',
+                message: `Hệ thống sẽ đối soát VÀ tự phục hồi định kỳ mỗi ${autoInterval}s (${reconcileMode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'}). Bạn có chắc chắn muốn kích hoạt?`,
+                onConfirm: () => {
+                    setConfirmModal(null)
+                    setIsAutoRunning(true)
+                },
+            })
+        } else {
+            setIsAutoRunning(enabled)
+        }
+    }
 
     function handleAutoHealClick() {
         setConfirmModal({
@@ -269,6 +292,7 @@ export function DataReconciliationPage() {
                     </div>
 
                     <div className={styles.actionsBar}>
+                        {/* 1. CHỌN LUỒNG */}
                         <select
                             className={styles.select}
                             value={selectedStream}
@@ -288,59 +312,64 @@ export function DataReconciliationPage() {
                             <option value="grades">Khối lớp</option>
                             <option value="users">Người dùng</option>
                         </select>
+                        {/* 2. BỘ CHỌN PHẠM VI ĐỐI SOÁT */}
+                        <select
+                            className={styles.select}
+                            value={reconcileMode}
+                            onChange={(e) => setReconcileMode(e.target.value as 'INCREMENTAL' | 'FULL')}
+                            aria-label="Phạm vi đối soát"
+                        >
+                            <option value="INCREMENTAL">Tăng dần (Chỉ file mới/thay đổi)</option>
+                            <option value="FULL">Toàn diện (Tất cả file)</option>
+                        </select>
 
-                        {selectedStream !== 'files' ? <>
-                        {/* NÚT CHUYỂN ĐỔI CHẾ ĐỘ THỦ CÔNG / TỰ ĐỘNG */}
-                        <div className={styles.segmentedControl} role="group" aria-label="Chế độ đối soát">
-                            <button
-                                type="button"
-                                className={`${styles.segmentedBtn} ${runMode === 'MANUAL' ? styles.segmentedBtnActive : ''}`}
-                                onClick={() => {
-                                    setRunMode('MANUAL')
-                                    setIsAutoRunning(false)
-                                }}
+                        {/* 3. NÚT ĐỐI SOÁT & PHỤC HỒI THỦ CÔNG */}
+                        <button
+                            type="button"
+                            className={styles.primaryButton}
+                            disabled={reconciling || loading}
+                            onClick={() => void executeReconciliation(true)}
+                        >
+                            {reconciling ? 'Đang đối soát...' : 'Quét đối soát'}
+                        </button>
+
+                        <button
+                            type="button"
+                            className={styles.secondaryButton}
+                            disabled={reconciling || loading}
+                            onClick={handleAutoHealClick}
+                        >
+                            Tự phục hồi
+                        </button>
+
+                        {/* 4. CÔNG TẮC BẬT/TẮT TỰ ĐỘNG DUY NHẤT */}
+                        <div className={styles.autoSwitchContainer}>
+                            <label className={styles.switch}>
+                                <input
+                                    type="checkbox"
+                                    checked={isAutoRunning}
+                                    onChange={(e) => handleToggleAuto(e.target.checked)}
+                                />
+                                <span className={styles.slider} />
+                            </label>
+                            <span
+                                className={styles.switchLabel}
+                                onClick={() => handleToggleAuto(!isAutoRunning)}
                             >
-                                Thủ công
-                            </button>
-                            <button
-                                type="button"
-                                className={`${styles.segmentedBtn} ${runMode === 'AUTO' ? styles.segmentedBtnActive : ''}`}
-                                onClick={() => setRunMode('AUTO')}
-                            >
-                                Tự động
-                            </button>
+                                {isAutoRunning ? 'Tự động: BẬT' : 'Tự động: TẮT'}
+                            </span>
                         </div>
 
-                        {runMode === 'MANUAL' ? (
-                            <>
-                                <button
-                                    type="button"
-                                    className={styles.primaryButton}
-                                    disabled={reconciling || loading}
-                                    onClick={() => void executeReconciliation(true)}
-                                >
-                                    {reconciling ? 'Đang đối soát...' : 'Quét đối soát'}
-                                </button>
-
-                                <button
-                                    type="button"
-                                    className={styles.secondaryButton}
-                                    disabled={reconciling || loading}
-                                    onClick={handleAutoHealClick}
-                                >
-                                    Tự phục hồi
-                                </button>
-                            </>
-                        ) : (
+                        {/* CẤU HÌNH INLINE KHI BẬT TỰ ĐỘNG */}
+                        {isAutoRunning && (
                             <div className={styles.autoGroup}>
                                 <select
                                     className={styles.select}
                                     value={autoInterval}
-                                    disabled={isAutoRunning}
                                     onChange={(e) => setAutoInterval(Number(e.target.value))}
                                     aria-label="Chu kỳ tự động"
                                 >
-                                    <option value={30}>Mỗi 30 giây</option>
+                                    <option value={30}>Mỗi 30s</option>
                                     <option value={60}>Mỗi 1 phút</option>
                                     <option value={300}>Mỗi 5 phút</option>
                                     <option value={600}>Mỗi 10 phút</option>
@@ -350,56 +379,30 @@ export function DataReconciliationPage() {
                                     <input
                                         type="checkbox"
                                         checked={autoHealEnabled}
-                                        disabled={isAutoRunning}
                                         onChange={(e) => setAutoHealEnabled(e.target.checked)}
                                     />
-                                    <span>Kèm tự phục hồi</span>
+                                    <span>Kèm tự sửa</span>
                                 </label>
-
-                                <button
-                                    type="button"
-                                    className={isAutoRunning ? styles.dangerButton : styles.successButton}
-                                    onClick={() => {
-                                        if (!isAutoRunning && autoHealEnabled) {
-                                            setConfirmModal({
-                                                title: 'Kích hoạt tự động phục hồi',
-                                                message: `Hệ thống sẽ đối soát VÀ tự phục hồi định kỳ mỗi ${autoInterval}s. Bạn có chắc chắn muốn kích hoạt?`,
-                                                onConfirm: () => {
-                                                    setConfirmModal(null)
-                                                    setIsAutoRunning(true)
-                                                },
-                                            })
-                                        } else {
-                                            setIsAutoRunning(!isAutoRunning)
-                                        }
-                                    }}
-                                >
-                                    {isAutoRunning ? 'Dừng tự động' : 'Bật tự động'}
-                                </button>
                             </div>
                         )}
-                        </> : <>
-                        <button
-                            type="button"
-                            className={styles.primaryButton}
-                            disabled={reconciling || loading}
-                            onClick={() => void handleRunReconcile()}
-                        >
-                            {reconciling ? 'Đang đối soát...' : 'Quét đối soát'}
-                        </button>
 
-                        <label><input type="checkbox" checked={automatic} onChange={event => setAutomatic(event.target.checked)} /> Tự quét mỗi 5 phút khi mở trang</label>
-                        </>}
+                        {/* BADGE HIỂN THỊ THỜI GIAN THỰC THI */}
+                        {(lastExecutionTimeMs !== null || report?.stream_reports?.[0]?.execution_time_ms !== undefined) && (
+                            <div className={styles.executionBadge} title="Thời gian thực thi đợt quét gần nhất">
+                                {lastExecutionTimeMs ?? report?.stream_reports?.[0]?.execution_time_ms} ms
+                            </div>
+                        )}
                     </div>
                 </div>
 
                 {/* BANNER THÔNG BÁO TỰ ĐỘNG CHẠY */}
-                {selectedStream !== 'files' && runMode === 'AUTO' && isAutoRunning && (
+                {isAutoRunning && (
                     <div className={styles.autoStatusBanner}>
                         <div>
                             <span className={styles.pulseDot} />
-                            <strong>Đang tự động đối soát:</strong> chu kỳ {autoInterval}s ({autoHealEnabled ? 'Kèm tự phục hồi' : 'Chỉ kiểm tra'})
+                            <strong>Đang tự động đối soát:</strong> chu kỳ {autoInterval}s • Phạm vi: {reconcileMode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'} ({autoHealEnabled ? 'Kèm tự phục hồi' : 'Chỉ kiểm tra'})
                             {lastAutoRunAt && ` • Quét gần nhất: ${lastAutoRunAt}`}
+                            {lastExecutionTimeMs !== null && ` (${lastExecutionTimeMs}ms)`}
                         </div>
                         <div>
                             Lần quét tiếp theo: <strong>{countdown}s</strong>
@@ -461,6 +464,9 @@ export function DataReconciliationPage() {
                         </span>
                         <span className={styles.statusSub}>
                             Lần chạy: {formatDate(report?.last_reconciled_at)}
+                            {report?.stream_reports?.[0]?.execution_time_ms !== undefined && (
+                                <> • {report.stream_reports[0].execution_time_ms}ms</>
+                            )}
                         </span>
                     </div>
                 </div>

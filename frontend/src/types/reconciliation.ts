@@ -2,6 +2,8 @@ export interface ReconciliationRunReport {
     run_id: string
     stream_name: string
     status: 'RUNNING' | 'COMPLETED' | 'BLOCKED' | 'FAILED' | 'PARTIAL'
+    mode?: 'INCREMENTAL' | 'FULL'
+    execution_time_ms?: number
     started_at: string
     finished_at?: string | null
     source_count: number
@@ -14,6 +16,8 @@ export interface ReconciliationRunReport {
     source_table_hash?: string | null
     target_table_hash?: string | null
     summary_meta?: {
+        mode?: 'INCREMENTAL' | 'FULL'
+        execution_time_ms?: number
         mismatch_ratio?: number
         max_allowed_ratio?: number
         guard_alert?: string
@@ -27,6 +31,16 @@ export interface ReconciliationRunReport {
         total_files?: number
         verified_bytes?: number
     } | null
+}
+
+export interface ReconcileTriggerResponse {
+    status: string
+    executed_at: string
+    dry_run: boolean
+    mode: 'INCREMENTAL' | 'FULL'
+    execution_time_ms: number
+    total_streams: number
+    reports: ReconciliationRunReport[]
 }
 
 export interface ReconciliationLatestReport {
