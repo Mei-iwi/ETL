@@ -43,7 +43,11 @@ def trigger_reconciliation(
     - Tự động áp dụng ngưỡng an toàn max_ratio <= 10% (0.1).
     """
     engine = request.app.state.container.reconciliation_engine
-    result = engine.execute_stream_reconcile(stream_name=body.stream, dry_run=body.dry_run)
+    result = engine.execute_stream_reconcile(
+        stream_name=body.stream,
+        dry_run=body.dry_run,
+        mode=body.mode,
+    )
     return result
 
 

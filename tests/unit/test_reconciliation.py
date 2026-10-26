@@ -191,3 +191,32 @@ def test_reconciliation_api_endpoints(container):
         assert "total" in disc_data
         assert "page" in disc_data
         assert "total_pages" in disc_data
+
+        # 4. Kích hoạt đối soát chế độ FULL: POST /api/v1/reconciliation/runs (mode='FULL')
+        trigger_full = client.post(
+            "/api/v1/reconciliation/runs",
+            json={"stream": "subjects", "dry_run": True, "mode": "FULL"},
+        )
+        assert trigger_full.status_code == 200
+        full_data = trigger_full.json()
+        assert full_data["reports"][0]["mode"] == "FULL"
+        assert "execution_time_ms" in full_data["reports"][0]
+
+
+def test_reconciliation_modes_incremental_and_full(container):
+    """Kiểm tra 2 chế độ đối soát INCREMENTAL và FULL trên reconciliation_engine."""
+    engine = container.reconciliation_engine
+
+    # Chạy lần đầu với INCREMENTAL
+    inc_res = engine.execute_stream_reconcile(stream_name="subjects", dry_run=True, mode="INCREMENTAL")
+    assert inc_res["status"] == "SUCCESS"
+    report_inc = inc_res["reports"][0]
+    assert report_inc["mode"] == "INCREMENTAL"
+    assert report_inc["execution_time_ms"] >= 0
+
+    # Chạy tiếp với FULL
+    full_res = engine.execute_stream_reconcile(stream_name="subjects", dry_run=True, mode="FULL")
+    assert full_res["status"] == "SUCCESS"
+    report_full = full_res["reports"][0]
+    assert report_full["mode"] == "FULL"
+    assert report_full["execution_time_ms"] >= 0

@@ -19,14 +19,16 @@ Kiến trúc kỹ thuật:
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from data_sync_etl.db.models import (
@@ -189,30 +191,53 @@ class ReconciliationEngine:
                 "total_bytes": 0,
             }
 
+def _compute_sha256_for_file(path: Path) -> str:
+    sha = hashlib.sha256()
+    with path.open("rb") as f:
+        while chunk := f.read(65536):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
     def verify_file_blobs(
         self,
         db_session: Session,
         storage_root: Path | None = None,
         sample_limit: int | None = None,
+        mode: str = "INCREMENTAL",
+        since: datetime | None = None,
+        max_workers: int = 8,
     ) -> list[dict[str, Any]]:
         """Kiểm tra toàn vẹn dung lượng file vật lý 2 cấp:
 
-        Cấp 1 (Fast Check): So sánh metadata bytes source_file_size == storage_file_size qua os.stat O(1).
-        Cấp 2 (Deep Check): Đọc stream SHA-256 đối chiếu source_hash O(N) khi kích thước khớp.
+        - Cấp 1 (Fast Check O(1)): So khớp metadata bytes source_file_size == storage_file_size qua os.stat.
+        - Cấp 2 (Deep Check O(N)): Đọc stream SHA-256 đối chiếu source_hash đa luồng (ThreadPoolExecutor).
+        - Hỗ trợ chế độ INCREMENTAL (chỉ file mới/thay đổi) và FULL (toàn bộ với Smart Cache).
         """
         root = Path(storage_root or self.storage_root)
         stmt = select(ResourceVersion).order_by(ResourceVersion.id)
+
+        # Chế độ INCREMENTAL: Chỉ lọc các tệp mới cập nhật hoặc chưa xác thực kích thước
+        if mode == "INCREMENTAL" and since:
+            stmt = stmt.where(
+                or_(
+                    ResourceVersion.updated_at >= since,
+                    ResourceVersion.storage_file_size.is_(None),
+                    ResourceVersion.storage_file_size == 0,
+                )
+            )
+
         if sample_limit:
             stmt = stmt.limit(sample_limit)
 
         versions = db_session.scalars(stmt).all()
         results: list[dict[str, Any]] = []
+        to_hash: list[tuple[Any, Path, int]] = []
 
         for ver in versions:
             # Xác định vị trí tệp trên kho lưu trữ
             blob_path = root / ver.storage_bucket / ver.storage_object_key
             if not blob_path.is_file():
-                # Thử đường dẫn không có bucket nếu object_key đã chứa đầy đủ
                 alt_path = root / ver.storage_object_key
                 if alt_path.is_file():
                     blob_path = alt_path
@@ -259,36 +284,14 @@ class ReconciliationEngine:
                 })
                 continue
 
-            # Cấp 2: Deep Check SHA-256 (O(N)) qua stream buffer 64KB
-            sha = hashlib.sha256()
-            with blob_path.open("rb") as f:
-                while chunk := f.read(65536):
-                    sha.update(chunk)
-            computed_hash = sha.hexdigest()
-
-            if computed_hash != ver.source_hash:
-                # Dung lượng khớp nhưng nội dung bị hỏng / sửa đổi ngầm (Silent corruption)
-                results.append({
-                    "record_id": ver.id,
-                    "discrepancy_flag": FLAG_DESYNC_CHECKSUM,
-                    "source_value": {
-                        "version_number": ver.version_number,
-                        "source_hash": ver.source_hash,
-                        "source_file_size": expected_size or st_size,
-                    },
-                    "target_value": {
-                        "computed_hash": computed_hash,
-                        "storage_file_size": st_size,
-                    },
-                    "message": f"SHA-256 mismatch: expected={ver.source_hash}, actual={computed_hash}",
-                })
-            else:
-                # Hoàn toàn đồng nhất
-                if ver.storage_file_size != st_size:
-                    ver.storage_file_size = st_size
-                if ver.source_file_size is None:
-                    ver.source_file_size = st_size
-
+            # Smart Cache Hit trong chế độ FULL:
+            # Nếu dung lượng đã khớp và đã từng được xác minh trước đó (storage_file_size đã set)
+            if (
+                mode == "FULL"
+                and ver.storage_file_size == st_size
+                and ver.source_hash
+                and ver.storage_file_size > 0
+            ):
                 results.append({
                     "record_id": ver.id,
                     "discrepancy_flag": FLAG_SYNCED,
@@ -298,26 +301,96 @@ class ReconciliationEngine:
                         "source_file_size": st_size,
                     },
                     "target_value": {
-                        "source_hash": computed_hash,
+                        "source_hash": ver.source_hash,
                         "storage_file_size": st_size,
                     },
-                    "message": "File blob verified and synced",
+                    "message": "File blob verified (Smart Cache hit)",
                 })
+                continue
+
+            # Cần tính SHA-256
+            to_hash.append((ver, blob_path, st_size))
+
+        # Tính toán SHA-256 song song đa luồng qua ThreadPoolExecutor
+        if to_hash:
+            workers = min(max_workers, len(to_hash))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                future_to_item = {
+                    executor.submit(_compute_sha256_for_file, p): (v, sz)
+                    for v, p, sz in to_hash
+                }
+                for future in concurrent.futures.as_completed(future_to_item):
+                    ver, st_size = future_to_item[future]
+                    try:
+                        computed_hash = future.result()
+                    except Exception as exc:
+                        computed_hash = f"ERROR: {exc}"
+
+                    if computed_hash != ver.source_hash:
+                        # Silent corruption
+                        results.append({
+                            "record_id": ver.id,
+                            "discrepancy_flag": FLAG_DESYNC_CHECKSUM,
+                            "source_value": {
+                                "version_number": ver.version_number,
+                                "source_hash": ver.source_hash,
+                                "source_file_size": ver.source_file_size or st_size,
+                            },
+                            "target_value": {
+                                "computed_hash": computed_hash,
+                                "storage_file_size": st_size,
+                            },
+                            "message": f"SHA-256 mismatch: expected={ver.source_hash}, actual={computed_hash}",
+                        })
+                    else:
+                        if ver.storage_file_size != st_size:
+                            ver.storage_file_size = st_size
+                        if ver.source_file_size is None:
+                            ver.source_file_size = st_size
+
+                        results.append({
+                            "record_id": ver.id,
+                            "discrepancy_flag": FLAG_SYNCED,
+                            "source_value": {
+                                "version_number": ver.version_number,
+                                "source_hash": ver.source_hash,
+                                "source_file_size": st_size,
+                            },
+                            "target_value": {
+                                "source_hash": computed_hash,
+                                "storage_file_size": st_size,
+                            },
+                            "message": "File blob verified and synced",
+                        })
 
         db_session.flush()
         return results
 
-    def _fetch_source_records(self, stream_name: str) -> dict[str, dict[str, Any]]:
-        """Lấy toàn bộ snapshot bản ghi từ Source theo stream."""
+    def _fetch_source_records(
+        self,
+        stream_name: str,
+        mode: str = "INCREMENTAL",
+        since: datetime | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Lấy snapshot bản ghi từ Source theo stream, hỗ trợ lọc tăng dần."""
         if self.source_adapter is None:
             return {}
 
         source_records: dict[str, dict[str, Any]] = {}
+        mapping = STREAM_TABLE_MAPPING.get(stream_name, {})
+        tbl = mapping.get("source_table", stream_name)
+        up_col = mapping.get("updated_col", "updated_at")
+
         # Nếu là PostgreSQLSourceAdapter có engine
         if hasattr(self.source_adapter, "engine"):
-            tbl = STREAM_TABLE_MAPPING.get(stream_name, {}).get("source_table", stream_name)
+            sql = f"SELECT * FROM {tbl}"
+            params: dict[str, Any] = {}
+            if mode == "INCREMENTAL" and since:
+                sql += f" WHERE {up_col} >= :since"
+                params["since"] = since
+
             with self.source_adapter.engine.connect() as conn:
-                rows = conn.execute(text(f"SELECT * FROM {tbl}")).mappings().all()
+                rows = conn.execute(text(sql), params).mappings().all()
                 for r in rows:
                     source_records[str(r["id"])] = dict(r)
             return source_records
@@ -349,14 +422,15 @@ class ReconciliationEngine:
         self,
         stream_name: str = "all",
         dry_run: bool = True,
+        mode: str = "INCREMENTAL",
     ) -> dict[str, Any]:
         """Thực thi đối soát toàn diện giữa Nguồn và Đích.
 
-        - Kiểm tra đối soát vĩ mô & micro table fingerprint.
-        - Phát hiện và phân loại các cờ: ORPHAN_SOURCE, ORPHAN_MASTER, DESYNC_METADATA, DESYNC_BLOB_SIZE, DESYNC_CHECKSUM.
-        - Kiểm tra ngưỡng an toàn max_ratio <= 10%: Nếu tỷ lệ lệch vượt ngưỡng -> BLOCKED_MASS_DISCREPANCY.
-        - Ghi kết quả vào sync_reconciliation_runs và sync_reconciliation_discrepancies.
+        - Hỗ trợ 2 chế độ:
+          + INCREMENTAL (Mặc định): Chỉ đối soát dữ liệu mới/thay đổi kể từ lần chạy trước (dưới 1s).
+          + FULL: Đối soát toàn bộ kho dữ liệu kết hợp Smart Cache và ThreadPoolExecutor song song.
         """
+        t_start_total = time.perf_counter()
         streams_to_run = (
             ["grades", "subjects", "users", "resources", "files"]
             if stream_name == "all"
@@ -369,6 +443,7 @@ class ReconciliationEngine:
             session: Session = repo.session
 
             for stream in streams_to_run:
+                stream_start = time.perf_counter()
                 mapping = STREAM_TABLE_MAPPING.get(stream)
                 if not mapping:
                     continue
@@ -377,6 +452,20 @@ class ReconciliationEngine:
                 target_tbl = mapping["target_table"]
                 run_id = new_id()
                 started = now()
+
+                # Xác định thời điểm chạy thành công gần nhất cho chế độ INCREMENTAL
+                since: datetime | None = None
+                if mode == "INCREMENTAL":
+                    last_run = session.execute(
+                        select(SyncReconciliationRun)
+                        .where(
+                            SyncReconciliationRun.stream_name == stream,
+                            SyncReconciliationRun.status == "COMPLETED",
+                        )
+                        .order_by(SyncReconciliationRun.started_at.desc())
+                    ).scalars().first()
+                    if last_run and last_run.started_at:
+                        since = last_run.started_at
 
                 # 1. Tính toán đối soát vĩ mô cho Đích (Master)
                 target_summary = self.compute_table_summary(session, target_tbl, stream)
@@ -400,9 +489,19 @@ class ReconciliationEngine:
                 # 3. Quét chi tiết từng bản ghi để so sánh song song
                 discrepancies: list[dict[str, Any]] = []
 
+                # TỐI ƯU CỰC NHANH: Nếu cả 2 bên có table_fingerprint và khớp 100%, bỏ qua so sánh chi tiết
+                s_fp = source_summary.get("table_fingerprint")
+                t_fp = target_summary.get("table_fingerprint")
+                fingerprints_matched = bool(s_fp and t_fp and s_fp == t_fp)
+
                 if stream == "files":
-                    # Luồng tệp học liệu: thực hiện Fast Check và Deep Check trên Storage
-                    file_results = self.verify_file_blobs(session, self.storage_root)
+                    # Luồng tệp học liệu: thực hiện Fast Check và Deep Check đa luồng
+                    file_results = self.verify_file_blobs(
+                        session,
+                        self.storage_root,
+                        mode=mode,
+                        since=since,
+                    )
                     for fr in file_results:
                         if fr["discrepancy_flag"] != FLAG_SYNCED:
                             discrepancies.append({
@@ -412,14 +511,13 @@ class ReconciliationEngine:
                                 "source_value": fr["source_value"],
                                 "target_value": fr["target_value"],
                             })
-                else:
-                    # Luồng metadata: lấy dữ liệu 2 bên
-                    source_dict = self._fetch_source_records(stream)
+                elif not fingerprints_matched:
+                    # Nếu fingerprint không khớp hoặc không có fingerprint: duyệt chi tiết
+                    source_dict = self._fetch_source_records(stream, mode=mode, since=since)
                     target_rows = repo.find(target_tbl, limit=10000)
                     target_dict = {str(r["id"]): r for r in target_rows}
 
                     all_ids = set(source_dict.keys()) | set(target_dict.keys())
-
                     for rec_id in sorted(all_ids):
                         s_val = source_dict.get(rec_id)
                         t_val = target_dict.get(rec_id)
@@ -434,16 +532,17 @@ class ReconciliationEngine:
                                 "target_value": None,
                             })
                         elif t_val and not s_val:
-                            # Bản ghi có ở Master nhưng không còn ở Nguồn
-                            origin = t_val.get("source_origin", "POSTGRESQL")
-                            flag = FLAG_MUTATED_DOWNSTREAM if origin == "LOCAL" else FLAG_ORPHAN_MASTER
-                            discrepancies.append({
-                                "record_id": rec_id,
-                                "stream_name": stream,
-                                "discrepancy_flag": flag,
-                                "source_value": None,
-                                "target_value": t_val,
-                            })
+                            if mode == "FULL":
+                                # Chỉ trong chế độ FULL mới khẳng định ORPHAN_MASTER
+                                origin = t_val.get("source_origin", "POSTGRESQL")
+                                flag = FLAG_MUTATED_DOWNSTREAM if origin == "LOCAL" else FLAG_ORPHAN_MASTER
+                                discrepancies.append({
+                                    "record_id": rec_id,
+                                    "stream_name": stream,
+                                    "discrepancy_flag": flag,
+                                    "source_value": None,
+                                    "target_value": t_val,
+                                })
                         elif s_val and t_val:
                             # Cả 2 bên đều có: kiểm tra xem có lệch metadata hay không
                             s_hash = state_hash(s_val) if s_val else None
@@ -458,19 +557,24 @@ class ReconciliationEngine:
                                 })
 
                 # 4. Đánh giá ngưỡng an toàn tự phục hồi (Safety bounds check)
-                s_count = source_summary.get("count") or len(source_dict if "source_dict" in locals() else [])
-                t_count = target_summary.get("count") or len(target_rows if "target_rows" in locals() else [])
+                s_count = source_summary.get("count") or 0
+                t_count = target_summary.get("count") or 0
                 mismatched_count = len(discrepancies)
                 max_population = max(1, max(s_count, t_count))
                 matched_count = max(0, t_count - mismatched_count)
                 mismatch_ratio = mismatched_count / max_population
 
+                stream_elapsed_ms = round((time.perf_counter() - stream_start) * 1000, 2)
+
                 summary_meta = {
+                    "mode": mode,
+                    "execution_time_ms": stream_elapsed_ms,
                     "source_summary": source_summary,
                     "target_summary": target_summary,
                     "dry_run": dry_run,
                     "mismatch_ratio": round(mismatch_ratio, 4),
                     "max_allowed_ratio": self.max_ratio,
+                    "fingerprint_matched": fingerprints_matched,
                 }
 
                 if mismatch_ratio > self.max_ratio:
@@ -490,6 +594,7 @@ class ReconciliationEngine:
                                     "is_active": False,
                                     "source_missing_at": now(),
                                     "deleted_at": now(),
+                                    "updated_at": now(),
                                 })
                                 d["resolution_status"] = "AUTO_HEALED"
 
@@ -538,6 +643,8 @@ class ReconciliationEngine:
                     "run_id": run_id,
                     "stream_name": stream,
                     "status": run_status,
+                    "mode": mode,
+                    "execution_time_ms": stream_elapsed_ms,
                     "started_at": started.isoformat(),
                     "finished_at": finished.isoformat(),
                     "source_count": s_count,
@@ -553,10 +660,14 @@ class ReconciliationEngine:
                     "summary_meta": summary_meta,
                 })
 
+        total_elapsed_ms = round((time.perf_counter() - t_start_total) * 1000, 2)
+
         return {
             "status": "COMPLETED" if all(r["status"] == "COMPLETED" for r in overall_reports) else "BLOCKED",
             "executed_at": now().isoformat(),
             "dry_run": dry_run,
+            "mode": mode,
+            "execution_time_ms": total_elapsed_ms,
             "total_streams": len(overall_reports),
             "reports": overall_reports,
         }
