@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
+import { canManageResourceDeletion } from '../../services/resourceDeletionApi'
+import { ResourceDeletionDialog } from './ResourceDeletionDialog'
 import {
     getResourceTypes,
     type ResourceTypeOption,
@@ -14,6 +16,8 @@ type Resource = {
     resource_type_name_vi: string
     publication_status: string
     updated_at: string
+    deletion_revision: number
+    master_deleted_at?: string | null
     latest_version?: {
         id: string
         version_number: number
@@ -47,6 +51,10 @@ export function LibraryListPage() {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
     const [refresh, setRefresh] = useState(0)
+    const canDelete = canManageResourceDeletion(principal)
+    const [deletedOnly, setDeletedOnly] = useState(false)
+    const [deletionTarget, setDeletionTarget] = useState<Resource | null>(null)
+    const [notice, setNotice] = useState('')
 
     useEffect(() => {
         const controller = new AbortController()
@@ -90,6 +98,7 @@ export function LibraryListPage() {
             if (resourceTypeCode) {
                 params.set('resource_type_code', resourceTypeCode)
             }
+            if (canDelete && deletedOnly) params.set('deleted_only', 'true')
 
             try {
                 const response = await fetch(
@@ -120,7 +129,7 @@ export function LibraryListPage() {
         void loadResources()
 
         return () => controller.abort()
-    }, [page, query, resourceTypeCode, refresh])
+    }, [page, query, resourceTypeCode, refresh, canDelete, deletedOnly])
 
     function handleSearch(event: FormEvent<HTMLFormElement>) {
         event.preventDefault()
@@ -139,6 +148,14 @@ export function LibraryListPage() {
                 </Link>}
             </header>
 
+            {canDelete && <div className={styles.visibilityTabs} aria-label="Trạng thái học liệu">
+                <button type="button" aria-pressed={!deletedOnly} onClick={() => {
+                    setDeletedOnly(false); setPage(1); setData(null); setNotice('')
+                }}>Đang sử dụng</button>
+                <button type="button" aria-pressed={deletedOnly} onClick={() => {
+                    setDeletedOnly(true); setPage(1); setData(null); setNotice('')
+                }}>Đã xóa</button>
+            </div>}
             <form className={styles.searchForm} onSubmit={handleSearch}>
                 <input
                     aria-label="Tìm học liệu"
@@ -168,6 +185,7 @@ export function LibraryListPage() {
 
             {lookupError && <p className={styles.error} role="alert">{lookupError}</p>}
             {error && <p className={styles.error} role="alert">{error}</p>}
+            {notice && <p className={styles.notice} role="status">{notice}</p>}
 
             <div className={styles.tableWrapper}>
                 <table className={styles.table}>
@@ -217,6 +235,10 @@ export function LibraryListPage() {
                                         {new Date(resource.updated_at).toLocaleDateString('vi-VN')}
                                     </td>
                                     <td>
+                                        {deletedOnly && canDelete ? <>
+                                            <span className={styles.versionTime}>Đã xóa{resource.master_deleted_at
+                                                ? `: ${new Date(resource.master_deleted_at).toLocaleString('vi-VN')}` : ''}</span>
+                                        </> : <>
                                         <Link
                                             className={styles.link}
                                             to={`/library/${encodeURIComponent(resource.id)}`}
@@ -239,6 +261,11 @@ export function LibraryListPage() {
                                                 Cập nhật
                                             </Link>
                                         </>}
+                                        </>}
+                                        {canDelete && deletedOnly && <button type="button" className={styles.restoreAction}
+                                            onClick={() => setDeletionTarget(resource)}>
+                                            Khôi phục
+                                        </button>}
                                     </td>
                                 </tr>
                             ))
@@ -279,6 +306,14 @@ export function LibraryListPage() {
                     </div>
                 </footer>
             )}
+            {canDelete && deletionTarget && <ResourceDeletionDialog resource={deletionTarget} restore={deletedOnly}
+                onClose={() => setDeletionTarget(null)} onSuccess={() => {
+                    setDeletionTarget(null)
+                    setNotice(deletedOnly ? 'Đã khôi phục học liệu.' : 'Đã xóa mềm học liệu.')
+                    setData(null); setLoading(true)
+                    if (data?.items.length === 1 && page > 1) setPage(page - 1)
+                    setRefresh(value => value + 1)
+                }} />}
         </section>
     )
 }

@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { useAuth } from '../../auth/AuthProvider'
+import { canManageResourceDeletion } from '../../services/resourceDeletionApi'
+import { ResourceDeletionDialog } from './ResourceDeletionDialog'
 import { ArrowLeft, BookOpen, GraduationCap, Library, History } from 'lucide-react'
 import styles from './LibraryResourceDetailPage.module.css'
 import { ResourceFilePanel } from './ResourceFilePanel'
@@ -30,11 +33,15 @@ type ResourceDetail = {
     is_active: boolean
     created_at: string
     updated_at: string
+    deletion_revision: number
     subjects: Subject[]
     grade_levels: GradeLevel[]
 }
 
 export function LibraryResourceDetailPage() {
+    const { principal } = useAuth()
+    const navigate = useNavigate()
+    const [deleting, setDeleting] = useState(false)
     const { resourceId } = useParams<{ resourceId: string }>()
     const [params] = useSearchParams()
     const backTo = '/library/list'
@@ -149,7 +156,9 @@ export function LibraryResourceDetailPage() {
                 <h1>{resource.title}</h1>
             </header>
 
-            <ResourceDescriptionPanel key={resource.id} resourceId={resource.id}>
+            <ResourceDescriptionPanel key={resource.id} resourceId={resource.id}
+                actions={canManageResourceDeletion(principal) && <button type="button" className={styles.deleteResourceButton}
+                    onClick={() => setDeleting(true)}>Xóa học liệu</button>}>
                 <dl className={styles.details}>
                     <div>
                         <dt>Nguồn quản lý</dt>
@@ -197,6 +206,9 @@ export function LibraryResourceDetailPage() {
                 <History size={16} aria-hidden="true" />Xem lịch sử phiên bản
             </Link>
             </div>
+            {deleting && canManageResourceDeletion(principal) && <ResourceDeletionDialog
+                resource={resource} restore={false} onClose={() => setDeleting(false)}
+                onSuccess={() => navigate('/library/list', { replace: true })} />}
         </section>
     )
 }
