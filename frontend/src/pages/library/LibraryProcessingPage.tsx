@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { BilingualPanel } from '../../components/BilingualPanel'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router'
 import {
     ProcessingApiError,
@@ -42,6 +43,7 @@ function getMainStatus(
     statusError: string,
 ) {
     if (statusError) return { label: 'Không thể cập nhật trạng thái', tone: 'error' }
+    if (result?.processing_status === 'NO_EXTRACTABLE_CONTENT') return { label: 'Không có nội dung trích xuất được', tone: 'idle' }
     if (result?.error_code === 'NO_SPEECH_CONTENT') return { label: 'Không có nội dung lời nói', tone: 'idle' }
     if (result?.error_code === 'MEDIA_NO_AUDIO') return { label: 'Tệp không có âm thanh', tone: 'idle' }
     if (!jobId) return { label: 'Chưa bắt đầu xử lý', tone: 'idle' }
@@ -274,6 +276,7 @@ export function LibraryProcessingPage() {
                 </div>
             </div>
 
+            <BilingualPanel key={versionId} versionId={versionId} refreshKey={`${currentResult?.job_status}-${currentResult?.processing_status}`} />
             <div className={styles.resultCard}>
                 <h2>Trạng thái xử lý</h2>
                 <div className={styles.statusMessage} data-tone={mainStatus.tone} role="status">
