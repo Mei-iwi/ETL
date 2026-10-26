@@ -2,6 +2,7 @@
 
 from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import ProcessingJobNotFound, ProcessingRetryConflict, now
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.ports.repositories import UnitOfWork
 
 
@@ -46,7 +47,7 @@ class RetryProcessingJob:
                     version is None
                     or resource is None
                     or not resource["is_active"]
-                    or resource["deleted_at"] is not None
+                    or resource_deleted(resource)
                 ):
                     raise ProcessingRetryConflict("Learning resource is unavailable")
 

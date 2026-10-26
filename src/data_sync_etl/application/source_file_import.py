@@ -19,6 +19,7 @@ from data_sync_etl.domain.format_validation import (
     FormatValidatorRegistry,
     ProcessingFormatError,
 )
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.logging import event
 from data_sync_etl.ports.repositories import UnitOfWork
 from data_sync_etl.ports.source_files import ReadOnlySourceFilePort, ReadOnlySourceVersionPort
@@ -173,7 +174,7 @@ class SourceFileImportService:
     @staticmethod
     def _master(repo, resource_id):
         resource = repo.get("master_learning_resources", resource_id, lock=True)
-        if not resource or not resource["is_active"] or resource["deleted_at"] is not None:
+        if not resource or not resource["is_active"] or resource_deleted(resource):
             raise SourceFileError("WAITING_FOR_MASTER", transient=True)
         return resource
 
@@ -388,6 +389,13 @@ class SourceFileImportService:
                 row = self._owned(repo, claimed)
             except SourceImportConflict:
                 return
+            resource = repo.get('master_learning_resources', row['resource_id'], lock=True)
+            if resource_deleted(resource):
+                repo.update('source_file_imports', row['id'], {
+                    'status': 'RETRY_WAIT', 'attempts': max(0, row['attempts'] - 1),
+                    'claim_token': None, 'lease_expires_at': None, 'next_retry_at': None,
+                    'last_error_code': 'RESOURCE_SOFT_DELETED', 'updated_at': now()})
+                return
             exhausted = row["attempts"] >= self.settings.source_file_import_max_attempts
             delay = min(3600, self.settings.source_file_import_retry_seconds * 2 ** min(row["attempts"] - 1, 10))
             repo.update("source_file_imports", row["id"], {
@@ -433,7 +441,7 @@ class SourceFileImportService:
         if not self._source_allowed(row):
             return False
         resource = repo.get('master_learning_resources', row['resource_id'])
-        if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
+        if resource is None or not resource['is_active'] or resource_deleted(resource):
             return False
         if row["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
             return False

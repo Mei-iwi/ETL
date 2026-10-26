@@ -183,6 +183,8 @@ class Container:
             self.sync,
             self.auto_sync,
             poll_seconds=self.settings.master_sync_auto_poll_seconds,
+            auth_freshness_seconds=(self.settings.auth_master_freshness_seconds
+                                    if self.settings.auth_mode == 'master_users' else None),
         )
         self.ingestion = ResourceIngestion(self.uow, self.storage)
         self.ocr = OCRPipeline(

@@ -85,9 +85,9 @@ def test_bootstrap_idempotent_and_business_contract_untouched(database_auth):
     assert set(inspect(repo.engine).get_table_names()) == {'auth_users', 'auth_roles', 'auth_user_roles', 'auth_schema_versions'}
     from data_sync_etl.db.models import Base
     baseline = json.loads((Path(__file__).parents[2] / 'fixtures/contracts/erd-contract/contract_snapshot.json').read_text(encoding='utf-8'))
-    # Migration0016 adds only the two audit tables; the18 business identities
+    # Migrations0016/0017 add reconciliation/deletion audit, while business identities
     # stay isolated from the separate authentication database.
-    audit = {'sync_reconciliation_runs', 'sync_reconciliation_discrepancies'}
+    audit = {'sync_reconciliation_runs', 'sync_reconciliation_discrepancies', 'resource_deletion_events'}
     assert set(Base.metadata.tables) - audit == set(baseline['master'])
     assert audit <= set(Base.metadata.tables) and 'auth_users' not in Base.metadata.tables
 

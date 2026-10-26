@@ -67,11 +67,14 @@ class ResourceMetadataRepositoryMixin:
             "uploaded_by": "created_by",
         }
         row = self._metadata_row_for_update(resource_id)
+        visibility_changed = 'publication_status' in values and values['publication_status'] != row.publication_status
         for source, target in mapping.items():
             if source in values:
                 setattr(row, target, values[source])
         row.updated_at = datetime.now(UTC)
         self.session.flush()
+        if visibility_changed:
+            self.bump_resource_visibility_epoch()
         return self._dict(row)
 
     def replace_subject_relation(self, resource_id, subject_id):

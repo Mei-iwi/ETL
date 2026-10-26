@@ -1,5 +1,6 @@
 from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.logging import flow
 
 
@@ -73,6 +74,6 @@ class EtlOrchestrator:
             if not version:
                 raise DomainError("Resource version not found")
             resource = repo.get('master_learning_resources', version['resource_id'])
-            if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
+            if resource is None or not resource['is_active'] or resource_deleted(resource):
                 raise DomainError('Resource inactive or deleted')
             return repo.content_units(version_id, offset=offset, limit=limit, search=search)

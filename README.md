@@ -169,6 +169,8 @@ AUTH_STATE_PATH=D:/etl/private/auth/sessions.sqlite3
 
 User MASTER dùng mật khẩu tài khoản SOURCE đã đồng bộ, không dùng password DB. User/email verified/role phải hợp lệ và đồng bộ users còn mới. `ADMIN_ENABLED=true` bật chức năng, không bỏ login. Chi tiết: [MASTER users](deploy/AUTH_MASTER_USERS_SETUP.md).
 
+Với `master_users`, bật luồng Auto users và giữ Master Sync Worker chạy. Worker ưu tiên users, làm mới thêm tối đa một lần trong lượt đồng bộ dài; không tự bật luồng đang tắt. Khoảng cách giữa hai lần users thành công phải dưới `AUTH_MASTER_FRESHNESS_SECONDS` (mặc định 120 giây), tính cả thời gian xử lý và chờ lịch. `AUTH_MASTER_STALE` trả 503 khi dữ liệu xác thực quá cũ; kiểm tra worker/lịch users thay vì tắt kiểm tra freshness. Khi cập nhật code worker, khởi động lại tiến trình worker để nạp bản sửa.
+
 ### 1.7. Khởi động
 
 Mỗi tiến trình mở terminal riêng; kích hoạt venv trước lệnh Python:
@@ -184,6 +186,8 @@ Mỗi tiến trình mở terminal riêng; kích hoạt venv trước lệnh Pyth
 Mở **http://127.0.0.1:3000/login**; Swagger admin qua **http://127.0.0.1:3000/docs**. Chạy Full baseline rồi bật Auto Incremental trong giao diện Đồng bộ, đặc biệt luồng users khi dùng MASTER auth. Worker đang chạy không tự bật lịch đồng bộ.
 
 Khi model/schema/index hợp lệ, đặt `INDEX_AUTO_ENABLED=true` để tự lập chỉ mục. Đổi `.env` phải restart API/worker; đổi origin/proxy key phải restart React. Dừng bằng Ctrl+C.
+
+Quản trị viên có thể xóa tại **Kho học liệu → Chi tiết → Xóa học liệu**, bên dưới nút **Cập nhật thông tin**; mở **Danh sách học liệu → Đã xóa → Khôi phục** để đưa học liệu trở lại. Cần `ADMIN_ENABLED=true` và vai trò ADMIN. Thao tác xóa mềm giữ nguyên file và dữ liệu nguồn; khôi phục vẫn kiểm tra trạng thái tại nguồn.
 
 ## 2. Chạy Docker
 
@@ -325,6 +329,8 @@ Vector 384D không dùng lại như 1024D: đổi model cần backup, điều ch
 Thử nghiệm query không dấu: `SEARCH_APPROVED_ACCENT_VARIANTS_ENABLED=true` trong `.env` local hoặc `docker.env`, rồi restart API/tạo lại container. Cờ mặc định `false`; chỉ dùng cụm tiếng Việt đã duyệt, giữ query gốc và thêm tối đa một biến thể. Không cần reindex; không bật cùng ColBERT. Đây chưa phải cấu hình được nghiệm thu chất lượng production; rollback bằng `false`. Export lexical V1 từ chối chế độ này để tránh báo parity sai.
 
 Metadata search là nhánh riêng cho tiêu đề MASTER và mô tả/tags Mongo liên kết: `SEARCH_METADATA_ENABLED=true`, `SEARCH_METADATA_CONTENT_ENABLED=true`; MP3/MP4 đăng ký metadata dùng `SOURCE_METADATA_MEDIA_ENABLED=true`. Cần collection chỉ mục được cấp phép; bật cờ không tự tạo schema. Vector metadata dùng adapter BGE-M3/FlagEmbedding: `SEMANTIC_MODEL_PATH` trỏ đến checkpoint local và `SEMANTIC_MODEL_REVISION` khớp file `etl-model-revision.txt`; không bắt buộc bật `SEMANTIC_ENABLED` cho content. Luồng này không trích xuất âm thanh/video.
+
+Xóa mềm học liệu (cần migration MASTER `0017` được phê duyệt): admin đã đăng nhập với `ADMIN_ENABLED=true` gọi `DELETE /api/v1/resources/{id}`; khôi phục bằng `POST /api/v1/resources/{id}/restore`. JSON tùy chọn: `{"reason":"Lý do","expected_revision":0}`; lấy revision mới từ response cho thao tác tiếp theo. Dùng session/CSRF như các lệnh quản trị khác. Xóa chỉ đặt visibility override tại MASTER, không sửa SOURCE hay xóa tệp/nội dung; không hỗ trợ xóa riêng phiên bản. Restore không đổi trạng thái xuất bản và cần xác minh/xây lại thế hệ chỉ mục trước khi tìm kiếm lại. Kết quả tìm kiếm được xác minh lại khi điều hướng/trở lại tab; trạng thái bộ lọc vẫn giữ trong URL. Không tự chạy migration trên DB đang phục vụ.
 
 Sau khi chỉ mục đã sẵn sàng và được phép ghi, có thể bật `SEARCH_METADATA_AUTO_REFRESH_ENABLED=true` trong `.env`/`docker.env` và chạy **Master Sync Worker** hiện có; thêm `SEARCH_METADATA_REFRESH_DENSE=true` nếu cần cập nhật vector. Worker quét mặc định 5 học liệu mỗi 30 giây, lưu checkpoint và retry; không OCR lại. Các cờ tự động mặc định `false`. Xem số lượng trạng thái và thời điểm hoàn tất vòng quét bằng `python -m data_sync_etl.cli metadata-search-diagnostics`; đây là số liệu storage, không phải số học liệu người dùng được phép xem.
 

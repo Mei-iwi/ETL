@@ -10,7 +10,9 @@ type Description = {
     revision: string; editable: boolean; unavailable_reason: string | null
 }
 
-export function ResourceDescriptionPanel({ resourceId, children }: { resourceId: string; children: ReactNode }) {
+export function ResourceDescriptionPanel({ resourceId, children, actions }: {
+    resourceId: string; children: ReactNode; actions?: ReactNode
+}) {
     const [data, setData] = useState<Description | null>(null)
     const [description, setDescription] = useState(''), [tags, setTags] = useState('')
     const [authors, setAuthors] = useState<Author[]>([])
@@ -70,8 +72,11 @@ export function ResourceDescriptionPanel({ resourceId, children }: { resourceId:
     return <section className={`${styles.panel} ${styles.informationPanel}`} aria-labelledby="resource-description-title">
         <div className={styles.descriptionHeading}>
             <h2 id="resource-description-title">Thông tin chung</h2>
-            {data?.editable && !editing && <button type="button" className={styles.secondaryButton}
+            {!editing && <div className={styles.informationActions}>
+            {data?.editable && <button type="button" className={styles.secondaryButton}
                 onClick={() => { setEditing(true); setNotice('') }}><Pencil size={14} aria-hidden="true" />Cập nhật thông tin</button>}
+            {actions}
+            </div>}
         </div>
         {children}
         <div className={styles.descriptionFields}>

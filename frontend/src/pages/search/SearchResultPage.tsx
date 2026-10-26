@@ -21,6 +21,34 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
     const [attempt, setAttempt] = useState(0)
     const retrying = useRef(false)
     const navigating = useRef(false)
+    useEffect(() => {
+        const revalidate = () => {
+            if (document.visibilityState !== 'visible') return
+            clearSearchViewCache()
+            setResult(null)
+            setAttempt(value => value + 1)
+        }
+        window.addEventListener('focus', revalidate)
+        document.addEventListener('visibilitychange', revalidate)
+        return () => {
+            window.removeEventListener('focus', revalidate)
+            document.removeEventListener('visibilitychange', revalidate)
+        }
+    }, [])
+    useEffect(() => {
+        const revalidate = () => {
+            if (document.visibilityState !== 'visible') return
+            clearSearchViewCache()
+            setResult(null)
+            setAttempt(value => value + 1)
+        }
+        window.addEventListener('focus', revalidate)
+        document.addEventListener('visibilitychange', revalidate)
+        return () => {
+            window.removeEventListener('focus', revalidate)
+            document.removeEventListener('visibilitychange', revalidate)
+        }
+    }, [])
     function goToPage(page: number) {
         // React may batch rapid clicks before unmounting this page. Only one
         // history entry/request belongs to this transition.

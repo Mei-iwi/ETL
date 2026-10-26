@@ -30,6 +30,10 @@ JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
 
 
 class MasterLearningResource(Base):
+    master_deleted_at = Column(DateTime(timezone=True), nullable=True)
+    master_deleted_by = Column(String(255), nullable=True)
+    master_deletion_reason = Column(String(500), nullable=True)
+    deletion_revision = Column(Integer, nullable=False, default=0, server_default='0')
     source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
     source_state_hash = Column(String(64), nullable=True)
     source_missing_at = Column(DateTime(timezone=True), nullable=True)
@@ -470,10 +474,30 @@ class SyncReconciliationDiscrepancy(Base):
     resolution_status = Column(String(30), nullable=False, default="UNRESOLVED")
 
 
+class ResourceDeletionEvent(Base):
+    __tablename__ = 'resource_deletion_events'
+    __table_args__ = (
+        CheckConstraint("action IN ('DELETE','RESTORE')", name='ck_resource_deletion_action'),
+        CheckConstraint('revision > 0', name='ck_resource_deletion_positive_revision'),
+        UniqueConstraint('resource_id', 'revision', name='uq_resource_deletion_revision'),
+        Index('ix_resource_deletion_pending', 'propagated_at', 'created_at'),
+    )
+    id = Column(String(30), primary_key=True, default=new_id)
+    resource_id = Column(String(30), ForeignKey('master_learning_resources.id'), nullable=False)
+    revision = Column(Integer, nullable=False)
+    action = Column(String(10), nullable=False)
+    actor_id = Column(String(255), nullable=False)
+    reason = Column(String(500), nullable=True)
+    origin = Column(String(30), nullable=False, default='MASTER_VISIBILITY_OVERRIDE')
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    propagated_at = Column(DateTime(timezone=True), nullable=True)
+
+
 MODELS = {
     m.__tablename__: m
     for m in [
         MasterLearningResource,
+        ResourceDeletionEvent,
         MasterUser,
         MasterGradeLevel,
         Subject,

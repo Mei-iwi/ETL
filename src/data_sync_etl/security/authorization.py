@@ -2,6 +2,7 @@
 
 import re
 
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.security.auth import AuthError
 
 
@@ -65,7 +66,7 @@ def authorize(request, principal):
         with request.app.state.container.uow() as repo:
             resource = repo.get('master_learning_resources', path.split('/')[4])
         if (principal.mode == 'master_users' and resource and owns_resource(principal, resource)
-                and resource['is_active'] and not resource.get('deleted_at') and not resource.get('source_missing_at')):
+                and resource['is_active'] and not resource_deleted(resource) and not resource.get('source_missing_at')):
             return
         raise AuthError('AUTH_RESOURCE_FORBIDDEN', 403)
     if method == 'GET' and re.fullmatch(r'/api/v1/resources/[^/]+(?:/versions|/description)?', path):

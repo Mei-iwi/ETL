@@ -21,6 +21,8 @@ class ResourceListItem(BaseModel):
     publication_status: str
     updated_at: datetime
     latest_version: ResourceVersionSummary | None = None
+    deletion_revision: int = 0
+    master_deleted_at: datetime | None = None
 
 
 class ResourcePagination(BaseModel):
@@ -45,6 +47,7 @@ class GradeLevelBrief(BaseModel):
 
 class ResourceDetailResponse(BaseModel):
     id: str
+    deletion_revision: int = 0
     source_origin: str | None = None
     title: str | None
     provider_id: str | None

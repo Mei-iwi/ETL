@@ -1,4 +1,5 @@
 from data_sync_etl.domain.core import ResourceNotFound
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.ports.repositories import UnitOfWork
 
 
@@ -9,7 +10,7 @@ class ListResourceVersions:
     def run(self, resource_id: str) -> list[dict]:
         with self.uow() as repo:
             resource = repo.get("master_learning_resources", resource_id)
-            if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
+            if resource is None or not resource['is_active'] or resource_deleted(resource):
                 raise ResourceNotFound("Resource not found")
 
             versions = repo.find(

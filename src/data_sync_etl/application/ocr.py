@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from data_sync_etl.domain.core import DomainError, SourceFileError, job_terminal, new_id, now
 from data_sync_etl.domain.file_integrity import stream_hash
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry, ProcessingFormatError
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.logging import event
 from data_sync_etl.ports.processing import (
     DocumentExtractorPort,
@@ -52,7 +53,7 @@ class OCRPipeline:
             if version is None:
                 raise DomainError("Resource version not found")
             resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
-            if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
+            if resource is None or not resource['is_active'] or resource_deleted(resource):
                 raise DomainError('Resource inactive or deleted')
             if version["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
                 raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
@@ -110,17 +111,15 @@ class OCRPipeline:
         if not worker_id or len(worker_id) > 100:
             raise DomainError("Worker ID must have 1 to 100 characters")
         with self.uow() as repo:
-            rows = repo.find(
-                "ocr_page_tasks",
-                {"status": "PENDING"},
-                order=("created_at", "id"),
-                limit=1,
-                lock=True,
-                skip_locked=True,
-            )
+            rows = repo.pending_live_ocr_tasks()
             if not rows:
                 return None
             task = rows[0]
+            job = repo.get('ocr_jobs', task['job_id'])
+            version = repo.get('resource_versions', job['resource_version_id'])
+            resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
+            if resource_deleted(resource):
+                return None
             stamp = now()
             change = dict(
                 status="RUNNING",
@@ -138,7 +137,7 @@ class OCRPipeline:
                 job["id"],
                 dict(status="RUNNING", started_at=job["started_at"] or stamp, updated_at=stamp),
             )
-            return {**task, **change}
+            return {**task, **change, 'deletion_revision': resource['deletion_revision']}
 
     @staticmethod
     def owns(current, claimed):
@@ -236,6 +235,13 @@ class OCRPipeline:
             task = repo.get("ocr_page_tasks", claimed["id"], lock=True)
             if not self.owns(task, claimed):
                 return False
+            job = repo.get('ocr_jobs', task['job_id'])
+            version = repo.get('resource_versions', job['resource_version_id'])
+            resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
+            if resource_deleted(resource) or resource['deletion_revision'] != claimed.get('deletion_revision', resource['deletion_revision']):
+                repo.update('ocr_page_tasks', task['id'], {'status': 'PENDING', 'worker_id': None,
+                    'claim_token': None, 'heartbeat_at': None, 'error_message': 'RESOURCE_SOFT_DELETED'})
+                return False
             repo.insert(
                 "ocr_page_results",
                 dict(
@@ -291,6 +297,13 @@ class OCRPipeline:
             task = repo.get("ocr_page_tasks", claimed["id"], lock=True)
             if not self.owns(task, claimed):
                 return False
+            job = repo.get('ocr_jobs', task['job_id'])
+            version = repo.get('resource_versions', job['resource_version_id'])
+            resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
+            if resource_deleted(resource) or resource['deletion_revision'] != claimed.get('deletion_revision', resource['deletion_revision']):
+                repo.update('ocr_page_tasks', task['id'], {'status': 'PENDING', 'worker_id': None,
+                    'claim_token': None, 'heartbeat_at': None, 'error_message': 'RESOURCE_SOFT_DELETED'})
+                return True
             code = str(error).split(':', 1)[0] if isinstance(error, DomainError) else ''
             permanent_codes = {'INVALID_DOCUMENT_CONTENT', 'EMPTY_EXTRACTED_CONTENT',
                                'EXTRACTION_LIMIT_EXCEEDED', 'INVALID_CSV', 'UNSUPPORTED_TEXT_ENCODING',

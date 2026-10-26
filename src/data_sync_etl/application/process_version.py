@@ -1,5 +1,6 @@
 from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import DomainError, ResourceVersionNotFound
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.ports.repositories import UnitOfWork
 
 
@@ -18,7 +19,7 @@ class ProcessResourceVersion:
                 version["resource_id"],
             )
 
-            if resource is None or not resource["is_active"] or resource["deleted_at"] is not None:
+            if resource is None or not resource["is_active"] or resource_deleted(resource):
                 raise DomainError("Learning resource is unavailable")
 
         job = self.ocr.create_job(version_id)

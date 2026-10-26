@@ -320,6 +320,7 @@ async def test_cancelled_queued_http_does_not_run_model(searchable, monkeypatch,
 
 def test_http_waiting_deadline_is_timeout_not_busy(searchable, monkeypatch):
     c, _ = searchable
+    normal_timeout = c.settings.search_timeout_seconds
     c.settings.search_timeout_seconds = 1  # test only; capacity is NOT full
     entered, release = Event(), Event()
     original, factory = c.indexing.embedding.prepare, c.search.new_http_call
@@ -354,4 +355,7 @@ def test_http_waiting_deadline_is_timeout_not_busy(searchable, monkeypatch):
                 release.set()
             assert all(done.wait(3) for done in finished[:2])
         assert c.search._http_heavy_calls._value == 16
+        # The two waiting requests above still use the strict1s fixture budget.
+        # Recovery checks released capacity, not sub-second native tokenization.
+        c.settings.search_timeout_seconds = normal_timeout
         assert api.post('/api/v1/search', json={'query': 'page', 'method': 'hybrid'}).status_code == 200

@@ -94,7 +94,8 @@ def projection(resource, version, curriculum, extension=None):
     return {'resource_id': resource['id'], 'resource_version_id': version['id'], 'fields': fields,
             'resource_format': resource_format,
             'text': text, 'template': TEMPLATE, 'generation': GENERATION,
-            'projection_fingerprint': digest([TEMPLATE, authority, fields]),
+            'projection_fingerprint': digest([TEMPLATE, authority, fields] + (
+                [resource['deletion_revision']] if resource.get('deletion_revision') else [])),
             'lexical_fingerprint': digest([TEMPLATE, ANALYZER_VERSION, fields]),
             'dense_input_fingerprint': digest([TEMPLATE, text])}
 
