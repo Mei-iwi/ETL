@@ -316,6 +316,26 @@ Local thay `sslrootcert` bằng `D%3A%2Fetl%2Fprivate%2Fneon-ca.pem`. Dùng đú
 
 ## 4. Kiểm tra và xử lý lỗi
 
+BoW yêu cầu bằng chứng về khái niệm đã nhận diện; từ phụ như “hai” không đủ để nhận một truy vấn nhiều từ. Nhánh metadata dùng cùng quy tắc và `SEARCH_BOW_MIN_COVERAGE`. Với không dấu, dùng `SEARCH_APPROVED_ACCENT_VARIANTS_ENABLED=true`; không tự phê duyệt bản dịch hoặc sửa từ điển seed.
+
+Vector giữ `SEARCH_VECTOR_MIN_SIMILARITY=0.6`. Đường bổ trợ mặc định `SEARCH_VECTOR_ANCHOR_FALLBACK_ENABLED=true`, `SEARCH_VECTOR_ANCHOR_MIN_SIMILARITY=0.4` chỉ nhận điểm dense dưới ngưỡng chính khi đoạn nguồn đã xác minh có cụm định danh nhiều từ hoặc khái niệm tương đương đã duyệt. Điểm xếp hạng vẫn là cosine; không cần model mới hoặc reindex. Cấu hình ở `.env` local / `docker.env`; restart API hoặc tạo lại container. Tắt cờ bổ trợ để quay về ngưỡng chính.
+
+`branch_status.metadata=METADATA_SCHEMA_NOT_READY` là chỉ mục metadata chưa được provision hợp lệ, không phải vector nội dung bị hỏng. Kiểm tra bằng `python -m data_sync_etl.cli metadata-search-schema` (không `--apply`); mọi thay đổi collection/schema cần quyền và phê duyệt riêng. Không hạ ngưỡng hoặc tự tạo schema để che trạng thái này.
+
+Từ điển dẫn xuất từ học liệu có luồng thử nghiệm **offline**, không tạo collection MongoDB hoặc sửa schema MASTER. Các cờ `CONCEPT_DYNAMIC_ENABLED`, `CONCEPT_DYNAMIC_BUILDER_ENABLED`, `CONCEPT_DISCOVERY_SEMANTIC_ENABLED` mặc định `false`; bật cờ không thay thế xác minh quyền đọc, thu hồi quyền và artifact volume. Hiện chưa cho phép đọc corpus/publish dùng chung trên hệ thống thật.
+
+Thử bằng dữ liệu giả lập, không tải model hoặc kết nối DB:
+
+```powershell
+$conceptRoot = Join-Path (Get-Location) '.test-tmp/concept-demo'
+python -m data_sync_etl.cli.concepts example --root $conceptRoot
+python -m data_sync_etl.cli.concepts run --root $conceptRoot --fixture "$conceptRoot/example-corpus.json" --loop
+# Ctrl+C để dừng; xem các thao tác duyệt/build/publish offline bằng --help.
+python -m data_sync_etl.cli.concepts --help
+```
+
+Hướng dẫn đầy đủ: [từ điển corpus offline](deploy/CONCEPT_DICTIONARY_OFFLINE.md). Dữ liệu pending không tham gia tìm kiếm; file `concepts.json` gốc giữ nguyên.
+
 | Hiện tượng | Kiểm tra |
 | --- | --- |
 | `AUTH_MASTER_STALE` | Full baseline/Auto users và Master Sync Worker; không bỏ freshness guard |

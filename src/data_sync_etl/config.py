@@ -112,8 +112,26 @@ class Settings(BaseSettings):
     semantic_rerank_top_k: int = Field(default=20, ge=1, le=50)
     search_max_bags: int = Field(default=2000, ge=1, le=10000)
     search_concept_snapshot: Path | None = None
+    # Corpus dictionary is OFF by default; a flag is never a live ACL attestation.
+    concept_dynamic_enabled: bool = False
+    concept_dynamic_builder_enabled: bool = False
+    concept_discovery_semantic_enabled: bool = False
+    concept_dynamic_artifact_root: Path | None = Field(default=None, repr=False)
+    concept_corpus_mongo_uri_file: Path | None = Field(default=None, repr=False)
+    concept_dynamic_lookup_budget_ms: int = Field(default=20, ge=1, le=100)
+    concept_dynamic_cache_max_mb: int = Field(default=16, ge=1, le=256)
+    concept_dynamic_refresh_interval_seconds: int = Field(default=10, ge=1, le=3600)
+    concept_dynamic_max_lookup_records: int = Field(default=32, ge=1, le=128)
+    concept_builder_batch_size: int = Field(default=20, ge=1, le=500)
+    concept_builder_tick_seconds: float = Field(default=2., gt=0, le=300)
+    concept_builder_max_candidates: int = Field(default=64, ge=1, le=1000)
+    concept_builder_max_chars: int = Field(default=100000, ge=1000, le=1000000)
+    concept_artifact_shards: int = Field(default=4, ge=1, le=16)
+    concept_artifact_max_mb: int = Field(default=512, ge=1, le=4096)
     search_expansion: ExpansionPolicy = Field(default_factory=ExpansionPolicy)
     search_vector_min_similarity: float = Field(default=0.6, gt=0, le=1, allow_inf_nan=False)
+    search_vector_anchor_fallback_enabled: bool = True
+    search_vector_anchor_min_similarity: float = Field(default=0.4, gt=0, le=1, allow_inf_nan=False)
     search_meaning_context_fallback_enabled: bool = False
     search_meaning_fallback_min_similarity: float = Field(default=0.55, gt=0, le=1, allow_inf_nan=False)
     search_meaning_fallback_min_context_similarity: float = Field(default=0.45, gt=0, le=1, allow_inf_nan=False)

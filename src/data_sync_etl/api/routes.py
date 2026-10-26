@@ -214,7 +214,9 @@ async def retry_search_model(request: Request, response: Response):
 async def search_materials(body: SearchRequest, request: Request):
     call = None
     try:
-        access = search_access(request)  # Never acquire runtime capacity before authorization.
+        # MASTER authorization can perform blocking DB reads. Keep it off the
+        # event loop; runtime capacity is still acquired only after authorization.
+        access = await run_in_threadpool(search_access, request)
         service = request.app.state.container.search
         def reauthorize():
             # A request-local trusted policy lookup, never a role/user from JSON.
@@ -259,7 +261,9 @@ async def search_materials(body: SearchRequest, request: Request):
         if not succeeded:
             raise value
         call.check()
-        call.reauthorize()
+        await run_in_threadpool(call.reauthorize)
+        if call.concept_guard is not None:
+            request.scope.setdefault('state', {})['concept_visibility_guard'] = call.concept_guard
         return value
     except HTTPException:
         raise

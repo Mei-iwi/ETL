@@ -1,6 +1,7 @@
 """Search reads verified Index snapshots; it never queues processing or writes data."""
 
 from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from threading import BoundedSemaphore
 from time import monotonic
 
@@ -37,8 +38,12 @@ from data_sync_etl.domain.retrieval_fusion import version_rrf
 from data_sync_etl.domain.search import SearchError, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
 from data_sync_etl.domain.search_context import decode_context, encode_context
+from data_sync_etl.domain.vector_admission import VERSION as VECTOR_ADMISSION_VERSION
+from data_sync_etl.domain.vector_admission import anchored_dense_match
 from data_sync_etl.ports.metadata_search import query_encoding_scope
 from data_sync_etl.ports.search import SearchBagReader, document_validation_scope
+
+_REQUEST_DICTIONARY = ContextVar('request_concept_dictionary', default=None)
 
 
 class QueryEmbeddingContext:
@@ -73,13 +78,14 @@ class QueryEmbeddingContext:
 
 class SearchService:
     def __init__(self, indexing, settings, bags: SearchBagReader | None, *, query_cache_runtime=None,
-                 semantic=None, metadata=None):
+                 semantic=None, metadata=None, concept_resolver=None):
         self.indexing, self.settings, self.bags = indexing, settings, bags
         self.semantic = semantic
         self.metadata = metadata
         path = settings.search_concept_snapshot
         self.dictionary = (Dictionary(Snapshot.model_validate_json(path.read_text(encoding='utf-8')))
                            if path is not None else default_dictionary())
+        self.concept_resolver = concept_resolver
 
         self._http_inference = SearchInferenceQueue()
         # Retain worker leases after HTTP timeout: repeated cancellations cannot
@@ -88,6 +94,15 @@ class SearchService:
         self._http_light_calls = BoundedSemaphore(8)
         self._http_query_vectors = (HttpQueryVectorCache(query_cache_runtime)
                                     if query_cache_runtime is not None else None)
+
+    @property
+    def dictionary(self):
+        current = _REQUEST_DICTIONARY.get()
+        return current[1] if current and current[0] is self else self._base_dictionary
+
+    @dictionary.setter
+    def dictionary(self, value):
+        self._base_dictionary = value
 
     def _ranking_algorithm(self, method):
         base = self._base_ranking_algorithm(method)
@@ -106,11 +121,11 @@ class SearchService:
                     ('+rrf-v1' if method == 'hybrid' else ''))
         meanings = self.settings.index_meaning_bags_enabled
         if meanings:
-            return {'bow': RANKING_VERSION, 'vector': 'meaning-context-cosine-v3',
-                    'hybrid': 'rrf-meaning-context-v3'}[method]
+            return {'bow': RANKING_VERSION, 'vector': 'meaning-context-cosine-v4',
+                    'hybrid': 'rrf-meaning-context-v4'}[method]
         return {'bow': RANKING_VERSION,
-                'vector': 'meaning-maxcosine-v1' if meanings else 'bag-cosine-threshold-v2',
-                'hybrid': 'rrf-meaning-v1' if meanings else 'rrf-vector-threshold-v2'}[method]
+                'vector': 'meaning-maxcosine-v2' if meanings else 'bag-cosine-threshold-v3',
+                'hybrid': 'rrf-meaning-v2' if meanings else 'rrf-vector-threshold-v3'}[method]
 
     def search_http(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None):
         """Called only inside the route's existing authorization/admission guard.
@@ -341,6 +356,39 @@ class SearchService:
     @query_encoding_scope()
     def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
                _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None):
+        options = dict(access=access, _query_context=_query_context, _batch_texts=_batch_texts,
+                       _batch_bags=_batch_bags, _evaluation_capture=_evaluation_capture)
+        provider = self.concept_resolver
+        call = CURRENT_SEARCH.get()
+        if call is not None:
+            call.concept_guard = None
+        if provider is None or method == 'vector':
+            return self._search(query, method, filters, page, size, **options)
+        from data_sync_etl.ports.concept_corpus import ConceptBlocked
+        try:
+            with provider.pin(query, (filters or {}).get('domain')) as dictionary:
+                if call is not None:
+                    call.concept_guard = getattr(dictionary, 'visibility_guard', None)
+                token = _REQUEST_DICTIONARY.set((self, dictionary))
+                try:
+                    return self._search(query, method, filters, page, size, **options)
+                finally:
+                    _REQUEST_DICTIONARY.reset(token)
+        except ConceptBlocked as error:
+            if str(error) != 'DYNAMIC_REVOKED':
+                raise
+            # Revocation changed during ranking: discard dynamic response and
+            # recompute once. Never return its aliases, evidence or fingerprint.
+            token = _REQUEST_DICTIONARY.set((self, self._base_dictionary))
+            if call is not None:
+                call.concept_guard = None
+            try:
+                return self._search(query, method, filters, page, size, **options)
+            finally:
+                _REQUEST_DICTIONARY.reset(token)
+
+    def _search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
+                _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None):
         access = access or SearchAccess()
         options = dict(access=access, _query_context=_query_context, _batch_texts=_batch_texts,
                        _batch_bags=_batch_bags, _evaluation_capture=_evaluation_capture)
@@ -576,6 +624,15 @@ class SearchService:
                     else:
                         value = max(cosine(v, bag.embedding) for v in [vector, *extra_vectors])
                     accepted = value >= self.settings.search_vector_min_similarity
+                    if not accepted and self.settings.search_vector_anchor_fallback_enabled:
+                        # Dense score remains mandatory. Accent-insensitive phrase
+                        # evidence is from the selected, freshly authorized source
+                        # passage, never a title, private sibling or invented alias.
+                        source_text = member.text if member is not None and member.kind == 'text' else (
+                            chunk['text'] if member is None else '')
+                        accepted = anchored_dense_match(query, source_text, value,
+                            floor=self.settings.search_vector_anchor_min_similarity,
+                            dictionary=self.dictionary, policy=policy, expansion=expansion)
                     if (not accepted and self.settings.index_meaning_bags_enabled
                             and self.settings.search_meaning_context_fallback_enabled
                             and value >= self.settings.search_meaning_fallback_min_similarity):
@@ -618,7 +675,7 @@ class SearchService:
             nonlocal bow
             bow = bm25(query, {key: row[0].lexical for key, row in by_bag.items()},
                        dictionary=self.dictionary, policy=policy, expansion=expansion,
-                       min_coverage=self.settings.search_bow_min_coverage)
+                       min_coverage=self.settings.search_bow_min_coverage, focus_query=variant)
             if variant is not None:
                 assisted = bm25(variant, {key: row[0].lexical for key, row in by_bag.items()},
                     dictionary=self.dictionary, policy=policy, domain=filters.get('domain'),
@@ -804,6 +861,9 @@ class SearchService:
                                               expansion.dictionary_fingerprint,
                                               expansion.policy_fingerprint,
                                               self.settings.search_vector_min_similarity,
+                                              VECTOR_ADMISSION_VERSION,
+                                              self.settings.search_vector_anchor_fallback_enabled,
+                                              self.settings.search_vector_anchor_min_similarity,
                                               self.settings.index_meaning_bags_enabled,
                                               self.settings.search_meaning_context_fallback_enabled,
                                               self.settings.search_meaning_fallback_min_similarity,

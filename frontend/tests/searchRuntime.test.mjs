@@ -85,3 +85,20 @@ test('body stream disconnect is a network error, not malformed JSON', async () =
         await assert.rejects(searchMaterials(searchRequest), error => error.code === 'SEARCH_NETWORK_ERROR' && !error.message.includes('PRIVATE_INTERNAL'))
     } finally { globalThis.fetch = original }
 })
+
+for (const phase of ['headers', 'body']) test(`BoW deadline settles even when ${phase} transport never settles`, async () => {
+    const original = globalThis.fetch, timeout = AbortSignal.timeout
+    const keepAlive = setTimeout(() => {}, 1000)
+    try {
+        let budget
+        AbortSignal.timeout = ms => { budget = ms; return timeout(5) }
+        const hanging = new Promise(() => {})
+        globalThis.fetch = phase === 'headers' ? () => hanging
+            : async () => ({ ok: true, status: 200, json: () => hanging })
+        await assert.rejects(searchMaterials({ ...searchRequest, method: 'bow' }),
+            error => error.code === 'SEARCH_TIMEOUT')
+        assert.equal(budget, 20000)
+        globalThis.fetch = async () => Response.json(searchResponse({ ...searchRequest, method: 'bow' }))
+        assert.equal((await searchMaterials({ ...searchRequest, method: 'bow' })).method, 'bow')
+    } finally { clearTimeout(keepAlive); globalThis.fetch = original; AbortSignal.timeout = timeout }
+})

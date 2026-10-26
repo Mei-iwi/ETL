@@ -81,7 +81,7 @@ const messages: Record<string, string> = {
     SEARCH_RUNTIME_BUSY: 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
     SEARCH_ACCESS_RESTRICTED: 'Truy cập tìm kiếm nội bộ bị hạn chế.',
     SEARCH_LIMIT_EXCEEDED: 'Kho dữ liệu vượt giới hạn. Hãy thu hẹp bộ lọc.',
-    SEARCH_TIMEOUT: 'Tìm kiếm quá thời gian. Vui lòng thử lại hoặc chọn BoW.',
+    SEARCH_TIMEOUT: 'Tìm kiếm quá thời gian. Vui lòng thử lại.',
     SEARCH_MODEL_WARMUP_TIMEOUT: 'Chuẩn bị tìm kiếm quá thời gian. Vui lòng thử lại hoặc chọn BoW.',
     BLOCKED_EMBEDDING_RUNTIME: 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.',
     INVALID_EMBEDDING: 'Tìm kiếm theo ngữ nghĩa chưa sẵn sàng. Có thể chọn BoW.',
@@ -108,16 +108,23 @@ const invalidResponse = () => new SearchApiError(502, 'SEARCH_INVALID_RESPONSE',
 
 async function request<T>(path: string, validate: (value: unknown) => value is T, signal?: AbortSignal, payload?: SearchRequest, method: 'GET' | 'POST' = 'GET'): Promise<T> {
     // Server deadlines are cooperative; abort stops waiting, not running inference.
-    const combined = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(payload ? 90000 : 20000)])
+    const combined = AbortSignal.any([...(signal ? [signal] : []),
+        AbortSignal.timeout(payload && payload.method !== 'bow' ? 90000 : 20000)])
+    let abortWait: () => void
+    const aborted = new Promise<never>((_, reject) => {
+        abortWait = () => reject(combined.reason)
+        combined.addEventListener('abort', abortWait, { once: true })
+    })
     try {
-        const response = await fetch(path, {
+        combined.throwIfAborted()
+        const response = await Promise.race([fetch(path, {
             method: payload ? 'POST' : method, signal: combined,
             cache: 'no-store',
             headers: { Accept: 'application/json', ...(payload ? { 'Content-Type': 'application/json' } : {}) },
             ...(payload ? { body: JSON.stringify(payload) } : {}),
-        })
+        }), aborted])
         let body: unknown
-        try { body = await response.json() } catch (error) {
+        try { body = await Promise.race([response.json(), aborted]) } catch (error) {
             if (combined.aborted) throw error
             if (response.ok) {
                 if (error instanceof SyntaxError) throw invalidResponse()
@@ -148,6 +155,8 @@ async function request<T>(path: string, validate: (value: unknown) => value is T
         }
         if (error instanceof SearchApiError) throw error
         throw new SearchApiError(0, 'SEARCH_NETWORK_ERROR', 'Không kết nối được máy chủ. Vui lòng thử lại.')
+    } finally {
+        combined.removeEventListener('abort', abortWait!)
     }
 }
 

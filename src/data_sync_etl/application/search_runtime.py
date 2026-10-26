@@ -28,6 +28,7 @@ class SearchCall:
         self.queue_ms = self.inference_ms = 0.0
         self.cancel_reason = None
         self._authorize = authorize  # Request-local callback; never shared/cached.
+        self.concept_guard = None  # Optional pinned dictionary revocation fence.
 
     def remaining(self):
         return max(0.0, self.deadline - self.clock())

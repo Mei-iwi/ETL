@@ -11,12 +11,13 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const root = process.env.ETL_T4_FRONTEND_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const dist = resolve(process.env.ETL_TEST_SEARCH_DIST || join(root, 'dist'))
 const baseline = process.env.ETL_T4_BASELINE === '1'
 const executable = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 test('search form, methods, results, pagination, empty, error/retry and mobile layout', {
-    skip: !existsSync(executable) || !existsSync(join(root, 'dist/index.html')), timeout: 90000,
+    skip: !existsSync(executable) || !existsSync(join(dist, 'index.html')), timeout: 90000,
 }, async () => {
     let postCount = 0, contextCount = 0, catalogCount = 0, mode = 'results', fileKind = 'image'
     let resultCount = 8
@@ -77,7 +78,9 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             if (mode === 'busy') return json({ detail: { code: 'SEARCH_RUNTIME_BUSY' } }, 503)
             if (mode === 'empty') return json({ ...body, items: [], total: 0, total_pages: 0, message: 'NO_READY_INDEX', ranking_algorithm: 'rrf-v1' })
             if (mode === 'public') return json({ ...body, access_scope: 'public', items: [], total: 0, total_pages: 0, message: 'PUBLIC_ACCESS_UNCONFIRMED', ranking_algorithm: 'rrf-v1' })
-            return json({ ...body, access_scope: 'local_demo', total: resultCount, total_pages: Math.ceil(resultCount / body.size), message: 'OK', ranking_algorithm: 'rrf-v1', items: Array.from({ length: Math.max(0, Math.min(body.size, resultCount - (body.page - 1) * body.size)) }, (_, offset) => ({
+            return json({ ...body, access_scope: 'local_demo', total: resultCount, total_pages: Math.ceil(resultCount / body.size), message: 'OK', ranking_algorithm: 'rrf-v1',
+                ...(mode === 'metadata-unready' ? { branch_status: { metadata: 'METADATA_SCHEMA_NOT_READY', content: 'OK' } } : {}),
+                items: Array.from({ length: Math.max(0, Math.min(body.size, resultCount - (body.page - 1) * body.size)) }, (_, offset) => ({
                 resource_id: `r${(body.page - 1) * 5 + offset + 1}`, resource_title: `Học liệu ${(body.page - 1) * 5 + offset + 1}`, resource_version_id: 'v1', version_number: 1,
                 can_view_file: canViewFile,
                 provider_name: 'Nhà cung cấp', resource_type_code: 'DOC', bag_id: 'b1', bag_title: null, unit_type: 'SECTION', representation_mode: 'fallback',
@@ -153,8 +156,8 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             return json({ status: 'RUNNING', reports: [{ run_id: 'fixture-audit', stream_name: 'files', status: 'RUNNING' }] }, 202)
         }
         if (url.pathname.startsWith('/api/')) return json({ detail: 'not found' }, 404)
-        const file = url.pathname.startsWith('/assets/') ? resolve(root, 'dist', '.' + url.pathname) : join(root, 'dist/index.html')
-        if (!file.startsWith(join(root, 'dist') + sep)) { res.writeHead(403); return res.end() }
+        const file = url.pathname.startsWith('/assets/') ? resolve(dist, '.' + url.pathname) : join(dist, 'index.html')
+        if (!file.startsWith(dist + sep)) { res.writeHead(403); return res.end() }
         try {
             res.writeHead(200, { 'Content-Type': { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png', '.jpg': 'image/jpeg' }[extname(file)] || 'application/octet-stream' })
             res.end(await readFile(file))
@@ -294,8 +297,15 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await waitFor(() => evaluate("document.querySelector('#search-grade')?.value === 'g1'"))
         mode = 'empty'
         const beforeVisibilityChange = postCount
-        await evaluate("window.dispatchEvent(new Event('focus'))")
-        await waitFor(() => postCount > beforeVisibilityChange)
+        await evaluate("for (let i = 0; i < 5; i++) window.dispatchEvent(new Event('focus'))")
+        await delay(300)
+        assert.equal(postCount, beforeVisibilityChange, 'DevTools focus does not rerun a completed search')
+        await evaluate("Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')); document.dispatchEvent(new Event('visibilitychange'))")
+        await delay(300)
+        assert.equal(postCount, beforeVisibilityChange, 'switching tabs does not rerun a completed search')
+        assert.equal(await evaluate("!!document.querySelector('article')"), true)
+        await click('Cập nhật kết quả')
+        await waitFor(() => postCount === beforeVisibilityChange + 1)
         await waitFor(() => evaluate("document.querySelectorAll('article').length === 0 && document.body.textContent.includes('Chưa tìm thấy học liệu')"))
         mode = 'results'
         await click('Cập nhật kết quả')
@@ -436,8 +446,13 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("document.querySelector('section[aria-busy=true]')?.textContent.includes('Đang tìm kiếm')"), true)
         assert.equal(await evaluate("document.body.textContent.includes('Đang chuẩn bị tìm kiếm')"), false)
         await evaluate("for(let i=0;i<10;i++) document.querySelector('form').requestSubmit()")
+        await evaluate("for (let i = 0; i < 5; i++) window.dispatchEvent(new Event('focus'))")
+        await evaluate("Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange'))")
         await delay(200)
         assert.equal(postCount, beforeSlow + 1, 'rapid keyboard/submission stays single flight')
+        await click('Ngừng chờ')
+        await waitFor(() => evaluate("document.querySelector('[role=alert]')?.textContent.includes('Đã ngừng chờ tìm kiếm')"))
+        assert.equal(await evaluate("document.querySelector('button[type=submit]').disabled"), false)
         // Navigate while the old server request is still computing. Its late
         // response must not replace the new route or report server cancellation.
         mode = 'empty'
@@ -513,6 +528,14 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         // Horizontal overview and reconciliation dialogs use the real built UI.
         authRole = 'ADMIN'
         await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
+        // Permit the search regression to run independently of the historical
+        // overview/library/reconciliation assertions below. Full runs are unchanged.
+        mode = 'metadata-unready'; resultCount = 0
+        await open('/search/query-methods?q=Van%20Lang&method=vector')
+        await waitFor(() => evaluate("document.body.textContent.includes('Chỉ mục tìm kiếm metadata chưa sẵn sàng')"))
+        assert.equal(await evaluate("document.body.textContent.includes('Kết quả hiện tại dựa trên nội dung đã lập chỉ mục')"), true)
+        mode = 'results'; resultCount = 8
+        if (process.env.ETL_TEST_SEARCH_ONLY === '1') return
         await call('Page.navigate', { url: origin + '/overview/summary' })
         await waitFor(() => evaluate("document.querySelector('img[alt=\"Kệ sách trong thư viện\"]')?.naturalWidth > 0"))
         assert.equal(await evaluate("document.querySelector('h1').getBoundingClientRect().right > document.querySelector('figure img').getBoundingClientRect().left"), true)

@@ -22,9 +22,11 @@ from data_sync_etl.domain.metadata_search import (
     metadata_allowed,
     projection,
 )
+from data_sync_etl.domain.query_variants import approved_accent_variant
 from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search import SearchError, cosine, ranks, rrf
 from data_sync_etl.domain.search_access import SearchAccess
+from data_sync_etl.domain.vector_admission import anchored_dense_match
 from data_sync_etl.ports.metadata_search import MetadataIndexPort
 
 
@@ -252,6 +254,8 @@ class MetadataSearchService:
 
     def retrieve(self, query, method, filters, access, *, dictionary, policy, checkpoint=lambda: None):
         self.store.ensure_ready()
+        variant = (approved_accent_variant(query, dictionary, policy=policy, domain=filters.get('domain'))
+                   if method != 'vector' and self.settings.search_approved_accent_variants_enabled else None)
         indexed = self.settings.search_metadata_indexed_candidates_enabled
         snapshots = self.indexed_snapshots(filters, access, checkpoint=checkpoint) if indexed else self.snapshots(filters, access, checkpoint=checkpoint)
         dense_blocked = indexed and len(snapshots.ready_keys) > self.settings.search_metadata_max_resources
@@ -261,7 +265,12 @@ class MetadataSearchService:
             elif method == 'vector':
                 keys = []  # Never substitute a lexical shortlist for semantic candidates.
             else:
-                keys = self.store.candidates(candidate_query(query, dictionary, policy, filters.get('domain')),
+                candidate_tokens = set(candidate_query(query, dictionary, policy, filters.get('domain')))
+                if variant:
+                    candidate_tokens.update(candidate_query(variant, dictionary, policy, filters.get('domain')))
+                if len(candidate_tokens) > 512:
+                    raise IndexingError('METADATA_QUERY_LIMIT', 422)
+                keys = self.store.candidates(sorted(candidate_tokens),
                     sorted(snapshots.ready_keys), limit=self.settings.search_metadata_match_limit)
             stored = self.store.get_many(keys)
         else:
@@ -288,7 +297,15 @@ class MetadataSearchService:
             for field in SEARCH_FIELDS:
                 documents = {key: LexicalDocument.model_validate(row['lexical'][field]) for key, row in verified.items()}
                 corpus = (len(snapshots.ready_keys), snapshots.lengths[field]) if indexed else None
-                scores = bm25(query, documents, dictionary=dictionary, policy=policy, domain=filters.get('domain'), corpus=corpus)
+                scores = bm25(query, documents, dictionary=dictionary, policy=policy,
+                    domain=filters.get('domain'), corpus=corpus,
+                    min_coverage=self.settings.search_bow_min_coverage, focus_query=variant)
+                if variant:
+                    assisted = bm25(variant, documents, dictionary=dictionary, policy=policy,
+                        domain=filters.get('domain'), corpus=corpus,
+                        min_coverage=self.settings.search_bow_min_coverage)
+                    scores = {key: max(scores.get(key, 0), policy.synonyms * assisted.get(key, 0))
+                              for key in scores.keys() | assisted.keys()}
                 fields.append(scores)
                 for key in scores:
                     matched.setdefault(key, []).append(field.upper())
@@ -302,9 +319,16 @@ class MetadataSearchService:
             if eligible:
                 try:
                     query_vector = validate_vector(self.embedding.embed_queries([query])[0]['vector'], 1024)
+                    dense_expansion = dictionary.expand(query, domain=filters.get('domain'), policy=policy)
                     for key, row in eligible.items():
                         checkpoint()
-                        dense[key] = cosine(query_vector, validate_vector(row['vector'], 1024))
+                        score = cosine(query_vector, validate_vector(row['vector'], 1024))
+                        if (score >= self.settings.search_vector_min_similarity
+                                or (self.settings.search_vector_anchor_fallback_enabled
+                                    and anchored_dense_match(query, row['text'], score,
+                                        floor=self.settings.search_vector_anchor_min_similarity,
+                                        dictionary=dictionary, policy=policy, expansion=dense_expansion))):
+                            dense[key] = score
                     dense_status = 'READY'
                 except IndexingError as exc:
                     dense = {}
@@ -322,7 +346,7 @@ class MetadataSearchService:
                 'evidence_kind': 'METADATA_FIELD', 'evidence_text': text[:600],
                 'bag_id': None, 'bag_title': None, 'unit_type': None, 'representation_mode': 'metadata',
                 'matched_keywords': [], 'matched_bag_count': 0, 'score': scores[key], 'score_components': {},
-                'snippet': snippet_text(text, set(surface_tokens(query)), query=query),
+                'snippet': snippet_text(text, set(surface_tokens(query)), query=query, dictionary=dictionary, policy=policy),
                 'page_from': None, 'page_to': None, 'content_unit_id': None, 'context_id': None,
                 'context_url': None, 'can_view_file': False})
         status = {'lexical': ('STALE' if len(stored) > len(verified) else

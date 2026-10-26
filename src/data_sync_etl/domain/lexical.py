@@ -13,7 +13,7 @@ from data_sync_etl.domain.indexing import digest
 
 ANALYZER_VERSION = 'underthesea-8.3.0-nfc-surface-compound-alnum-v2'
 REPRESENTATION_VERSION = 'bag-lexical-tf-v1'
-RANKING_VERSION = 'bm25-concept-coverage-v4'
+RANKING_VERSION = 'bm25-concept-core-evidence-v5'
 TOKEN = re.compile(r'c\+\+|c#|\.net\b|\d+(?:\.\d+)+|[^\W_]+', re.IGNORECASE)
 SPECIAL = re.compile(r'(c\+\+|c#|\.net\b)', re.IGNORECASE)
 _ANALYSIS = ContextVar('lexical_request_analysis', default=None)
@@ -37,6 +37,12 @@ QUERY_STOPWORDS = frozenset(
     'the a an of and to in is are for on what how why where when which who whom whose '
     'does do can could would should please explain about this that these those it its '
     'as be been being'.split())
+
+# Keep these words in the index and score: they can qualify a real phrase.
+# On their own they cannot establish the subject of a multiword query.
+AUXILIARY_MATCH_TERMS = frozenset(
+    'một hai ba bốn năm sáu bảy tám chín mười '
+    'one two three four five six seven eight nine ten'.split())
 
 
 def surface_tokens(text):
@@ -168,7 +174,8 @@ def contains_phrase(tokens, query):
 
 
 def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
-         dictionary=None, policy=None, domain=None, contextual=True, expansion=None, min_coverage=0., corpus=None):
+         dictionary=None, policy=None, domain=None, contextual=True, expansion=None, min_coverage=0., corpus=None,
+         focus_query=None):
     """Weighted BM25, maximum alternative per concept (no alias stacking).
 
     N, avgdl and DF cover ALL authorized verified bags including nonhits.
@@ -184,6 +191,11 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
     policy = policy or ExpansionPolicy()
     dictionary = dictionary or default_dictionary()
     expansion = expansion or dictionary.expand(query, domain=domain, policy=policy, contextual=contextual)
+    focus = (dictionary.expand(focus_query, domain=domain, policy=policy, contextual=contextual)
+             if focus_query and focus_query != query else expansion)
+    focus_ids = ({mention.concept_id for mention in focus.recognized if mention.concept_id}
+                 if expand_concepts and policy.enabled else set())
+    original_terms = set(surface_tokens(focus_query or query)) - QUERY_STOPWORDS
     terms = {t for t in surface_tokens(query) if t not in QUERY_STOPWORDS}
     if not query_terms(query):
         return {}
@@ -205,7 +217,7 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         # Longest dictionary matches prevent a qualified phrase from becoming
         # evidence for a shorter, different sense. Passage boundaries are kept.
         counts, title = Counter(), Counter()
-        if groups:
+        if groups or focus_ids:
             title.update((cid, m.group()) for m, cid in dictionary.observations(' '.join(doc.title_tokens), policy=policy))
             counts.update(title)
             for passage in doc.passages:
@@ -228,6 +240,11 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         score = sum(contribution(tf[t] + policy.title_boost * title_tf.get(t, 0), df[t], doc.length)
                     for t in sorted(terms & tf.keys()))
         counts, title = observed[key]
+        if focus_ids and not any(cid in focus_ids and count for (cid, _), count in counts.items()):
+            continue  # A qualifier cannot replace an explicitly recognized subject.
+        if (len(original_terms) > 1 and not focus_ids
+                and (original_terms & tf.keys()) <= AUXILIARY_MATCH_TERMS):
+            continue
         matched_features = sum(term in tf for term in terms)
         matched_features += sum(any(counts[t.concept_id, t.term] for t in alternatives)
                                 for alternatives in groups.values())
