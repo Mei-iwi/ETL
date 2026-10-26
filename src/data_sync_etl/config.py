@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     office_pdf_timeout_seconds: int = Field(default=90, ge=5, le=180)
     source_drive_enabled: bool = False
     source_drive_buckets: dict[str, str] = Field(default_factory=dict, repr=False)
+    # Explicit legacy locator -> verified Drive filename; never a global fuzzy match.
+    source_drive_filename_aliases: dict[str, str] = Field(default_factory=dict, repr=False)
     source_local_buckets: tuple[str, ...] = ()
     source_drive_auth_type: Literal['service_account', 'authorized_user'] = 'service_account'
     source_drive_credentials_file: Path | None = Field(default=None, repr=False)
