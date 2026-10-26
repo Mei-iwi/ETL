@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { FileText, Eye, X, Download, ExternalLink, RotateCw, Check } from 'lucide-react'
 import styles from './LibraryResourceDetailPage.module.css'
 import { SearchContext } from '../search/SearchContext'
 import { canOpenFile, fileResponseError } from './fileReadiness'
@@ -14,11 +15,12 @@ type Version = { id: string; version_number: number; created_at: string }
 
 type FilePanelProps = {
     resourceId: string; versionId: string | null; contextId: string | null; sourceOwned?: boolean
+    contextEvidence?: string | null
 }
 export function ResourceFilePanel(props: FilePanelProps) {
     return <VersionFilePanel key={JSON.stringify([props.resourceId, props.versionId])} {...props} />
 }
-function VersionFilePanel({ resourceId, versionId, contextId, sourceOwned = false }: FilePanelProps) {
+function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, sourceOwned = false }: FilePanelProps) {
     const [versions, setVersions] = useState<Version[]>([])
     const [selected, setSelected] = useState(versionId || '')
     const [error, setError] = useState('')
@@ -89,35 +91,45 @@ function VersionFilePanel({ resourceId, versionId, contextId, sourceOwned = fals
         void poll()
         return () => { controller.abort(); if (timer !== undefined) window.clearTimeout(timer) }
     }, [selected, valid, attempt])
-    return <section className={styles.panel}>
-        <h2>Tệp học liệu</h2>
+    return <section className={`${styles.panel} ${styles.filePanel}`} aria-labelledby="resource-file-title">
+        <div className={styles.fileHeading}>
+            <h2 id="resource-file-title"><FileText size={21} aria-hidden="true" />Tệp học liệu</h2>
+            {!loading && versions.length > 0 && <span className={styles.fileCount}>{versions.length} phiên bản</span>}
+        </div>
         {error && <p role="alert" className={styles.error}>{error}</p>}
         {loading ? <p className={styles.message}>Đang tải danh sách tệp…</p> :
-            !error && !versions.length && <p className={styles.message}>{sourceOwned
+            !error && !versions.length && <p className={styles.fileEmpty}>{sourceOwned
                 ? 'Chưa nhập tệp từ nguồn. Kiểm tra Đồng bộ dữ liệu nguồn.'
                 : 'Chưa có tệp học liệu.'}</p>}
-        <div className={styles.fileToolbar}>
+        {versions.length > 0 && <div className={styles.fileToolbar}>
             <label>Phiên bản <select aria-label="Phiên bản tệp" value={selected}
                 onChange={event => { setSelected(event.target.value); setOpen(false) }}>
                 {versions.map(row => <option value={row.id} key={row.id}>Phiên bản {row.version_number} · {new Date(row.created_at).toLocaleDateString('vi-VN')}</option>)}
             </select></label>
-            <button className={styles.historyLink} disabled={!ready} onClick={() => setOpen(value => !value)}>
-                {open ? 'Đóng tệp' : 'Xem tệp'}</button>
-            {ready && <a className={styles.secondaryButton} href={`${url}?download=true`} download>Tải tệp</a>}
+            <div className={styles.fileActions}>
+            <button className={styles.historyLink} disabled={!ready} aria-expanded={open && ready}
+                onClick={() => setOpen(value => !value)}>
+                {open ? <X size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{open ? 'Đóng tệp' : 'Xem tệp'}</button>
+            {ready && <a className={styles.secondaryButton} href={`${url}?download=true`} download><Download size={15} aria-hidden="true" />Tải tệp</a>}
             {ready && original && <a className={styles.secondaryButton} href={original}
-                target="_blank" rel="noopener noreferrer" title="Xem tệp trực tiếp tại nguồn trong tab mới">Xem tệp bên ngoài</a>}
+                target="_blank" rel="noopener noreferrer" title="Xem tệp trực tiếp tại nguồn trong tab mới"><ExternalLink size={15} aria-hidden="true" />Xem tệp bên ngoài</a>}
             {sourceOwned && valid && !(ready && original) && <button className={styles.secondaryButton}
-                disabled title={externalLinkReason} aria-describedby="external-source-link-status">Xem tệp bên ngoài</button>}
-            {valid && <button className={styles.secondaryButton} onClick={() => setAttempt(n => n + 1)}>Kiểm tra lại</button>}
-        </div>
-        {valid && <p role="status" className={ready ? styles.ready : styles.pending}>
-            Phiên bản đã tiếp nhận · Nội dung {status?.processing_status === 'CONTENT_READY' ? 'sẵn sàng' : 'chưa sẵn sàng'} · Chỉ mục {status?.index_status === 'READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}
-        </p>}
+                disabled title={externalLinkReason} aria-describedby="external-source-link-status"><ExternalLink size={15} aria-hidden="true" />Xem tệp bên ngoài</button>}
+            {valid && <button className={styles.secondaryButton} onClick={() => setAttempt(n => n + 1)}><RotateCw size={14} aria-hidden="true" />Kiểm tra lại</button>}
+            </div>
+        </div>}
+        {valid && <div role="status" className={styles.fileStatus}>
+            <span className={styles.ready}><Check size={14} aria-hidden="true" />Đã tiếp nhận</span>
+            <span className={status?.processing_status === 'CONTENT_READY' ? styles.ready : styles.pending}>
+                Nội dung {status?.processing_status === 'CONTENT_READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}</span>
+            <span className={status?.index_status === 'READY' ? styles.ready : styles.pending}>
+                Chỉ mục {status?.index_status === 'READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}</span>
+        </div>}
         {statusError?.id === selected && <p role="alert" className={styles.error}>{statusError.message}</p>}
         {sourceOwned && valid && !(ready && original) && <p id="external-source-link-status" className={styles.message}>{externalLinkReason}</p>}
         {sourceError?.id === selected && <p role="alert" className={styles.error}>{sourceError.message}</p>}
         {open && ready && <FilePreview key={selected} url={url} />}
-        {contextId && selected === versionId && <div className={styles.fileContext}><SearchContext id={contextId} /></div>}
+        {contextId && selected === versionId && <div className={styles.fileContext}><SearchContext id={contextId} evidence={contextEvidence} /></div>}
     </section>
 }
 

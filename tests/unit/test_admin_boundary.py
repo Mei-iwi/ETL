@@ -169,7 +169,7 @@ def test_route_classification_does_not_turn_search_into_admin():
 
 
 @pytest.mark.parametrize("origin", ["POSTGRESQL", "UNKNOWN", "MISSING", "LOCAL"])
-def test_legacy_ingest_cannot_bypass_local_ownership(searchable, monkeypatch, origin):
+def test_ingest_cannot_bypass_local_ownership(searchable, monkeypatch, origin):
     from conftest import make_pdf
 
     c, version = searchable
@@ -187,7 +187,7 @@ def test_legacy_ingest_cannot_bypass_local_ownership(searchable, monkeypatch, or
 
     monkeypatch.setattr(c.storage, "snapshot", snapshot)
     with client(c) as api:
-        response = api.post(f"/admin/resources/{resource_id}/versions/ingest",
+        response = api.post(f"/api/v1/resources/{resource_id}/versions/ingest",
                             json={"bucket": "input", "object_key": "legacy.pdf"})
     assert response.status_code == (200 if origin == "LOCAL" else 404 if origin == "MISSING" else 409)
     assert len(calls) == (1 if origin == "LOCAL" else 0)

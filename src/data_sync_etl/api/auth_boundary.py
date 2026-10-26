@@ -19,6 +19,13 @@ def auth_error(error):
         'AUTH_LOGIN_REQUIRED': 'Vui lòng đăng nhập.',
         'AUTH_SESSION_EXPIRED': 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
         'AUTH_ADMIN_DISABLED': 'Chức năng quản trị đang tắt.',
+        'AUTH_MASTER_STALE': 'Dữ liệu xác thực MASTER chưa được đồng bộ đủ mới. Vui lòng kiểm tra luồng đồng bộ users.',
+        'AUTH_MASTER_UNAVAILABLE': 'Chưa kết nối được MASTER để xác thực. Vui lòng thử lại sau.',
+        'RESOURCE_NOT_FOUND': 'Không tìm thấy học liệu.',
+        'RESOURCE_DELETION_CONFLICT': 'Trạng thái học liệu đã thay đổi. Vui lòng tải lại trước khi thực hiện.',
+        'RESOURCE_ORIGIN_UNVERIFIED': 'Chưa xác minh được nguồn quản lý học liệu.',
+        'RESOURCE_RESTORE_SOURCE_RESTRICTED': 'Chưa thể khôi phục. Vui lòng kiểm tra trạng thái nguồn và xuất bản.',
+        'RESOURCE_RESTORE_VERSION_NOT_READY': 'Phiên bản hiện hành chưa đủ điều kiện khôi phục.',
     }.get(error.code, 'Yêu cầu xác thực không được chấp nhận.')}}, status_code=error.status, headers=headers)
 
 
@@ -89,11 +96,13 @@ class AuthBoundary:
             if ended:
                 return
             if principal and not scope.get('state', {}).get('auth_change_completed') and message['type'] in ('http.response.start', 'http.response.body'):
-                if not await run_in_threadpool(auth.live, request):
+                try:
+                    await run_in_threadpool(auth.principal, request, touch=False)
+                except AuthError as error:
                     if started:
                         await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
                     else:
-                        await auth_error(AuthError('AUTH_SESSION_EXPIRED'))(scope, receive, send)
+                        await auth_error(error)(scope, receive, send)
                     ended = True
                     return
             if message['type'] == 'http.response.start':

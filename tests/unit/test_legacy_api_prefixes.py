@@ -1,4 +1,4 @@
-"""Canonical v1 URLs retain legacy behavior and access policy."""
+"""Canonical v1 URLs work; retired aliases never dispatch business actions."""
 import pytest
 from fastapi.testclient import TestClient as RawClient
 
@@ -15,7 +15,7 @@ OPERATIONS = [
 
 
 @pytest.mark.parametrize("method,suffix,body,service,operation", OPERATIONS)
-def test_v1_and_legacy_alias_dispatch_to_same_guarded_service(
+def test_v1_dispatches_and_retired_alias_is_not_registered(
     container, monkeypatch, method, suffix, body, service, operation
 ):
     container.settings.admin_enabled = True
@@ -27,11 +27,11 @@ def test_v1_and_legacy_alias_dispatch_to_same_guarded_service(
 
     monkeypatch.setattr(getattr(container, service), operation, perform)
     with TestClient(create_app(container)) as api:
-        for prefix in ("/api/v1", "/admin"):
-            response = api.request(method, prefix + suffix, **({"json": body} if body is not None else {}))
-            assert response.status_code == 200
-            assert response.json() == {"result": "same-handler"}
-    assert len(calls) == 2 and calls[0] == calls[1]
+        response = api.request(method, '/api/v1' + suffix, **({"json": body} if body is not None else {}))
+        assert response.status_code == 200
+        assert response.json() == {"result": "same-handler"}
+        assert api.request(method, '/admin' + suffix, **({"json": body} if body is not None else {})).status_code == 404
+    assert len(calls) == 1
     if service == "ingestion":
         assert calls[0][1] == {"local_only": True}
 

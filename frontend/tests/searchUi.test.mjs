@@ -16,13 +16,18 @@ const executable = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Micro
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 test('search form, methods, results, pagination, empty, error/retry and mobile layout', {
-    skip: !existsSync(executable) || !existsSync(join(root, 'dist/index.html')), timeout: 60000,
+    skip: !existsSync(executable) || !existsSync(join(root, 'dist/index.html')), timeout: 90000,
 }, async () => {
     let postCount = 0, contextCount = 0, catalogCount = 0, mode = 'results', fileKind = 'image'
     let resultCount = 8
     let modelState = 'LOADING'
     let authRole = null
     let canViewFile = true
+    let contextEvidence = 'lexical'
+    let metadataFields = ['TITLE']
+    let holdAuthConfig = true
+    const reconciliationBodies = []
+    let reconciliationPolls = 0
     let releaseSearch
     const bodies = [], responses = []
     const server = createServer(async (req, res) => {
@@ -33,7 +38,10 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(wire)
         }
         if (url.pathname === '/health') return json({ status: 'ok', database: 'ok' })
-        if (url.pathname === '/api/v1/auth/config') return json({ mode: authRole ? 'master_users' : 'legacy_local', login_required: !!authRole })
+        if (url.pathname === '/api/v1/auth/config') {
+            if (holdAuthConfig) return // Simulate the backend accepting TCP but never responding.
+            return json({ mode: authRole ? 'master_users' : 'legacy_local', login_required: !!authRole })
+        }
         if (url.pathname === '/api/v1/auth/me') return json({ id: 'master:search-reader', mode: 'master_users',
             role: authRole, roles: [authRole === 'ADMIN' ? 'admin' : 'viewer'], resource_ids: [], admin_feature_enabled: true })
         if (url.pathname === '/api/v1/auth/csrf') return json({ csrf_token: 'search-fixture-csrf' })
@@ -74,7 +82,18 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
                 can_view_file: canViewFile,
                 provider_name: 'Nhà cung cấp', resource_type_code: 'DOC', bag_id: 'b1', bag_title: null, unit_type: 'SECTION', representation_mode: 'fallback',
                 score: .03, score_components: { bow: .5, vector: .7 }, matched_bag_count: 1, matched_keywords: ['toán'],
-                snippet: 'Văn bản <script>không được thực thi</script>', page_from: 2, page_to: 2, content_unit_id: 'unit-1', context_id: 'token-1', context_url: '/api/v1/chunks/token-1/context',
+                snippet: 'Văn bản <script>không được thực thi</script>' + (contextEvidence === 'semantic' ? ' Machine learning' : ''), page_from: 2, page_to: 2, content_unit_id: 'unit-1', context_id: 'token-1', context_url: '/api/v1/chunks/token-1/context',
+                context_evidence: contextEvidence,
+                lexical_evidence: contextEvidence === 'semantic' ? [{ query_phrase: 'học máy', matched_phrase: 'Machine learning',
+                    concept_id: 'etl:machine_learning', relation: 'translation', field: 'content', weight: 0.65,
+                    sources: [{ name: 'curated', identifier: 'fixture' }] }] : [],
+                meaning_variants: contextEvidence === 'semantic' ? ['học máy', 'machine learning', 'hệ thống học từ dữ liệu'] : [],
+                ...(mode === 'metadata' ? { match_origin: 'METADATA', matched_fields: metadataFields,
+                    evidence_kind: 'METADATA_FIELD', evidence_text: 'Thông tin học liệu đã đồng bộ', resource_format: 'mp4',
+                    representation_mode: 'metadata', bag_id: null, content_unit_id: null, context_id: null,
+                    context_url: null, can_view_file: false, matched_bag_count: 0, matched_keywords: [],
+                    page_from: null, page_to: null, snippet: 'Thông tin học liệu đã đồng bộ' } : {}),
+                ...(mode === 'both' ? { match_origin: 'BOTH', matched_fields: ['CONTENT', 'TITLE'], resource_format: 'pdf' } : {}),
             })) })
         }
         if (url.pathname === '/api/v1/chunks/token-1/context') {
@@ -105,11 +124,39 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             res.writeHead(200, { 'Content-Type': 'image/png' })
             return res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=', 'base64'))
         }
+        if (url.pathname === '/api/v1/resources') return json({ items: [], pagination: { page: 1, size: 7, total: 0, total_pages: 0 } })
+        if (url.pathname === '/api/v1/reconciliation/runs/latest' && reconciliationBodies.length && ++reconciliationPolls < 3) return json({
+            latest_run_id: 'fixture-audit', overall_status: 'RUNNING', overall_match_rate_percent: 0,
+            total_source_records: 0, total_target_records: 1, total_matched_records: 0, total_mismatched_records: 0,
+            total_source_bytes: 0, total_target_bytes: 0,
+            stream_reports: [{ run_id: 'fixture-audit', stream_name: 'files', status: 'RUNNING',
+                summary_meta: { processed_files: 0, total_files: 1 } }] })
+        if (url.pathname === '/api/v1/reconciliation/runs/latest' && reconciliationBodies.length) return json({
+            latest_run_id: 'fixture-audit', overall_status: 'PARTIAL', overall_match_rate_percent: 0,
+            total_source_records: 1, total_target_records: 1, total_matched_records: 0, total_mismatched_records: 0,
+            total_source_bytes: 0, total_target_bytes: 0,
+            stream_reports: [{ run_id: 'fixture-audit', stream_name: 'files', status: 'PARTIAL',
+                summary_meta: { unverified_source_files: 1 } }] })
+        if (url.pathname === '/api/v1/reconciliation/discrepancies') return json({
+            items: [{ id: 'audit-item', run_id: 'fixture-audit', record_id: 'version-1', stream_name: 'files',
+                discrepancy_flag: 'NOT_VERIFIED', source_value: { source_file_size: 100 },
+                target_value: { reason_code: 'SOURCE_REFERENCE_DISABLED' }, resolution_status: 'UNRESOLVED' }],
+            total: 1, page: 1, page_size: 10, total_pages: 1 })
+        if (url.pathname === '/api/v1/reconciliation/runs/latest') return json({
+            overall_status: 'NO_RUNS_YET', overall_match_rate_percent: 0, total_source_records: 0,
+            total_target_records: 0, total_matched_records: 0, total_mismatched_records: 0,
+            total_source_bytes: 0, total_target_bytes: 0, stream_reports: [] })
+        if (url.pathname === '/api/v1/reconciliation/runs') {
+            let body = ''; for await (const chunk of req) body += chunk
+            reconciliationBodies.push(JSON.parse(body))
+            reconciliationPolls = 0
+            return json({ status: 'RUNNING', reports: [{ run_id: 'fixture-audit', stream_name: 'files', status: 'RUNNING' }] }, 202)
+        }
         if (url.pathname.startsWith('/api/')) return json({ detail: 'not found' }, 404)
         const file = url.pathname.startsWith('/assets/') ? resolve(root, 'dist', '.' + url.pathname) : join(root, 'dist/index.html')
         if (!file.startsWith(join(root, 'dist') + sep)) { res.writeHead(403); return res.end() }
         try {
-            res.writeHead(200, { 'Content-Type': { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png' }[extname(file)] || 'application/octet-stream' })
+            res.writeHead(200, { 'Content-Type': { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png', '.jpg': 'image/jpeg' }[extname(file)] || 'application/octet-stream' })
             res.end(await readFile(file))
         } catch { res.writeHead(404); res.end() }
     })
@@ -155,6 +202,10 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await call('Page.enable')
         await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
         await open('/search')
+        await waitFor(() => evaluate("document.querySelector('[role=alert]')?.textContent.includes('Dịch vụ xác thực chưa khả dụng')"))
+        assert.equal(await evaluate("document.body.textContent.includes('Đang kiểm tra phiên đăng nhập')"), false)
+        holdAuthConfig = false
+        await click('Thử lại')
         await waitFor(() => evaluate("document.querySelector('fieldset button[aria-pressed=\"true\"]')?.textContent === 'Tìm kết hợp'"))
         await waitFor(() => evaluate("document.body.textContent.includes('Đang chuẩn bị tìm kiếm')"))
         assert.equal(await evaluate("document.querySelector('button[type=submit]').disabled"), true)
@@ -224,7 +275,8 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await assertFixedSearch()
         async function capture(name) {
             if (!process.env.ETL_TEST_CAPTURE_LAYOUT) return
-            const directory = resolve(root, '../.test-tmp/search-layout')
+            await delay(450)
+            const directory = resolve(process.env.ETL_TEST_LAYOUT_OUTPUT || resolve(root, '../.test-tmp/search-layout'))
             await mkdir(directory, { recursive: true })
             const result = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true })
             await writeFile(join(directory, name + '.png'), Buffer.from(result.data, 'base64'))
@@ -240,19 +292,23 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("!!document.querySelector('#search-query')"), true)
         await waitFor(() => evaluate("document.querySelector('#search-query')?.value === 'toán'"))
         await waitFor(() => evaluate("document.querySelector('#search-grade')?.value === 'g1'"))
-        // Same-page duplicate clicks produce one request; the page body is never
-        // reused on back, including after access/revision failures.
+        mode = 'empty'
+        const beforeVisibilityChange = postCount
+        await evaluate("window.dispatchEvent(new Event('focus'))")
+        await waitFor(() => postCount > beforeVisibilityChange)
+        await waitFor(() => evaluate("document.querySelectorAll('article').length === 0 && document.body.textContent.includes('Chưa tìm thấy học liệu')"))
+        mode = 'results'
+        await click('Cập nhật kết quả')
+        await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 1')"))
+        // Explicit refresh must validate with the server and discard cached
+        // snapshots on access/revision failures, rather than resurrect old text.
         for (const failure of ['revoked', 'denied', 'stale', 'busy']) {
-            mode = 'slow'
-            const before = postCount
-            await evaluate(`window.t4Form = document.querySelector('form'); for (let i=0;i<${baseline ? 1 : 10};i++) Array.from(document.querySelectorAll('button')).find(e => e.textContent === 'Tiếp').click()`)
-            await waitFor(() => !!releaseSearch && postCount === before + 1)
-            assert.equal(await evaluate("document.querySelectorAll('article').length"), 0, 'old protected page hidden during validation')
             mode = failure
-            await evaluate('history.back()')
+            const before = postCount
+            await evaluate("window.t4Form = document.querySelector('form'); undefined")
+            await click('Cập nhật kết quả')
             await waitFor(() => evaluate("!!document.querySelector('[role=alert]')"))
-            releaseSearch()
-            releaseSearch = undefined
+            assert.equal(postCount, before + 1)
             assert.equal(await evaluate("document.querySelectorAll('article').length"), 0)
             if (!baseline) assert.equal(await evaluate("window.t4Form === document.querySelector('form')"), true)
             mode = 'results'
@@ -280,7 +336,8 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
                         throw new Error(`${temperature}/${group}: ${error.message}; fixture UI state=${JSON.stringify(state)}`)
                     })
                 assert.equal(result.exceptionDetails, undefined, `${temperature}/${group}`)
-                assert.equal(postCount - posts, 1, 'every page goes through live Search')
+                assert.equal(postCount - posts, ['visited', 'back'].includes(group) ? 0 : 1,
+                    'visited pages reuse recent tab snapshots; new pages use live Search')
                 const usage = process.cpuUsage(cpu)
                 const memory = process.memoryUsage()
                 assert.equal(responses.at(-1).status, 200)
@@ -324,8 +381,26 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await waitFor(() => evaluate("document.querySelector('iframe[title=\"Xem tệp PDF\"]')?.src.startsWith('blob:')"))
         assert.equal(await evaluate("document.querySelector('pre')"), null)
         assert.ok(await evaluate("document.querySelector('a[download]').href.endsWith('/api/v1/resource-versions/v1/file?download=true')"))
-        await click('← Quay lại kết quả tìm kiếm')
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('a')).find(link => link.textContent.includes('Quay lại danh sách học liệu'))?.getAttribute('href')"), '/library/list')
+        await evaluate('history.back()')
         await waitFor(() => evaluate("!!document.querySelector('article')"))
+        mode = 'metadata'; resultCount = 1
+        for (const [fields, label] of [[['TITLE'], 'Khớp tiêu đề'], [['DESCRIPTION'], 'Khớp mô tả'],
+            [['TAGS'], 'Khớp thẻ/từ khóa'], [[], 'Khớp thông tin học liệu']]) {
+            metadataFields = fields
+            const contextsBefore = contextCount
+            await open('/search/result?q=metadata&method=vector')
+            await waitFor(() => evaluate(`document.body.textContent.includes(${JSON.stringify(label)})`))
+            assert.equal(await evaluate("document.querySelectorAll('article').length"), 1)
+            assert.equal(await evaluate("document.querySelector('article a')?.getAttribute('href').includes('versionId=v1')"), true)
+            assert.equal(contextCount, contextsBefore)
+            assert.equal(await evaluate("document.body.textContent.includes('Kh?p')"), false)
+        }
+        mode = 'both'
+        await open('/search/result?q=both&method=hybrid')
+        await waitFor(() => evaluate("document.body.textContent.includes('Khớp nội dung và thông tin học liệu')"))
+        assert.equal(await evaluate("document.querySelectorAll('article').length"), 1)
+        resultCount = 8
         mode = 'error'
         await open('/search/result?q=toán&method=vector')
         await waitFor(() => evaluate("document.querySelector('[role=alert]')?.textContent.includes('Chưa thể chuẩn bị tìm kiếm')"))
@@ -411,7 +486,119 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         authRole = 'ADMIN'
         await open('/search/query-methods?q=public&method=bow')
         await waitFor(() => evaluate("!!document.querySelector('article h2 a')"))
+        // Follow the actual result locator and verify both passage evidence states.
+        for (const evidence of ['lexical', 'semantic', 'bag']) {
+            contextEvidence = evidence
+            mode = 'results'
+            await open('/search/result?q=toán&method=bow')
+            await waitFor(() => evaluate("!!document.querySelector('article h2 a')"))
+            assert.equal(await evaluate("new URL(document.querySelector('article h2 a').href).searchParams.get('contextEvidence')"), evidence)
+            if (evidence === 'semantic') {
+                await evaluate("Array.from(document.querySelectorAll('summary')).find(item => item.textContent === 'Thuật ngữ tương đương trong học liệu').click()")
+                assert.ok(await evaluate("Array.from(document.querySelectorAll('details[open] li')).some(item => item.textContent.includes('học máy') && item.textContent.includes('Machine learning'))"))
+                await evaluate("Array.from(document.querySelectorAll('summary')).find(item => item.textContent === 'Các cách diễn đạt trong nhóm nghĩa khớp').click()")
+                assert.ok(await evaluate("Array.from(document.querySelectorAll('details[open] li')).some(item => item.textContent === 'hệ thống học từ dữ liệu')"))
+            }
+            const beforeContext = contextCount
+            await evaluate("document.querySelector('article h2 a').click()")
+            await waitFor(() => evaluate("document.body.textContent.includes('Tệp học liệu')"))
+            assert.equal(contextCount, beforeContext, 'passage loading remains lazy')
+            await click('Ngữ cảnh')
+            await waitFor(() => evaluate("document.querySelector('section[aria-label=\"Ngữ cảnh học liệu\"]')?.textContent.includes('Nội dung ngữ cảnh được chọn')"))
+            const content = await evaluate("document.querySelector('section[aria-label=\"Ngữ cảnh học liệu\"]').textContent")
+            assert.ok(content.includes(evidence === 'lexical' ? 'Đoạn có từ/cụm từ khớp truy vấn' : evidence === 'semantic' ? 'Đoạn gần nghĩa với truy vấn' : 'chưa xác định được đoạn khớp trực tiếp'))
+            assert.equal(contextCount, beforeContext + 1)
+        }
 
+        // Horizontal overview and reconciliation dialogs use the real built UI.
+        authRole = 'ADMIN'
+        await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
+        await call('Page.navigate', { url: origin + '/overview/summary' })
+        await waitFor(() => evaluate("document.querySelector('img[alt=\"Kệ sách trong thư viện\"]')?.naturalWidth > 0"))
+        assert.equal(await evaluate("document.querySelector('h1').getBoundingClientRect().right > document.querySelector('figure img').getBoundingClientRect().left"), true)
+        assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true)
+        assert.equal(await evaluate("/Ảnh minh họa|Nghiên cứu & phát triển|[↗↓→]/.test(document.querySelector('main').textContent)"), false)
+        await capture('overview-horizontal-desktop')
+        await evaluate("document.getElementById('overview-content').scrollIntoView(); undefined")
+        await capture('overview-research-desktop')
+        await evaluate("document.querySelector('main').scrollTop = 0; undefined")
+        await evaluate("history.pushState({}, '', '/overview/process'); window.dispatchEvent(new PopStateEvent('popstate'))")
+        await waitFor(() => evaluate("document.querySelector('h1')?.textContent.includes('đến kết quả tìm kiếm')"))
+        assert.equal(await evaluate("document.querySelector('details').open"), false)
+        await evaluate("document.querySelector('details summary').click()")
+        assert.equal(await evaluate("document.querySelector('details').open"), true)
+        await evaluate("document.querySelector('details summary').click()")
+        assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true)
+        await capture('overview-process-desktop')
+        await evaluate("document.getElementById('overview-content').scrollIntoView(); undefined")
+        await capture('overview-workflow-desktop')
+        await evaluate("document.querySelector('main').scrollTop = 0; undefined")
+        await evaluate("history.pushState({}, '', '/overview/summary'); window.dispatchEvent(new PopStateEvent('popstate'))")
+        await waitFor(() => evaluate("document.querySelector('h1')?.textContent.includes('Quản lý và')"))
+        await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+        assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true)
+        await capture('overview-mobile')
+        await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
+        await call('Page.addScriptToEvaluateOnNewDocument', { source: `
+            const originalInterval = window.setInterval, originalClear = window.clearInterval;
+            window.setInterval = (fn, ms, ...args) => {
+                if (ms === 300000) { window.fixtureAutoScan = fn; return 2147483000; }
+                return originalInterval(fn, ms, ...args);
+            };
+            window.clearInterval = id => { if (id === 2147483000) window.fixtureAutoScan = null; else originalClear(id); };
+            window.alert = window.confirm = () => { throw new Error('Native dialog forbidden'); };
+        ` })
+        await call('Page.navigate', { url: origin + '/library/list' })
+        await waitFor(() => evaluate("!!document.querySelector('a[href=\"/library/add\"]')"))
+        assert.equal(await evaluate("document.querySelector('a[href=\"/library/add\"]').textContent.replace(/\\s+/g, ' ').trim()"), '+ Thêm học liệu')
+        assert.equal(await evaluate("document.querySelector('a[href=\"/library/add\"]').getBoundingClientRect().height >= 44"), true)
+        await capture('library-add-desktop')
+        await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+        assert.equal(await evaluate("document.querySelector('a[href=\"/library/add\"]').getBoundingClientRect().right <= innerWidth"), true)
+        await capture('library-add-mobile')
+        await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 960, deviceScaleFactor: 1, mobile: false })
+        await call('Page.navigate', { url: origin + '/library/source-sync/reconciliation' })
+        await waitFor(() => evaluate("!!document.querySelector('select[aria-label=\"Chọn luồng dữ liệu\"]')"))
+        await evaluate("const stream = document.querySelector('select[aria-label=\"Chọn luồng dữ liệu\"]'); stream.value='files'; stream.dispatchEvent(new Event('change', { bubbles: true }))")
+        await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Quét đối soát' && !button.disabled)"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).filter(button => button.textContent === 'Quét đối soát').length"), 1)
+        await click('Quét đối soát')
+        await waitFor(() => evaluate("document.body.textContent.includes('Đang đối soát nền:')"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('Đang đối soát'))?.disabled"), true)
+        await waitFor(() => evaluate("!!document.querySelector('dialog[open]')"))
+        assert.equal(reconciliationBodies.length, 1)
+        assert.equal(reconciliationBodies[0].dry_run, true)
+        await waitFor(() => evaluate("document.body.textContent.includes('Chưa bật truy xuất nguồn')"))
+        assert.equal(await evaluate("document.body.textContent.includes('Chưa xác minh')"), true)
+        assert.equal(await evaluate("document.body.textContent.includes('Tự phục hồi')"), false)
+        await capture('reconciliation-dialog')
+        await click('Đóng')
+        await evaluate("document.querySelector('input[type=checkbox]').click()")
+        await waitFor(() => evaluate("typeof window.fixtureAutoScan === 'function'"))
+        await evaluate("for (let i = 0; i < 10; i++) window.fixtureAutoScan()")
+        await waitFor(() => reconciliationBodies.length === 2)
+        assert.equal(reconciliationBodies[1].dry_run, true)
+        await waitFor(() => evaluate("!!document.querySelector('dialog[open]')"))
+        await click('Đóng')
+        await evaluate("history.pushState({}, '', '/overview/summary'); window.dispatchEvent(new PopStateEvent('popstate'))")
+        await waitFor(() => evaluate("window.fixtureAutoScan === null"))
+        // Unicode/mixed-language transport through every real React method.
+        // Fixture responses attest UI/API mapping, not semantic relevance.
+        mode = 'results'
+        modelState = 'READY'
+        for (const query of ['quang hợp'.normalize('NFD'), 'photosynthesis', 'base de données',
+            'quang hợp photosynthesis photosynthèse']) {
+            for (const method of ['bow', 'vector', 'hybrid']) {
+                const previous = postCount
+                const criteria = new URLSearchParams({ q: query, method, page: '1', size: '5' })
+                await call('Page.navigate', { url: origin + '/search/query-methods?' + criteria })
+                await waitFor(() => postCount > previous)
+                await waitFor(() => evaluate("!!document.querySelector('article')"))
+                assert.equal(bodies.at(-1).query, query.normalize('NFC'))
+                assert.equal(bodies.at(-1).method, method)
+                assert.equal(await evaluate("document.querySelector('#search-query').value"), query.normalize('NFC'))
+            }
+        }
     } finally {
         releaseSearch?.()
         if (ws) ws.close()

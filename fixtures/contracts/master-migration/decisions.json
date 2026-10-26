@@ -1,0 +1,55 @@
+{
+  "schema_policy": "PRESERVE",
+  "approved_schema_changes": [],
+  "governance_approval": "User explicitly approved governance and isolated tests only; no Dev writes or historical revision edits.",
+  "acceptance": {
+    "date": "2026-10-17",
+    "phase_status": "PARTIAL",
+    "governance": "PASS",
+    "tests": "PASS",
+    "unit_passed": 92,
+    "integration_passed": 16,
+    "known_defect_xfailed": 1,
+    "accepted_by": "User",
+    "schema_approval_granted": false,
+    "lineage_and_lov_policy": "HOLD_CURRENT_BEHAVIOR_UNTIL_USER_DECISION"
+  },
+  "base_head": "753fb22",
+  "baseline": "fixtures/contracts/erd-contract/contract_snapshot.json",
+  "design_decisions": [
+    {
+      "id": "B03",
+      "status": "UNDECIDED",
+      "subject": "Master created_by FK and nullable"
+    },
+    {
+      "id": "B04",
+      "status": "UNDECIDED",
+      "subject": "SOURCE branching lineage versus linear ETL imports"
+    },
+    {
+      "id": "B07",
+      "status": "UNDECIDED",
+      "subject": "LOCAL subject/grade, primary subject and grade consistency"
+    },
+    {
+      "id": "B08",
+      "status": "UNDECIDED",
+      "subject": "Master grade_code width versus diagram"
+    },
+    {
+      "id": "B09",
+      "status": "UNDECIDED",
+      "subject": "LOV full source catalog versus referenced values"
+    }
+  ],
+  "historical_defects": [
+    {
+      "id": "B13",
+      "status": "KNOWN_DEFECT",
+      "resolution": "NOT_FIXED",
+      "subject": "0005 downgrade index spelling mismatch",
+      "historical_revision": "0005"
+    }
+  ]
+}

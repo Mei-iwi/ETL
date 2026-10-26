@@ -109,7 +109,7 @@ def test_cli_check_emits_json_for_incompatible_schema(monkeypatch, capsys,
     monkeypatch.setattr(schema, 'MongoClient', lambda *args, **kwargs: client)
     monkeypatch.setattr(schema, 'Settings', lambda: SimpleNamespace(
         mongo_uri='test-only-not-a-real-connection', mongo_database=database.name,
-        index_embedding_dimension=384))
+        index_embedding_dimension=384, index_historical_embedding_dimensions=[]))
     assert schema.main(['--check']) == exit_code
     report = json.loads(capsys.readouterr().out)
     assert report['schema_ready'] == (exit_code == 0)

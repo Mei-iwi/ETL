@@ -1,0 +1,624 @@
+{
+  "label_status": "AGENT_REVIEWED_DRAFT_REQUIRES_DOMAIN_REVIEW",
+  "version": "optimization-v1",
+  "provenance": "New queries/anchors frozen before computing model rankings. Holdout evaluated once after validation-only choices. Same small corpus, no independent human labels.",
+  "queries": [
+    {
+      "query_id": "V31",
+      "query": "Vì sao xác thực hai lớp không đủ để tin một đường link?",
+      "language": "vi",
+      "split": "validation",
+      "category": "negation",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R017",
+            "HL26_XDRV_R005"
+          ],
+          "anchors": [
+            "nhưng không thay thế thói quen kiểm tra tên miền"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V32",
+      "query": "Should I share a one-time code with someone claiming to be an administrator?",
+      "language": "en",
+      "split": "validation",
+      "category": "paraphrase",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R017",
+            "HL26_XDRV_R005"
+          ],
+          "anchors": [
+            "Học sinh cần từ chối cung cấp mã"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V33",
+      "query": "Cát không tan trong nước thì chọn cách tách nào?",
+      "language": "vi",
+      "split": "validation",
+      "category": "explanation",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R014",
+            "HL26_XDRV_R002"
+          ],
+          "anchors": [
+            "cát bị giữ lại còn nước đi qua"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V34",
+      "query": "Why can evaporation recover salt from a solution?",
+      "language": "en",
+      "split": "validation",
+      "category": "explanation",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R014",
+            "HL26_XDRV_R002"
+          ],
+          "anchors": [
+            "Nước muối để bay hơi dần cho tinh thể muối"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V35",
+      "query": "Lá có cấu tạo nào giúp nhận light và trao đổi khí?",
+      "language": "mixed",
+      "split": "validation",
+      "category": "multi_intent",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "khí khổng"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V36",
+      "query": "Cần làm gì với các phiên đăng nhập lạ khi bị lộ mật khẩu?",
+      "language": "vi",
+      "split": "validation",
+      "category": "narrow_context",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R017",
+            "HL26_XDRV_R005"
+          ],
+          "anchors": [
+            "đăng xuất các phiên lạ"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "V37",
+      "query": "Phương trình hô hấp tế bào của lá vào ban đêm là gì?",
+      "language": "vi",
+      "split": "validation",
+      "category": "hard_no_answer",
+      "reason": "Corpus mô tả quang hợp/khí khổng, không có phương trình hô hấp.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "khí khổng"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V38",
+      "query": "Give Python code implementing TOTP for multi-factor authentication.",
+      "language": "en",
+      "split": "validation",
+      "category": "hard_no_answer",
+      "reason": "Chỉ kỹ năng sử dụng, không có mã triển khai TOTP.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R017",
+            "HL26_XDRV_R005"
+          ],
+          "anchors": [
+            "Xác thực nhiều yếu tố bổ sung lớp bảo vệ"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V39",
+      "query": "Tính năng lượng liên kết hóa học tiêu thụ trong quang hợp.",
+      "language": "vi",
+      "split": "validation",
+      "category": "hard_no_answer",
+      "reason": "Không có số liệu/phương pháp tính năng lượng liên kết.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "khí khổng"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V40",
+      "query": "How does fractional distillation separate ethanol from water?",
+      "language": "en",
+      "split": "validation",
+      "category": "hard_no_answer",
+      "reason": "Cô cạn/chiết/lọc không giải thích chưng cất phân đoạn ethanol.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R014",
+            "HL26_XDRV_R002"
+          ],
+          "anchors": [
+            "Cô cạn thích hợp"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V41",
+      "query": "Làm sao bẻ khóa mật khẩu đã băm Argon2?",
+      "language": "vi",
+      "split": "validation",
+      "category": "hard_no_answer",
+      "reason": "Không có thuật toán hoặc hướng dẫn phá hash.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R017",
+            "HL26_XDRV_R005"
+          ],
+          "anchors": [
+            "Mật khẩu nên dài"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "V42",
+      "query": "Photosynthesis quantum yield measurement protocol?",
+      "language": "mixed",
+      "split": "validation",
+      "category": "hard_no_answer",
+      "reason": "Không có quy trình đo hiệu suất lượng tử.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R022",
+            "HL26_XDRV_R010"
+          ],
+          "anchors": [
+            "khí khổng"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H01",
+      "query": "Chiếc cặp 240 nghìn giảm 15 phần trăm phải trả bao nhiêu?",
+      "language": "vi",
+      "split": "test",
+      "category": "calculation",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R001"
+          ],
+          "anchors": [
+            "giá còn lại là 204 000"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H02",
+      "query": "What percentage is eighteen students out of sixty?",
+      "language": "en",
+      "split": "test",
+      "category": "cross_lingual",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R001"
+          ],
+          "anchors": [
+            "18 trong 60"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H03",
+      "query": "How do water droplets in clouds turn into rain?",
+      "language": "en",
+      "split": "test",
+      "category": "explanation",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R003"
+          ],
+          "anchors": [
+            "Khi giọt nước lớn dần"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H04",
+      "query": "Nước mưa trở lại water cycle bằng dòng chảy và thấm ra sao?",
+      "language": "mixed",
+      "split": "test",
+      "category": "multi_intent",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R003"
+          ],
+          "anchors": [
+            "Nước mưa chảy trên bề mặt đất"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H05",
+      "query": "Câu chủ đề và câu kết trong đoạn giải thích làm nhiệm vụ gì?",
+      "language": "vi",
+      "split": "test",
+      "category": "multi_intent",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R002"
+          ],
+          "anchors": [
+            "Câu cuối khái quát ý chính"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H06",
+      "query": "How does taking notes while reading help build vocabulary?",
+      "language": "en",
+      "split": "test",
+      "category": "narrow_context",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R002"
+          ],
+          "anchors": [
+            "Khi ghi lại từ chưa biết và đặt câu"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H07",
+      "query": "Hai đại lượng cùng tăng đã chắc là tỉ lệ thuận chưa?",
+      "language": "vi",
+      "split": "test",
+      "category": "negation",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R016",
+            "HL26_XDRV_R004"
+          ],
+          "anchors": [
+            "Không phải mọi mối quan hệ cùng tăng"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H08",
+      "query": "At a constant speed of 45 km per hour, how far is travelled in two hours?",
+      "language": "en",
+      "split": "test",
+      "category": "calculation",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R016",
+            "HL26_XDRV_R004"
+          ],
+          "anchors": [
+            "Sau 2 giờ xe đi 90 km"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H09",
+      "query": "Đặt mắt ở đâu khi đọc thermometer dạng thang chia để giảm sai số?",
+      "language": "mixed",
+      "split": "test",
+      "category": "narrow_context",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R023",
+            "HL26_XDRV_R011"
+          ],
+          "anchors": [
+            "cần đặt mắt ngang mực chỉ thị"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H10",
+      "query": "Có thể xem mọi chi tiết truyền thuyết là sự kiện lịch sử đã kiểm chứng không?",
+      "language": "vi",
+      "split": "test",
+      "category": "negation",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R024",
+            "HL26_XDRV_R012"
+          ],
+          "anchors": [
+            "phân biệt bằng chứng khảo cổ với truyền thuyết"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H11",
+      "query": "Trong dữ liệu khảo sát, TEST_S01 đọc bao nhiêu phút mỗi ngày?",
+      "language": "vi",
+      "split": "test",
+      "category": "table_lookup",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R006"
+          ],
+          "anchors": [
+            "C1: TEST_S01"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H12",
+      "query": "What crafts and farming activities are described for Van Lang residents?",
+      "language": "en",
+      "split": "test",
+      "category": "multi_intent",
+      "reason": "",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R024",
+            "HL26_XDRV_R012"
+          ],
+          "anchors": [
+            "Nghề đúc đồng, làm gốm và dệt vải"
+          ],
+          "grade": 3
+        }
+      ]
+    },
+    {
+      "query_id": "H13",
+      "query": "Công thức lãi kép liên tục khi lạm phát thay đổi mỗi năm?",
+      "language": "vi",
+      "split": "test",
+      "category": "hard_no_answer",
+      "reason": "Ví dụ giảm giá không dạy lãi kép liên tục.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R001"
+          ],
+          "anchors": [
+            "Tỉ số phần trăm"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H14",
+      "query": "Derive the boiling temperature of water at a given atmospheric pressure.",
+      "language": "en",
+      "split": "test",
+      "category": "hard_no_answer",
+      "reason": "Vòng tuần hoàn không có quan hệ định lượng áp suất/nhiệt độ sôi.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R003"
+          ],
+          "anchors": [
+            "Bay hơi"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H15",
+      "query": "Quy trình sửa nhiệt kế thủy ngân bị vỡ tại nhà?",
+      "language": "vi",
+      "split": "test",
+      "category": "hard_no_answer",
+      "reason": "Có cảnh báo không dùng, không có quy trình sửa. Chỉ liên quan một phần.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R023",
+            "HL26_XDRV_R011"
+          ],
+          "anchors": [
+            "Không sử dụng nhiệt kế đã nứt vỡ"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H16",
+      "query": "Does the reading survey establish a causal effect of reading time on book borrowing?",
+      "language": "en",
+      "split": "test",
+      "category": "hard_no_answer",
+      "reason": "Có bảng giả lập, không có thiết kế/phân tích nhân quả.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R006"
+          ],
+          "anchors": [
+            "minutes_read_per_day"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H17",
+      "query": "Hướng dẫn tạo một web server HTTP bằng Rust.",
+      "language": "vi",
+      "split": "test",
+      "category": "unrelated_no_answer",
+      "reason": "Không có nội dung lập trình Rust/web server trong corpus.",
+      "annotations": []
+    },
+    {
+      "query_id": "H18",
+      "query": "Exact founding year of Van Lang supported by an absolute chronology?",
+      "language": "en",
+      "split": "test",
+      "category": "hard_no_answer",
+      "reason": "Timeline nói rõ không có niên đại tuyệt đối; bài đời sống không nêu năm thành lập.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_GDRV_R008"
+          ],
+          "anchors": [
+            "không biểu thị niên đại tuyệt đối"
+          ],
+          "grade": 1
+        },
+        {
+          "resource_ids": [
+            "HL26_R024",
+            "HL26_XDRV_R012"
+          ],
+          "anchors": [
+            "Trống đồng"
+          ],
+          "grade": 1
+        }
+      ]
+    },
+    {
+      "query_id": "H19",
+      "query": "Dự báo quỹ đạo sao chổi bằng phương pháp tích phân số nào?",
+      "language": "vi",
+      "split": "test",
+      "category": "unrelated_no_answer",
+      "reason": "Không có thiên văn/tích phân số trong corpus.",
+      "annotations": []
+    },
+    {
+      "query_id": "H20",
+      "query": "Prove the derivative rule for a direct proportion y=kx.",
+      "language": "en",
+      "split": "test",
+      "category": "hard_no_answer",
+      "reason": "Có đại lượng tỉ lệ thuận cấp lớp7, không có đạo hàm/chứng minh giải tích.",
+      "annotations": [
+        {
+          "resource_ids": [
+            "HL26_R016",
+            "HL26_XDRV_R004"
+          ],
+          "anchors": [
+            "y = kx"
+          ],
+          "grade": 1
+        }
+      ]
+    }
+  ]
+}

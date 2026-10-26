@@ -12,6 +12,7 @@ from hashlib import sha256
 from pathlib import PurePosixPath
 
 from data_sync_etl.domain.core import DomainError, SourceFileError
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.ports.source_files import ResolvedFileReference
 
 CHUNK = 256 * 1024
@@ -75,7 +76,7 @@ class SourceFileResolver:
             version = repo.get('resource_versions', version_id)
             resource = repo.get('master_learning_resources', version['resource_id']) if version else None
             rows = repo.find('source_file_imports', {'target_version_id': version_id}, limit=2)
-            if not version or not resource or not resource['is_active'] or resource.get('deleted_at') is not None or resource.get('source_missing_at') is not None:
+            if not version or not resource or not resource['is_active'] or resource_deleted(resource) or resource.get('source_missing_at') is not None:
                 raise SourceFileError('FILE_NOT_FOUND')
             origin = resource.get('source_origin')
             if origin == 'LOCAL' and not rows:

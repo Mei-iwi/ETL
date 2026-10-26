@@ -154,7 +154,10 @@ def test_process_unavailable_resource(container, change):
     with container.uow() as repo:
         repo.update("master_learning_resources", "resource-1", change)
     with TestClient(create_app(container)) as client:
-        assert client.post(f"/api/v1/resource-versions/{version['id']}/process").status_code == 400
+        # A deleted resource is hidden before dispatch; inactive retains its
+        # existing command-validation error. Neither may enqueue OCR.
+        expected = 404 if change.get('deleted_at') is not None else 400
+        assert client.post(f"/api/v1/resource-versions/{version['id']}/process").status_code == expected
     with container.uow() as repo:
         assert repo.count("ocr_jobs", {}) == 0
 
@@ -327,7 +330,7 @@ def test_manual_postprocess_cannot_overlap_projection(container, monkeypatch):
             with pytest.raises(DomainError, match="already running"):
                 container.postprocess.run(version["id"])
             with TestClient(create_app(container)) as api:
-                response = api.post(f"/admin/resource-versions/{version['id']}/postprocess")
+                response = api.post(f"/api/v1/resource-versions/{version['id']}/postprocess")
                 assert response.status_code == 400
         finally:
             release.set()

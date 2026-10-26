@@ -19,7 +19,15 @@ def test_nullable_unique_references_and_other_ten_tables_unchanged(container):
               'subjects': 12, 'resource_subjects': 3, 'resource_grade_levels': 2,
               'resource_versions': 20, 'content_units': 13, 'ocr_jobs': 12, 'ocr_page_tasks': 14}
     for table, count in counts.items():
-        assert len(inspector.get_columns(table)) == len(MODELS[table].__table__.columns) == count
+        additions = {'source_file_size', 'storage_file_size'} if table == 'resource_versions' else set()
+        if table == 'master_learning_resources':
+            additions = {'master_deleted_at', 'master_deleted_by', 'master_deletion_reason', 'deletion_revision'}
+        physical = {column['name'] for column in inspector.get_columns(table)}
+        assert physical == set(MODELS[table].__table__.columns.keys())
+        assert len(physical - additions) == count and additions <= physical
+        for column in inspector.get_columns(table):
+            if column['name'] in additions and table == 'resource_versions':
+                assert column['nullable'] and str(column['type']).upper() == 'BIGINT'
     for table in ('master_users', 'master_learning_resources'):
         column = next(c for c in inspector.get_columns(table) if c['name'] == 'mongo_id')
         assert column['nullable'] and column['type'].length == 30

@@ -192,7 +192,7 @@ def test_recovery_workloads(searchable, mongo_test_database, monkeypatch):
         event.listen(c.engine, 'before_cursor_execute', before)
         event.listen(c.engine, 'after_cursor_execute', after)
         target = Path(os.environ['ETL_CACHE_RECOVERY_METRICS']).resolve()
-        assert target.is_relative_to(Path.cwd().resolve() / 'docs/audits/search-query-vector-cache')
+        assert target.is_relative_to(Path.cwd().resolve() / '.test-tmp/audits/search-query-vector-cache')
         report = {
             'head': '358cf921125df28a95edd3fbaa72829c0c771eae', 'status': 'RUNNING',
             'scope': 'isolated real PG/Mongo + MiniLM384D; 2 resources; SearchService/admission, not HTTP or Dev',

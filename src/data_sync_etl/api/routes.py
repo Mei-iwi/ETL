@@ -37,6 +37,7 @@ from data_sync_etl.api.indexing_schemas import (
     index_error,
 )
 from data_sync_etl.api.master_sync_schemas import (
+    SYNC_ERRORS,
     MasterSyncAutoRequest,
     MasterSyncRequest,
     MasterSyncRunResult,
@@ -182,6 +183,8 @@ async def search_model_status(request: Request, response: Response):
     # This process alone reports its resident model, never another worker's.
     response.headers['Cache-Control'] = 'private, no-store'
     embedding = request.app.state.container.indexing.embedding
+    if request.app.state.container.settings.semantic_enabled and request.app.state.container.semantic is not None:
+        embedding = request.app.state.container.semantic.embedding
     status = getattr(embedding, 'search_status', None)
     return status() if status is not None else {'state': 'FAILED', 'ready': False}
 
@@ -192,6 +195,8 @@ async def retry_search_model(request: Request, response: Response):
         if not search_access(request).internal:
             raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
         embedding = request.app.state.container.indexing.embedding
+        if request.app.state.container.settings.semantic_enabled and request.app.state.container.semantic is not None:
+            embedding = request.app.state.container.semantic.embedding
         retry = getattr(embedding, 'retry_preload', None)
         if retry is None or not retry():
             raise SearchError('BLOCKED_EMBEDDING_RUNTIME')
@@ -592,9 +597,14 @@ def list_resources(
     ] = None,
     resource_type_code: Annotated[
         str | None, Query(max_length=50)
-    ] = None
+    ] = None,
+    deleted_only: bool = False,
 ) -> ResouceListResponse:
     principal = getattr(request.state, 'auth_principal', None)
+    if deleted_only:
+        from data_sync_etl.security.auth import AuthError
+        if not request.app.state.container.settings.admin_enabled or principal is None or principal.role != 'ADMIN':
+            raise AuthError('AUTH_FORBIDDEN', 403)
     allowed = (frozenset(principal.resource_ids) if principal is not None
                and principal.mode in ('db_users', 'master_users') and principal.role != 'ADMIN' else None)
     result = (
@@ -605,6 +615,7 @@ def list_resources(
             subject_id=subject_id,
             grade_level_id=grade_level_id,
             resource_type_code=resource_type_code,
+            **({'deleted_only': True} if deleted_only else {}),
             **({'allowed_resource_ids': allowed} if allowed is not None else {}),
         )
     )
@@ -903,6 +914,12 @@ def sync_master_data(body: MasterSyncRequest, request: Request):
         return services(request).sync.run(body.stream, body.full)
     except SyncAlreadyRunning:
         raise HTTPException(409, "A Master Data sync is already running") from None
+    except DomainError as exc:
+        code = str(exc).split(':', 1)[0]
+        if code in SYNC_ERRORS:
+            status, message = SYNC_ERRORS[code]
+            raise HTTPException(status, detail={'code': code, 'message': message}) from None
+        raise
 
 
 @router.get(
@@ -977,11 +994,6 @@ def retry_source_file(file_id: ResourceId, request: Request):
         raise HTTPException(409, "Tệp chưa đủ điều kiện thử lại") from None
 
 
-@router.post("/admin/sync/master", include_in_schema=False)
-def sync(body: MasterSyncRequest, request: Request):
-    return services(request).sync.run(body.stream, body.full)
-
-
 @router.post("/api/v1/resource-versions/{id}/index", tags=[TAG_INDEXING],
              status_code=202, response_model=IndexRequestResponse, responses=ERROR_RESPONSES,
              summary="Xếp hàng phân đoạn và lập chỉ mục học liệu")
@@ -996,7 +1008,6 @@ def index_version(id: ResourceId, request: Request, response: Response):
         raise index_error(exc) from None
 
 
-@router.post("/admin/resources/{id}/versions/ingest", include_in_schema=False)
 @router.post("/api/v1/resources/{id}/versions/ingest", tags=[TAG_MASTER])
 def ingest(id: ResourceId, body: IngestInput, request: Request):
     container = services(request)
@@ -1028,7 +1039,6 @@ def chunk_preview(id: ResourceId, request: Request,
         raise index_error(exc) from None
 
 
-@router.post("/admin/resource-versions/{id}/ocr-jobs", include_in_schema=False)
 @router.post("/api/v1/resource-versions/{id}/ocr-jobs", tags=[TAG_PROCESSING])
 def create_job(id: ResourceId, request: Request, body: JobInput | None = None):
     services(request)
@@ -1047,7 +1057,6 @@ def index_status(id: ResourceId, request: Request):
         raise index_error(exc) from None
 
 
-@router.post("/admin/resource-versions/{id}/postprocess", include_in_schema=False)
 @router.post("/api/v1/resource-versions/{id}/postprocess", tags=[TAG_PROCESSING])
 def postprocess(id: ResourceId, request: Request):
     return services(request).postprocess.run(id)
@@ -1064,7 +1073,6 @@ def reindex_version(id: ResourceId, request: Request, body: ReindexRequest | Non
         raise index_error(exc) from None
 
 
-@router.get("/admin/resource-versions/{id}/etl-status", include_in_schema=False)
 @router.get("/api/v1/resource-versions/{id}/etl-status", tags=[TAG_PROCESSING])
 def status(id: ResourceId, request: Request):
     return services(request).orchestrator.status(id)
@@ -1092,15 +1100,3 @@ def list_public_content_units(
         )
     except DomainError:
         raise HTTPException(status_code=404, detail="Resource version not found") from None
-
-
-@router.get("/admin/resource-versions/{id}/content-units", include_in_schema=False)
-def content_units(
-    id: ResourceId,
-    request: Request,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    search: Annotated[str, Query(max_length=200)] = "",
-):
-    services(request)
-    return list_public_content_units(id, request, offset, limit, search)

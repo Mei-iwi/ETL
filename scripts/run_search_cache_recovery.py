@@ -28,7 +28,7 @@ def main():
         parser.error("Run from repository root")
     target = (
         root
-        / "docs/audits/search-query-vector-cache"
+        / ".test-tmp/audits/search-query-vector-cache"
         / (
             "metrics_recovery_positive_control_v2.json"
             if args.positive_control

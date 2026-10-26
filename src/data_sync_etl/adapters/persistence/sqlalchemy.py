@@ -24,13 +24,15 @@ from data_sync_etl.db.models import (
     OcrPageTask,
     ResourceGradeLevel,
     ResourceSubject,
+    ResourceVersion,
     SourceFileImport,
     Subject,
     SyncAutoConfig,
     SyncAutoStream,
     SyncCheckpoint,
 )
-from data_sync_etl.domain.core import DomainError, now
+from data_sync_etl.domain.core import DomainError, new_id, now
+from data_sync_etl.domain.resource_deletion import LOCAL_DELETION_FIELDS
 from data_sync_etl.domain.source_ownership import state_hash
 
 STREAMS = {
@@ -221,14 +223,23 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         return self._dict(row)
 
     def update(self, table, key, values):
+        if table == 'resource_deletion_events' and set(values) != {'propagated_at'}:
+            raise DomainError('DELETION_AUDIT_IMMUTABLE')
         row = self.session.get(MODELS[table], key)
         if row is None:
             raise LookupError("Target not found")
+        visibility_changed = table == 'master_learning_resources' and any(
+            name in values and utc(getattr(row, name)) != utc(values[name])
+            for name in ('master_deleted_at', 'deleted_at', 'is_active', 'source_missing_at', 'publication_status'))
         for name, value in values.items():
             setattr(row, name, value)
         self.session.flush()
+        if visibility_changed:
+            self.bump_resource_visibility_epoch()
 
     def delete(self, table, filters):
+        if table in ('master_learning_resources', 'resource_versions', 'resource_deletion_events'):
+            raise DomainError('RESOURCE_HARD_DELETE_FORBIDDEN')
         self.session.execute(delete(MODELS[table]).filter_by(**filters))
         self.session.flush()
 
@@ -242,6 +253,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             select(MasterLearningResource).where(
                 MasterLearningResource.id == resource_id,
                 MasterLearningResource.deleted_at.is_(None),
+                MasterLearningResource.master_deleted_at.is_(None),
                 MasterLearningResource.is_active.is_(True),
             )
         )
@@ -328,7 +340,8 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
 
     def claim_source_import(self, stamp, token, expires_at):
         model = SourceFileImport
-        stmt = select(model).where(or_(
+        stmt = select(model).where(~exists().where(
+            MasterLearningResource.id == model.resource_id, MasterLearningResource.master_deleted_at.is_not(None)), or_(
             and_(model.status.in_(["PENDING", "IMPORTED", "RETRY_PROCESSING", "RETRY_WAIT"]),
                  or_(model.next_retry_at.is_(None), model.next_retry_at <= stamp)),
             and_(model.status == "FETCHING", model.lease_expires_at <= stamp),
@@ -344,6 +357,33 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         row.attempts += 1
         self.session.flush()
         return {**self._dict(row), "previous_status": previous_status}
+
+    def pending_live_ocr_tasks(self):
+        live = exists().where(OcrJob.id == OcrPageTask.job_id,
+            ResourceVersion.id == OcrJob.resource_version_id,
+            MasterLearningResource.id == ResourceVersion.resource_id,
+            MasterLearningResource.is_active.is_(True), MasterLearningResource.deleted_at.is_(None),
+            MasterLearningResource.master_deleted_at.is_(None))
+        query = select(OcrPageTask).where(OcrPageTask.status == 'PENDING', live).order_by(
+            OcrPageTask.created_at, OcrPageTask.id).limit(1).with_for_update(skip_locked=True)
+        return [self._dict(row) for row in self.session.scalars(query)]
+
+    def resource_visibility_epoch(self):
+        # O(1) authority epoch, committed atomically with tombstone + audit.
+        return self.session.scalar(select(SyncCheckpoint.last_id).where(SyncCheckpoint.stream_name == 'resource-visibility-v1'))
+
+    def bump_resource_visibility_epoch(self):
+        # Defer the global lock until ALL resource writes/locks are done. Taking
+        # it inside a multi-resource sync batch can deadlock with a delete of
+        # a resource later in that batch.
+        self.session.info['resource_visibility_dirty'] = True
+
+    def flush_resource_visibility_epoch(self):
+        if not self.session.info.pop('resource_visibility_dirty', False):
+            return
+        self.ensure_checkpoint('resource-visibility-v1')
+        self.get('sync_checkpoints', 'resource-visibility-v1', lock=True)
+        self.update('sync_checkpoints', 'resource-visibility-v1', {'last_id': new_id(), 'updated_at': now()})
 
     def ensure_auto_sync_config(self, interval_seconds):
         insert = pg_insert if self.session.bind.dialect.name == "postgresql" else sqlite_insert
@@ -375,7 +415,8 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         model = MODELS[table]
         referenced = table in ('master_users', 'master_learning_resources')
         row = self.session.get(model, values['id'], with_for_update=referenced or source_origin is not None, populate_existing=True)
-        values = {k: v for k, v in values.items() if k not in {'source_origin', 'source_state_hash', 'source_missing_at'}}
+        values = {k: v for k, v in values.items() if k not in
+                  {'source_origin', 'source_state_hash', 'source_missing_at'} | LOCAL_DELETION_FIELDS}
         if source_origin is not None:
             if source_origin != 'POSTGRESQL':
                 raise DomainError('BLOCKED_SOURCE_OWNERSHIP')
@@ -387,6 +428,9 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
                 created = 'grade_created_at' if table == 'master_grade_levels' else 'created_at'
                 if created in values and utc(values[created]) != utc(getattr(row, created)):
                     raise DomainError('BLOCKED_SOURCE_IDENTITY')
+                updated = 'grade_updated_at' if table == 'master_grade_levels' else 'updated_at'
+                if values.get(updated) is not None and utc(values[updated]) < utc(getattr(row, updated)):
+                    return 'SKIPPED'  # An older SOURCE event cannot undo newer lifecycle state.
         if table == 'master_grade_levels' and values.get('grade_mongo_id') is None:
             values = {k: v for k, v in values.items() if k != 'grade_mongo_id'}
         if referenced:
@@ -410,10 +454,15 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             if source_origin and row.source_missing_at is not None:
                 row.source_missing_at = None
                 self.session.flush()
+                if table == 'master_learning_resources':
+                    self.bump_resource_visibility_epoch()
             return "SKIPPED"
         for k, v in changed.items():
             setattr(row, k, v)
         self.session.flush()
+        if table == 'master_learning_resources' and (
+                set(changed) & {'deleted_at', 'is_active', 'publication_status'} or row.source_missing_at is not None):
+            self.bump_resource_visibility_epoch()
         if source_origin:
             row.source_missing_at = None
             row.source_state_hash = state_hash(self._dict(row))
@@ -443,7 +492,11 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
     def index_candidates(self):
         model = MODELS["etl_stage_runs"]
         rows = self.session.scalars(select(model).where(
-            model.stage == "INDEX_BUILD", model.status.in_(("PENDING", "RUNNING"))
+            model.stage == "INDEX_BUILD", model.status.in_(("PENDING", "RUNNING")),
+            exists().where(ResourceVersion.id == model.resource_version_id,
+                MasterLearningResource.id == ResourceVersion.resource_id,
+                MasterLearningResource.master_deleted_at.is_(None), MasterLearningResource.deleted_at.is_(None),
+                MasterLearningResource.is_active.is_(True))
         ).order_by(model.created_at, model.id).limit(100)).all()
         return [self._dict(row) for row in rows]
 
@@ -460,14 +513,20 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             offset: int,
             limit: int,
             allowed_resource_ids: frozenset[str] | None = None,
+            deleted_only: bool = False,
     ) -> tuple[list[dict], int]:
         resouce = MasterLearningResource
 
         conditions = [
             resouce.is_active.is_(True),
             resouce.deleted_at.is_(None),
+            resouce.master_deleted_at.is_(None),
             resouce.publication_status == 'PUBLISHED',
         ]
+        if deleted_only:
+            # Admin-only route checks this before invoking the listing use case.
+            # Include SOURCE-restricted items too; restore still enforces SOURCE policy.
+            conditions = [resouce.master_deleted_at.is_not(None)]
         if allowed_resource_ids is not None:
             conditions.append(resouce.id.in_(allowed_resource_ids))
 
@@ -533,13 +592,23 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
 
 
 class SQLAlchemyUnitOfWork:
+    def reconciliation_engine(self, **options):
+        from data_sync_etl.adapters.persistence.reconciliation_engine import ReconciliationEngine
+        return ReconciliationEngine(self, **options)
+
+    def file_reconciliation_jobs(self, engine):
+        from data_sync_etl.adapters.persistence.file_reconciliation import FileReconciliationJobs
+        return FileReconciliationJobs(engine)
+
     def __init__(self, session_factory):
         self.sessions = session_factory
 
     @contextmanager
     def __call__(self):
         with self.sessions.begin() as session:
-            yield SQLAlchemyRepository(session)
+            repo = SQLAlchemyRepository(session)
+            yield repo
+            repo.flush_resource_visibility_epoch()
 
     @contextmanager
     def metadata_projection_lock(self, stream):

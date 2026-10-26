@@ -19,6 +19,7 @@ from data_sync_etl.domain.format_validation import (
     FormatValidatorRegistry,
     ProcessingFormatError,
 )
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.logging import event
 from data_sync_etl.ports.repositories import UnitOfWork
 from data_sync_etl.ports.source_files import ReadOnlySourceFilePort, ReadOnlySourceVersionPort
@@ -94,7 +95,8 @@ class SourceFileImportService:
             return len(page["items"])
 
     def _discover(self, repo, source):
-        unsupported_media = source["storage_object_key"].lower().endswith(('.mp3', '.mp4'))
+        unsupported_media = (source["storage_object_key"].lower().endswith(('.mp3', '.mp4'))
+                             and not self.settings.source_metadata_media_enabled)
         existing = repo.find("source_file_imports", {
             "source_system": "postgresql", "source_version_id": source["source_version_id"]}, limit=1)
         if existing:
@@ -117,6 +119,9 @@ class SourceFileImportService:
                     "claim_token": None, "lease_expires_at": None, "updated_at": now(),
                 })
             else:
+                if (self.settings.source_metadata_media_enabled and row['last_error_code'] == 'UNSUPPORTED_SOURCE_FORMAT'
+                        and row['target_version_id'] is None and row['status'] == 'FAILED'):
+                    repo.update('source_file_imports', row['id'], {'status': 'PENDING', 'last_error_code': None})
                 repo.update("source_file_imports", row["id"], {
                     "resource_title": source["resource_title"],
                     "source_lifecycle_status": source["source_lifecycle_status"],
@@ -169,7 +174,7 @@ class SourceFileImportService:
     @staticmethod
     def _master(repo, resource_id):
         resource = repo.get("master_learning_resources", resource_id, lock=True)
-        if not resource or not resource["is_active"] or resource["deleted_at"] is not None:
+        if not resource or not resource["is_active"] or resource_deleted(resource):
             raise SourceFileError("WAITING_FOR_MASTER", transient=True)
         return resource
 
@@ -181,7 +186,8 @@ class SourceFileImportService:
         try:
             self.resolver._enabled()
             self.resolver.files = self.files
-            if claimed["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
+            media = claimed['storage_object_key'].lower().endswith(('.mp3', '.mp4'))
+            if media and not self.settings.source_metadata_media_enabled:
                 raise SourceFileError("UNSUPPORTED_SOURCE_FORMAT")
             if claimed["attempts"] > self.settings.source_file_import_max_attempts:
                 raise SourceFileError("WORKER_RECOVERY_EXHAUSTED", transient=True)
@@ -201,6 +207,15 @@ class SourceFileImportService:
                 self._master(repo, row["resource_id"])
                 if not self._source_allowed(row):
                     raise SourceFileError("BLOCKED_SOURCE_POLICY")
+                if media:
+                    # Registration verified bytes through the existing resolver.
+                    # Terminal import state is independent of content readiness.
+                    repo.update('source_file_imports', row['id'], {
+                        'status': 'METADATA_ONLY', 'last_error_code': 'UNSUPPORTED_SOURCE_FORMAT',
+                        'claim_token': None, 'lease_expires_at': None, 'next_retry_at': None,
+                        'updated_at': now(),
+                    })
+                    return
             if row["processing_job_id"]:
                 if row["processing_retry_requested"]:
                     self.retry_processing.run(row["processing_job_id"])
@@ -276,7 +291,7 @@ class SourceFileImportService:
         if parent["status"] in {"FAILED", "RETRY_EXHAUSTED"}:
             raise SourceFileError("PARENT_MAPPING_FAILED")
         # IMPORTED/PROCESSING is a committed file mapping; OCR completion is independent.
-        if parent["status"] not in {"IMPORTED", "PROCESSING"}:
+        if parent["status"] not in {"IMPORTED", "PROCESSING", "METADATA_ONLY"}:
             raise SourceFileError("PARENT_PENDING", transient=True)
         target = repo.get("resource_versions", parent["target_version_id"]) if parent["target_version_id"] else None
         if (target is None or target["resource_id"] != row["resource_id"]
@@ -305,7 +320,7 @@ class SourceFileImportService:
                 "source_system": row["source_system"], "target_version_id": ancestor["parent_version_id"]}, limit=1)
             if (not historical or historical[0]["source_version_id"] != expected
                     or historical[0]["resource_id"] != row["resource_id"]
-                    or historical[0]["status"] not in {"IMPORTED", "PROCESSING"}):
+                    or historical[0]["status"] not in {"IMPORTED", "PROCESSING", "METADATA_ONLY"}):
                 raise SourceFileError("PARENT_MAPPING_INVALID")
             source_ancestor = self.source.get_version(expected)
             if source_ancestor is None:
@@ -337,7 +352,8 @@ class SourceFileImportService:
             validator = self.formats.find_validator(row['storage_object_key'])
         except DomainError:
             raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT') from None
-        if not validator.text_extraction_supported:
+        if not validator.text_extraction_supported and not (
+                self.settings.source_metadata_media_enabled and validator.extension in ('.mp3', '.mp4')):
             raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT')
 
         reference = self.resolver.import_reference(row)
@@ -372,6 +388,13 @@ class SourceFileImportService:
             try:
                 row = self._owned(repo, claimed)
             except SourceImportConflict:
+                return
+            resource = repo.get('master_learning_resources', row['resource_id'], lock=True)
+            if resource_deleted(resource):
+                repo.update('source_file_imports', row['id'], {
+                    'status': 'RETRY_WAIT', 'attempts': max(0, row['attempts'] - 1),
+                    'claim_token': None, 'lease_expires_at': None, 'next_retry_at': None,
+                    'last_error_code': 'RESOURCE_SOFT_DELETED', 'updated_at': now()})
                 return
             exhausted = row["attempts"] >= self.settings.source_file_import_max_attempts
             delay = min(3600, self.settings.source_file_import_retry_seconds * 2 ** min(row["attempts"] - 1, 10))
@@ -418,7 +441,7 @@ class SourceFileImportService:
         if not self._source_allowed(row):
             return False
         resource = repo.get('master_learning_resources', row['resource_id'])
-        if resource is None or not resource['is_active'] or resource['deleted_at'] is not None:
+        if resource is None or not resource['is_active'] or resource_deleted(resource):
             return False
         if row["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
             return False

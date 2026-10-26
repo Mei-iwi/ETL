@@ -376,7 +376,8 @@ def test_shared_metadata_and_bags_unchanged_through_native_pdf_etl(source, pg_co
     monkeypatch.setattr('data_sync_etl.composition.create_source', lambda _: source.adapter)
     runtime = Container(Settings(_env_file=None, source_adapter='postgresql', mongo_metadata_mode='shared',
         mongo_uri=uri, mongo_database=name, source_file_storage_root=pg_container.source_files.root,
-        storage_root=pg_container.storage.root, ocr_engine='native'), pg_container.engine)
+        storage_root=pg_container.storage.root, ocr_engine='native',
+        source_reference_enabled=True, source_temporary_files_enabled=True), pg_container.engine)
     try:
         stamp = now()
         db.users.insert_one(dict(_id='MUSER-1', bio='Fixture metadata', created_at=stamp, updated_at=stamp))

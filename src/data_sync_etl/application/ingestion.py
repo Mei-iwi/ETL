@@ -1,5 +1,6 @@
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
 from data_sync_etl.domain.core import DomainError, now
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.logging import event, flow
 from data_sync_etl.ports.processing import StoragePort
 from data_sync_etl.ports.repositories import UnitOfWork
@@ -55,7 +56,7 @@ class ResourceIngestion:
     def _validate(resource):
         if not resource:
             raise DomainError("Resource not found")
-        if not resource["is_active"] or resource["deleted_at"] is not None:
+        if not resource["is_active"] or resource_deleted(resource):
             raise DomainError("Resource is inactive or deleted")
         if resource.get('source_origin') != 'LOCAL':
             raise DomainError('BLOCKED_SOURCE_MAPPING: snapshots require LOCAL ownership')

@@ -4,6 +4,8 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from data_sync_etl.domain.concepts import ExpansionPolicy
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -72,6 +74,8 @@ class Settings(BaseSettings):
         default=256, ge=16, le = 4096
     )
     index_auto_enabled: bool = False
+    index_meaning_bags_enabled: bool = True
+    index_meaning_group_threshold: float = Field(default=0.8, gt=0, le=1, allow_inf_nan=False)
     index_embedding_model_path: Path | None = Field(default=None, repr=False)
     index_embedding_model_id: str = Field(default="", max_length=255)
     index_embedding_model_version: str = Field(default="", max_length=128)
@@ -81,7 +85,49 @@ class Settings(BaseSettings):
     index_max_units: int = Field(default=10000, ge=1, le=50000)
     index_max_source_chars: int = Field(default=10000000, ge=1, le=50000000)
     index_timeout_seconds: int = Field(default=300, ge=1, le=3600)
+    # Opt-in parallel index. Legacy bag vectors/BoW remain the default.
+    semantic_enabled: bool = False
+    search_metadata_enabled: bool = False
+    search_metadata_indexed_candidates_enabled: bool = False
+    search_metadata_authority_limit: int = Field(default=10000, ge=201, le=20000)
+    search_metadata_match_limit: int = Field(default=2000, ge=1, le=2000)
+    search_metadata_content_enabled: bool = True
+    search_metadata_max_resources: int = Field(default=200, ge=1, le=2000)
+    source_metadata_media_enabled: bool = False
+    search_metadata_auto_refresh_enabled: bool = False
+    search_metadata_refresh_dense: bool = False
+    search_metadata_refresh_content_semantic: bool = False
+    semantic_input_identity_enabled: bool = False
+    search_metadata_refresh_batch_size: int = Field(default=5, ge=1, le=50)
+    search_metadata_refresh_interval_seconds: int = Field(default=30, ge=5, le=3600)
+    semantic_strategy: Literal['raw', 'contextual'] = 'contextual'
+    semantic_model_path: Path | None = Field(default=None, repr=False)
+    semantic_model_revision: str = Field(default='', max_length=40)
+    semantic_device: str = Field(default='cpu', pattern=r'^(cpu|cuda:\d+)$')
+    semantic_batch_size: int = Field(default=2, ge=1, le=16)
+    semantic_max_tokens: int = Field(default=1024, ge=64, le=8192)
+    semantic_max_candidates: int = Field(default=10000, ge=1, le=50000)
+    semantic_min_score: float = Field(default=0., ge=0., le=1., allow_inf_nan=False)
+    semantic_rerank_enabled: bool = False
+    semantic_rerank_top_k: int = Field(default=20, ge=1, le=50)
     search_max_bags: int = Field(default=2000, ge=1, le=10000)
+    search_concept_snapshot: Path | None = None
+    search_expansion: ExpansionPolicy = Field(default_factory=ExpansionPolicy)
+    search_vector_min_similarity: float = Field(default=0.6, gt=0, le=1, allow_inf_nan=False)
+    search_meaning_context_fallback_enabled: bool = False
+    search_meaning_fallback_min_similarity: float = Field(default=0.55, gt=0, le=1, allow_inf_nan=False)
+    search_meaning_fallback_min_context_similarity: float = Field(default=0.45, gt=0, le=1, allow_inf_nan=False)
+    search_meaning_context_margin: float = Field(default=0.08, ge=0, le=0.15, allow_inf_nan=False)
+    search_bow_min_coverage: float = Field(default=0., ge=0, le=1, allow_inf_nan=False)
+    # Experimental grouping; retain legacy bag fusion until independent acceptance.
+    search_hybrid_fusion_unit: Literal['bag', 'version'] = 'bag'
+    # Query-only experiment: original + at most one reviewed phrase variant.
+    search_approved_accent_variants_enabled: bool = False
+    search_hybrid_lexical_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
+    search_hybrid_vector_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
+    search_evidence_strategy: Literal['current', 'version_dense', 'version_context'] = 'current'
+    search_evidence_top_n: int = Field(default=3, ge=1, le=10)
+    search_evidence_dense_margin: float = Field(default=.08, ge=0, le=.15, allow_inf_nan=False)
     search_timeout_seconds: int = Field(default=15, ge=1, le=120)
     search_model_warmup_timeout_seconds: int = Field(default=60, ge=1, le=120)
     search_query_embedding_cache_enabled: bool = False
@@ -116,6 +162,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_search_grants(self):
+        if self.search_approved_accent_variants_enabled and self.semantic_rerank_enabled:
+            raise ValueError('Approved accent variants require ColBERT OFF until combined evaluation')
+        if self.search_evidence_strategy != 'current' and (not self.semantic_enabled or self.semantic_rerank_enabled
+                or self.search_hybrid_fusion_unit != 'version'):
+            raise ValueError('Experimental evidence requires Semantic Chunk, version fusion and ColBERT OFF')
+        if (self.search_hybrid_fusion_unit != 'version'
+                and (self.search_hybrid_lexical_weight != 1. or self.search_hybrid_vector_weight != 1.)):
+            raise ValueError('Experimental branch weights require version fusion')
         if self.search_internal_dev_enabled and self.app_environment != 'development':
             raise ValueError('Local demo Search is restricted to Development')
         return self

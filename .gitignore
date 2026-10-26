@@ -43,3 +43,14 @@ TAI_LIEU_DOI_CHIEU/
 # Local documentation and generated reports.
 /docs/
 !deploy/.env.auth.example
+
+# Private Docker deployment settings (template stays versioned).
+/docker.env
+
+# Generated research/benchmark outputs; keep query labels and contracts versioned.
+/fixtures/search/*_results.json
+
+# Local reports and archives; executable inputs live under fixtures/.
+/research/
+/research.rar
+/profile-evidence/

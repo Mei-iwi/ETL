@@ -164,7 +164,7 @@ def test_real384_pagination_baseline(searchable, monkeypatch):
         assert counts['encode'] == 240 and counts['candidate_reads_double'] == 360
         assert counts['rrf_calls'] == 120 and len(loads) == 1
         output = Path(os.environ['ETL_PAGINATION_BASELINE_OUTPUT']).resolve()
-        assert output.is_relative_to(Path.cwd().resolve() / 'docs/audits/search-pagination-cache')
+        assert output.is_relative_to(Path.cwd().resolve() / '.test-tmp/audits/search-pagination-cache')
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     finally:

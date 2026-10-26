@@ -21,9 +21,9 @@ def test_admin_default_and_startup_warning(container, caplog):
 def test_admin_rejects_unknown_body_fields_and_invalid_id(container):
     container.settings.admin_enabled = True
     with TestClient(create_app(container)) as client:
-        response = client.post("/admin/sync/master", json={"password": "private-value"})
+        response = client.post("/api/v1/master-data/sync", json={"password": "private-value"})
         assert response.status_code == 422 and "private-value" not in response.text
-        response = client.get("/admin/resource-versions/" + "x" * 31 + "/etl-status")
+        response = client.get("/api/v1/resource-versions/" + "x" * 31 + "/etl-status")
         assert response.status_code == 422
 
 

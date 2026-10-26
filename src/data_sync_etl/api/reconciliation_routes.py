@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import math
 from typing import Any
-from fastapi import APIRouter, Query, Request
+
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 
 from data_sync_etl.api.reconciliation_schemas import (
@@ -22,18 +23,22 @@ from data_sync_etl.api.reconciliation_schemas import (
     ReconciliationLatestReport,
     ReconciliationRunReport,
 )
+from data_sync_etl.application.reconciliation_engine import serialize_json_value
 from data_sync_etl.db.models import (
     SyncReconciliationDiscrepancy,
     SyncReconciliationRun,
 )
+from data_sync_etl.domain.core import DomainError
 
 router = APIRouter(prefix="/api/v1/reconciliation", tags=["Reconciliation & Integrity Verification"])
 
 
-@router.post("/runs", response_model=ReconcileTriggerResponse)
+@router.post("/runs", response_model=ReconcileTriggerResponse,
+             responses={202: {'model': ReconcileTriggerResponse, 'description': 'Đã tiếp nhận tác vụ đối soát nền'}})
 def trigger_reconciliation(
     request: Request,
-    body: ReconcileTriggerRequest = ReconcileTriggerRequest(),
+    response: Response,
+    body: ReconcileTriggerRequest | None = None,
 ) -> dict[str, Any]:
     """Kích hoạt một đợt đối soát toàn vẹn dữ liệu giữa Nguồn và Đích.
 
@@ -42,12 +47,26 @@ def trigger_reconciliation(
     - So sánh song song và phát hiện các loại cờ lỗi: ORPHAN_SOURCE, ORPHAN_MASTER, DESYNC_BLOB_SIZE, DESYNC_CHECKSUM, DESYNC_METADATA.
     - Tự động áp dụng ngưỡng an toàn max_ratio <= 10% (0.1).
     """
+    body = body or ReconcileTriggerRequest()
     engine = request.app.state.container.reconciliation_engine
-    result = engine.execute_stream_reconcile(
-        stream_name=body.stream,
-        dry_run=body.dry_run,
-        mode=body.mode,
-    )
+    if not body.dry_run:
+        raise HTTPException(409, 'Đối soát chỉ phát hiện sai lệch. Dùng chức năng đồng bộ để cập nhật dữ liệu.')
+    try:
+        if body.stream in ('files', 'all'):
+            result = request.app.state.container.reconciliation_jobs.start(body.stream, mode=body.mode)
+            result.setdefault('mode', body.mode)
+            result.setdefault('execution_time_ms', 0)
+            response.status_code = 202
+            return result
+        result = engine.execute_stream_reconcile(stream_name=body.stream, dry_run=body.dry_run, mode=body.mode)
+    except DomainError as exc:
+        if str(exc) == 'RECONCILIATION_BUSY':
+            raise HTTPException(409, 'Một đợt đối soát đang chạy. Vui lòng chờ hoàn tất.') from None
+        if str(exc) == 'RECONCILIATION_LIMIT_EXCEEDED':
+            raise HTTPException(422, 'Luồng dữ liệu vượt giới hạn 10.000 bản ghi; cần đối soát theo lô riêng.') from None
+        if str(exc) in ('RECONCILIATION_START_TIMEOUT', 'RECONCILIATION_FAILED'):
+            raise HTTPException(503, 'Không khởi động được đối soát nền. Kiểm tra kết nối Master và bảng audit.') from None
+        raise
     return result
 
 
@@ -83,7 +102,7 @@ def get_latest_reconciliation_report(
                 "latest_run_id": None,
                 "last_reconciled_at": None,
                 "overall_status": "NO_RUNS_YET",
-                "overall_match_rate_percent": 100.0,
+                "overall_match_rate_percent": 0.0,
                 "total_source_records": 0,
                 "total_target_records": 0,
                 "total_matched_records": 0,
@@ -102,17 +121,28 @@ def get_latest_reconciliation_report(
 
         max_pop = max(1, max(total_source, total_target))
         overall_match_rate = round((total_matched / max_pop) * 100, 2)
-        overall_status = "BLOCKED" if any(r.status == "BLOCKED" for r in latest_runs) else "COMPLETED"
+        latest_runs.sort(key=lambda run: (run.started_at, run.run_id), reverse=True)
+        recoverable = (any(r.stream_name == 'files' and r.status == 'RUNNING' for r in latest_runs)
+                       and container.reconciliation_jobs.can_recover())
+        def displayed_status(run):
+            return 'PARTIAL' if recoverable and run.stream_name == 'files' and run.status == 'RUNNING' else run.status
+        overall_status = next((status for status in ('RUNNING', 'FAILED', 'BLOCKED', 'PARTIAL')
+                               if any(displayed_status(run) == status for run in latest_runs)), 'COMPLETED')
 
         stream_reports = []
         for r in latest_runs:
             pop = max(1, max(r.source_count, r.target_count))
             match_pct = round((r.matched_count / pop) * 100, 2)
+            meta = r.summary_meta or {}
+            run_mode = meta.get("mode", "INCREMENTAL")
+            run_exec_ms = meta.get("execution_time_ms", 0.0)
             stream_reports.append(
                 ReconciliationRunReport(
                     run_id=r.run_id,
                     stream_name=r.stream_name,
-                    status=r.status,
+                    status=displayed_status(r),
+                    mode=run_mode,
+                    execution_time_ms=run_exec_ms,
                     started_at=r.started_at.isoformat(),
                     finished_at=r.finished_at.isoformat() if r.finished_at else None,
                     source_count=r.source_count,
@@ -124,7 +154,8 @@ def get_latest_reconciliation_report(
                     target_total_bytes=r.target_total_bytes,
                     source_table_hash=r.source_table_hash,
                     target_table_hash=r.target_table_hash,
-                    summary_meta=r.summary_meta,
+                    summary_meta=({**meta, 'reason': 'RECONCILIATION_INTERRUPTED'}
+                                  if displayed_status(r) != r.status else meta),
                 )
             )
 
@@ -147,10 +178,11 @@ def get_latest_reconciliation_report(
 def list_discrepancies(
     request: Request,
     run_id: str | None = Query(None, description="Lọc theo mã đợt đối soát cụ thể"),
+    latest_only: bool = Query(False, description="Chỉ lấy đợt mới nhất của từng luồng"),
     stream: str | None = Query(None, description="Lọc theo luồng dữ liệu (resources, files, subjects...)"),
     discrepancy_flag: str | None = Query(None, description="Lọc theo cờ hiệu (DESYNC_BLOB_SIZE, DESYNC_CHECKSUM, ORPHAN_SOURCE...)"),
     page: int = Query(1, ge=1, description="Số trang hiển thị (bắt đầu từ 1)"),
-    page_size: int = Query(20, ge=1, le=100, description="Số bản ghi trên mỗi trang"),
+    page_size: int = Query(20, ge=1, le=1000, description="Số bản ghi trên mỗi trang"),
 ) -> dict[str, Any]:
     """Lấy danh sách chi tiết các bản ghi bị lệch để hiển thị bảng so sánh đối soát song song (Side-by-side reconciliation view)."""
     container = request.app.state.container
@@ -158,6 +190,13 @@ def list_discrepancies(
         session = repo.session
 
         query = select(SyncReconciliationDiscrepancy)
+        if latest_only:
+            ranked = select(SyncReconciliationRun.run_id, func.row_number().over(
+                partition_by=SyncReconciliationRun.stream_name,
+                order_by=(SyncReconciliationRun.started_at.desc(), SyncReconciliationRun.run_id.desc())
+            ).label('ordinal')).subquery()
+            query = query.where(SyncReconciliationDiscrepancy.run_id.in_(
+                select(ranked.c.run_id).where(ranked.c.ordinal == 1)))
         if run_id:
             query = query.where(SyncReconciliationDiscrepancy.run_id == run_id)
         if stream:
@@ -185,8 +224,8 @@ def list_discrepancies(
                 record_id=r.record_id,
                 stream_name=r.stream_name,
                 discrepancy_flag=r.discrepancy_flag,
-                source_value=r.source_value,
-                target_value=r.target_value,
+                source_value=serialize_json_value(r.source_value),
+                target_value=serialize_json_value(r.target_value),
                 detected_at=r.detected_at.isoformat(),
                 resolution_status=r.resolution_status,
             )

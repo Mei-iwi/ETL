@@ -77,6 +77,92 @@ def test_public_mode_never_loads_database_secrets(monkeypatch):
         runtime.verify_runtime('api')
 
 
+@pytest.fixture
+def source_neon_connections(tmp_path, monkeypatch):
+    runtime = load_runtime('runtime')
+    ca = tmp_path / 'source-ca.pem'
+    ca.write_text('isolated fixture; TLS negotiation is not performed by this test')
+    monkeypatch.setattr(runtime, 'SOURCE_CA_FILE', ca)
+    secret = tmp_path / 'connections.json'
+    values = {'DATABASE_URL': 'postgresql+psycopg://runtime:fixture@postgres:5432/etl',
+              'SOURCE_DATABASE_URL': 'postgresql+psycopg://reader:fixture@ep-example.us-east-2.aws.neon.tech/source'
+                  f'?sslmode=verify-full&channel_binding=require&sslrootcert={ca.as_posix()}',
+              'MONGO_URI': 'mongodb://mongo:27017', 'MONGO_DATABASE': 'etl_content'}
+    monkeypatch.setenv('ETL_DATABASE_MODE', 'source-neon')
+    monkeypatch.setenv('ETL_CONNECTIONS_FILE', str(secret))
+    monkeypatch.delenv('SOURCE_MIGRATION_DATABASE_URL', raising=False)
+    # URI uses a normalized POSIX path on Windows as well as Linux.
+    monkeypatch.setattr(runtime, 'SOURCE_CA_FILE', Path(ca.as_posix()))
+    return runtime, secret, values, ca
+
+
+def test_neon_source_with_local_master_mongo(source_neon_connections):
+    runtime, secret, values, _ = source_neon_connections
+    # Windows Path string uses backslashes; URI must match the declared trust path.
+    from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
+    url = urlsplit(values['SOURCE_DATABASE_URL'])
+    query = parse_qs(url.query)
+    query['sslrootcert'] = [str(runtime.SOURCE_CA_FILE)]
+    values['SOURCE_DATABASE_URL'] = urlunsplit(url._replace(query=urlencode(query, doseq=True)))
+    secret.write_text(json.dumps(values))
+    runtime.load_connections()
+    assert os.environ['SOURCE_DATABASE_URL'] == values['SOURCE_DATABASE_URL']
+    assert os.environ['DATABASE_URL'] == values['DATABASE_URL']
+    assert os.environ['MONGO_URI'] == values['MONGO_URI']
+
+
+@pytest.mark.parametrize(('key', 'replacement', 'error'), [
+    ('source_ssl', 'require', 'SOURCE_NEON_TLS_REQUIRED'),
+    ('source_ssl', 'disable', 'SOURCE_NEON_TLS_REQUIRED'),
+    ('channel_binding', 'prefer', 'SOURCE_NEON_TLS_REQUIRED'),
+    ('sslrootcert', '/tmp/untrusted.pem', 'SOURCE_NEON_TLS_REQUIRED'),
+    ('hostaddr', '203.0.113.1', 'SOURCE_NEON_CONNECTION_OVERRIDE_FORBIDDEN'),
+    ('DATABASE_URL', 'postgresql+psycopg://u:p@external.example/db', 'SOURCE_NEON_MASTER_LOCAL_REQUIRED'),
+    ('DATABASE_URL', 'postgresql+psycopg://u:p@postgres/db?hostaddr=203.0.113.1', 'SOURCE_NEON_MASTER_LOCAL_REQUIRED'),
+    ('MONGO_URI', 'mongodb://external.example/db', 'SOURCE_NEON_MONGO_LOCAL_REQUIRED'),
+    ('MONGO_URI', 'mongodb://mongo:27017,external.example:27017/db', 'SOURCE_NEON_MONGO_LOCAL_REQUIRED'),
+    ('source_host', 'not-neon.example', 'SOURCE_NEON_HOST_REQUIRED'),
+    ('source_role', 'neondb_owner', 'SOURCE_PRIVILEGED_ROLE_FORBIDDEN'),
+    ('missing_ca', '', 'SOURCE_NEON_CA_REQUIRED'),
+])
+def test_neon_source_mode_rejects_unsafe_connections(source_neon_connections, key, replacement, error):
+    from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
+    runtime, secret, values, ca = source_neon_connections
+    url = urlsplit(values['SOURCE_DATABASE_URL'])
+    query = parse_qs(url.query)
+    query['sslrootcert'] = [str(runtime.SOURCE_CA_FILE)]
+    if key in ('source_ssl', 'channel_binding', 'sslrootcert', 'hostaddr'):
+        query['sslmode' if key == 'source_ssl' else key] = [replacement]
+    elif key == 'source_host':
+        url = url._replace(netloc='reader:fixture@' + replacement)
+    elif key == 'source_role':
+        url = url._replace(netloc=replacement + ':fixture@' + url.hostname)
+    elif key == 'missing_ca':
+        ca.unlink()  # Isolated fixture, never a deployed certificate.
+    else:
+        values[key] = replacement
+    values['SOURCE_DATABASE_URL'] = urlunsplit(url._replace(query=urlencode(query, doseq=True)))
+    secret.write_text(json.dumps(values))
+    with pytest.raises(ValueError, match=error):
+        runtime.load_connections()
+
+
+def test_unknown_database_mode_is_rejected(source_neon_connections, monkeypatch):
+    runtime, secret, values, _ = source_neon_connections
+    secret.write_text(json.dumps(values))
+    monkeypatch.setenv('ETL_DATABASE_MODE', 'typo')
+    with pytest.raises(ValueError, match='DATABASE_MODE_INVALID'):
+        runtime.load_connections()
+
+
+def test_neon_overlay_mounts_only_source_ca_for_all_backend_services():
+    data = yaml.load((ROOT / 'deploy/compose.source-neon.yml').read_text(encoding='utf-8'), Loader=UniqueLoader)
+    assert set(data['services']) == {'api', 'master-sync-worker', 'source-file-worker', 'ocr-worker', 'preflight'}
+    for service in data['services'].values():
+        assert service['environment'] == {'ETL_DATABASE_MODE': 'source-neon'}
+        assert service['secrets'] == [{'source': 'source-database-ca', 'target': 'source-database-ca.pem'}]
+
+
 def test_source_preflight_uses_all_15_tables_not_the_10_metadata_streams():
     runtime = load_runtime('runtime')
     names = runtime.source_table_names(ROOT / 'alembic_source/schema_v1.sql')

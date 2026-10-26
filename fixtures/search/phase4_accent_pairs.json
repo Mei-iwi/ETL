@@ -1,0 +1,24 @@
+{
+  "status": "DIAGNOSTIC_CANDIDATES_NOT_QRELS",
+  "pairs": [
+    ["Cách cộng hai phân số khác mẫu số", "cach cong hai phan so khac mau so"],
+    ["Tìm mẫu số chung rồi cộng các tử số", "tim mau so chung roi cong cac tu so"],
+    ["Cách tìm ước chung lớn nhất", "cach tim uoc chung lon nhat"],
+    ["Cách tìm bội chung nhỏ nhất", "cach tim boi chung nho nhat"],
+    ["Đại lượng tỉ lệ thuận", "dai luong ti le thuan"],
+    ["Quang hợp ở thực vật", "quang hop o thuc vat"],
+    ["Vì sao cây xanh cần ánh sáng", "vi sao cay xanh can anh sang"],
+    ["Trao đổi khí ở cây", "trao doi khi o cay"],
+    ["Tách muối khỏi nước muối", "tach muoi khoi nuoc muoi"],
+    ["Đo nhiệt độ bằng nhiệt kế", "do nhiet do bang nhiet ke"],
+    ["Cơ sở dữ liệu", "co so du lieu"],
+    ["Bảo vệ tài khoản cá nhân", "bao ve tai khoan ca nhan"],
+    ["Mã xác thực một lần", "ma xac thuc mot lan"],
+    ["Dữ liệu cá nhân", "du lieu ca nhan"],
+    ["Sử dụng hàm tính tổng", "su dung ham tinh tong"],
+    ["Viết đoạn văn nghị luận", "viet doan van nghi luan"],
+    ["Lí lẽ và bằng chứng", "li le va bang chung"],
+    ["Đọc hiểu truyện ngắn", "doc hieu truyen ngan"],
+    ["Đời sống cư dân Văn Lang", "doi song cu dan van lang"]
+  ]
+}

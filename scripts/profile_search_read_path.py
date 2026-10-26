@@ -26,7 +26,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     if Path.cwd().resolve() != root:
         parser.error("Run from repository root")
-    target = root / "docs/audits/search-read-path" / (
+    target = root / ".test-tmp/audits/search-read-path" / (
         "baseline_smoke.json" if args.smoke else "baseline_completion.json" if args.completion else "baseline_metrics.json"
     )
     if target.exists():

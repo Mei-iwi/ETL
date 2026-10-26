@@ -23,7 +23,7 @@ def test_api_consumes_sensitive_errors(container, monkeypatch, caplog, exception
     monkeypatch.setattr(container.sync, "run", fail)
     # Default raise_server_exceptions=True also proves no traceback escapes to server logs.
     with TestClient(create_app(container)) as client:
-        response = client.post("/admin/sync/master", json={"full": True})
+        response = client.post("/api/v1/master-data/sync", json={"full": True})
     assert response.status_code == (400 if exception is DomainError else 500)
     assert "private-password-and-document-body" not in response.text + caplog.text
 
@@ -60,6 +60,8 @@ def test_handoff_excludes_local_artifacts(tmp_path):
         "tests/test-secrets.json",
         "fixtures/source/access_token.json",
         "docs/keys/config.json",
+        "docs/local-report.md",
+        "research/private-results.json",
         "tests/volumes/local.json",
         "src/node_modules/local.py",
     ]:
@@ -68,8 +70,15 @@ def test_handoff_excludes_local_artifacts(tmp_path):
         target.write_text("private-local-data")
     (tmp_path / ".env.example").write_text("PLACEHOLDER")
     (tmp_path / "src/app.py").write_text("print('example')")
+    for name in ("fixtures/contracts/contract.json", "fixtures/search/queries.json"):
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
     output = tmp_path / "delivery.zip"
     module.package(tmp_path, output)
     with ZipFile(output) as archive:
-        assert set(archive.namelist()) == {".env.example", "src/app.py"}
+        assert set(archive.namelist()) == {
+            ".env.example", "src/app.py",
+            "fixtures/contracts/contract.json", "fixtures/search/queries.json",
+        }
         assert all(b"private-local-data" not in archive.read(p) for p in archive.namelist())

@@ -12,6 +12,11 @@ STREAMS = {
     "resources": "master_learning_resources",
 }
 
+SAFE_SYNC_ERROR_CODES = frozenset({
+    'BLOCKED_MONGO_ID_MAPPING', 'BLOCKED_SOURCE_OWNERSHIP', 'BLOCKED_LOCAL_SOURCE_CHANGE',
+    'BLOCKED_SOURCE_IDENTITY', 'BLOCKED_SOURCE_MAPPING',
+})
+
 
 class MasterSync:
     def __init__(self, source: SourceDataReader, uow: UnitOfWork, batch_size=100, metadata_projection=None,
@@ -141,9 +146,8 @@ class MasterSync:
             with self.uow() as repo:
                 repo.update("sync_runs", run_id, dict(status="COMPLETED", finished_at=now()))
         except Exception as exc:
-            safe_code = str(exc) if isinstance(exc, DomainError) and str(exc) in {
-                'BLOCKED_MONGO_ID_MAPPING', 'BLOCKED_SOURCE_OWNERSHIP', 'BLOCKED_LOCAL_SOURCE_CHANGE', 'BLOCKED_SOURCE_IDENTITY',
-            } else None
+            code = str(exc).split(':', 1)[0] if isinstance(exc, DomainError) else None
+            safe_code = code if code in SAFE_SYNC_ERROR_CODES else None
             with self.uow() as repo:
                 repo.update(
                     "sync_runs",

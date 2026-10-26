@@ -1,0 +1,16 @@
+{
+  "revision": "phase3-proposed-gates-v1",
+  "review_status": "PROPOSED_REVIEW_PENDING",
+  "independent_labels_required": true,
+  "direct_relevance_grade_minimum": 2,
+  "unjudged": "UNKNOWN_NOT_GRADE_ZERO",
+  "unit_of_split": "intent_family_id",
+  "selection": "validation_only_before_independent_holdout_release",
+  "primary": {"resource_precision1": "must_improve", "recall5": "must_not_decrease", "snippet_precision1": "must_not_decrease"},
+  "secondary": ["mrr10", "ndcg10", "hard_negative_precision", "coverage_risk", "false_abstention"],
+  "security": "no_regressions_or_access_bypass",
+  "no_answer": "keep_off_without_independently_reviewed_full_corpus_answerability",
+  "latency": "same_authenticated_http_workload_cold_warm_separate_p95_at_least_20_samples",
+  "significance": "report_paired_uncertainty_and_intent_family_counts_no_claim_from_small_seen_sets",
+  "production_promotion": "manual_approval_required"
+}

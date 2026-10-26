@@ -1,0 +1,6 @@
+{
+  "DATABASE_URL": "postgresql+psycopg://etl_master_runtime:CHANGE_ME@master-postgres:5432/etl_master",
+  "SOURCE_DATABASE_URL": "postgresql+psycopg://etl_source_reader:CHANGE_ME@ep-your-endpoint.us-east-2.aws.neon.tech:5432/Learning_Resources?sslmode=verify-full&channel_binding=require&sslrootcert=/run/secrets/source-database-ca.pem",
+  "MONGO_URI": "mongodb://etl_runtime:CHANGE_ME@mongo:27017/etl_content?authSource=etl_content",
+  "MONGO_DATABASE": "etl_content"
+}

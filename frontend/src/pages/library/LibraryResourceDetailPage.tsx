@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { useAuth } from '../../auth/AuthProvider'
+import { canManageResourceDeletion } from '../../services/resourceDeletionApi'
+import { ResourceDeletionDialog } from './ResourceDeletionDialog'
+import { ArrowLeft, BookOpen, GraduationCap, Library, History } from 'lucide-react'
 import styles from './LibraryResourceDetailPage.module.css'
 import { ResourceFilePanel } from './ResourceFilePanel'
+import { ResourceDescriptionPanel } from './ResourceDescriptionPanel'
 
 type Subject = {
     id: string
@@ -28,16 +33,19 @@ type ResourceDetail = {
     is_active: boolean
     created_at: string
     updated_at: string
+    deletion_revision: number
     subjects: Subject[]
     grade_levels: GradeLevel[]
 }
 
 export function LibraryResourceDetailPage() {
+    const { principal } = useAuth()
+    const navigate = useNavigate()
+    const [deleting, setDeleting] = useState(false)
     const { resourceId } = useParams<{ resourceId: string }>()
     const [params] = useSearchParams()
-    const returnTo = params.get('returnTo')
-    const backTo = returnTo?.startsWith('/search/query-methods?') ? returnTo : '/library/list'
-    const backLabel = backTo === '/library/list' ? '← Quay lại danh sách học liệu' : '← Quay lại kết quả tìm kiếm'
+    const backTo = '/library/list'
+    const backLabel = 'Quay lại danh sách học liệu'
 
     const [resource, setResource] = useState<ResourceDetail | null>(null)
     const [loading, setLoading] = useState(true)
@@ -116,21 +124,41 @@ export function LibraryResourceDetailPage() {
     return (
         <section className={styles.page}>
             <Link className={styles.backLink} to={backTo}>
-                {backLabel}
+                <ArrowLeft size={17} />{backLabel}
             </Link>
 
+            <div className={styles.profileStage}>
+                <aside className={styles.resourceCard} aria-label="Tóm tắt học liệu">
+                    <div className={styles.resourceCardBody}>
+                        <div className={styles.bookPortrait}><BookOpen size={68} strokeWidth={1.2} aria-hidden="true" /></div>
+                        <h2>{resource.resource_type_name_vi}</h2>
+                        <span className={styles.cardAccent} />
+                        <div className={styles.cardTaxonomy}>
+                            <h3><Library size={15} aria-hidden="true" />Môn học</h3>
+                            {resource.subjects.length ? <ul className={styles.cardTags}>
+                                {resource.subjects.map(subject => <li key={subject.id}>
+                                    {subject.name}{subject.is_primary && <span className={styles.primaryTag}>Môn chính</span>}
+                                </li>)}
+                            </ul> : <p>Chưa có thông tin môn học.</p>}
+                        </div>
+                        <div className={styles.cardTaxonomy}>
+                            <h3><GraduationCap size={16} aria-hidden="true" />Khối lớp</h3>
+                            {resource.grade_levels.length ? <ul className={styles.cardTags}>
+                                {resource.grade_levels.map(grade => <li key={grade.id}>{grade.grade_name_vi} ({grade.grade_code})</li>)}
+                            </ul> : <p>Chưa có thông tin khối lớp.</p>}
+                        </div>
+                    </div>
+                    <div className={styles.resourceCardFooter}><BookOpen size={16} aria-hidden="true" />Kho học liệu số</div>
+                </aside>
+
+                <div className={styles.resourceInformation}>
             <header className={styles.header}>
-                <h1 className={styles.eyebrow}>Chi tiết học liệu</h1>
                 <h1>{resource.title}</h1>
             </header>
 
-            <ResourceFilePanel key={`${resource.id}:${params.get('versionId')}`} resourceId={resource.id}
-                versionId={params.get('versionId')} contextId={params.get('contextId')}
-                sourceOwned={resource.source_origin === 'POSTGRESQL'} />
-
-            <section className={styles.panel}>
-                <h2>Thông tin chung</h2>
-
+            <ResourceDescriptionPanel key={resource.id} resourceId={resource.id}
+                actions={canManageResourceDeletion(principal) && <button type="button" className={styles.deleteResourceButton}
+                    onClick={() => setDeleting(true)}>Xóa học liệu</button>}>
                 <dl className={styles.details}>
                     <div>
                         <dt>Nguồn quản lý</dt>
@@ -146,7 +174,7 @@ export function LibraryResourceDetailPage() {
                     </div>
                     <div>
                         <dt>Trạng thái xuất bản</dt>
-                        <dd>{resource.publication_status}</dd>
+                        <dd>{({ PUBLISHED: 'Đã xuất bản', DRAFT: 'Bản nháp', ARCHIVED: 'Đã lưu trữ' } as Record<string, string>)[resource.publication_status] || resource.publication_status}</dd>
                     </div>
                     <div>
                         <dt>Trạng thái hoạt động</dt>
@@ -161,49 +189,26 @@ export function LibraryResourceDetailPage() {
                         <dd>{new Date(resource.updated_at).toLocaleString('vi-VN')}</dd>
                     </div>
                 </dl>
-            </section>
+            </ResourceDescriptionPanel>
+                </div>
+            </div>
 
-            <section className={styles.panel}>
-                <h2>Môn học</h2>
-
-                {resource.subjects.length > 0 ? (
-                    <ul className={styles.tagList}>
-                        {resource.subjects.map((subject) => (
-                            <li className={styles.tag} key={subject.id}>
-                                {subject.name}
-                                {subject.is_primary && (
-                                    <span className={styles.primaryTag}>Môn chính</span>
-                                )}
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <p className={styles.empty}>Chưa có thông tin môn học.</p>
-                )}
-            </section>
-
-            <section className={styles.panel}>
-                <h2>Khối lớp</h2>
-
-                {resource.grade_levels.length > 0 ? (
-                    <ul className={styles.tagList}>
-                        {resource.grade_levels.map((grade) => (
-                            <li className={styles.tag} key={grade.id}>
-                                {grade.grade_name_vi} ({grade.grade_code})
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <p className={styles.empty}>Chưa có thông tin khối lớp.</p>
-                )}
-            </section>
+            <div className={styles.fileSection}>
+            <ResourceFilePanel key={`${resource.id}:${params.get('versionId')}`} resourceId={resource.id}
+                versionId={params.get('versionId')} contextId={params.get('contextId')}
+                contextEvidence={params.get('contextEvidence')}
+                sourceOwned={resource.source_origin === 'POSTGRESQL'} />
 
             <Link
                 className={styles.historyLink}
                 to={`/library/${encodeURIComponent(resource.id)}/versions`}
             >
-                Xem lịch sử phiên bản
+                <History size={16} aria-hidden="true" />Xem lịch sử phiên bản
             </Link>
+            </div>
+            {deleting && canManageResourceDeletion(principal) && <ResourceDeletionDialog
+                resource={resource} restore={false} onClose={() => setDeleting(false)}
+                onSuccess={() => navigate('/library/list', { replace: true })} />}
         </section>
     )
 }

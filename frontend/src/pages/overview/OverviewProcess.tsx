@@ -1,11 +1,12 @@
 import style from './OverviewProcess.module.css'
 import { ProcessEntityDiagram } from './ProcessEntityDiagram'
+import { OverviewLayout } from './OverviewLayout'
 
 const processSteps = [
     {
         step: 1,
         name: 'Tiếp nhận học liệu',
-        content: 'Tải học liệu, nhập thông tin mô tả, tạo phiên bản',
+        content: 'Đồng bộ tham chiếu tệp nguồn hoặc tải tệp LOCAL, nhập thông tin và tạo phiên bản',
         output: 'Học liệu và Metadata',
     },
     {
@@ -22,15 +23,15 @@ const processSteps = [
     },
     {
         step: 4,
-        name: 'Phân đoạn dữ liệu',
-        content: 'Chia nội dung thành Chunk có thông tin vị trí và nguồn gốc',
-        output: 'Danh sách Chunk',
+        name: 'Tổ chức nội dung',
+        content: 'Tổ chức ContentUnit theo cấu trúc tài liệu; xem các đoạn nội dung kèm vị trí và nguồn gốc',
+        output: 'ContentUnit và bản xem phân đoạn',
     },
     {
         step: 5,
         name: 'Biểu diễn dữ liệu',
-        content: 'Xây dựng biểu diễn Bag of Words và vector ngữ nghĩa',
-        output: 'Dữ liệu biểu diễn',
+        content: 'Tổng hợp từ khóa và tạo vector ngữ nghĩa cho ContentBag',
+        output: 'ContentBag với từ khóa và vector',
     },
     {
         step: 6,
@@ -50,22 +51,28 @@ const processSteps = [
         content: 'Hiển thị đoạn nội dung liên quan, ngữ cảnh và nguồn tham chiếu',
         output: 'Nội dung học liệu phù hợp',
     },
+    {
+        step: 9,
+        name: 'Thực nghiệm và đánh giá',
+        content: 'Đối chiếu các phương pháp trên tập truy vấn có nhãn liên quan; xem lại ngữ cảnh để phân tích kết quả',
+        output: 'Recall@k, nDCG@k và MRR',
+    },
 ]
 
 export function OverviewProcess() {
     return (
-        <section className={style.page}>
-            <header className={style.hero}>
-                <h1>Quy trình hoạt động</h1>
-            </header>
+        <OverviewLayout title={'Từ học liệu\nđến kết quả tìm kiếm'} chapter="02"
+            introduction="Tiếp nhận học liệu, trích xuất nội dung, lập chỉ mục và truy hồi kết quả.">
 
             <section className={style.section}>
-                <h2>1. Sơ đồ tổng thể</h2>
+                <h2>Quy trình xử lý và tìm kiếm</h2>
+                <p className={style.sectionLead}>Hai pha dùng chung dữ liệu đã xử lý và chỉ mục; mỗi kết quả gắn với đoạn nội dung và nguồn tham chiếu.</p>
                 <ProcessEntityDiagram />
             </section>
 
             <section className={style.section}>
-                <h2>2. Chi tiết các bước xử lý</h2>
+                <h2>Các bước xử lý</h2>
+                <details className={style.technical}><summary>Xem chi tiết các bước và đầu ra</summary>
                 <div className={style.tableWrapper} role="region" aria-label="Chi tiết các bước xử lý" tabIndex={0}>
                     <table className={style.processTable}>
                         <thead>
@@ -92,7 +99,8 @@ export function OverviewProcess() {
                         </tbody>)}
                     </table>
                 </div>
+                </details>
             </section>
-        </section>
+        </OverviewLayout>
     )
 }

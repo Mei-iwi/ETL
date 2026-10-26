@@ -1,7 +1,14 @@
 from typing import Annotated, Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.domain.search import SearchError, normalize_query
@@ -15,6 +22,8 @@ class StrictDTO(BaseModel):
 
 
 class SearchFilters(StrictDTO):
+    resource_format: Literal['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'mp3', 'mp4'] | None = None
+    domain: Annotated[str, Field(min_length=1, max_length=80)] | None = None
     subject_id: Identifier | None = None
     grade_level_id: Identifier | None = None
     resource_type_code: Annotated[str, Field(min_length=1, max_length=50)] | None = None
@@ -51,10 +60,10 @@ class SearchItem(StrictDTO):
     version_number: int
     provider_name: str | None
     resource_type_code: str
-    bag_id: str
+    bag_id: str | None
     bag_title: str | None
-    unit_type: str
-    representation_mode: Literal['structured', 'fallback']
+    unit_type: str | None
+    representation_mode: Literal['structured', 'fallback', 'metadata']
     matched_keywords: list[str]
     matched_bag_count: int
     score: float
@@ -62,13 +71,42 @@ class SearchItem(StrictDTO):
     snippet: str
     page_from: int | None
     page_to: int | None
-    content_unit_id: str
-    context_id: str
-    context_url: str
+    content_unit_id: str | None
+    context_id: str | None
+    context_url: str | None
+    match_origin: Literal['METADATA', 'CONTENT', 'BOTH'] | None = None
+    matched_fields: list[str] | None = None
+    evidence_kind: Literal['METADATA_FIELD', 'CONTENT_CHUNK'] | None = None
+    evidence_text: str | None = None
+    resource_format: str | None = None
     can_view_file: bool = False
+    context_evidence: Literal['lexical', 'semantic', 'bag'] | None = None
+    meaning_variants: list[str] = Field(default_factory=list)
+    lexical_evidence: list[dict] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def metadata_has_no_context(self):
+        if self.representation_mode == 'metadata' and (
+            self.match_origin != 'METADATA' or any(value is not None for value in
+                (self.bag_id, self.content_unit_id, self.context_id, self.context_url))
+                or self.matched_bag_count != 0 or self.can_view_file):
+            raise ValueError('Metadata cannot contain content locators')
+        return self
+
+    @model_serializer(mode='wrap')
+    def omit_unused_provenance(self, handler):
+        result = handler(self)
+        for key in ('match_origin', 'matched_fields', 'evidence_kind', 'evidence_text', 'resource_format'):
+            if getattr(self, key) is None:
+                result.pop(key, None)
+        return result
 
 
 class SearchResponse(StrictDTO):
+    branch_status: dict[str, str] | None = None
+    query_expansion: dict | None = None
+    search_fingerprint: str | None = None
+    readiness: dict[str, int | bool] | None = None
     query: str
     method: Method
     page: int
@@ -81,6 +119,18 @@ class SearchResponse(StrictDTO):
     ready_bag_count: int
     message: Literal['OK', 'NO_READY_INDEX', 'NO_ACCESSIBLE_CONTENT', 'QUERY_NO_KEYWORDS', 'PUBLIC_ACCESS_UNCONFIRMED']
     access_scope: Literal['public', 'local_demo', 'authenticated_admin', 'authenticated_user'] = 'public'
+    vector_index: dict | None = None
+
+    @model_serializer(mode='wrap')
+    def omit_unused_vector_index(self, handler):
+        # Preserve byte-for-byte legacy field presence, including nullable item
+        # metadata. response_model_exclude_none would remove required nulls too.
+        result = handler(self)
+        if self.vector_index is None:
+            result.pop('vector_index', None)
+        if self.branch_status is None:
+            result.pop('branch_status', None)
+        return result
 
 
 class ContextChunk(StrictDTO):
@@ -132,6 +182,13 @@ SEARCH_ERROR_RESPONSES = {status: {'model': SearchErrorResponse} for status in (
 
 
 MESSAGES = {
+    'SEMANTIC_MODEL_UNAVAILABLE': 'Mô hình tìm kiếm ngữ nghĩa chưa sẵn sàng. Có thể chọn BoW.',
+    'SEMANTIC_SCHEMA_NOT_READY': 'Chỉ mục ngữ nghĩa chưa được cấu hình. Liên hệ quản trị viên.',
+    'SEMANTIC_INDEX_NOT_READY': 'Chỉ mục ngữ nghĩa chưa sẵn sàng. Cần hoàn tất lập chỉ mục.',
+    'SEMANTIC_INDEX_STALE': 'Nội dung hoặc chỉ mục đã thay đổi. Vui lòng tìm lại.',
+    'SEMANTIC_CANDIDATE_LIMIT': 'Có quá nhiều đoạn văn. Hãy thu hẹp bộ lọc tìm kiếm.',
+    'SEMANTIC_TOKEN_LIMIT': 'Văn bản vượt giới hạn xử lý của mô hình ngữ nghĩa.',
+    'BLOCKED_LEXICAL_ANALYZER': 'Underthesea chưa sẵn sàng. Cần cài đúng phiên bản analyzer.',
     'SEARCH_MODEL_LOADING': 'Đang chuẩn bị tìm kiếm. Có thể chọn BoW.',
     'SEARCH_RUNTIME_BUSY': 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
     'SEARCH_ACCESS_RESTRICTED': 'Truy cập tìm kiếm nội bộ bị hạn chế.',

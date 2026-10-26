@@ -1,4 +1,3 @@
-import { CatalogNotice } from "../../components/CatalogNotice"
 import React, { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 import {
@@ -308,7 +307,6 @@ export function LibraryCreatePage() {
                 <h1>Thêm học liệu số</h1>
             </header>
 
-            <CatalogNotice providers={providers} types={resourceTypes} />
             <form
                 className={styles.form}
                 onSubmit={handleSubmit}
@@ -610,7 +608,7 @@ export function LibraryCreatePage() {
                         className={styles.secondaryButton}
                         type="button"
                         disabled={isSubmitting}
-                        onClick={() => navigate(-1)}
+                        onClick={() => navigate('/library/list')}
                     >
                         Quay lại
                     </button>

@@ -2,6 +2,7 @@
 
 import re
 
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.security.auth import AuthError
 
 
@@ -61,7 +62,14 @@ def authorize(request, principal):
                 raise AuthError('AUTH_RESOURCE_FORBIDDEN', 403)
         if method == 'GET':
             return  # Domain SearchAccess still checks visibility, review and ownership.
-    if method == 'GET' and re.fullmatch(r'/api/v1/resources/[^/]+(?:/versions)?', path):
+    if method == 'PATCH' and re.fullmatch(r'/api/v1/resources/[^/]+/description', path):
+        with request.app.state.container.uow() as repo:
+            resource = repo.get('master_learning_resources', path.split('/')[4])
+        if (principal.mode == 'master_users' and resource and owns_resource(principal, resource)
+                and resource['is_active'] and not resource_deleted(resource) and not resource.get('source_missing_at')):
+            return
+        raise AuthError('AUTH_RESOURCE_FORBIDDEN', 403)
+    if method == 'GET' and re.fullmatch(r'/api/v1/resources/[^/]+(?:/versions|/description)?', path):
         from data_sync_etl.domain.search_access import denied
         container = request.app.state.container
         with container.uow() as repo:

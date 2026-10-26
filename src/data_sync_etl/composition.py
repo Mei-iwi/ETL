@@ -2,6 +2,7 @@ from dataclasses import replace
 
 from pymongo import MongoClient
 
+from data_sync_etl.adapters.bge_m3 import BgeM3Embedding
 from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
 from data_sync_etl.adapters.extraction import NativeDocumentExtractor
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
@@ -10,6 +11,7 @@ from data_sync_etl.adapters.mongo.foundation_store import (
     MongoContentReader,
     MongoMetadataStore,
 )
+from data_sync_etl.adapters.mongo.semantic import MongoSemanticStore
 from data_sync_etl.adapters.ocr.engines import (
     FakeOCREngine,
     PyMuPDFPDFProcessor,
@@ -33,6 +35,7 @@ from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
 from data_sync_etl.application.evaluation import EvaluationService
 from data_sync_etl.application.file_preview import FilePreviewService
+from data_sync_etl.application.file_reconciliation import FileReconciliationJobs
 from data_sync_etl.application.get_processing_job import GetProcessingJob
 from data_sync_etl.application.get_resource_detail import GetResourceDetail
 from data_sync_etl.application.indexing import IndexingService
@@ -53,6 +56,7 @@ from data_sync_etl.application.reconcile_master import ReconcileMaster
 from data_sync_etl.application.reconciliation_engine import ReconciliationEngine
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
+from data_sync_etl.application.semantic import SemanticService
 from data_sync_etl.application.source_file_import import SourceFileImportService
 from data_sync_etl.application.source_file_resolver import SourceFileResolver
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
@@ -94,6 +98,8 @@ def create_ocr_engine(settings):
 
 class Container:
     def close(self):
+        if hasattr(self, 'reconciliation_jobs'):
+            self.reconciliation_jobs.close()
         if hasattr(self.source, "close"):
             self.source.close()
         if self.mongo_client is not None:
@@ -177,6 +183,8 @@ class Container:
             self.sync,
             self.auto_sync,
             poll_seconds=self.settings.master_sync_auto_poll_seconds,
+            auth_freshness_seconds=(self.settings.auth_master_freshness_seconds
+                                    if self.settings.auth_mode == 'master_users' else None),
         )
         self.ingestion = ResourceIngestion(self.uow, self.storage)
         self.ocr = OCRPipeline(
@@ -280,9 +288,29 @@ class Container:
             bags=self.content_bags,
         )
         self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
+        self.semantic = None
+        if self.mongo_client is not None:
+            self.semantic = SemanticService(self.indexing, BgeM3Embedding(
+                self.settings.semantic_model_path or self.settings.index_embedding_model_path,
+                self.settings.semantic_model_revision, device=self.settings.semantic_device,
+                batch_size=self.settings.semantic_batch_size,
+                max_tokens=self.settings.semantic_max_tokens,
+                timeout_seconds=self.settings.index_timeout_seconds),
+                MongoSemanticStore(mongo_database), self.settings)
+        from data_sync_etl.adapters.mongo.metadata_search import MongoMetadataIndex
+        from data_sync_etl.application.metadata_refresh import MetadataRefresh
+        from data_sync_etl.application.metadata_search import MetadataSearchService
+
+        self.metadata_search = (MetadataSearchService(
+            self.uow, self.metadata_documents, MongoMetadataIndex(mongo_database),
+            self.semantic.embedding, self.settings) if self.semantic is not None else None)
+        self.master_sync_worker.metadata_refresh = MetadataRefresh(self.metadata_search, self.settings, self.semantic)
         # Attest only the fixed LocalSentenceEmbedding used by HTTP Search.
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
-                                    query_cache_runtime=self.indexing.embedding)
+                                    query_cache_runtime=self.indexing.embedding, semantic=self.semantic,
+                                    metadata=self.metadata_search)
+        if self.settings.semantic_enabled and self.semantic is not None:
+            self.capabilities = replace(self.capabilities, embedding_runtime=self.semantic.embedding)
         self.evaluations = EvaluationService(self.search, EvaluationFileStore(
             self.settings.storage_root, max_files=self.settings.evaluation_max_stored_files,
             max_bytes=self.settings.evaluation_max_file_bytes), self.settings)
@@ -310,13 +338,16 @@ class Container:
         self.source_file_import = SourceFileImportService(
             self.source, self.source_files, self.storage, self.uow,
             self.process_version, self.retry_processing_job, self.settings,
-            formats=self.format_registry,
+            formats=FormatValidatorRegistry(media_registration=self.settings.source_metadata_media_enabled),
         )
         self.source_resolver = SourceFileResolver(
-            self.uow, self.source, self.source_files, self.storage, self.format_registry,
+            self.uow, self.source, self.source_files, self.storage, self.source_file_import.formats,
             self.settings, SourceTemporaryFiles(self.settings, self.storage.root),
         )
         self.source_file_import.resolver = self.source_resolver
+        self.reconciliation_engine.source_resolver = self.source_resolver
+        self.reconciliation_engine.file_read_budget_seconds = self.settings.source_read_timeout_seconds
+        self.reconciliation_jobs = FileReconciliationJobs(self.reconciliation_engine)
         self.file_previews = FilePreviewService(self.source_resolver, self.settings)
         self.ocr.resolver = self.source_resolver
         self.source_file_worker = SourceFileImportWorker(self.source_file_import)

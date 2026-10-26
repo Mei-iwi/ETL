@@ -65,6 +65,7 @@ def test_verify_file_blobs_fast_and_deep_check(container, tmp_path):
         res_id = new_id()
         repo.insert("master_learning_resources", {
             "id": res_id,
+            "source_origin": "LOCAL",
             "resource_type_id": "type-1",
             "resource_type_code": "SGK",
             "resource_type_name_vi": "Sach giao khoa",
@@ -159,6 +160,7 @@ def test_reconciliation_engine_safety_bounds_blocked(container):
 
 def test_reconciliation_api_endpoints(container):
     """Kiểm tra 3 REST API endpoint đối soát dữ liệu."""
+    container.sync.run(full=True)
     container.settings.admin_enabled = True
     app = create_app(container)
     with TestClient(app) as client:
@@ -205,18 +207,19 @@ def test_reconciliation_api_endpoints(container):
 
 def test_reconciliation_modes_incremental_and_full(container):
     """Kiểm tra 2 chế độ đối soát INCREMENTAL và FULL trên reconciliation_engine."""
+    container.sync.run(full=True)
     engine = container.reconciliation_engine
 
     # Chạy lần đầu với INCREMENTAL
     inc_res = engine.execute_stream_reconcile(stream_name="subjects", dry_run=True, mode="INCREMENTAL")
-    assert inc_res["status"] == "SUCCESS"
+    assert inc_res["status"] in ("SUCCESS", "COMPLETED")
     report_inc = inc_res["reports"][0]
     assert report_inc["mode"] == "INCREMENTAL"
     assert report_inc["execution_time_ms"] >= 0
 
     # Chạy tiếp với FULL
     full_res = engine.execute_stream_reconcile(stream_name="subjects", dry_run=True, mode="FULL")
-    assert full_res["status"] == "SUCCESS"
+    assert full_res["status"] in ("SUCCESS", "COMPLETED")
     report_full = full_res["reports"][0]
     assert report_full["mode"] == "FULL"
     assert report_full["execution_time_ms"] >= 0

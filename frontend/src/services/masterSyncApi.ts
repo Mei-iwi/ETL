@@ -12,6 +12,10 @@ async function getErrorMessage(response: Response) {
     if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') {
         return body.detail
     }
+    if (body && typeof body === 'object' && 'detail' in body && body.detail && typeof body.detail === 'object'
+        && 'message' in body.detail && typeof body.detail.message === 'string') {
+        return body.detail.message
+    }
     return `Yêu cầu đồng bộ thất bại: HTTP ${response.status}`
 }
 

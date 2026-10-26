@@ -8,16 +8,47 @@ import styles from './SearchPages.module.css'
 import { readSearch, writeSearch } from './searchParams'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
 import { SearchContext } from './SearchContext'
+import { clearSearchViewCache, readSearchView, saveSearchView } from './searchViewCache'
 
 export function SearchResults({ params, onBusyChange }: { params: URLSearchParams; onBusyChange?: (busy: boolean) => void }) {
-    const { principal } = useAuth()
+    const { principal, mode } = useAuth()
     const criteria = readSearch(params)
+    const encoded = writeSearch(criteria).toString()
+    const cacheKey = JSON.stringify([mode, principal, encoded])
     const [, setParams] = useSearchParams()
-    const [result, setResult] = useState<SearchResponse | null>(null)
+    const [result, setResult] = useState<SearchResponse | null>(() => readSearchView(cacheKey))
     const [error, setError] = useState('')
     const [attempt, setAttempt] = useState(0)
     const retrying = useRef(false)
     const navigating = useRef(false)
+    useEffect(() => {
+        const revalidate = () => {
+            if (document.visibilityState !== 'visible') return
+            clearSearchViewCache()
+            setResult(null)
+            setAttempt(value => value + 1)
+        }
+        window.addEventListener('focus', revalidate)
+        document.addEventListener('visibilitychange', revalidate)
+        return () => {
+            window.removeEventListener('focus', revalidate)
+            document.removeEventListener('visibilitychange', revalidate)
+        }
+    }, [])
+    useEffect(() => {
+        const revalidate = () => {
+            if (document.visibilityState !== 'visible') return
+            clearSearchViewCache()
+            setResult(null)
+            setAttempt(value => value + 1)
+        }
+        window.addEventListener('focus', revalidate)
+        document.addEventListener('visibilitychange', revalidate)
+        return () => {
+            window.removeEventListener('focus', revalidate)
+            document.removeEventListener('visibilitychange', revalidate)
+        }
+    }, [])
     function goToPage(page: number) {
         // React may batch rapid clicks before unmounting this page. Only one
         // history entry/request belongs to this transition.
@@ -25,10 +56,11 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
         navigating.current = true
         setParams(writeSearch({ ...criteria, page }))
     }
-    const encoded = params.toString()
     useEffect(() => {
         const request = readSearch(new URLSearchParams(encoded))
         if (!request.query) return
+        const cached = attempt === 0 ? readSearchView(cacheKey) : null
+        if (cached) { setResult(cached); onBusyChange?.(false); return }
         const controller = new AbortController()
         // StrictMode cleans up its probe effect before this microtask starts a POST.
         void Promise.resolve().then(() => {
@@ -36,11 +68,11 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
             onBusyChange?.(true)
             return searchMaterials(request, controller.signal)
         })
-            .then(data => { if (data && !controller.signal.aborted) { setResult(data); setError('') } })
-            .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof SearchApiError ? reason.message : 'Tìm kiếm thất bại. Vui lòng thử lại.') })
+            .then(data => { if (data && !controller.signal.aborted) { saveSearchView(cacheKey, data); setResult(data); setError('') } })
+            .catch(reason => { if (!controller.signal.aborted) { clearSearchViewCache(); setError(reason instanceof SearchApiError ? reason.message : 'Tìm kiếm thất bại. Vui lòng thử lại.') } })
             .finally(() => { if (!controller.signal.aborted) { retrying.current = false; onBusyChange?.(false) } })
         return () => { controller.abort(); onBusyChange?.(false) }
-    }, [encoded, attempt, onBusyChange])
+    }, [encoded, cacheKey, attempt, onBusyChange])
     return <section className={styles.results} aria-label="Kết quả tìm kiếm" aria-busy={Boolean(criteria.query && !error && !result)} tabIndex={0}>
         <div className={styles.stack}>
             {!criteria.query ? <p role="status">Nhập truy vấn để tìm kiếm.</p> : error ?
@@ -51,7 +83,14 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                         <div><h2>Kết quả tìm kiếm</h2><p role="status"><strong>{result.total.toLocaleString('vi-VN')}</strong> kết quả cho <strong>“{criteria.query}”</strong></p></div>
                         {result.items.length > 0 && <span className={styles.metadata}>Phù hợp nhất trước · {Math.min((result.page - 1) * result.size + 1, result.total)}–{Math.min((result.page - 1) * result.size + result.items.length, result.total)} / {result.total}</span>}
                         {result.access_scope === 'local_demo' && <p role="status" className={styles.metadata}>Tra cứu thử nghiệm nội bộ</p>}
+                        <button type="button" className={styles.textButton} onClick={() => { clearSearchViewCache(); setResult(null); setAttempt(value => value + 1) }}>Cập nhật kết quả</button>
                     </div>
+                    {result.readiness?.reindex_required && <p role="status" className={styles.metadata}>
+                        Một số học liệu chưa sẵn sàng để tìm kiếm: {result.readiness.ready_versions}/{result.readiness.eligible_versions} phiên bản đã có chỉ mục hợp lệ.
+                    </p>}
+                    {result.branch_status && Object.values(result.branch_status).some(value =>
+                        !['READY', 'NOT_REQUESTED', 'OK', 'DISABLED', 'NO_ACCESSIBLE_CONTENT', 'NO_READY_INDEX'].includes(value)) &&
+                        <p role="status" className={styles.metadata}>Một phần tìm kiếm chưa sẵn sàng; kết quả hiện có thể chưa đầy đủ.</p>}
                     {result.items.length === 0 && <div className={styles.emptyState}>
                         <SearchX size={32} aria-hidden="true" /><h3>Chưa tìm thấy học liệu</h3>
                         <p>{result.message === 'PUBLIC_ACCESS_UNCONFIRMED' ? 'Chưa có học liệu đủ quyền truy xuất công khai.' :
@@ -61,12 +100,25 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                     </div>}
                     {result.items.map((item, index) => <article key={item.resource_id} className={styles.searchResult}>
                         <div className={styles.resultTopline}><span className={styles.documentType}><FileText size={15} aria-hidden="true" /> Học liệu</span><span className={styles.source}>{item.provider_name || item.resource_type_code} · Phiên bản {item.version_number}</span></div>
-                        <div className={styles.resultHeader}><h2>{item.can_view_file !== false && canVisit(`/library/${encodeURIComponent(item.resource_id)}`, principal)
-                            ? <Link to={`/library/${encodeURIComponent(item.resource_id)}?${new URLSearchParams({ versionId: item.resource_version_id, contextId: item.context_id, returnTo: `/search/query-methods?${params}` })}`}>{item.resource_title}<ArrowUpRight size={18} aria-hidden="true" /></Link>
+                        <div className={styles.resultHeader}><h2>{(item.match_origin === 'METADATA' || item.can_view_file !== false) && canVisit(`/library/${encodeURIComponent(item.resource_id)}`, principal)
+                            ? <Link to={`/library/${encodeURIComponent(item.resource_id)}?${new URLSearchParams({ versionId: item.resource_version_id, contextId: item.context_id || '', contextEvidence: item.context_evidence || '', returnTo: `/search/query-methods?${params}` })}`}>{item.resource_title}<ArrowUpRight size={18} aria-hidden="true" /></Link>
                             : item.resource_title}</h2></div>
+                        {item.resource_format && <p className={styles.metadata}>{item.resource_format.toUpperCase()}</p>}
                         {item.bag_title && <p className={styles.sectionTitle}>{item.bag_title}</p>}
                         {item.snippet && <p className={styles.snippet}>{item.snippet}</p>}
-                        <SearchContext id={item.context_id} />
+                        {!!item.lexical_evidence?.some(e => e.relation !== 'original') && <details className={styles.more}>
+                            <summary>Thuật ngữ tương đương trong học liệu</summary>
+                            <ul>{item.lexical_evidence.filter(e => e.relation !== 'original').slice(0, 6).map((e, i) =>
+                                <li key={i}>“{e.query_phrase}” → “{e.matched_phrase}”{e.field === 'title' ? ' (tiêu đề)' : ''}</li>)}</ul>
+                        </details>}
+                        {item.context_id && <SearchContext id={item.context_id} evidence={item.context_evidence} />}
+                        {item.match_origin && <p className={styles.metadata}>
+                            {item.match_origin === 'BOTH' && 'Khớp nội dung và thông tin học liệu · '}{item.matched_fields?.length
+                            ? item.matched_fields.map(field => ({ TITLE: 'Khớp tiêu đề', DESCRIPTION: 'Khớp mô tả', TAGS: 'Khớp thẻ/từ khóa', CONTENT: 'Khớp nội dung' }[field] || field)).join(' · ')
+                            : 'Khớp thông tin học liệu'}</p>}
+                        {!!item.meaning_variants?.length && <details className={styles.more}><summary>Các cách diễn đạt trong nhóm nghĩa khớp</summary>
+                            <ul>{item.meaning_variants.map(value => <li key={value}>{value}</li>)}</ul></details>}
+                        {item.context_evidence === 'bag' && <p className={styles.metadata}>Kết quả khớp ở cấp học liệu; đoạn trích là đoạn tham khảo, chưa xác định được đoạn khớp trực tiếp.</p>}
                         {item.page_from != null && <p className={styles.metadata}>Nội dung liên quan tại trang {item.page_from}{item.page_to != null && item.page_to !== item.page_from ? `–${item.page_to}` : ''}</p>}
                         {item.matched_keywords.length > 0 && <div className={styles.keywords}><span>Từ khóa liên quan</span>{item.matched_keywords.map(keyword =>
                             <span className={styles.keyword} key={keyword}>{keyword}</span>)}</div>}

@@ -32,7 +32,7 @@ class LocalSentenceEmbedding:
     def start_preload(self):
         """One bounded task per shared adapter/process; never download weights."""
         with self._lifecycle_lock:
-            if self._preload_thread is not None:
+            if self._preload_thread is not None or self._stop.is_set():
                 return
             self._state = 'LOADING'
             self._preload_thread = Thread(target=self._preload, name='etl-model-preload', daemon=True)
@@ -63,6 +63,8 @@ class LocalSentenceEmbedding:
                     continue
                 with self._lifecycle_lock:
                     self._state = 'STOPPED' if self._stop.is_set() else 'FAILED'
+                if self._stop.is_set():
+                    return  # Cancellation during shutdown is not a model failure.
                 logging.getLogger('etl').warning('search_model FAILED pid=%s attempts=%s', os.getpid(), attempt + 1)
                 return
             with self._lifecycle_lock:
@@ -72,12 +74,17 @@ class LocalSentenceEmbedding:
                                           self._state, os.getpid(), self._startup_seconds)
             return
 
-    def stop_preload(self):
-        # Native torch loading cannot be force-killed safely. Stop retry and
-        # bound shutdown waiting; at most ONE daemon may finish its native call.
+    def request_stop(self):
+        """Signal synchronously, even when the lifespan task is being cancelled."""
         self._stop.set()
         with self._lifecycle_lock:
             self._state = 'STOPPED'
+
+    def stop_preload(self):
+        # Native torch loading cannot be force-killed safely. Stop retry and
+        # bound shutdown waiting; at most ONE daemon may finish its native call.
+        self.request_stop()
+        with self._lifecycle_lock:
             thread = self._preload_thread
         if thread is not None:
             thread.join(timeout=1)
@@ -159,6 +166,19 @@ class LocalSentenceEmbedding:
     def embed(self, text):
         self.prepare()
         return self._encode(text)
+
+    def embed_many(self, texts):
+        if not isinstance(texts, list) or not 1 <= len(texts) <= 16 or any(not isinstance(text, str) for text in texts):
+            raise IndexingError('INVALID_EMBEDDING', 503)
+        self.prepare()
+        try:
+            vectors = self._model.encode(texts, batch_size=16, show_progress_bar=False).tolist()
+        except Exception:
+            self._checked = False
+            raise IndexingError('BLOCKED_EMBEDDING_RUNTIME', 503) from None
+        if len(vectors) != len(texts):
+            raise IndexingError('INVALID_EMBEDDING', 503)
+        return [validate_vector(vector, self.dimension) for vector in vectors]
 
     def prepare_query(self):
         """Validate/load once, then return the encoder for the immediate query.

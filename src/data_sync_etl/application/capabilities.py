@@ -64,7 +64,7 @@ class CapabilityService:
             },
             'retrieval': {
                 'modes': ['bow', 'vector', 'hybrid'],
-                'filters': ['subject_id', 'grade_level_id', 'resource_type_code',
+                'filters': ['resource_format', 'domain', 'subject_id', 'grade_level_id', 'resource_type_code',
                             'resource_id', 'resource_version_id'],
                 # Implementation support is not corpus readiness or an access grant.
                 # These checks never load the model, infer vectors or query storage.

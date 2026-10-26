@@ -1,39 +1,47 @@
-.page { width:100%; max-width:1240px; min-width:0; margin:0 auto; padding-bottom:32px; color:#334155; }
-.hero { margin-bottom:24px; padding-bottom:18px; border-bottom:1px solid #dbe3ee; }
-.hero h1 { margin:0; color:#172554; font-size:clamp(26px,3vw,34px); line-height:1.25; letter-spacing:-.025em; }
-.section { min-width:0; margin-top:20px; padding:24px 28px; border:1px solid #e5eaf1; border-radius:14px; background:#fff; box-shadow:0 3px 14px rgb(15 23 42 / 3%); }
-.section h2 { display:flex; align-items:center; gap:10px; margin:0 0 20px; padding-bottom:14px; border-bottom:1px solid #edf1f6; color:#172554; font-size:19px; line-height:1.5; }
-.section h2::before { content:''; flex:0 0 4px; height:18px; border-radius:4px; background:#8da8d2; }
-.diagramFigure { margin:0; padding:28px; border:1px solid #e5ebf3; border-radius:12px; background-color:#fbfcfe; background-image:radial-gradient(#dfe6ef .8px, transparent .8px); background-size:18px 18px; }
+.section { min-width: 0; margin-top: 32px; padding-top: 26px; border-top: 1px solid #e9ebee; }
+.flow { display: grid; gap: 24px; }
+.flow h3 { font-size: 14px; color: #536459; }
+.flowScroll { overflow-x: auto; padding: 4px 0 14px; }
+.flowSteps { display: flex; gap: 18px; list-style: none; padding: 0; margin: 0; }
+.flowSteps li { position: relative; display: grid; gap: 12px; flex: 1 0 130px; padding: 17px; border: 1px solid #dce3ed; border-radius: 10px; background: #f8fafc; }
+.flowSteps span { color: #8f7c68; font-size: 12px; }
+.flowSteps strong { color: #24354b; font-size: 13px; line-height: 1.6; }
+.section h2 { margin: 0 0 18px; color: #253039; font-size: 28px; line-height: 1.3; letter-spacing: -.035em; }
+.sectionLead { max-width: 690px; margin: 0 0 28px; color: #64717b; font-size: 13px; line-height: 1.9; }
+.technical { margin-top: 24px; }
+.technical summary { cursor: pointer; padding: 18px 0; color: #3b5d6a; font-size: 13px; border-top: 1px solid #e5e9eb; }
+.technical summary:focus-visible { outline: 2px solid #567583; outline-offset: 3px; }
+.diagramFigure { box-sizing:border-box; margin:0; padding:12px; border:1px solid #e5ebf3; border-radius:12px; background-color:#fbfcfe; background-image:radial-gradient(#dfe6ef .8px, transparent .8px); background-size:18px 18px; }
 .diagramCaption { margin-top:24px; color:#64748b; font-size:13px; line-height:1.6; text-align:center; }
 .tableWrapper { width:100%; overflow-x:auto; border:1px solid #e2e8f0; border-radius:12px; }
 .tableWrapper:focus-visible { outline:2px solid #1e3a8a; outline-offset:3px; }
-.processTable { width:100%; min-width:900px; border-collapse:collapse; table-layout:fixed; font-size:18px; line-height:1.7; }
+.processTable { width:100%; min-width:720px; border-collapse:collapse; table-layout:fixed; font-size:13px; line-height:1.7; }
 .processTable th,.processTable td { padding:18px 20px; border-bottom:1px solid #edf1f6; text-align:left; vertical-align:middle; overflow-wrap:anywhere; }
-.processTable thead th { padding-block:15px; color:#fff; background:#233e70; font-size:17px; font-weight:600; }
+.processTable thead th { padding-block:15px; color:#536459; background:#f5f1eb; font-size:13px; font-weight:600; }
 .processTable thead th:first-child { width:28%; }
 .processTable thead th:nth-child(2) { width:45%; }
 .processTable thead th:last-child { width:27%; }
-.processTable .groupRow th { padding:11px 20px; background:#eef3fa; color:#3c5377; font-size:17px; font-weight:700; border-bottom:1px solid #dfe7f2; }
+.processTable .groupRow th { padding:11px 20px; background:#eef3fa; color:#3c5377; font-size:13px; font-weight:700; border-bottom:1px solid #dfe7f2; }
 .processTable tbody tr:not(.groupRow):hover { background:#f8faff; }
 .processTable tbody:last-child tr:last-child > * { border-bottom:0; }
 .stepCell { display:flex; align-items:center; gap:12px; }
-.stepName { color:#334155; font-size:18px; font-weight:600; }
+.stepName { color:#334155; font-size:13px; font-weight:600; }
 .stepNumber { display:inline-flex; align-items:center; justify-content:center; flex:0 0 32px; height:32px; border:1px solid #dce6f5; border-radius:9px; color:#1e3a8a; background:#eff5ff; font-size:13px; font-weight:700; }
-.output { display:inline-flex; align-items:center; gap:8px; color:#34634b; font-size:18px; line-height:1.6; }
+.output { display:inline-flex; align-items:center; gap:8px; color:#34634b; font-size:13px; line-height:1.6; }
 .output::before { content:''; width:6px; height:6px; flex-shrink:0; border-radius:50%; background:#7aa98e; }
 @media (max-width:700px) {
     .section { padding:18px 16px; }
-    .section h2 { font-size:17px; }
+    .section h2 { font-size:23px; }
     .diagramFigure { padding:16px 10px; }
     .processTable th,.processTable td { padding:16px; }
     .stepCell { gap:8px; }
 }
-.treeViewport { width:100%; min-width:0; border:1px solid #e2e8f0; border-radius:14px; background:#fff; }
-.treeCanvas { display:block; width:100%; height:auto; }
+.treeViewport { box-sizing:border-box; width:100%; min-width:0; overflow-x:auto; border:1px solid #e2e8f0; border-radius:14px; background:#fff; }
+.treeCanvas { display:block; width:100%; min-width:820px; height:auto; }
+.treeViewport:focus-visible { outline:3px solid #94b6fb; outline-offset:3px; }
 .preparationLane { fill:#f5f8fd; stroke:#e5ebf3; }
 .searchLane { fill:#f6faf9; stroke:#e1ece7; }
-.laneHeading { display:flex; align-items:center; gap:10px; color:#334155; font-size:17px; font-weight:650; }
+.laneHeading { display:flex; align-items:center; gap:10px; color:#334155; font-size:13px; font-weight:650; }
 .laneHeading > span { display:flex; align-items:center; justify-content:center; width:28px; height:28px; border:1px solid #d9e3f3; border-radius:8px; background:#fff; color:#667d9e; font-size:11px; }
 .treeNode { display:flex; align-items:center; justify-content:center; width:100%; height:76px; padding:12px 18px; border:1px solid #d6e0ef; border-radius:11px; color:#334155; background:#fff; font-size:16px; font-weight:600; line-height:1.5; text-align:center; box-shadow:0 3px 8px rgb(15 23 42 / 4%); }
 .highlight { border-color:#a9bfdf; background:#edf3fe; color:#1e3a8a; }
