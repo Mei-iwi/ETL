@@ -13,7 +13,7 @@ from data_sync_etl.application.search_review import (
     review_package,
     write_review,
 )
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.indexing import digest
 
 
@@ -31,7 +31,7 @@ def prepare(output):
     sources = {'public_full_corpus': [(q.id, c) for q in queries for c in candidates]}
     package, rows, audit = review_package(queries, sources, corpus_fingerprint=digest(base['documents']),
         model={'id': 'BAAI/bge-m3', 'dimension': 1024, 'inference_run': False},
-        dictionary_revision=default_dictionary().fingerprint,
+        dictionary_revision=empty_dictionary().fingerprint,
         evaluation_policy={'direct_grade_min': 2, 'unjudged': 'UNKNOWN_NOT_ZERO', 'new_thresholds': 'OFF',
                            'intent_families': 'REVIEW_PENDING_DIAGNOSTIC_ONLY'}, provenance='public_fixture')
     output = Path(output)

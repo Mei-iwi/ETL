@@ -12,7 +12,7 @@ from pathlib import Path
 from time import perf_counter
 
 from data_sync_etl.application.vector_quality import compile_qrels
-from data_sync_etl.domain.concepts import concept_analysis_scope, default_dictionary
+from data_sync_etl.domain.concepts import concept_analysis_scope, empty_dictionary
 from data_sync_etl.domain.context_ranking import content_terms
 from data_sync_etl.domain.evaluation import checksum
 from data_sync_etl.domain.evidence_selection import EvidenceCandidate, select_evidence
@@ -117,7 +117,7 @@ def run(args):
         if chunk['bag_id'] in bags:
             by_bag[chunk['bag_id']].append(key)
     lexical = {bag: lexical_document([chunks[k]['text'] for k in members]) for bag, members in by_bag.items()}
-    dictionary = default_dictionary()
+    dictionary = empty_dictionary()
     bm25('warmup', lexical)
     rows, cases, no_answer, profiles = [], [], [], []
     for qi, query in enumerate(qrels['queries']):

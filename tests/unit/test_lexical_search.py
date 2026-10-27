@@ -103,31 +103,30 @@ def test_snippet_centers_a_late_match():
     assert 'học máy không giám sát' in snippet_text(text, {'học', 'máy'}, query='học máy không giám sát')
 
 
-@pytest.mark.parametrize('query', [
-    'machine learning', 'máy học', 'apprentissage automatique', 'maschinelles lernen',
-    'aprendizaje automático', '机器学习', '機器學習', '機械学習', '머신러닝',
-])
-def test_multilingual_phrases_retrieve_vietnamese_without_model(query):
-    docs = {'ml': lexical_document(['Học máy dự đoán từ dữ liệu.']),
+@pytest.mark.parametrize('query', ['zircon lattice', 'réseau cristallin'])
+def test_multilingual_phrases_retrieve_only_via_reviewed_corpus(tmp_path, query):
+    from tests.corpus_dictionary_support import reviewed_dictionary
+    docs = {'relevant': lexical_document(['Mạng tinh thể cần nghiên cứu.']),
             'other': lexical_document(['Cây xanh cần ánh sáng.'])}
-    assert 'ml' in bm25(query, docs)
-    assert 'other' not in bm25(query, docs)
+    assert bm25(query, docs) == {}
+    with reviewed_dictionary(tmp_path,
+            'vi: mạng tinh thể | en: zircon lattice | fr: réseau cristallin', query) as dictionary:
+        assert set(bm25(query, docs, dictionary=dictionary)) == {'relevant'}
 
 
-def test_equivalences_are_bidirectional_and_literal_evidence_wins():
-    docs = {'vi': lexical_document(['học máy']), 'en': lexical_document(['machine learning'])}
-    assert bm25('machine learning', docs)['en'] > bm25('machine learning', docs)['vi'] > 0
-    assert bm25('học máy', docs)['vi'] > bm25('học máy', docs)['en'] > 0
-    assert bm25('机器学习', {'en': docs['en']})['en'] > 0
-    assert bm25('học máy', {'zh': lexical_document(['我们研究机器学习方法。'])})['zh'] > 0
+def test_equivalences_are_bidirectional_and_literal_evidence_wins(tmp_path):
+    from tests.corpus_dictionary_support import reviewed_dictionary
+    docs = {'fr': lexical_document(['réseau cristallin']), 'en': lexical_document(['zircon lattice'])}
+    with reviewed_dictionary(tmp_path, 'en: zircon lattice | fr: réseau cristallin', 'zircon lattice') as dictionary:
+        assert bm25('zircon lattice', docs, dictionary=dictionary)['en'] > bm25(
+            'zircon lattice', docs, dictionary=dictionary)['fr'] > 0
+        assert bm25('réseau cristallin', docs, dictionary=dictionary)['fr'] > bm25(
+            'réseau cristallin', docs, dictionary=dictionary)['en'] > 0
 
 
 def test_equivalences_keep_negation_boundaries_and_ambiguity():
     from data_sync_etl.domain.concepts import concept_frequencies
-
-    assert concept_frequencies(surface_tokens('unsupervised learning')) == {'unsupervised learning': 1}
-    assert concept_frequencies(surface_tokens('无监督学习')) == {'unsupervised learning': 1}
-    assert concept_frequencies(surface_tokens('học không giám sát')) == {'unsupervised learning': 1}
+    assert not concept_frequencies(surface_tokens('unsupervised learning'))
     assert bm25('unsupervised learning', {'s': lexical_document(['học có giám sát'])}) == {}
     assert bm25('machine learning', {'split': lexical_document(['học', 'máy'])}) == {}
     assert bm25('machine learning', {'partial': lexical_document(['máy tính'])}) == {}
@@ -136,17 +135,20 @@ def test_equivalences_keep_negation_boundaries_and_ambiguity():
 
 
 @pytest.mark.parametrize('searchable', [{'texts': [
-    'unrelated evidence\n' * 15 + 'Machine learning predicts labels from training data.',
+    'unrelated evidence\n' * 15 + 'Zircon lattice supports spectral analysis.',
 ]}], indirect=True)
-def test_multilingual_bow_search_returns_source_evidence_and_snippet(searchable):
+def test_multilingual_bow_search_returns_source_evidence_and_snippet(searchable, tmp_path):
+    from tests.corpus_dictionary_support import reviewed_dictionary
     c, _ = searchable
     c.indexing.embedding.prepare = lambda: pytest.fail('BoW loaded a model')
     c.indexing.embedding.embed = lambda *_: pytest.fail('BoW encoded a query')
-    for query in ('học máy', '機械学習', 'apprentissage automatique'):
-        result = c.search.search(query, 'bow')
+    assert c.search.search('réseau cristallin', 'bow')['total'] == 0
+    with reviewed_dictionary(tmp_path, 'en: zircon lattice | fr: réseau cristallin', 'réseau cristallin') as dictionary:
+        c.search.dictionary = dictionary
+        result = c.search.search('réseau cristallin', 'bow')
         assert result['total'] == 1
-        assert {'machine', 'learning'} <= set(result['items'][0]['matched_keywords'])
-        assert 'Machine learning' in result['items'][0]['snippet']
+        assert {'zircon', 'lattice'} <= set(result['items'][0]['matched_keywords'])
+        assert 'Zircon lattice' in result['items'][0]['snippet']
         assert result['items'][0]['score_components']['bow'] > 0
 
 

@@ -511,7 +511,7 @@ python -m data_sync_etl.cli.concepts run --root $conceptRoot --fixture "$concept
 python -m data_sync_etl.cli.concepts --help
 ```
 
-Hướng dẫn đầy đủ: [từ điển corpus offline](deploy/CONCEPT_DICTIONARY_OFFLINE.md). Dữ liệu pending không tham gia tìm kiếm; file `concepts.json` gốc giữ nguyên.
+Hướng dẫn đầy đủ: [từ điển corpus offline](deploy/CONCEPT_DICTIONARY_OFFLINE.md). Chỉ quan hệ corpus đã duyệt, còn hiệu lực và đủ quyền mới được mở rộng truy vấn lexical. Khi từ điển tắt hoặc chưa sẵn sàng, hệ thống tìm bằng câu truy vấn gốc; không dùng từ điển tĩnh dự phòng.
 
 | Hiện tượng | Kiểm tra |
 | --- | --- |

@@ -3,16 +3,21 @@ import pytest
 from tests.unit.test_search import searchable as searchable
 
 
-@pytest.mark.parametrize('query', ['green leaf', 'green leaves', 'lá xanh'])
-@pytest.mark.parametrize('searchable', [{'texts': ['Lá xanh chứa diệp lục và hấp thụ ánh sáng.']}], indirect=True)
-def test_bow_bilingual_concept_keeps_original_source_context(searchable, monkeypatch, query):
+@pytest.mark.parametrize('query', ['zircon lattice', 'réseau cristallin', 'mạng tinh thể'])
+@pytest.mark.parametrize('searchable', [{'texts': ['Réseau cristallin possède une structure.']}], indirect=True)
+def test_bow_bilingual_concept_keeps_original_source_context(searchable, monkeypatch, query, tmp_path):
+    from tests.corpus_dictionary_support import reviewed_dictionary
     container, _ = searchable
     monkeypatch.setattr(container.indexing.embedding, 'embed',
         lambda *_: pytest.fail('BoW must not invoke an encoder'))
-    result = container.search.search(query, 'bow')
+    with reviewed_dictionary(tmp_path,
+            'vi: mạng tinh thể | en: zircon lattice | fr: réseau cristallin', query) as dictionary:
+        assert 'mạng tinh thể' in {term.term for term in dictionary.expand(query).terms}
+        container.search.dictionary = dictionary
+        result = container.search.search(query, 'bow')
     assert result['total'] == 1
     item = result['items'][0]
-    assert 'Lá xanh' in item['snippet']
+    assert 'Réseau cristallin' in item['snippet']
     assert item['context_evidence'] == 'lexical'
     assert 'vector' not in item['score_components']
     context = container.search.context(item['context_id'], neighbors=0)

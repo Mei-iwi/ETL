@@ -6,7 +6,7 @@ import unicodedata
 from pathlib import Path
 from time import perf_counter
 
-from data_sync_etl.domain.concepts import ExpansionPolicy, default_dictionary
+from data_sync_etl.domain.concepts import ExpansionPolicy, empty_dictionary
 from data_sync_etl.domain.evaluation import checksum, percentile
 from data_sync_etl.domain.lexical import analysis_scope, bm25, lexical_document
 from data_sync_etl.domain.meaning_bags import build_meanings, match_meaning
@@ -44,7 +44,7 @@ def run(args):
     fixture = json.loads(Path('fixtures/search/multilingual_context.json').read_text(encoding='utf-8'))
     additional = json.loads(Path('fixtures/search/phase2_queries.json').read_text(encoding='utf-8'))
     fixture['queries'] = [*fixture['queries'], *additional['queries']]
-    dictionary = default_dictionary()  # Runtime approved dictionary ONLY; no draft fixture terminology.
+    dictionary = empty_dictionary()  # Runtime approved dictionary ONLY; no draft fixture terminology.
     if args.engine == 'meaning_bag':
         model = LocalSentenceEmbedding(args.model, 'BAAI/bge-m3', args.revision, 1024)
         encode = model.embed
