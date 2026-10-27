@@ -146,10 +146,16 @@ with (p / "model.bin").open("rb") as f:
 assert checksum == "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1", checksum
 print("Checksum OK:", checksum)
 PY
+
+# Chuẩn bị mẫu kiểm thử FLEURS công khai (chạy 1 lần nếu chưa có thư mục .test-tmp/media-tools):
+./.venv/Scripts/python.exe -m pip install pyarrow fsspec aiohttp
+./.venv/Scripts/python.exe scripts/prepare_media_test_assets.py --download-public-samples
+
+# Đánh giá mô hình ASR offline với 3 ngôn ngữ mẫu:
 HF_HUB_OFFLINE=1 ./.venv/Scripts/python.exe scripts/evaluate_media_asr.py --model Models/faster-whisper-large-v3 --languages vi_vn fr_fr ja_jp --report .test-tmp/asr-large-v3.json
 ```
 
-Lệnh evaluator cần các mẫu audio/reference local nêu bên dưới. Khi kiểm tra thành công, restart API/worker để nạp cấu hình model mới.
+Lệnh evaluator cần các mẫu audio/reference local theo bước tải trên. Khi kiểm tra thành công, restart API/worker để nạp cấu hình model mới.
 
 **PowerShell — lệnh tương đương:**
 
@@ -189,6 +195,11 @@ with (p / "model.bin").open("rb") as f:
 assert checksum == "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1", checksum
 print("large-v3 edaa852ec7e145841d8ffdb056a99866b5f0a478", checksum)
 '@ | .\.venv\Scripts\python.exe -
+
+# Chuẩn bị mẫu kiểm thử FLEURS công khai (nếu chưa có):
+.\.venv\Scripts\python.exe -m pip install pyarrow fsspec aiohttp
+.\.venv\Scripts\python.exe scripts/prepare_media_test_assets.py --download-public-samples
+
 $env:HF_HUB_OFFLINE="1"
 .\.venv\Scripts\python.exe scripts/evaluate_media_asr.py --model Models/faster-whisper-large-v3 --languages vi_vn fr_fr ja_jp --report .test-tmp/asr-large-v3.json
 ```
@@ -197,9 +208,20 @@ Lệnh đánh giá cần audio/reference local theo [MEDIA_ACCEPTANCE.md](MEDIA_
 
 **Tải và giải nén gói Argos Anh → Việt 1.9** vào thư mục model riêng:
 
+> *Lưu ý*: Máy chủ `argos-net.com` có Cloudflare bảo vệ, chặn `User-Agent` mặc định của urllib (`HTTP 403 Forbidden`). Dùng `curl` kèm `-A "Mozilla/5.0"` để tải file trước khi giải nén:
+
+**Git Bash:**
 ```bash
 mkdir -p Models/argos .test-tmp/media-setup
-python -c "from pathlib import Path; from urllib.request import urlretrieve; from zipfile import ZipFile; p=Path('.test-tmp/media-setup/translate-en_vi-1_9.argosmodel'); urlretrieve('https://argos-net.com/v1/translate-en_vi-1_9.argosmodel',p); ZipFile(p).extractall('Models/argos')"
+curl -A "Mozilla/5.0" -L -o .test-tmp/media-setup/translate-en_vi-1_9.argosmodel "https://argos-net.com/v1/translate-en_vi-1_9.argosmodel"
+./.venv/Scripts/python.exe -c "from zipfile import ZipFile; ZipFile('.test-tmp/media-setup/translate-en_vi-1_9.argosmodel').extractall('Models/argos')"
+```
+
+**PowerShell:**
+```powershell
+New-Item -ItemType Directory -Force -Path "Models/argos", ".test-tmp/media-setup" | Out-Null
+curl.exe -A "Mozilla/5.0" -L -o ".test-tmp/media-setup/translate-en_vi-1_9.argosmodel" "https://argos-net.com/v1/translate-en_vi-1_9.argosmodel"
+.\.venv\Scripts\python.exe -c "from zipfile import ZipFile; ZipFile('.test-tmp/media-setup/translate-en_vi-1_9.argosmodel').extractall('Models/argos')"
 ```
 
 Kết quả phải có `Models/argos/translate-en_vi-1_9/metadata.json`, tokenizer và `model/model.bin`. `TRANSLATION_MODEL_ROOT` trỏ tới **thư mục cha `Models/argos`**, không trỏ vào một gói con. Cặp nguồn/đích khác cần gói tương ứng; chỉ gói Anh → Việt ở trên đã được kiểm chứng. Thiếu gói dịch không làm mất nguyên ngữ.
