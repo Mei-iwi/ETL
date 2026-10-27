@@ -9,6 +9,7 @@ import { readSearch, writeSearch } from './searchParams'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
 import { SearchContext } from './SearchContext'
 import { clearSearchViewCache, readSearchView, saveSearchView } from './searchViewCache'
+import { searchEmptyState } from './searchResultState'
 
 export function SearchResults({ params, onBusyChange }: { params: URLSearchParams; onBusyChange?: (busy: boolean) => void }) {
     const { principal, mode } = useAuth()
@@ -22,6 +23,7 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
     const retrying = useRef(false)
     const navigating = useRef(false)
     const activeRequest = useRef<AbortController | null>(null)
+    const emptyState = result ? searchEmptyState(result) : null
     // Focus/tab changes do not restart a query. AuthProvider still verifies the
     // session; identity/permission changes invalidate this request's scope.
     function goToPage(page: number) {
@@ -78,11 +80,8 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                                 : 'Chỉ mục tìm kiếm metadata chưa sẵn sàng. Vui lòng liên hệ quản trị viên.')
                             : 'Một phần tìm kiếm chưa sẵn sàng; kết quả hiện có thể chưa đầy đủ.'}</p>}
                     {result.items.length === 0 && <div className={styles.emptyState}>
-                        <SearchX size={32} aria-hidden="true" /><h3>Chưa tìm thấy học liệu</h3>
-                        <p>{result.message === 'PUBLIC_ACCESS_UNCONFIRMED' ? 'Chưa có học liệu đủ quyền truy xuất công khai.' :
-                            result.message === 'NO_READY_INDEX' ? 'Chưa có học liệu lập chỉ mục sẵn sàng.' :
-                                result.message === 'NO_ACCESSIBLE_CONTENT' ? 'Không có nội dung được phép truy xuất trong phạm vi hiện tại.' :
-                                    result.message === 'QUERY_NO_KEYWORDS' ? 'Truy vấn không có từ khóa phù hợp.' : 'Không tìm thấy học liệu phù hợp.'}</p>
+                        <SearchX size={32} aria-hidden="true" /><h3>{emptyState?.title}</h3>
+                        <p>{emptyState?.message}</p>
                     </div>}
                     {result.items.map((item, index) => <article key={item.resource_id} className={styles.searchResult}>
                         <div className={styles.resultTopline}><span className={styles.documentType}><FileText size={15} aria-hidden="true" /> Học liệu</span><span className={styles.source}>{item.provider_name || item.resource_type_code} · Phiên bản {item.version_number}</span></div>
