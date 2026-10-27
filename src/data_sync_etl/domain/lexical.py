@@ -175,7 +175,7 @@ def contains_phrase(tokens, query):
 
 def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
          dictionary=None, policy=None, domain=None, contextual=True, expansion=None, min_coverage=0., corpus=None,
-         focus_query=None):
+         focus_query=None, accent_insensitive=False):
     """Weighted BM25, maximum alternative per concept (no alias stacking).
 
     N, avgdl and DF cover ALL authorized verified bags including nonhits.
@@ -234,6 +234,25 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         if len(exact) % period == 0 and exact == exact[:period] * (len(exact) // period):
             exact = exact[:period]
             break
+    # A substantial phrase actually present in this authorized corpus supplies
+    # a subject anchor without a curated ontology. Incidental qualifiers alone
+    # must not outrank it. No anchor is inferred for unknown/long queries.
+    anchors = set()
+    if not focus_ids and 3 <= len(exact) <= 12:
+        informative_query = set(exact) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS
+        for doc in documents.values():
+            if len(informative_query.intersection(doc.terms)) < 2:
+                continue
+            for tokens in [doc.title_tokens, *doc.passages]:
+                for width in range(min(6, len(exact)), 2, -1):
+                    for start in range(len(exact) - width + 1):
+                        phrase = exact[start:start + width]
+                        informative = set(phrase) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS
+                        if len(informative) >= 2 and contains_phrase(tokens, phrase):
+                            anchors.add(tuple(phrase))
+        if anchors:
+            longest = max(map(len, anchors))
+            anchors = {phrase for phrase in anchors if len(phrase) == longest}
     for key, doc in documents.items():
         tf = dict(zip(doc.terms, doc.frequencies, strict=True))
         title_tf = dict(zip(doc.title_terms, doc.title_frequencies, strict=True))
@@ -242,6 +261,9 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         counts, title = observed[key]
         if focus_ids and not any(cid in focus_ids and count for (cid, _), count in counts.items()):
             continue  # A qualifier cannot replace an explicitly recognized subject.
+        if anchors and not any(set(phrase) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS <= tf.keys()
+                               for phrase in anchors):
+            continue
         if (len(original_terms) > 1 and not focus_ids
                 and (original_terms & tf.keys()) <= AUXILIARY_MATCH_TERMS):
             continue
@@ -259,6 +281,16 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
                                          for tokens in [doc.title_tokens, *doc.passages]):
                 score *= policy.phrase_boost
             result[key] = score
+    if accent_insensitive:
+        from data_sync_etl.domain.query_variants import corpus_accent_variant
+
+        variant = corpus_accent_variant(query, documents)
+        if variant is not None:
+            assisted = bm25(variant, documents, k1=k1, b=b, expand_concepts=expand_concepts,
+                            dictionary=dictionary, policy=policy, domain=domain, contextual=contextual,
+                            min_coverage=min_coverage, corpus=corpus)
+            result = {key: max(result.get(key, 0.), .8 * assisted.get(key, 0.))
+                      for key in result.keys() | assisted.keys()}
     return result
 
 

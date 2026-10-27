@@ -6,6 +6,7 @@ The original query always remains a separate retrieval branch.
 import re
 import unicodedata
 from functools import cached_property
+from time import monotonic
 
 VERSION = 'approved-missing-accents-v1'
 WORDS = re.compile(r'[^\W\d_]+', re.UNICODE)
@@ -14,6 +15,77 @@ WORDS = re.compile(r'[^\W\d_]+', re.UNICODE)
 def fold(text):
     return ''.join(c for c in unicodedata.normalize('NFD', text.casefold().replace('đ', 'd'))
                    if unicodedata.category(c) != 'Mn')
+
+
+def corpus_accent_variant(query, documents, *, max_tokens=100000, budget_ms=20., clock=monotonic):
+    """Restore only an unambiguous multiword phrase observed in eligible bags.
+
+    Caller supplies the already authorized bounded lexical corpus. This is a
+    transient candidate operation, never an alias approval or Mongo scan. On
+    budget exhaustion it abstains, rather than using incomplete collision data.
+    """
+    canonical = unicodedata.normalize('NFC', query)
+    started = clock()
+    words = list(WORDS.finditer(canonical))
+    if not 2 <= len(words) <= 160:
+        return None
+    wanted = {}
+    for start in range(len(words)):
+        for width in range(2, min(6, len(words) - start) + 1):
+            selected = words[start:start + width]
+            if any(not canonical[a.end():b.start()].isspace()
+                   for a, b in zip(selected, selected[1:], strict=False)):
+                continue
+            before = canonical[selected[0].start()-1:selected[0].start()] if selected[0].start() else ''
+            after = canonical[selected[-1].end():selected[-1].end()+1]
+            if before == '_' or after == '_' or before.isdigit() or after.isdigit():
+                continue
+            raw = ' '.join(m.group().casefold() for m in selected)
+            wanted.setdefault(fold(raw), []).append((selected[0].start(), selected[-1].end(), raw))
+    observed, used = {}, 0
+    first_words = {phrase.split()[0] for phrase in wanted}
+    for document in documents.values():
+        for tokens in [document.title_tokens, *document.passages]:
+            used += len(tokens)
+            if used > max_tokens or (clock() - started) * 1000 >= budget_ms:
+                return None
+            for start in range(len(tokens)):
+                if fold(tokens[start]) not in first_words:
+                    continue
+                for width in range(2, min(6, len(tokens) - start) + 1):
+                    phrase = ' '.join(tokens[start:start + width])
+                    key = fold(phrase)
+                    if key in wanted:
+                        bucket = observed.setdefault(key, set())
+                        if len(bucket) < 2:  # Two values already prove ambiguity.
+                            bucket.add(phrase)
+    ambiguous = set()
+    for key, candidates in observed.items():
+        if len(candidates) > 1:
+            for start, end, _ in wanted[key]:
+                ambiguous.update(range(start, end))
+    replacements = []
+    for key, candidates in observed.items():
+        if len(candidates) != 1:
+            continue
+        target = next(iter(candidates))
+        for start, end, raw in wanted[key]:
+            if ambiguous.intersection(range(start, end)):
+                continue
+            if (raw == target or len(raw) != len(target)
+                    or any(fold(a) != a and a != b for a, b in zip(raw, target, strict=True))):
+                continue
+            replacements.append((start, end, target))
+    accepted, occupied = [], set()
+    for start, end, target in sorted(replacements, key=lambda row: (-(row[1]-row[0]), row[0])):
+        if not occupied.intersection(range(start, end)):
+            accepted.append((start, end, target))
+            occupied.update(range(start, end))
+        if len(accepted) == 4:
+            break
+    for start, end, target in sorted(accepted, reverse=True):
+        canonical = canonical[:start] + target + canonical[end:]
+    return canonical if accepted else None
 
 
 class AccentAliases:

@@ -11,7 +11,7 @@ from pydantic import (
 )
 
 from data_sync_etl.domain.indexing import IndexingError
-from data_sync_etl.domain.search import SearchError, normalize_query
+from data_sync_etl.domain.search import SearchError, bounded_query
 
 Method = Literal['bow', 'vector', 'hybrid']
 Identifier = Annotated[str, Field(min_length=1, max_length=30, pattern=r'^\S(?:.*\S)?$')]
@@ -32,7 +32,7 @@ class SearchFilters(StrictDTO):
 
 
 class SearchRequest(StrictDTO):
-    query: str = Field(max_length=600)
+    query: str = Field(max_length=8000)
     method: Method = 'hybrid'
     filters: SearchFilters = Field(default_factory=SearchFilters)
     page: int = Field(default=1, ge=1, le=10001)
@@ -41,10 +41,7 @@ class SearchRequest(StrictDTO):
     @field_validator('query')
     @classmethod
     def query_text(cls, value):
-        value = normalize_query(value)
-        if not 1 <= len(value) <= 300:
-            raise ValueError('Invalid search query length')
-        return value
+        return bounded_query(value)
 
     @model_validator(mode='after')
     def offset_bound(self):

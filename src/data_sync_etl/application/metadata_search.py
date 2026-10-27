@@ -299,6 +299,7 @@ class MetadataSearchService:
                 corpus = (len(snapshots.ready_keys), snapshots.lengths[field]) if indexed else None
                 scores = bm25(query, documents, dictionary=dictionary, policy=policy,
                     domain=filters.get('domain'), corpus=corpus,
+                    accent_insensitive=not indexed and self.settings.search_approved_accent_variants_enabled,
                     min_coverage=self.settings.search_bow_min_coverage, focus_query=variant)
                 if variant:
                     assisted = bm25(variant, documents, dictionary=dictionary, policy=policy,

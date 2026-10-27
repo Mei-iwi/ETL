@@ -3,10 +3,11 @@ import math
 
 import pytest
 
-from data_sync_etl.domain.concepts import ExpansionPolicy, default_dictionary
+from data_sync_etl.domain.concepts import ExpansionPolicy
 from data_sync_etl.domain.lexical import bm25, lexical_document
-from data_sync_etl.domain.query_variants import approved_accent_variant
+from data_sync_etl.domain.query_variants import corpus_accent_variant
 from data_sync_etl.domain.vector_admission import anchored_dense_match
+from tests.corpus_dictionary_support import reviewed_dictionary
 from tests.unit.test_metadata_search import metadata as metadata
 from tests.unit.test_metadata_search import search
 from tests.unit.test_search import searchable as searchable
@@ -14,10 +15,9 @@ from tests.unit.test_search import searchable as searchable
 
 def test_missing_accents_require_fraction_concept_not_incidental_number():
     query = 'Cong hai phan so khac mau'
-    dictionary = default_dictionary()
-    variant = approved_accent_variant(query, dictionary, policy=ExpansionPolicy())
     docs = {'security': lexical_document(['Xác thực hai yếu tố bảo vệ tài khoản.']),
             'math': lexical_document(['Cộng hai phân số khác mẫu cần quy đồng.'])}
+    variant = corpus_accent_variant(query, docs)
     raw = bm25(query, docs, focus_query=variant)
     assisted = bm25(variant, docs)
     assert 'security' not in raw and 'security' not in assisted
@@ -85,15 +85,16 @@ def test_generic_or_single_word_overlap_never_satisfies_dense_anchor():
     assert not anchored_dense_match('missing subject', 'missing unrelated subject', .5, floor=.4)
 
 
-def test_approved_cross_language_core_can_support_dense_hit_without_literal_alias():
-    dictionary, policy = default_dictionary(), ExpansionPolicy()
-    expansion = dictionary.expand('machine learning', policy=policy)
-    options = dict(floor=.4, dictionary=dictionary, policy=policy, expansion=expansion)
-    assert anchored_dense_match('machine learning', 'Tài liệu về học máy.', .49, **options)
-    assert not anchored_dense_match('machine learning', 'Tài liệu về máy tính.', .49, **options)
-    expansion = dictionary.expand('machine learning and two', policy=policy)
-    assert not anchored_dense_match('machine learning and two', 'two factor security', .49,
-        floor=.4, dictionary=dictionary, policy=policy, expansion=expansion)
+def test_approved_cross_language_core_can_support_dense_hit_without_literal_alias(tmp_path):
+    policy = ExpansionPolicy()
+    with reviewed_dictionary(tmp_path, 'en: zircon lattice | fr: réseau cristallin', 'zircon lattice') as dictionary:
+        expansion = dictionary.expand('zircon lattice', policy=policy)
+        options = dict(floor=.4, dictionary=dictionary, policy=policy, expansion=expansion)
+        assert anchored_dense_match('zircon lattice', 'Texte sur le réseau cristallin.', .49, **options)
+        assert not anchored_dense_match('zircon lattice', 'Un autre sujet.', .49, **options)
+        expansion = dictionary.expand('zircon lattice and two', policy=policy)
+        assert not anchored_dense_match('zircon lattice and two', 'two factor security', .49,
+            floor=.4, dictionary=dictionary, policy=policy, expansion=expansion)
 
 
 @pytest.mark.parametrize('searchable', [

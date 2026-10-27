@@ -33,7 +33,7 @@ from data_sync_etl.domain.meaning_bags import match_meaning
 from data_sync_etl.domain.query_variants import VERSION as ACCENT_VARIANT_VERSION
 from data_sync_etl.domain.query_variants import approved_accent_variant
 from data_sync_etl.domain.retrieval_fusion import version_rrf
-from data_sync_etl.domain.search import SearchError, cosine, normalize_query, rrf
+from data_sync_etl.domain.search import SearchError, bounded_query, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
 from data_sync_etl.domain.search_context import decode_context, encode_context
 from data_sync_etl.domain.vector_admission import VERSION as VECTOR_ADMISSION_VERSION
@@ -352,6 +352,10 @@ class SearchService:
     @query_encoding_scope()
     def search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
                _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None):
+        try:
+            query = bounded_query(query)
+        except ValueError as exc:
+            raise SearchError('QUERY_INVALID', 422) from exc
         options = dict(access=access, _query_context=_query_context, _batch_texts=_batch_texts,
                        _batch_bags=_batch_bags, _evaluation_capture=_evaluation_capture)
         provider = self.concept_resolver
@@ -665,6 +669,7 @@ class SearchService:
             nonlocal bow
             bow = bm25(query, {key: row[0].lexical for key, row in by_bag.items()},
                        dictionary=self.dictionary, policy=policy, expansion=expansion,
+                       accent_insensitive=self.settings.search_approved_accent_variants_enabled,
                        min_coverage=self.settings.search_bow_min_coverage, focus_query=variant)
             if variant is not None:
                 assisted = bm25(variant, {key: row[0].lexical for key, row in by_bag.items()},

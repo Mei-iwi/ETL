@@ -7,7 +7,7 @@ import type { GradeLevelOption, ResourceTypeOption, SubjectOption } from '../../
 import type { SearchMethod } from '../../types/search'
 import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
-import { methods, readSearch, writeSearch } from './searchParams'
+import { methods, readSearch, SEARCH_QUERY_MAX_LENGTH, writeSearch } from './searchParams'
 import { SearchResults } from './SearchResultPage'
 import { useSearchModel } from './useSearchModel'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
@@ -55,7 +55,7 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
         event.preventDefault()
         if (busy || submitting.current || (method !== 'bow' && !model.ready)) return
         const normalized = query.normalize('NFC').trim()
-        if (!normalized || normalized.length > 300) { setError('Nhập nội dung cần tìm, tối đa 300 ký tự.'); return }
+        if (!normalized || normalized.length > SEARCH_QUERY_MAX_LENGTH) { setError(`Nhập nội dung cần tìm, tối đa ${SEARCH_QUERY_MAX_LENGTH} ký tự.`); return }
         const next = writeSearch({ query: normalized, method, filters, page: 1, size: 5 }).toString()
         if (next === params.toString()) return
         submitting.current = true
@@ -68,7 +68,7 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
         <form role="search" aria-label="Tra cứu học liệu" className={`${layout.card} ${layout.form} ${styles.searchForm}`} onSubmit={submit}>
             <div className={styles.searchBar}><div className={`${layout.field} ${styles.queryField}`}><label htmlFor="search-query" className={styles.visuallyHidden}>Tìm kiếm học liệu</label>
                 <Search size={20} aria-hidden="true" className={styles.searchIcon} />
-                <input id="search-query" type="search" value={query} onChange={event => { setQuery(event.target.value); setError('') }} maxLength={300} placeholder="Nhập từ khóa hoặc câu hỏi…" aria-describedby={error ? 'search-error' : undefined} aria-invalid={Boolean(error)} required /></div>
+                <input id="search-query" type="search" value={query} onChange={event => { setQuery(event.target.value); setError('') }} maxLength={SEARCH_QUERY_MAX_LENGTH} placeholder="Nhập từ khóa hoặc câu hỏi…" aria-describedby={error ? 'search-error' : undefined} aria-invalid={Boolean(error)} required /></div>
                 <button type="submit" className={layout.primaryButton} disabled={busy || (method !== 'bow' && !model.ready)}>{busy ? 'Đang tìm…' : 'Tìm kiếm'}</button></div>
             <div className={styles.searchOptions}>
                 <fieldset className={styles.methodPicker}><legend className={styles.visuallyHidden}>Cách tìm kiếm</legend>

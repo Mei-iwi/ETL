@@ -75,7 +75,7 @@ def test_unicode_symbols_negation_and_unusual_inputs_are_not_globally_folded(tex
     assert request.query == unicodedata.normalize('NFC', text).strip()
 
 
-@pytest.mark.parametrize('text', ['', '   ', 'x'*301, '\ud800'])
+@pytest.mark.parametrize('text', ['', '   ', 'x'*2001, '\ud800'])
 def test_invalid_search_lengths_remain_explicit_errors(text):
     with pytest.raises(ValidationError):
         SearchRequest(query=text)
