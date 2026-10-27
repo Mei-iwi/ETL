@@ -1,0 +1,23 @@
+# Opt-in offline ASR. Model files stay on the host; no startup download.
+x-media: &media
+  build:
+    args:
+      INSTALL_MEDIA: "true"
+  environment:
+    SOURCE_METADATA_MEDIA_ENABLED: "false"
+    WHISPER_MODEL_PATH: /opt/models/whisper
+    WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+    WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+    FFMPEG_PATH: /usr/bin/ffmpeg
+    FFPROBE_PATH: /usr/bin/ffprobe
+  volumes:
+    - type: bind
+      source: ${WHISPER_MODEL_DIR:?Set WHISPER_MODEL_DIR to the complete offline faster-whisper model}
+      target: /opt/models/whisper
+      read_only: true
+      bind:
+        create_host_path: false
+services:
+  api: *media
+  source-file-worker: *media
+  ocr-worker: *media

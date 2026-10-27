@@ -8,9 +8,15 @@ env_file="${ETL_DOCKER_ENV_FILE:-$root_dir/docker.env}"
 if [[ -z "${ETL_DOCKER_ENV_FILE:-}" && ! -f "$env_file" ]]; then env_file="$deploy_dir/.env.docker"; fi
 [[ -f "$env_file" ]] || { echo 'Docker env file missing. Copy deploy/docker.env.example to docker.env and configure it.' >&2; exit 2; }
 database_mode=same-host
+media_enabled=false
 mode_pattern="^[[:space:]]*DATABASE_MODE[[:space:]]*=[[:space:]]*[\"']?(same-host|remote|source-neon)[\"']?[[:space:]]*(#.*)?$"
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
+  if [[ "$line" =~ ^[[:space:]]*MEDIA_ENABLED[[:space:]]*= ]]; then
+    media_pattern="^[[:space:]]*MEDIA_ENABLED[[:space:]]*=[\"']?(true|false)[\"']?[[:space:]]*(#.*)?$"
+    [[ "$line" =~ $media_pattern ]] || { echo 'Invalid MEDIA_ENABLED in Docker env file.' >&2; exit 2; }
+    media_enabled="${BASH_REMATCH[1]}"
+  fi
   if [[ "$line" =~ ^[[:space:]]*DATABASE_MODE[[:space:]]*= ]]; then
     [[ "$line" =~ $mode_pattern ]] || { echo 'Invalid DATABASE_MODE in Docker env file.' >&2; exit 2; }
     database_mode="${BASH_REMATCH[1]}"
@@ -33,6 +39,9 @@ if [[ "${ETL_REMOTE_DB:-false}" == true && "${ETL_SOURCE_NEON:-false}" == true ]
   exit 2
 fi
 compose=(docker compose --env-file "$env_file" -f "$deploy_dir/compose.app.yml")
+media_enabled="${MEDIA_ENABLED:-$media_enabled}"
+case "$media_enabled" in true|false) ;; *) echo 'Invalid MEDIA_ENABLED.' >&2; exit 2 ;; esac
+[[ "$media_enabled" == true ]] && compose+=(-f "$deploy_dir/compose.media.yml")
 [[ "${ETL_WITH_DRIVE:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.drive.yml")
 [[ "${ETL_REMOTE_DB:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.remote-db.yml")
 [[ "${ETL_SOURCE_NEON:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.source-neon.yml")
