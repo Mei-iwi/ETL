@@ -81,8 +81,8 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                         <SearchX size={32} aria-hidden="true" /><h3>Chưa tìm thấy học liệu</h3>
                         <p>{result.message === 'PUBLIC_ACCESS_UNCONFIRMED' ? 'Chưa có học liệu đủ quyền truy xuất công khai.' :
                             result.message === 'NO_READY_INDEX' ? 'Chưa có học liệu lập chỉ mục sẵn sàng.' :
-                            result.message === 'NO_ACCESSIBLE_CONTENT' ? 'Không có nội dung được phép truy xuất trong phạm vi hiện tại.' :
-                            result.message === 'QUERY_NO_KEYWORDS' ? 'Truy vấn không có từ khóa phù hợp.' : 'Không tìm thấy học liệu phù hợp.'}</p>
+                                result.message === 'NO_ACCESSIBLE_CONTENT' ? 'Không có nội dung được phép truy xuất trong phạm vi hiện tại.' :
+                                    result.message === 'QUERY_NO_KEYWORDS' ? 'Truy vấn không có từ khóa phù hợp.' : 'Không tìm thấy học liệu phù hợp.'}</p>
                     </div>}
                     {result.items.map((item, index) => <article key={item.resource_id} className={styles.searchResult}>
                         <div className={styles.resultTopline}><span className={styles.documentType}><FileText size={15} aria-hidden="true" /> Học liệu</span><span className={styles.source}>{item.provider_name || item.resource_type_code} · Phiên bản {item.version_number}</span></div>
@@ -100,8 +100,8 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                         {item.context_id && <SearchContext id={item.context_id} evidence={item.context_evidence} />}
                         {item.match_origin && <p className={styles.metadata}>
                             {item.match_origin === 'BOTH' && 'Khớp nội dung và thông tin học liệu · '}{item.matched_fields?.length
-                            ? item.matched_fields.map(field => ({ TITLE: 'Khớp tiêu đề', DESCRIPTION: 'Khớp mô tả', TAGS: 'Khớp thẻ/từ khóa', CONTENT: 'Khớp nội dung' }[field] || field)).join(' · ')
-                            : 'Khớp thông tin học liệu'}</p>}
+                                ? item.matched_fields.map(field => ({ TITLE: 'Khớp tiêu đề', DESCRIPTION: 'Khớp mô tả', TAGS: 'Khớp thẻ/từ khóa', CONTENT: 'Khớp nội dung' }[field] || field)).join(' · ')
+                                : 'Khớp thông tin học liệu'}</p>}
                         {!!item.meaning_variants?.length && <details className={styles.more}><summary>Các cách diễn đạt trong nhóm nghĩa khớp</summary>
                             <ul>{item.meaning_variants.map(value => <li key={value}>{value}</li>)}</ul></details>}
                         {item.context_evidence === 'bag' && <p className={styles.metadata}>Kết quả khớp ở cấp học liệu; đoạn trích là đoạn tham khảo, chưa xác định được đoạn khớp trực tiếp.</p>}
