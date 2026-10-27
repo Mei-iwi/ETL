@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 from data_sync_etl.domain.core import DomainError, SourceFileError, job_terminal, new_id, now
 from data_sync_etl.domain.file_integrity import stream_hash
-from data_sync_etl.domain.format_validation import FormatValidatorRegistry, ProcessingFormatError
+from data_sync_etl.domain.format_validation import (
+    PUBLIC_PROCESSING_ERROR_CODES,
+    FormatValidatorRegistry,
+    ProcessingFormatError,
+)
 from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.logging import event
 from data_sync_etl.ports.processing import (
@@ -29,11 +33,15 @@ class OCRPipeline:
         heartbeat_timeout=120,
         documents: DocumentExtractorPort | None = None,
         formats=None,
+        media=None,
+        default_target_language='vi',
     ):
         self.uow, self.storage, self.pdf, self.engine = uow, storage, pdf, engine
         self.max_retries, self.heartbeat_timeout = max_retries, heartbeat_timeout
         self.formats = formats or FormatValidatorRegistry()
         self.native_documents = documents
+        self.media = media
+        self.default_target_language = default_target_language
 
     def create_job(self, version_id, triggered_by=None):
         reference = self.resolver.resolve(version_id)
@@ -55,8 +63,6 @@ class OCRPipeline:
             resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
             if resource is None or not resource['is_active'] or resource_deleted(resource):
                 raise DomainError('Resource inactive or deleted')
-            if version["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
-                raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
             # Reuse any existing run, including terminal jobs: repeated commands are idempotent.
             existing = repo.find(
                 "ocr_jobs",
@@ -100,6 +106,8 @@ class OCRPipeline:
                     failed_pages=0,
                 ),
             )
+            repo.update('resource_versions', version_id, {'processing_options': {
+                **(version.get('processing_options') or {}), 'translation_pending': True}})
             for page in range(1, total + 1):
                 repo.insert(
                     "ocr_page_tasks",
@@ -159,8 +167,6 @@ class OCRPipeline:
         with self.uow() as repo:
             job = repo.get("ocr_jobs", task["job_id"])
             version = repo.get("resource_versions", job["resource_version_id"])
-        if version['storage_object_key'].lower().endswith(('.mp3', '.mp4')):
-            raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
         reference = self.resolver.resolve(version['id'])
         with self.resolver.temporary_path(reference) as path:
             # Source images share the verified attempt directory, avoiding a second slot.
@@ -169,7 +175,9 @@ class OCRPipeline:
                 result, image = self._recognize_path(task, version, path, directory)
             if reference.ownership == 'SOURCE_BACKED':
                 image = None  # source scratch is never retained in task metadata
-        return result, image
+        from data_sync_etl.application.bilingual import paired_result
+        options = {'target_language': self.default_target_language, **(version.get('processing_options') or {})}
+        return paired_result(result, version['id'], task['page_num'], options), image
 
     def _recognize_path(self, task, version, path, source_directory=None):
         engine = self.engine
@@ -179,7 +187,15 @@ class OCRPipeline:
                 recognize=partial(engine.recognize_scoped, directory=source_directory),
             )
         if path.suffix.lower() in ('.mp3', '.mp4'):
-            raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
+            if self.media is None:
+                raise ProcessingFormatError('MEDIA_RUNTIME_UNAVAILABLE')
+            with path.open('rb') as stream:
+                if stream_hash(stream) != version['source_hash']:
+                    raise ProcessingFormatError('SOURCE_HASH_MISMATCH')
+            from data_sync_etl.application.media_capacity import media_capacity
+            settings = self.media.settings
+            with media_capacity(self.uow, settings.media_max_concurrency, settings.media_timeout_seconds):
+                return self.media.extract(path, version.get('processing_options') or {}), None
         if path.suffix.lower() in ('.docx', '.xlsx', '.pptx'):
             with path.open('rb') as stream:
                 observed_hash = stream_hash(stream)
@@ -310,9 +326,10 @@ class OCRPipeline:
                                'INVALID_IMAGE', 'INVALID_OPENXML_CONTAINER', 'OPENXML_LIMIT_EXCEEDED'}
             permanent_codes.add('UNSUPPORTED_PROCESSING_FORMAT')
             permanent_codes.add('SOURCE_HASH_MISMATCH')
+            permanent_codes.update({'INVALID_MEDIA', 'MEDIA_DURATION_EXCEEDED', 'MEDIA_SIZE_EXCEEDED', 'INVALID_MEDIA_TRACK'})
             if isinstance(error, SourceFileError):
                 self._fail(repo, task, error.code, permanent=not error.transient)
-            elif code in permanent_codes or code == 'BLOCKED_OCR_RUNTIME':
+            elif code in permanent_codes or code in PUBLIC_PROCESSING_ERROR_CODES:
                 self._fail(repo, task, code, permanent=code in permanent_codes)
             else:
                 self._fail(repo, task, "OCR attempt failed; verify document and OCR engine configuration")
@@ -325,6 +342,11 @@ class OCRPipeline:
         completed += job["completed_pages"]
         failed += job["failed_pages"]
         status = job_terminal(completed, failed, job["total_pages"])
+        if status == 'FAILED':
+            version = repo.get('resource_versions', job['resource_version_id'])
+            repo.update('resource_versions', version['id'], {'processing_options': {
+                **(version.get('processing_options') or {}), 'translation_pending': False,
+                'translation_state': 'extraction_failed'}})
         repo.update(
             "ocr_jobs",
             job_id,

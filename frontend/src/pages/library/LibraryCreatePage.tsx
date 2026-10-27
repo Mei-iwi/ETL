@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from "react"
+import { ProcessingPreferences } from '../../components/ProcessingPreferences'
+import { defaultProcessingPreferences, getMediaFileType, saveProcessingPreferences } from '../../services/processingPreferences'
 import { useNavigate } from "react-router"
 import {
     getGradeLevels,
@@ -23,7 +25,7 @@ type SubmitStage = "idle" | "creating" | "processing"
 
 const ALLOWED_EXTENSIONS = [
     ".pdf", ".docx", ".xlsx", ".txt", ".csv",
-    ".png", ".jpg", ".jpeg", ".pptx",
+    ".png", ".jpg", ".jpeg", ".pptx", ".mp3", ".mp4",
 ]
 
 function formatFileSize(size: number): string {
@@ -33,6 +35,7 @@ function formatFileSize(size: number): string {
 }
 
 export function LibraryCreatePage() {
+    const [processingPreferences, setProcessingPreferences] = useState(defaultProcessingPreferences)
     const navigate = useNavigate()
     const submittingRef = useRef(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
@@ -57,6 +60,7 @@ export function LibraryCreatePage() {
     const [catalogRequest, setCatalogRequest] = useState(0)
 
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
+    const selectedMediaType = getMediaFileType(selectedFile?.name)
     const [isDragging, setIsDragging] = useState(false)
 
     const selectedProvider = providers.find(
@@ -167,20 +171,13 @@ export function LibraryCreatePage() {
 
         if (!valid) {
             setError(
-                "Định dạng tệp không được hỗ trợ. Hãy chọn PDF, DOCX, XLSX, TXT, CSV, PNG, JPG hoặc PPTX.",
+                "Định dạng tệp không được hỗ trợ. Hãy chọn PDF, DOCX, XLSX, TXT, CSV, PNG, JPG, PPTX, MP3 hoặc MP4.",
             )
             return
         }
 
-        // Đồng bộ file được chọn vào input để FormData gửi đúng tệp.
-        const input = fileInputRef.current
-        if (input) {
-            const transfer = new DataTransfer()
-            transfer.items.add(file)
-            input.files = transfer.files
-        }
-
         setSelectedFile(file)
+        setProcessingPreferences(defaultProcessingPreferences)
         setError("")
     }
 
@@ -224,7 +221,7 @@ export function LibraryCreatePage() {
             return
         }
 
-        if (!fileInputRef.current?.files?.length) {
+        if (!selectedFile) {
             setError("Vui lòng chọn tệp học liệu trước khi tiếp tục.")
             return
         }
@@ -234,6 +231,9 @@ export function LibraryCreatePage() {
         setError("")
 
         const formData = new FormData(event.currentTarget)
+        // The picker unmounts while the selected-file card is visible.
+        // State retains the File for both picker and drag/drop selection.
+        formData.set("file", selectedFile, selectedFile.name)
 
         try {
             const response = await fetch("/api/v1/resources", {
@@ -262,6 +262,7 @@ export function LibraryCreatePage() {
             setSubmitStage("processing")
 
             try {
+                await saveProcessingPreferences(versionId, selectedMediaType ? processingPreferences : defaultProcessingPreferences)
                 const result = await startProcessing(versionId)
 
                 if (!result.job_id) {
@@ -445,7 +446,7 @@ export function LibraryCreatePage() {
                                 </span>
 
                                 <span className={styles.fileTypes}>
-                                    PDF · DOCX · XLSX · TXT · CSV · PNG · JPG · PPTX
+                                    PDF · DOCX · XLSX · TXT · CSV · PNG · JPG · PPTX · MP3 · MP4
                                 </span>
 
                                 <input
@@ -454,7 +455,7 @@ export function LibraryCreatePage() {
                                     id="file"
                                     type="file"
                                     name="file"
-                                    accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx"
+                                    accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx,.mp3,.mp4"
                                     onChange={handleFileInputChange}
                                     required
                                 />
@@ -602,6 +603,14 @@ export function LibraryCreatePage() {
                         <p>{error}</p>
                     </div>
                 )}
+
+                {selectedMediaType && <ProcessingPreferences
+                    value={processingPreferences}
+                    onChange={setProcessingPreferences}
+                    disabled={isSubmitting}
+                    mediaType={selectedMediaType}
+                    variant="card"
+                />}
 
                 <footer className={styles.formFooter}>
                     <button

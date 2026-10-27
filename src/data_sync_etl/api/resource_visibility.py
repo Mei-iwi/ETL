@@ -17,7 +17,10 @@ class ResourceVisibilityBoundary:
             return await self.app(scope, receive, send)
         path = scope['path']
         resource_match = re.fullmatch(r'/api/v1/resources/([^/]+)(?:/(versions(?:/ingest)?|metadata|description))?', path)
-        version_match = re.fullmatch(r'/api/v1/resource-versions/([^/]+)/[^/]+', path)
+        version_match = re.fullmatch(
+            r'/api/v1/resource-versions/([^/]+)/(?:[^/]+|translations/retry|exports/(?:json|txt|srt|vtt)|segments/[^/]+/frame)',
+            path,
+        )
         job_match = re.fullmatch(r'/api/v1/processing-jobs/([^/]+)(?:/[^/]+)?', path)
         global_read = ((path == '/api/v1/search' and scope['method'] == 'POST')
                        or (path == '/api/v1/resources' and scope['method'] == 'GET'))

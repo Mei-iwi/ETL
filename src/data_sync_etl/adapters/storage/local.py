@@ -72,6 +72,7 @@ class LocalFilesystemStorageAdapter:
         digest = hashlib.sha256()
         size = 0
         resource_root = self.root / "resources"
+        created_root = not resource_root.exists()
         resource_root.mkdir(parents=True, exist_ok=True)
         fd, temporary_name = tempfile.mkstemp(prefix=".upload-", dir=resource_root)
         temporary = Path(temporary_name)
@@ -110,6 +111,11 @@ class LocalFilesystemStorageAdapter:
             return StoredFile("resources", object_key, source_hash, created=True)
         finally:
             temporary.unlink(missing_ok=True)
+            if created_root:
+                try:
+                    resource_root.rmdir()  # Only empty failed staging; never removes stored files.
+                except OSError:
+                    pass
 
     def delete(self, bucket: str, object_key: str) -> None:
         self._resolve(bucket, object_key).unlink(missing_ok=True)

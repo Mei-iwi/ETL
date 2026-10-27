@@ -87,6 +87,34 @@ def test_blob_disk_stream_closed_by_caller_and_no_secret_or_url_transport():
     assert all(call[0] in (API + 'blob', API + 'root') for call in http.calls)
 
 
+def test_explicit_filename_alias_is_bound_to_file_id_and_source_name():
+    http = DriveHTTP(name='Sample.txt')
+    r = reader(http, source_drive_filename_aliases={'files/blob/sample.txt': 'Sample.txt'})
+    with r.open_stream('DRIVE', 'files/blob/sample.txt') as stream:
+        assert stream.read() == http.payload
+    assert r.revision('DRIVE', 'files/blob/sample.txt')[1] == 'Sample.txt'
+    for alias in ({'files/other/sample.txt': 'Sample.txt'}, {'files/blob/other.txt': 'Sample.txt'}):
+        with pytest.raises(SourceFileError, match='DRIVE_FILENAME_MISMATCH'):
+            reader(DriveHTTP(name='Sample.txt'), source_drive_filename_aliases=alias).open_stream(
+                'DRIVE', 'files/blob/sample.txt')
+
+
+@pytest.mark.parametrize('actual', ['Sample.pdf', '../Sample.txt', 'folder/Sample.txt'])
+def test_filename_alias_cannot_change_type_or_inject_path(actual):
+    with pytest.raises(SourceFileError):
+        reader(source_drive_filename_aliases={'files/blob/sample.txt': actual})
+
+
+def test_filename_alias_still_rejects_wrong_mime_and_outside_root():
+    for changes, code in [({'mimeType': 'application/pdf'}, 'DRIVE_MIME_MISMATCH'),
+                          ({'parents': []}, 'DRIVE_OUTSIDE_ROOT')]:
+        http = DriveHTTP(name='Sample.txt')
+        http.metadata['blob'].update(changes)
+        with pytest.raises(SourceFileError, match=code):
+            reader(http, source_drive_filename_aliases={'files/blob/sample.txt': 'Sample.txt'}).open_stream(
+                'DRIVE', 'files/blob/sample.txt')
+
+
 @pytest.mark.parametrize('key', [
     'blob', 'https://drive.google.com/file/d/blob/view', 'files/blob/../sample.txt',
     'files//sample.txt', 'files/blob/sample.txt:secret', 'files/blob/%2e%2e.pdf',

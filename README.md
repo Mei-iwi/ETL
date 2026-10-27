@@ -1,5 +1,7 @@
 # ETL — Kho học liệu số
 
+Mở rộng MP3/MP4, phụ đề, OCR video và nguyên ngữ/bản dịch: xem [cài đặt và API](MEDIA_PIPELINE.md), [kết quả kiểm thử và giới hạn](MEDIA_ACCEPTANCE.md).
+
 Đồng bộ SOURCE → MASTER, OCR/trích xuất nội dung và tìm kiếm BoW, BGE-M3 Vector, Hybrid. Tệp SOURCE được đọc trực tiếp từ nguồn; tệp LOCAL dùng storage riêng. Backend FastAPI, frontend React/TypeScript, PostgreSQL và MongoDB.
 
 Các lệnh Windows dùng **Git Bash tại gốc repo**, trừ khối ghi PowerShell. Linux dùng `npm` thay `npm.cmd` và thay `D:/etl/...` bằng đường dẫn tuyệt đối Linux. Không dùng dấu backtick PowerShell để xuống dòng trong Git Bash.
@@ -72,6 +74,179 @@ python deploy/runtime/model.py prepare \
   --dimension 1024 --accept-model-license
 ```
 
+### 1.3a. Cài môi trường MP3/MP4, Whisper và dịch cục bộ
+
+Thực hiện tại gốc repo, trong venv của mục 1.1. Máy đã có model/binary hợp lệ có thể bỏ qua bước tải. Cần FFmpeg **và ffprobe**, Tesseract `vie+eng` ở mục 1.2, Whisper đa ngôn ngữ và gói dịch đúng cặp ngôn ngữ. Model chỉ tải lúc cài đặt; API/worker không tự tải hoặc gửi tài liệu sang dịch vụ dịch bên ngoài.
+
+```bash
+python -m pip install -e ".[dev,embeddings,google-drive,media,translation]"
+python -m pip check
+```
+
+Extra `media` pin faster-whisper 1.2.1 và PyAV `<17`; không tự nâng PyAV riêng vì API giải mã bản mới không tương thích. Cấu hình đã kiểm thử dùng CPU/int8, 4 threads và 1 slot media, phù hợp máy RAM khoảng 16 GB. GPU là tùy chọn, cần môi trường CUDA tương thích riêng.
+
+**FFmpeg — PowerShell Windows:**
+
+```powershell
+winget install --id Gyan.FFmpeg --exact
+# Mở lại terminal sau khi cài để cập nhật PATH.
+ffmpeg -version
+ffprobe -version
+& 'C:\Program Files\Tesseract-OCR\tesseract.exe' --list-langs
+```
+
+**Ubuntu/Debian:**
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg tesseract-ocr tesseract-ocr-vie tesseract-ocr-eng
+ffmpeg -version
+ffprobe -version
+tesseract --list-langs
+```
+
+**Tải Whisper large-v3 đầy đủ, đa ngôn ngữ (CTranslate2)**. Checkpoint [Systran/faster-whisper-large-v3](https://huggingface.co/Systran/faster-whisper-large-v3) chuyển từ `openai/whisper-large-v3`, không phải turbo/distil/English-only. Dùng [faster-whisper 1.2.1](https://github.com/SYSTRAN/faster-whisper/tree/v1.2.1) hiện có; không cần nâng dependency hay cài CUDA. Large-v3 ưu tiên chất lượng và có thể chậm hơn small; GPU 4 GB không được mặc định là đủ.
+
+Chạy Git Bash hoặc PowerShell tại gốc repo bằng Python `.venv`. `huggingface_hub` đã là dependency của faster-whisper; chỉ cài nếu kiểm tra import báo thiếu. Tải cần Internet một lần, runtime chỉ dùng local. Bộ inference bên dưới khoảng **3,09 GB**; kiểm tra dung lượng trống trước khi tải. Base/small trên máy hiện tại đã được xóa theo yêu cầu; chỉ giữ thư mục large-v3.
+
+**Git Bash — tải model:**
+
+```bash
+cd /d/HK7/KLTN/ETL
+unset HF_HUB_OFFLINE
+export HF_HUB_DISABLE_XET=1
+./.venv/Scripts/python.exe -c "import huggingface_hub"
+# Chỉ khi import ở trên báo thiếu:
+# ./.venv/Scripts/python.exe -m pip install huggingface_hub
+./.venv/Scripts/python.exe -c "import shutil; print('Free bytes:', shutil.disk_usage('.').free)"
+./.venv/Scripts/python.exe - <<'PY'
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="Systran/faster-whisper-large-v3",
+    revision="edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    local_dir="Models/faster-whisper-large-v3",
+    allow_patterns=["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"],
+)
+PY
+```
+
+Sau khi lệnh tải kết thúc thành công, kiểm tra đủ tệp và checksum trong Git Bash:
+
+```bash
+./.venv/Scripts/python.exe - <<'PY'
+from pathlib import Path
+import hashlib
+
+p = Path("Models/faster-whisper-large-v3")
+for name in ["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"]:
+    assert (p / name).is_file() and (p / name).stat().st_size > 0, name
+with (p / "model.bin").open("rb") as f:
+    checksum = hashlib.file_digest(f, "sha256").hexdigest()
+assert checksum == "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1", checksum
+print("Checksum OK:", checksum)
+PY
+HF_HUB_OFFLINE=1 ./.venv/Scripts/python.exe scripts/evaluate_media_asr.py --model Models/faster-whisper-large-v3 --languages vi_vn fr_fr ja_jp --report .test-tmp/asr-large-v3.json
+```
+
+Lệnh evaluator cần các mẫu audio/reference local nêu bên dưới. Khi kiểm tra thành công, restart API/worker để nạp cấu hình model mới.
+
+**PowerShell — lệnh tương đương:**
+
+```powershell
+.\.venv\Scripts\python.exe -c "import huggingface_hub"
+# Chỉ khi import ở trên báo thiếu:
+# .\.venv\Scripts\python.exe -m pip install huggingface_hub
+.\.venv\Scripts\python.exe -c "import shutil; print('Free bytes:', shutil.disk_usage('.').free)"
+Remove-Item Env:HF_HUB_OFFLINE -ErrorAction SilentlyContinue
+$env:HF_HUB_DISABLE_XET="1"
+@'
+from huggingface_hub import snapshot_download
+snapshot_download(
+    repo_id="Systran/faster-whisper-large-v3",
+    revision="edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    local_dir="Models/faster-whisper-large-v3",
+    allow_patterns=["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"],
+)
+'@ | .\.venv\Scripts\python.exe -
+```
+
+Revision và danh sách tệp được xác minh từ Hugging Face ngày 26/10/2026. Chạy lại cùng lệnh để tận dụng tệp/cache đã tải và tiếp tục phần thiếu khi Hub hỗ trợ; không xóa cache trong lúc tải. Không lấy trọng số PyTorch. Model/cache được `.gitignore` loại trừ.
+
+Model large-v3 trên máy hiện tại đã tải đủ 3.087.284.237 byte weights, checksum đã khớp và evaluator offline CPU/int8 đã chạy thành công trên ba mẫu local. Kết quả và giới hạn nằm trong MEDIA_ACCEPTANCE; chưa kiểm chứng video 30 phút. Nếu đường Xet đứng khi cài máy khác, đặt `$env:HF_HUB_DISABLE_XET="1"` trong PowerShell rồi chạy lại lệnh tải; HTTP cũng có thể bị gián đoạn theo kết nối.
+
+**Kiểm tra sau tải:** có thư mục chưa có nghĩa model đã sẵn sàng. Kiểm tra đủ năm tệp, checksum rồi nạp CPU/int8 thật; lệnh cuối dùng mẫu speech local đã có, không truy cập DB:
+
+```powershell
+@'
+from pathlib import Path
+import hashlib
+p = Path("Models/faster-whisper-large-v3")
+for name in ["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"]:
+    assert (p / name).is_file() and (p / name).stat().st_size > 0, name
+with (p / "model.bin").open("rb") as f:
+    checksum = hashlib.file_digest(f, "sha256").hexdigest()
+assert checksum == "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1", checksum
+print("large-v3 edaa852ec7e145841d8ffdb056a99866b5f0a478", checksum)
+'@ | .\.venv\Scripts\python.exe -
+$env:HF_HUB_OFFLINE="1"
+.\.venv\Scripts\python.exe scripts/evaluate_media_asr.py --model Models/faster-whisper-large-v3 --languages vi_vn fr_fr ja_jp --report .test-tmp/asr-large-v3.json
+```
+
+Lệnh đánh giá cần audio/reference local theo [MEDIA_ACCEPTANCE.md](MEDIA_ACCEPTANCE.md); báo cáo gồm transcript, timestamp, WER/CER, thời gian cold start, thời gian nạp model và revision nếu có metadata tải. Evaluator dùng beam=3, cửa sổ VAD 15 giây, không điều kiện hóa trên văn bản trước. Muốn so sánh lại với small phải tải lại small trước; kết quả small trước khi xóa vẫn là bằng chứng lịch sử. Đây là kiểm tra mẫu ngắn, không thay thế pipeline video 30 phút. Runtime từ chối bộ model thiếu tokenizer để tránh tải ngầm và không tự fallback sang small. BGE-M3 và Argos không thay đổi.
+
+**Tải và giải nén gói Argos Anh → Việt 1.9** vào thư mục model riêng:
+
+```bash
+mkdir -p Models/argos .test-tmp/media-setup
+python -c "from pathlib import Path; from urllib.request import urlretrieve; from zipfile import ZipFile; p=Path('.test-tmp/media-setup/translate-en_vi-1_9.argosmodel'); urlretrieve('https://argos-net.com/v1/translate-en_vi-1_9.argosmodel',p); ZipFile(p).extractall('Models/argos')"
+```
+
+Kết quả phải có `Models/argos/translate-en_vi-1_9/metadata.json`, tokenizer và `model/model.bin`. `TRANSLATION_MODEL_ROOT` trỏ tới **thư mục cha `Models/argos`**, không trỏ vào một gói con. Cặp nguồn/đích khác cần gói tương ứng; chỉ gói Anh → Việt ở trên đã được kiểm chứng. Thiếu gói dịch không làm mất nguyên ngữ.
+
+**Thêm một lần vào `.env`**, đổi đường dẫn nếu đặt model ở nơi khác:
+
+```dotenv
+# Binary có trong PATH; cũng có thể dùng đường dẫn tuyệt đối tới từng .exe.
+FFMPEG_PATH=ffmpeg
+FFPROBE_PATH=ffprobe
+# Đường dẫn tương đối được tính từ gốc repo khi khởi động API/worker.
+WHISPER_MODEL_PATH=Models/faster-whisper-large-v3
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+TRANSLATION_PROVIDER=argos
+TRANSLATION_MODEL_ROOT=Models/argos
+TRANSLATION_TARGET_LANGUAGE=vi
+# false: SOURCE tự xếp hàng xử lý nội dung; true: giữ chế độ đăng ký metadata-only.
+SOURCE_METADATA_MEDIA_ENABLED=false
+```
+
+Giữ `OCR_ENGINE=tesseract`, `TESSERACT_PATH` và `TESSERACT_LANGUAGES=vie+eng` ở phần OCR đã có, **không khai báo lại các biến này ở cuối file**. Đường dẫn Windows có khoảng trắng nên đặt trong dấu nháy. Các đường dẫn `.test-tmp/media-tools/...` đã dùng để kiểm thử vẫn chạy nếu còn tệp, nhưng không nên dùng thư mục test làm nơi cài công cụ lâu dài.
+
+Giới hạn mặc định: 50 MiB, 30 phút/tệp, timeout media 900 giây, tối đa 120 khung/5.000 đoạn, dịch 60 giây/đoạn và 600 giây/tài liệu. Có thể đặt rõ các biến `MEDIA_*`, `ASR_WINDOW_SECONDS`, `TRANSLATION_*` theo `.env.example`; không bắt buộc thêm tất cả nếu dùng mặc định.
+
+**Schema và chạy:** sau khi tích hợp `main`, phần media dùng MASTER revision `0018`, nối tiếp `0017` xóa mềm. Với DB theo lịch sử `main`, kiểm tra đúng MASTER local/dev, sao lưu và dừng API/worker trước khi nâng; không chạy lệnh nâng trên SOURCE hoặc production:
+
+```bash
+python -m alembic current
+# Sau khi kiểm tra lịch sử migration và chuẩn bị như trên:
+python -m alembic upgrade 0018
+```
+
+DB từng áp dụng migration media cũ mang revision `0017` trước khi merge cần đối chiếu schema/lịch sử riêng: revision đó trùng số với migration xóa mềm trên `main`. Không chạy upgrade hoặc stamp mù trên DB này; giữ các cột/dữ liệu media đã có. Lượt merge chỉ kiểm thử migration trên DB cô lập, không sửa DB đang phục vụ.
+
+Đường dẫn tương đối tính từ thư mục làm việc của API/worker; nên chạy tại gốc repo. Máy hiện tại dùng `WHISPER_MODEL_PATH=D:/HK7/KLTN/ETL/Models/faster-whisper-large-v3`. Bỏ cấu hình model nếu chưa cài: mặc định `None` trả lỗi ASR có kiểm soát, không tải mạng.
+
+Khởi động lại API và worker OCR theo mục 1.7 để nạp `.env` và model: Ctrl+C từng tiến trình, sau đó chạy lại trong hai terminal PowerShell tại gốc repo:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn data_sync_etl.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+# Terminal thứ hai:
+.\.venv\Scripts\python.exe -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1
+```
+
+Quay lại small: máy hiện tại đã xóa small nên cần tải/cài lại model này trước khi đổi `WHISPER_MODEL_PATH=Models/faster-whisper-small`, giữ CPU/int8 rồi restart hai tiến trình như trên; không xóa large-v3. Không cần migration cho việc đổi model. API, lựa chọn track/ngôn ngữ, xem nguyên ngữ/bản dịch và xuất kết quả: [MEDIA_PIPELINE.md](MEDIA_PIPELINE.md). Kết quả kiểm chứng và giới hạn: [MEDIA_ACCEPTANCE.md](MEDIA_ACCEPTANCE.md).
+
 ### 1.4. Sửa `.env`
 
 Giữ các giá trị còn lại từ `.env.example`; sửa URL, password và đường dẫn theo máy. Mẫu dùng DB local:
@@ -104,9 +279,11 @@ INDEX_AUTO_ENABLED=false
 
 Linux dùng `/usr/bin/tesseract`, `/usr/bin/libreoffice`. Password trong URL phải percent-encode ký tự đặc biệt. SOURCE runtime dùng tài khoản chỉ SELECT. Tệp nguồn local nằm ở `<SOURCE_FILE_STORAGE_ROOT>/<bucket>/<object_key>`; kho SOURCE, LOCAL và thư mục tạm tách riêng. [Nguồn Google Drive](deploy/DRIVE_SETUP.md) cần credentials/quyền riêng.
 
+Nếu tên trong tham chiếu SOURCE cũ khác tên thật trên Drive, ưu tiên sửa metadata ở hệ thống nguồn. Khi SOURCE chỉ đọc, có thể cấu hình `SOURCE_DRIVE_FILENAME_ALIASES` bằng JSON ánh xạ chính xác `files/<file_id>/<tên SOURCE>` sang tên thật đã kiểm chứng; mặc định `{}`. Ánh xạ chỉ áp dụng đúng file ID và tên nguồn đó, phải cùng phần mở rộng, không chứa đường dẫn. Vẫn kiểm tra thư mục Drive được phép, MIME, kích thước, revision và SHA-256 so với SOURCE; không bật cơ chế so tên gần đúng. Restart API, source-file worker và OCR worker sau khi đổi cấu hình. Không tự bỏ qua `SOURCE_VERSION_MUTATED`: với bản ghi chưa có phiên bản đích/job, chỉ phục hồi sau khi xác minh lại bytes/hash và lưu bản ghi trước sửa; phiên bản đã nhập phải giữ kiểm tra bất biến.
+
 ### 1.5. Chuẩn bị DB
 
-**DB có schema sẵn:** điền URL ở trên, không chạy migration. Nếu DB local đã tạo nhưng đang dừng:
+**DB có schema sẵn:** điền URL ở trên, không chạy lại nhóm khởi tạo DB rỗng bên dưới. Riêng việc bổ sung media cần kiểm tra/nâng MASTER theo mục 1.3a. Nếu DB local đã tạo nhưng đang dừng:
 
 ```bash
 docker compose up -d postgres source-postgres mongo

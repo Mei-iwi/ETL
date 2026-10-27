@@ -79,6 +79,8 @@ def protected(path, method):
         or path.startswith("/api/v1/processing-jobs/")
         or path.endswith(("/index-status", "/etl-status"))
         or path.endswith(("/chunks", "/content-units"))
+        or path.endswith(("/bilingual", "/processing-source", "/frame"))
+        or '/exports/' in path
     )
 
 

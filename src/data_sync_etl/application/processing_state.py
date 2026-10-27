@@ -6,6 +6,12 @@ def projection_fingerprint(job_id: str, postprocess: dict) -> str:
 
 
 def processing_state(repo, job: dict) -> str:
+    if job['status'] == 'COMPLETED':
+        tasks = repo.find('ocr_page_tasks', {'job_id': job['id']}, limit=1)
+        if tasks:
+            results = repo.find('ocr_page_results', {'page_task_id': tasks[0]['id']}, limit=1)
+            if results and (results[0]['result_metadata'] or {}).get('extraction_status') == 'no_extractable_content':
+                return 'NO_EXTRACTABLE_CONTENT'
     stages = repo.find(
         "etl_stage_runs",
         {"resource_version_id": job["resource_version_id"]},

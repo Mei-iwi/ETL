@@ -1,4 +1,6 @@
 import { CatalogNotice } from '../../components/CatalogNotice'
+import { ProcessingPreferences } from '../../components/ProcessingPreferences'
+import { defaultProcessingPreferences, getMediaFileType, saveProcessingPreferences } from '../../services/processingPreferences'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 
@@ -34,6 +36,9 @@ type ResourceDetailResponse = {
 type UpdateStage = 'idle' | 'metadata' | 'uploading' | 'processing'
 
 export function LibraryUpdateVersion() {
+    const [processingPreferences, setProcessingPreferences] = useState(defaultProcessingPreferences)
+    const [replacementFileName, setReplacementFileName] = useState('')
+    const selectedMediaType = getMediaFileType(replacementFileName)
     const { resourceId } = useParams<{ resourceId: string }>()
     const navigate = useNavigate()
     const [title, setTitle] = useState('')
@@ -194,6 +199,7 @@ export function LibraryUpdateVersion() {
 
             setUpdateStage('processing')
             try {
+                await saveProcessingPreferences(version.resource_version_id, getMediaFileType(file.name) ? processingPreferences : defaultProcessingPreferences)
                 const processResult = await startProcessing(version.resource_version_id)
                 if (!processResult.job_id) throw new Error('Phản hồi xử lý thiếu mã job')
                 navigate(
@@ -356,10 +362,21 @@ export function LibraryUpdateVersion() {
                             id="file"
                             name="file"
                             type="file"
-                            accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx"
+                            accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx,.mp3,.mp4"
+                            onChange={event => {
+                                setReplacementFileName(event.currentTarget.files?.[0]?.name ?? '')
+                                setProcessingPreferences(defaultProcessingPreferences)
+                            }}
                             disabled={formDisabled}
                         />
                     </div>
+
+                    {selectedMediaType && <ProcessingPreferences
+                        value={processingPreferences}
+                        onChange={setProcessingPreferences}
+                        disabled={formDisabled}
+                        mediaType={selectedMediaType}
+                    />}
 
                     {error && <p className={styles.alert} role="alert">{error}</p>}
                     {versionError && <p className={styles.alert} role="alert">{versionError}</p>}

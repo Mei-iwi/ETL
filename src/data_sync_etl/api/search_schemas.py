@@ -54,6 +54,7 @@ class SearchRequest(StrictDTO):
 
 
 class SearchItem(StrictDTO):
+    source_locator: dict | None = None
     resource_id: str
     resource_title: str
     resource_version_id: str
@@ -96,7 +97,7 @@ class SearchItem(StrictDTO):
     @model_serializer(mode='wrap')
     def omit_unused_provenance(self, handler):
         result = handler(self)
-        for key in ('match_origin', 'matched_fields', 'evidence_kind', 'evidence_text', 'resource_format'):
+        for key in ('match_origin', 'matched_fields', 'evidence_kind', 'evidence_text', 'resource_format', 'source_locator'):
             if getattr(self, key) is None:
                 result.pop(key, None)
         return result
@@ -134,6 +135,7 @@ class SearchResponse(StrictDTO):
 
 
 class ContextChunk(StrictDTO):
+    source_locator: dict | None = None
     id: str
     content_unit_id: str
     unit_chunk_sequence: int
@@ -143,6 +145,13 @@ class ContextChunk(StrictDTO):
     page_to: int | None
     text: str
     selected: bool
+
+    @model_serializer(mode='wrap')
+    def omit_empty_locator(self, handler):
+        result = handler(self)
+        if self.source_locator is None:
+            result.pop('source_locator', None)
+        return result
 
 
 class Heading(StrictDTO):
