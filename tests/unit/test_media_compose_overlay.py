@@ -7,6 +7,19 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
+class UniqueMappingLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        keys = [key.value for key, _ in node.value if key.tag != 'tag:yaml.org,2002:merge']
+        if len(keys) != len(set(keys)):
+            raise ValueError('Duplicate Compose mapping key')
+        return super().construct_mapping(node, deep=deep)
+
+
+def test_compose_files_have_no_duplicate_mapping_keys():
+    for name in ('app', 'media', 'drive', 'auth', 'source-neon'):
+        yaml.load((ROOT / f'deploy/compose.{name}.yml').read_text(), Loader=UniqueMappingLoader)
+
+
 @pytest.mark.parametrize('service', ['api', 'source-file-worker', 'ocr-worker'])
 def test_media_runtime_is_explicit_offline_and_read_only(service):
     overlay = yaml.safe_load((ROOT / 'deploy/compose.media.yml').read_text())
