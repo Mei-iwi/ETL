@@ -490,7 +490,7 @@ class SearchService:
         policy = self.settings.search_expansion.model_copy(deep=True)
         expansion = self.dictionary.expand(query, domain=filters.get('domain'), policy=policy)
         variant = (approved_accent_variant(query, self.dictionary, policy=policy, domain=filters.get('domain'))
-                   if self.settings.search_approved_accent_variants_enabled else None)
+                   if method != 'vector' and self.settings.search_approved_accent_variants_enabled else None)
         variant_expansion = self.dictionary.expand(variant, domain=filters.get('domain'), policy=policy) if variant else None
         variant_keywords = query_terms(variant) if variant else []
         extra_vectors = []
@@ -508,15 +508,9 @@ class SearchService:
                 self.semantic.embedding.require_search_ready()
                 with self._inference():
                     vector = self.semantic.query(query)
-                    if variant is not None:
-                        self._deadline(started)
-                        extra_vectors.append(self.semantic.query(variant))
                 self._deadline(started)
             else:
                 vector, started = self._query_vector(query, _query_context, started)
-                if variant is not None:
-                    extra, started = self._query_vector(variant, _query_context, started)
-                    extra_vectors.append(extra)
         with self.indexing.uow() as repo:
             metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
         if len(metadata) > self.settings.search_max_bags:

@@ -26,6 +26,7 @@ class AccentAliases:
         for terms in self.dictionary.aliases.values():
             for term in terms:
                 if (term.language == 'vi' and term.kind != 'abbreviation'
+                        and fold(term.normalized) != term.normalized
                         and len(term.normalized.split()) >= 2
                         and all(WORDS.fullmatch(w) for w in term.normalized.split())):
                     result.setdefault(fold(term.normalized), []).append(term)
