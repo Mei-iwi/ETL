@@ -95,8 +95,7 @@ class SourceFileImportService:
             return len(page["items"])
 
     def _discover(self, repo, source):
-        unsupported_media = (source["storage_object_key"].lower().endswith(('.mp3', '.mp4'))
-                             and not self.settings.source_metadata_media_enabled)
+        unsupported_media = False  # MP3/MP4 now share the normal processing pipeline.
         existing = repo.find("source_file_imports", {
             "source_system": "postgresql", "source_version_id": source["source_version_id"]}, limit=1)
         if existing:
@@ -187,8 +186,6 @@ class SourceFileImportService:
             self.resolver._enabled()
             self.resolver.files = self.files
             media = claimed['storage_object_key'].lower().endswith(('.mp3', '.mp4'))
-            if media and not self.settings.source_metadata_media_enabled:
-                raise SourceFileError("UNSUPPORTED_SOURCE_FORMAT")
             if claimed["attempts"] > self.settings.source_file_import_max_attempts:
                 raise SourceFileError("WORKER_RECOVERY_EXHAUSTED", transient=True)
             with self.uow() as repo:
@@ -207,7 +204,7 @@ class SourceFileImportService:
                 self._master(repo, row["resource_id"])
                 if not self._source_allowed(row):
                     raise SourceFileError("BLOCKED_SOURCE_POLICY")
-                if media:
+                if media and self.settings.source_metadata_media_enabled:
                     # Registration verified bytes through the existing resolver.
                     # Terminal import state is independent of content readiness.
                     repo.update('source_file_imports', row['id'], {
@@ -443,7 +440,8 @@ class SourceFileImportService:
         resource = repo.get('master_learning_resources', row['resource_id'])
         if resource is None or not resource['is_active'] or resource_deleted(resource):
             return False
-        if row["storage_object_key"].lower().endswith(('.mp3', '.mp4')):
+        if (row["storage_object_key"].lower().endswith(('.mp3', '.mp4'))
+                and self.settings.source_metadata_media_enabled):
             return False
         if row["last_error_code"] in {"SOURCE_VERSION_MUTATED", "BLOCKED_SOURCE_MAPPING", "UNSUPPORTED_SOURCE_FORMAT"}:
             return False

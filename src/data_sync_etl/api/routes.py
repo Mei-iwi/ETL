@@ -1104,3 +1104,98 @@ def list_public_content_units(
         )
     except DomainError:
         raise HTTPException(status_code=404, detail="Resource version not found") from None
+
+
+class ProcessingOptions(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    source_language: str | None = Field(default=None, pattern=r'^[a-z]{2,3}$')
+    target_language: str = Field(default='vi', pattern=r'^[a-z]{2,3}$')
+    audio_track: int | None = Field(default=None, ge=0, le=63)
+    subtitle_track: int | None = Field(default=None, ge=0, le=63)
+    ocr_enabled: bool = True
+    ocr_languages: str | None = Field(default=None, max_length=100, pattern=r'^[a-z]{3}(\+[a-z]{3})*$')
+    visual_enabled: bool = False
+
+
+def bilingual_access(request, version_id):
+    container = services(request)
+    principal = getattr(request.state, 'auth_principal', None)
+    if principal is not None and principal.role != 'ADMIN':
+        try:
+            container.search.authorize_content_version(version_id, access=search_access(request))
+        except Exception as exc:
+            raise search_error(exc) from None
+    with container.uow() as repo:
+        version = repo.get('resource_versions', version_id)
+        resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+    if not resource or not resource['is_active'] or resource.get('deleted_at'):
+        raise HTTPException(404, 'Resource version not found')
+    return container
+
+
+@router.put('/api/v1/resource-versions/{id}/processing-options', tags=[TAG_PROCESSING])
+def configure_processing(id: ResourceId, body: ProcessingOptions, request: Request):
+    container = services(request)
+    try:
+        return container.bilingual.configure(id, body.model_dump(exclude_unset=True))
+    except DomainError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@router.post('/api/v1/resource-versions/{id}/translations/retry', tags=[TAG_PROCESSING], status_code=202)
+def retry_translation(id: ResourceId, body: ProcessingOptions, request: Request):
+    container = services(request)
+    try:
+        return container.bilingual.configure(id, body.model_dump(exclude_unset=True), retry_translation=True)
+    except DomainError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@router.get('/api/v1/resource-versions/{id}/bilingual', tags=[TAG_PROCESSING])
+def bilingual_content(id: ResourceId, request: Request):
+    return bilingual_access(request, id).bilingual.view(id)
+
+
+@router.get('/api/v1/resource-versions/{id}/exports/{format}', tags=[TAG_PROCESSING])
+def bilingual_export(id: ResourceId, format: Literal['json', 'txt', 'srt', 'vtt'], request: Request,
+                     translated: bool = False):
+    from data_sync_etl.application.bilingual import export_segments
+    container = bilingual_access(request, id)
+    view = container.bilingual.view(id)
+    headers = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
+               'Content-Disposition': f'attachment; filename="{id}-{"translated" if translated else "original"}.{format}"'}
+    if format == 'json':
+        return JSONResponse(view, headers=headers)
+    try:
+        content = export_segments(view, format, translated)
+    except DomainError:
+        raise HTTPException(404, 'EXPORT_NOT_AVAILABLE') from None
+    return PlainTextResponse(content, headers=headers,
+                             media_type='text/vtt' if format == 'vtt' else 'text/plain')
+
+
+@router.get('/api/v1/resource-versions/{id}/processing-source', tags=[TAG_PROCESSING])
+def bilingual_source(id: ResourceId, request: Request):
+    container = bilingual_access(request, id)
+    try:
+        reference = container.source_resolver.resolve(id)
+    except SourceFileError as exc:
+        return source_file_error(exc)
+    return SourceFileResponse(container.source_resolver, reference,
+                              lambda: bilingual_access(request, id), download=False)
+
+
+@router.get('/api/v1/resource-versions/{id}/segments/{segment_id}/frame', tags=[TAG_PROCESSING])
+def bilingual_frame(id: ResourceId, segment_id: str, request: Request):
+    container = bilingual_access(request, id)
+    with container.uow() as repo:
+        jobs = repo.find('ocr_jobs', {'resource_version_id': id}, order=('-created_at', '-id'), limit=1)
+        for job in jobs:
+            for task in repo.find('ocr_page_tasks', {'job_id': job['id']}):
+                for result in repo.find('ocr_page_results', {'page_task_id': task['id']}):
+                    for segment in (result['result_metadata'] or {}).get('paired_segments', []):
+                        if segment['segment_id'] == segment_id and segment.get('frame'):
+                            frame = segment['frame']
+                            return FileResponse(container.storage.get_local_path(frame['bucket'], frame['object_key']),
+                                                media_type='image/png', headers={'Cache-Control': 'private, no-store'})
+    raise HTTPException(404, 'Frame not found')

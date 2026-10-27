@@ -41,7 +41,10 @@ class ProcessingFinalizer:
                 or job["completed_pages"] != job["total_pages"]
             ):
                 return None
-            if processing_state(repo, job) == "CONTENT_READY":
+            state = processing_state(repo, job)
+            if state == 'NO_EXTRACTABLE_CONTENT':
+                return {'status': state}
+            if state == "CONTENT_READY":
                 return {"status": "ALREADY_COMPLETED"}
             attempts = repo.find(
                 "etl_stage_runs",

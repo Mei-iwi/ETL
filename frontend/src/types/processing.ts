@@ -12,6 +12,7 @@ export type ProcessingStatus =
     | 'FINALIZING'
     | 'FINALIZATION_FAILED'
     | 'CONTENT_READY'
+    | 'NO_EXTRACTABLE_CONTENT'
 
 export type ProcessResult = {
     resource_version_id: string

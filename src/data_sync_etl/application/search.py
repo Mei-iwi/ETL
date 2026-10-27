@@ -286,7 +286,7 @@ class SearchService:
         if current.keys() != previous.keys():
             return True
         fields = ('parent_unit_id', 'unit_type', 'title', 'sequence_no', 'page_from', 'page_to',
-                  'review_status', 'retrieval_eligible', 'mongo_id')
+                  'review_status', 'retrieval_eligible', 'mongo_id', 'source_locator')
         if any(any(unit[key] != previous[key_id][key] for key in fields)
                for key_id, unit in current.items()):
             return True
@@ -727,6 +727,7 @@ class SearchService:
                 self._deadline(started)
                 bag, chunk, *_ = by_bag[item['bag_id']]
                 version_id = bag.resource_version_id
+                snapshot = snapshots[version_id]
                 if use_semantic and self.settings.search_evidence_strategy != 'current' and method != 'bow':
                     selected = select_evidence(evidence_by_version.get(version_id, []), version_id=version_id,
                         strategy='dense' if self.settings.search_evidence_strategy == 'version_dense' else 'context',
@@ -754,6 +755,11 @@ class SearchService:
                 item['snippet'] = snippet_text(chunk['text'], set(variant_keywords if rendered_variant else keywords),
                     query=variant if rendered_variant else query,
                     anchor=chunk.get('anchor'), expansion=rendered_expansion, dictionary=self.dictionary, policy=policy)
+                locator = next((u.get('source_locator') for u in snapshot[2] if u['id'] == chunk['content_unit_id']), None)
+                if locator:
+                    item['source_locator'] = locator
+                else:
+                    item.pop('source_locator', None)
                 item['lexical_evidence'] = self._lexical_evidence(rendered_expansion, bag, snapshots[bag.resource_version_id], policy)
             return grouped, matches
         grouped, matches = ranked()
@@ -972,7 +978,8 @@ class SearchService:
                 chunks.append({'id': digest([version_id, unit_id, sequence, snapshot[3]])[:30],
                     'content_unit_id': unit_id, 'unit_chunk_sequence': sequence,
                     'char_start': start, 'char_end': end, 'page_from': unit['page_from'],
-                    'page_to': unit['page_to'], 'text': text, 'selected': sequence == ordinal})
+                    'page_to': unit['page_to'], 'text': text, 'selected': sequence == ordinal,
+                    **({'source_locator': unit['source_locator']} if unit.get('source_locator') else {})})
             if sequence > ordinal + neighbors:
                 break
         if not any(chunk['selected'] for chunk in chunks):

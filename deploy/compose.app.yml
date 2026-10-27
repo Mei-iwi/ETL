@@ -9,6 +9,7 @@ x-backend: &backend
     target: runtime
     args:
       INSTALL_SEMANTIC: ${INSTALL_SEMANTIC:-false}
+      INSTALL_MEDIA: ${INSTALL_MEDIA:-false}
   user: "10001:10001"
   init: false
   read_only: true

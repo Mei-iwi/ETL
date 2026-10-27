@@ -22,6 +22,9 @@ LEGACY_MEDIA_ERROR_CODES = {'MEDIA_NO_AUDIO', 'NO_SPEECH_CONTENT', 'MEDIA_DURATI
 # Only stable, sanitized codes may leave persisted worker task diagnostics.
 PUBLIC_PROCESSING_ERROR_CODES = LEGACY_MEDIA_ERROR_CODES | {
     'EMPTY_EXTRACTED_CONTENT', 'SOURCE_HASH_MISMATCH', 'BLOCKED_OCR_RUNTIME',
+    'MEDIA_RUNTIME_UNAVAILABLE', 'MEDIA_TIMEOUT', 'MEDIA_DECODE_FAILED', 'INVALID_MEDIA_TRACK',
+    'MODEL_RUNTIME_UNAVAILABLE', 'MEDIA_SIZE_EXCEEDED',
+    'MEDIA_CAPACITY_TIMEOUT', 'STT_MULTILINGUAL_MODEL_REQUIRED',
 }
 
 
@@ -239,7 +242,10 @@ class TextFormatValidator(_BaseFormatValidator):
 
 
 class FormatValidatorRegistry:
-    def __init__(self, *, media_registration=False):
+    def __init__(self, *, media_registration=False, media_processing=None,
+                 media_probe=None, media_max_size_bytes=50 * 1024 * 1024):
+        if media_processing is None:
+            media_processing = not media_registration
         validators = (
             PdfFormatValidator(), PngFormatValidator(), JpegFormatValidator(),
             OpenXMLFormatValidator('.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -253,12 +259,16 @@ class FormatValidatorRegistry:
         )
         self._validators = {validator.extension: validator for validator in validators}
         self._validators[".jpeg"] = self._validators[".jpg"]
-        if media_registration:
+        if media_registration or media_processing:
             from data_sync_etl.domain.media_registration import (
                 Mp3RegistrationValidator,
                 Mp4RegistrationValidator,
             )
             for validator in (Mp3RegistrationValidator(), Mp4RegistrationValidator()):
+                if media_processing:
+                    validator.text_extraction_supported = True
+                    validator.processing_probe = media_probe
+                    validator.max_size_bytes = media_max_size_bytes
                 self._validators[validator.extension] = validator
 
     def describe(self):
@@ -267,8 +277,8 @@ class FormatValidatorRegistry:
             'mime_types': sorted(validator.mime_types),
             'upload_accepted': True, 'text_extraction_supported': validator.text_extraction_supported,
             'ocr_requires_runtime': validator.ocr_requires_runtime,
-            'native_text_extraction': validator.text_extraction_supported and not validator.ocr_requires_runtime,
-            'native_text_extractioin': validator.text_extraction_supported and not validator.ocr_requires_runtime,
+            'native_text_extraction': validator.text_extraction_supported and not validator.ocr_requires_runtime and extension not in ('.mp3', '.mp4'),
+            'native_text_extractioin': validator.text_extraction_supported and not validator.ocr_requires_runtime and extension not in ('.mp3', '.mp4'),
             'max_size_bytes': validator.max_size_bytes,
         } for extension, validator in self._validators.items()]
 

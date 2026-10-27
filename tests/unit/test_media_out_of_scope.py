@@ -1,11 +1,14 @@
-"""Reject new media while preserving old versions, jobs and content."""
+"""Media scope regression: corrupt uploads rejected, legacy content preserved.
+
+The former blanket MP3/MP4 rejection is superseded by content validation.
+Real valid-media acceptance is covered in integration/test_media_local.py.
+"""
 
 import io
 from hashlib import sha256
 
 import pytest
 
-from data_sync_etl.application.source_file_import import SourceImportConflict
 from data_sync_etl.domain.core import now
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
 from data_sync_etl.main import create_app
@@ -38,11 +41,11 @@ def test_upload_and_new_version_reject_media_without_writes(container, extension
             'provider_id': 'provider-test', 'provider_name': 'Test provider',
         }, files={'file': ('sample' + extension, payload, mime)})
         assert response.status_code == 400, response.text
-        assert 'Unsupported file extension' in response.text
+        assert 'Unsupported file extension' not in response.text
         version = client.post('/api/v1/resource/resource-1/versions',
                               files={'file': ('sample' + extension, payload, mime)})
         assert version.status_code == 400, version.text
-        assert 'Unsupported file extension' in version.text
+        assert 'Unsupported file extension' not in version.text
     with container.uow() as repo:
         assert before == {table: repo.count(table, {}) for table in before}
     assert before_files == set(container.storage.root.rglob('*'))
@@ -50,7 +53,7 @@ def test_upload_and_new_version_reject_media_without_writes(container, extension
 
 @pytest.mark.parametrize('extension,payload,mime', MEDIA)
 @pytest.mark.parametrize('existing_job', [False, True])
-def test_old_version_start_retry_blocked_metadata_file_preserved(container, pdf_file, extension, payload, mime, existing_job):
+def test_corrupt_old_media_fails_safely_without_replacing_original(container, pdf_file, extension, payload, mime, existing_job):
     container.settings.admin_enabled = True
     container.sync.run(full=True)
     with TestClient(create_app(container), client=('127.0.0.1', 50000)) as client:
@@ -65,29 +68,30 @@ def test_old_version_start_retry_blocked_metadata_file_preserved(container, pdf_
                 'source_hash': stored.source_hash,
             })
             before = repo.get('resource_versions', version_id)
-        assert client.post(f'/api/v1/resource-versions/{version_id}/process').status_code == 400
-        if job_id:
-            status = client.get(f'/api/v1/processing-jobs/{job_id}')
-            assert status.status_code == 200
-            assert status.json()['error_code'] == 'UNSUPPORTED_PROCESSING_FORMAT'
-            assert client.post(f'/api/v1/processing-jobs/{job_id}/retry').status_code == 409
-            for _ in range(status.json()['total_pages']):
-                assert container.worker.once('old-media')
-            with container.uow() as repo:
-                task = repo.find('ocr_page_tasks', {'job_id': job_id})[0]
-                assert task['status'] == 'FAILED' and task['retry_count'] == 1
-                assert task['error_message'] == 'UNSUPPORTED_PROCESSING_FORMAT'
-                assert repo.count('ocr_page_results', {}) == 0
-                assert all(t['status'] == 'FAILED' and t['retry_count'] == 1
-                           for t in repo.find('ocr_page_tasks', {'job_id': job_id}))
-            # Reconciliation may do bookkeeping; no OCR task is queued again.
-            assert container.ocr.claim('old-media') is None
+        started = client.post(f'/api/v1/resource-versions/{version_id}/process')
+        assert started.status_code == 202
+        job_id = started.json()['job_id']
+        assert client.post(f'/api/v1/processing-jobs/{job_id}/retry').status_code == 200
+        for _ in range(30):
+            if not container.worker.once('old-media'):
+                break
+        status = client.get(f'/api/v1/processing-jobs/{job_id}')
+        assert status.status_code == 200 and status.json()['status'] == 'COMPLETED_WITH_ERRORS'
+        assert status.json()['completed_pages'] == 0
+        assert status.json()['failed_pages'] == status.json()['total_pages']
+        assert status.json()['error_code'] in ('MEDIA_RUNTIME_UNAVAILABLE', 'INVALID_MEDIA')
+        with container.uow() as repo:
+            assert repo.count('ocr_page_results', {}) == 0
+            assert all(t['status'] == 'FAILED' and 1 <= t['retry_count'] <= container.ocr.max_retries
+                       for t in repo.find('ocr_page_tasks', {'job_id': job_id}))
+        assert container.ocr.claim('old-media') is None
         versions = client.get('/api/v1/resources/resource-1/versions')
         assert versions.status_code == 200
         assert any(item['id'] == version_id for item in versions.json())
     with container.uow() as repo:
-        assert repo.get('resource_versions', version_id) == before
-        assert repo.count('ocr_jobs', {}) == int(existing_job)
+        current = repo.get('resource_versions', version_id)
+        assert all(current[key] == before[key] for key in ('source_hash', 'storage_bucket', 'storage_object_key'))
+        assert repo.count('ocr_jobs', {}) == 1
         assert repo.count('etl_stage_runs', {'stage': 'OCR_RETRY'}) == 0
     with container.storage.open_stream(stored.bucket, stored.object_key) as stream:
         assert stream.read() == payload
@@ -112,15 +116,15 @@ def test_completed_old_media_content_stays_readable(container, pdf_file, extensi
             repo.update('resource_versions', version_id, {
                 'storage_bucket': stored.bucket, 'storage_object_key': stored.object_key,
             })
-        assert client.post(f'/api/v1/processing-jobs/{job_id}/retry').status_code == 409
+        assert client.post(f'/api/v1/processing-jobs/{job_id}/retry').status_code == 200
         status = client.get(f'/api/v1/processing-jobs/{job_id}').json()
         assert status['processing_status'] == 'CONTENT_READY'
-        assert status['error_code'] == 'UNSUPPORTED_PROCESSING_FORMAT'
+        assert status['error_code'] is None
         assert client.get(f'/api/v1/resource-versions/{version_id}/content-units').json() == before
 
 
 @pytest.mark.parametrize('extension,payload,mime', MEDIA)
-def test_source_media_recorded_unsupported_never_queued_or_retried(container, monkeypatch, tmp_path, extension, payload, mime):
+def test_source_media_missing_file_is_not_misreported_as_unsupported(container, monkeypatch, tmp_path, extension, payload, mime):
     root = tmp_path / 'source'
     root.mkdir()
     container.source_files.root = root
@@ -131,22 +135,20 @@ def test_source_media_recorded_unsupported_never_queued_or_retried(container, mo
              'source_hash': sha256(payload).hexdigest(), 'storage_bucket': 'books',
              'storage_object_key': 'sample' + extension}]
     monkeypatch.setattr(container.source, 'version_page', lambda **_: {'items': rows, 'next_cursor': None}, raising=False)
-    assert not container.source_file_worker.once('excluded-media')
+    container.settings.source_reference_enabled = True
+    container.settings.source_temporary_files_enabled = True
+    container.settings.source_temp_root = tmp_path / 'scratch'
+    assert container.source_file_worker.once('excluded-media')
     item = container.source_file_import.list_files()['items'][0]
     assert item['import_status'] == 'FAILED'
-    assert item['last_error_code'] == 'UNSUPPORTED_SOURCE_FORMAT'
-    assert item['retry_count'] == 0 and not item['retry_eligible']
-    with pytest.raises(SourceImportConflict, match='cannot be retried'):
-        container.source_file_import.retry(item['import_job_id'])
-    assert container.source_file_import.retry_failed()['accepted_count'] == 0
-    assert not container.source_file_worker.once('excluded-media')
+    assert item['last_error_code'] != 'UNSUPPORTED_SOURCE_FORMAT'
     with container.uow() as repo:
         assert repo.count('ocr_jobs', {}) == repo.count('resource_versions', {}) == 0
         assert repo.get('source_file_imports', item['import_job_id'])['next_retry_at'] is None
 
 
 def test_capabilities_exact_supported_formats(container):
-    expected = {'.pdf', '.docx', '.xlsx', '.txt', '.csv', '.pptx', '.png', '.jpg', '.jpeg'}
+    expected = {'.pdf', '.docx', '.xlsx', '.txt', '.csv', '.pptx', '.png', '.jpg', '.jpeg', '.mp3', '.mp4'}
     assert {item['extension'] for item in FormatValidatorRegistry().describe()} == expected
     with TestClient(create_app(container)) as client:
         response = client.get('/api/v1/system/capabilities')

@@ -11,9 +11,11 @@ RUN pip install --upgrade pip && pip install 'torch==2.14.1+cpu' --index-url htt
 COPY pyproject.toml README.md ./
 COPY src ./src
 ARG INSTALL_SEMANTIC=false
+ARG INSTALL_MEDIA=false
 RUN if [ "$INSTALL_SEMANTIC" = "true" ]; then \
       pip install -c constraints.semantic.txt '.[embeddings,semantic,google-drive]'; \
     else pip install -c constraints.txt '.[embeddings,google-drive]'; fi && \
+    if [ "$INSTALL_MEDIA" = "true" ]; then pip install '.[media,translation]'; fi && \
     pip check && pip freeze > /opt/venv/dependencies.txt
 
 FROM ${PYTHON_IMAGE} AS runtime
@@ -25,7 +27,7 @@ ENV PATH=/opt/venv/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     TESSERACT_PATH=/usr/bin/tesseract TESSERACT_LANGUAGES=vie+eng OCR_ENGINE=tesseract \
     OFFICE_PDF_EXECUTABLE=/usr/bin/libreoffice OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates tini tesseract-ocr tesseract-ocr-eng tesseract-ocr-vie \
+      ca-certificates tini ffmpeg tesseract-ocr tesseract-ocr-eng tesseract-ocr-vie \
       libreoffice-writer libreoffice-impress fonts-dejavu-core fonts-liberation2 libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 etl && useradd --uid 10001 --gid 10001 --no-create-home etl \

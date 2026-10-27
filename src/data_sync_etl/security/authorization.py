@@ -46,7 +46,7 @@ def authorize(request, principal):
     if ((path == '/api/v1/search' and method == 'POST')
             or (path.startswith('/api/v1/chunks/') and path.endswith('/context') and method == 'GET')):
         return  # SearchAccess verifies explicit resource grants and eligibility.
-    version = re.fullmatch(r'/api/v1/resource-versions/([^/]+)/(file|source-info|chunks|content-units|index-status|etl-status|process|postprocess|index|reindex|ocr-jobs)', path)
+    version = re.fullmatch(r'/api/v1/resource-versions/([^/]+)/(file|source-info|chunks|content-units|index-status|etl-status|process|postprocess|index|reindex|ocr-jobs|processing-options|bilingual|processing-source|translations/retry|exports/(?:json|txt|srt|vtt)|segments/[^/]+/frame)', path)
     if version:
         if method != 'GET' and principal.role != 'OPERATOR':
             raise AuthError('AUTH_FORBIDDEN', 403)
@@ -87,7 +87,7 @@ def authorize(request, principal):
         capability = 'evaluation'
     elif path == '/api/v1/search/model-retry' or re.fullmatch(r'/api/v1/resource-versions/[^/]+/(index|reindex)', path):
         capability = 'index'
-    elif re.fullmatch(r'/api/v1/resource-versions/[^/]+/(process|postprocess|ocr-jobs)', path):
+    elif re.fullmatch(r'/api/v1/resource-versions/[^/]+/(process|postprocess|ocr-jobs|processing-options|translations/retry)', path):
         capability = 'process'
     if principal.role == 'OPERATOR' and capability in principal.permissions:
         return

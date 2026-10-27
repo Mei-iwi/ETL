@@ -5,6 +5,7 @@ from pymongo import MongoClient
 from data_sync_etl.adapters.bge_m3 import BgeM3Embedding
 from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
 from data_sync_etl.adapters.extraction import NativeDocumentExtractor
+from data_sync_etl.adapters.media import MediaExtractor, local_model_task, probe
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
 from data_sync_etl.adapters.mongo.foundation_store import (
     MongoBagStore,
@@ -30,6 +31,7 @@ from data_sync_etl.adapters.storage.source_google_drive import SourceGoogleDrive
 from data_sync_etl.adapters.storage.source_local import SourceLocalFileReader
 from data_sync_etl.adapters.storage.source_temporary import SourceTemporaryFiles
 from data_sync_etl.application.auto_sync import AutoSyncCoordinator
+from data_sync_etl.application.bilingual import BilingualService
 from data_sync_etl.application.capabilities import CapabilityService
 from data_sync_etl.application.create_resource import CreateResourceUseCase
 from data_sync_etl.application.create_resource_version import CreateResourceVersionUseCase
@@ -135,7 +137,10 @@ class Container:
         self.resource_versions = ListResourceVersions(self.uow)
         self.processing_job_detail = GetProcessingJob(self.uow)
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
-        self.format_registry = FormatValidatorRegistry()
+        self.format_registry = FormatValidatorRegistry(
+            media_probe=lambda path, extension: probe(path, self.settings, extension),
+            media_max_size_bytes=self.settings.media_max_size_bytes)
+        self.bilingual = BilingualService(self.uow, self.settings, local_model_task)
         self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry, self.resource_lookups)
         self.resource_version_create = CreateResourceVersionUseCase(
             self.uow, self.storage, self.format_registry
@@ -196,6 +201,8 @@ class Container:
             self.settings.ocr_heartbeat_timeout_seconds,
             documents=NativeDocumentExtractor(),
             formats=self.format_registry,
+            media=MediaExtractor(self.settings, self.storage, create_ocr_engine(self.settings)),
+            default_target_language=self.settings.translation_target_language,
         )
         self.postprocess = Postprocessor(self.uow)
         self.orchestrator = EtlOrchestrator(
@@ -347,7 +354,10 @@ class Container:
         self.source_file_import = SourceFileImportService(
             self.source, self.source_files, self.storage, self.uow,
             self.process_version, self.retry_processing_job, self.settings,
-            formats=FormatValidatorRegistry(media_registration=self.settings.source_metadata_media_enabled),
+            formats=FormatValidatorRegistry(media_registration=self.settings.source_metadata_media_enabled,
+                                             media_processing=not self.settings.source_metadata_media_enabled,
+                                             media_probe=lambda path, extension: probe(path, self.settings, extension),
+                                             media_max_size_bytes=self.settings.media_max_size_bytes),
         )
         self.source_resolver = SourceFileResolver(
             self.uow, self.source, self.source_files, self.storage, self.source_file_import.formats,
@@ -362,15 +372,23 @@ class Container:
         self.source_file_worker = SourceFileImportWorker(self.source_file_import)
         self.worker = OCRWorker(
             self.ocr,
-            on_job_terminal=self.processing_finalizer.finalize,
+            on_job_terminal=self.finalize_bilingual,
             reconcile=self.reconcile_processing,
             recovery_interval_seconds=self.settings.ocr_recovery_interval_seconds,
         )
         self._prefer_index_reconcile = False
 
     def reconcile_processing(self):
+        translated = self.bilingual.once()
         self._prefer_index_reconcile = not self._prefer_index_reconcile
         if self._prefer_index_reconcile:
-            return self.indexing.once() or self.processing_finalizer.reconcile_once()
-        return self.processing_finalizer.reconcile_once() or self.indexing.once()
+            return self.indexing.once() or self.processing_finalizer.reconcile_once() or translated
+        return self.processing_finalizer.reconcile_once() or self.indexing.once() or translated
+
+    def finalize_bilingual(self, job_id):
+        with self.uow() as repo:
+            job = repo.get('ocr_jobs', job_id)
+        if job and job['status'] in ('COMPLETED', 'COMPLETED_WITH_ERRORS'):
+            self.bilingual.translate_version(job['resource_version_id'])
+        return self.processing_finalizer.finalize(job_id)
 

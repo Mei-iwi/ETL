@@ -1,0 +1,55 @@
+.card {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 24px 28px;
+    border: 1px solid #e5eaf1;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 4px 12px rgb(15 23 42 / 5%);
+    color: #172033;
+}
+
+.panel { margin-block: 20px; }
+.preferences { min-width: 0; margin-bottom: 18px; }
+.heading { margin: 0 0 12px; color: #172033; font-size: 15px; line-height: 1.4; font-weight: 700; }
+.description, .hint { color: #64748b; font-size: 13px; line-height: 1.5; }
+.description { margin: 0 0 16px; }
+.fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.field { display: flex; flex-direction: column; min-width: 0; gap: 7px; color: #334155; font-size: 14px; font-weight: 600; }
+.hint { font-weight: 400; }
+.field input, .field select {
+    box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: 10px 14px;
+    color: #172033; background: #fff; border: 1px solid #cbd5e1; border-radius: 9px;
+    font: inherit; font-size: 14.5px; font-weight: 400; outline: none;
+}
+.field input:focus, .field select:focus { border-color: #1e3a8a; box-shadow: 0 0 0 3px rgb(30 58 138 / 10%); }
+.field input:disabled, .fields:disabled input { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
+.checkbox { display: flex; align-items: center; gap: 10px; margin-top: 18px; color: #334155; font-size: 14px; }
+.checkbox input { width: 17px; height: 17px; accent-color: #1e3a8a; }
+.advanced { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e5eaf1; }
+.advanced summary { color: #1e3a8a; font-size: 14px; font-weight: 600; cursor: pointer; }
+.advanced[open] summary { margin-bottom: 16px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-block: 16px; }
+.primaryButton, .secondaryButton, .timestamp {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 42px; padding: 10px 20px; border: 1px solid #cbd5e1; border-radius: 9px;
+    background: #fff; color: #334155; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.primaryButton { border-color: #1e3a8a; background: #1e3a8a; color: #fff; }
+.primaryButton:hover:not(:disabled) { background: #172554; }
+.primaryButton:disabled, .secondaryButton:disabled { opacity: .55; cursor: not-allowed; }
+.timestamp { min-height: 30px; padding: 4px 10px; color: #1e3a8a; }
+.player { display: block; max-width: 100%; max-height: 400px; margin-block: 16px; border-radius: 9px; }
+.segment { padding-block: 16px; border-top: 1px solid #e5eaf1; }
+.segmentMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #64748b; font-size: 13px; }
+.texts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.parallel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.panel a { color: #1e3a8a; }
+.alert { color: #b91c1c; }
+
+@media (max-width: 640px) {
+    .card { padding: 20px 16px; }
+    .grid, .parallel { grid-template-columns: minmax(0, 1fr); }
+}

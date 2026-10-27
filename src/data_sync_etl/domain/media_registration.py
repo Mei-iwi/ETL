@@ -13,6 +13,9 @@ class Mp3RegistrationValidator(_BaseFormatValidator):
         return header.startswith(b'ID3') or len(header) >= 2 and header[0] == 255 and header[1] & 224 == 224
 
     def validate_path(self, path):
+        if getattr(self, 'processing_probe', None) is not None:
+            self.processing_probe(path, self.extension)
+            return
         with path.open('rb') as stream:
             first = stream.read(10)
             offset = 0
@@ -55,6 +58,9 @@ class Mp4RegistrationValidator(_BaseFormatValidator):
             b'isom', b'iso2', b'iso4', b'iso5', b'iso6', b'mp41', b'mp42', b'avc1', b'M4V '}
 
     def validate_path(self, path):
+        if getattr(self, 'processing_probe', None) is not None:
+            self.processing_probe(path, self.extension)
+            return
         size, offset, seen = path.stat().st_size, 0, set()
         with path.open('rb') as stream:
             for _ in range(10000):

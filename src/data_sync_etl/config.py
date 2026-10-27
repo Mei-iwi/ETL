@@ -20,6 +20,29 @@ class Settings(BaseSettings):
     test_database_url: str | None = Field(default=None, repr=False)
     log_level: str = "INFO"
     storage_root: Path = Path("storage")
+    ffmpeg_path: str = 'ffmpeg'
+    ffprobe_path: str = 'ffprobe'
+    media_max_size_bytes: int = Field(default=50 * 1024 * 1024, ge=1024, le=1024 * 1024 * 1024)
+    media_max_duration_seconds: int = Field(default=1800, ge=1, le=7200)
+    media_timeout_seconds: int = Field(default=900, ge=1, le=7200)
+    media_cpu_threads: int = Field(default=4, ge=1, le=16)
+    media_max_concurrency: int = Field(default=1, ge=1, le=4)
+    media_frame_interval_seconds: float = Field(default=4, ge=.5, le=60)
+    media_max_frames: int = Field(default=120, ge=1, le=600)
+    media_scene_detection: bool = True
+    media_scene_threshold: float = Field(default=.35, gt=0, le=1)
+    media_frame_width: int = Field(default=1280, ge=320, le=1920)
+    media_max_segments: int = Field(default=5000, ge=1, le=10000)
+    whisper_model_path: Path | None = None
+    whisper_device: Literal['cpu', 'cuda'] = 'cpu'
+    whisper_compute_type: Literal['int8', 'float16', 'float32'] = 'int8'
+    asr_window_seconds: int = Field(default=15, ge=2, le=30)
+    translation_provider: Literal['disabled', 'argos'] = 'argos'
+    translation_model_root: Path | None = None
+    translation_target_language: str = Field(default='vi', pattern=r'^[a-z]{2,3}$')
+    translation_timeout_seconds: int = Field(default=60, ge=1, le=300)
+    translation_job_timeout_seconds: int = Field(default=600, ge=1, le=3600)
+    translation_max_retries: int = Field(default=3, ge=1, le=10)
     source_fixture_root: Path = Path("fixtures/source")
     source_adapter: Literal["json", "postgresql", "production"] = "json"
     source_database_url: str | None = Field(default=None, repr=False)
@@ -39,6 +62,8 @@ class Settings(BaseSettings):
     office_pdf_timeout_seconds: int = Field(default=90, ge=5, le=180)
     source_drive_enabled: bool = False
     source_drive_buckets: dict[str, str] = Field(default_factory=dict, repr=False)
+    # Explicit legacy locator -> verified Drive filename; never a global fuzzy match.
+    source_drive_filename_aliases: dict[str, str] = Field(default_factory=dict, repr=False)
     source_local_buckets: tuple[str, ...] = ()
     source_drive_auth_type: Literal['service_account', 'authorized_user'] = 'service_account'
     source_drive_credentials_file: Path | None = Field(default=None, repr=False)

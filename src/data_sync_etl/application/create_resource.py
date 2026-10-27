@@ -171,6 +171,7 @@ class CreateResourceUseCase:
                             "storage_bucket": stored.bucket,
                             "storage_object_key": stored.object_key,
                             "source_hash": stored.source_hash,
+                            "processing_options": {'original_filename': command.filename},
                             "uploaded_by": None,
                         },
                     )
