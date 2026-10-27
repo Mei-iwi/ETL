@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { ArrowUpRight, FileText, SearchX } from 'lucide-react'
-import { searchMaterials, SearchApiError } from '../../services/searchApi'
+import { searchMaterials, searchSessionPage, SearchApiError } from '../../services/searchApi'
 import type { SearchResponse } from '../../types/search'
 import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
 import { readSearch, writeSearch } from './searchParams'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
 import { SearchContext } from './SearchContext'
-import { clearSearchViewCache, readSearchView, saveSearchView } from './searchViewCache'
+import { clearSearchViewCache, fetchSearchPage, readSearchView, saveSearchView } from './searchViewCache'
 import { searchEmptyState } from './searchResultState'
 
 export function SearchResults({ params, onBusyChange }: { params: URLSearchParams; onBusyChange?: (busy: boolean) => void }) {
@@ -44,7 +44,8 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
         void Promise.resolve().then(() => {
             if (controller.signal.aborted) return
             onBusyChange?.(true)
-            return searchMaterials(request, controller.signal)
+            return fetchSearchPage(JSON.stringify([mode, principal]), request, controller.signal,
+                { full: searchMaterials, page: searchSessionPage })
         })
             .then(data => { if (data && !controller.signal.aborted) { saveSearchView(cacheKey, data); setResult(data); setError('') } })
             .catch(reason => { if (!controller.signal.aborted) { clearSearchViewCache(); setError(reason instanceof SearchApiError ? reason.message : 'Tìm kiếm thất bại. Vui lòng thử lại.') } })

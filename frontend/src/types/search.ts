@@ -14,6 +14,7 @@ export type SearchRequest = {
     filters: SearchFilters
     page: number
     size: number
+    window_pages?: number
 }
 export type SearchItem = {
     resource_id: string
@@ -47,6 +48,10 @@ export type SearchItem = {
     lexical_evidence?: { query_phrase: string; matched_phrase: string; concept_id: string | null; relation: string; field: string; weight: number; sources: { name: string; identifier: string }[] }[]
 }
 export type SearchResponse = {
+    search_session?: { id: string; ttl_seconds: number }
+    page_window?: SearchResponse[]
+    total_exact?: boolean
+    session_status?: 'UNAVAILABLE'
     branch_status?: Record<string, string>
     query_expansion?: Record<string, unknown> | null
     search_fingerprint?: string | null

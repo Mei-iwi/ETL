@@ -164,6 +164,10 @@ export function searchMaterials(payload: SearchRequest, signal?: AbortSignal) {
     return request('/api/v1/search', (value): value is SearchResponse => validSearch(value, payload), signal, payload)
 }
 
+export function searchSessionPage(payload: SearchRequest & { session_id: string }, signal?: AbortSignal) {
+    return request('/api/v1/search/page', (value): value is SearchResponse => validSearch(value, payload), signal, payload)
+}
+
 export function getChunkContext(id: string, signal?: AbortSignal, neighbors = 1) {
     return request(`/api/v1/chunks/${encodeURIComponent(id)}/context?neighbors=${neighbors}`,
         (value): value is ChunkContext => validContext(value, id, neighbors), signal)
