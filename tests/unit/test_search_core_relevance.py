@@ -36,6 +36,7 @@ def test_known_subject_cannot_be_replaced_by_leftover_qualifier():
 def test_metadata_and_content_use_same_core_policy_and_accent_variant(metadata):
     c, _, extension, service = metadata
     c.settings.search_approved_accent_variants_enabled = True
+    c.settings.search_corpus_accent_candidates_enabled = True
     service.reconcile(apply=True)
     assert search(c, 'Cong hai phan so khac mau')['total'] == 1
     with c.uow() as repo:

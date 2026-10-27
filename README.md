@@ -513,6 +513,8 @@ python -m data_sync_etl.cli.concepts --help
 
 Hướng dẫn đầy đủ: [từ điển corpus offline](deploy/CONCEPT_DICTIONARY_OFFLINE.md). Chỉ quan hệ corpus đã duyệt, còn hiệu lực và đủ quyền mới được mở rộng truy vấn lexical. Khi từ điển tắt hoặc chưa sẵn sàng, hệ thống tìm bằng câu truy vấn gốc; không dùng từ điển tĩnh dự phòng.
 
+Thử nghiệm khôi phục dấu từ cụm trong ContentBag có cờ riêng `SEARCH_CORPUS_ACCENT_CANDIDATES_ENABLED=false` trong `.env.example` và `deploy/docker.env.example`. Cờ mặc định tắt; chỉ bật trong môi trường kiểm thử sau khi kiểm chứng chất lượng trên dữ liệu của bạn. Vector luôn dùng câu truy vấn gốc.
+
 | Hiện tượng | Kiểm tra |
 | --- | --- |
 | `AUTH_MASTER_STALE` | Full baseline/Auto users và Master Sync Worker; không bỏ freshness guard |

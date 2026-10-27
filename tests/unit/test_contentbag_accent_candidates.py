@@ -7,6 +7,12 @@ from data_sync_etl.domain.lexical import bm25, lexical_document
 from data_sync_etl.domain.query_variants import corpus_accent_variant
 
 
+def test_new_corpus_candidate_policy_is_disabled_without_explicit_opt_in():
+    from data_sync_etl.config import Settings
+
+    assert Settings(_env_file=None).search_corpus_accent_candidates_enabled is False
+
+
 @pytest.mark.parametrize('query', ['Cong hai phan so khac mau', 'Cộng hai phan so khac mau'])
 def test_observed_phrase_finds_math_without_incidental_number_hit(query):
     docs = {'math': lexical_document(['Cộng hai phân số khác mẫu cần quy đồng.']),

@@ -102,6 +102,8 @@ class SearchService:
 
     def _ranking_algorithm(self, method):
         base = self._base_ranking_algorithm(method)
+        if method != 'vector' and self.settings.search_corpus_accent_candidates_enabled:
+            base += '+corpus-accent-candidates-v1'
         return base + '+approved-accent-max-v1' if self.settings.search_approved_accent_variants_enabled else base
 
     def _base_ranking_algorithm(self, method):
@@ -669,7 +671,7 @@ class SearchService:
             nonlocal bow
             bow = bm25(query, {key: row[0].lexical for key, row in by_bag.items()},
                        dictionary=self.dictionary, policy=policy, expansion=expansion,
-                       accent_insensitive=self.settings.search_approved_accent_variants_enabled,
+                       accent_insensitive=self.settings.search_corpus_accent_candidates_enabled,
                        min_coverage=self.settings.search_bow_min_coverage, focus_query=variant)
             if variant is not None:
                 assisted = bm25(variant, {key: row[0].lexical for key, row in by_bag.items()},

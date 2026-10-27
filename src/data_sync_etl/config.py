@@ -165,6 +165,7 @@ class Settings(BaseSettings):
     search_hybrid_fusion_unit: Literal['bag', 'version'] = 'bag'
     # Query-only experiment: original + at most one reviewed phrase variant.
     search_approved_accent_variants_enabled: bool = False
+    search_corpus_accent_candidates_enabled: bool = False
     search_hybrid_lexical_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
     search_hybrid_vector_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
     search_evidence_strategy: Literal['current', 'version_dense', 'version_context'] = 'current'
