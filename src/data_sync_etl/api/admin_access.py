@@ -71,7 +71,7 @@ def protected(path, method):
         or (
             path.startswith("/api/")
             and method not in {"GET", "HEAD", "OPTIONS"}
-            and path != "/api/v1/search"
+            and path not in ("/api/v1/search", "/api/v1/search/page")
         )
         or path.startswith("/api/v1/master-data/")
         or path == "/api/v1/resources"

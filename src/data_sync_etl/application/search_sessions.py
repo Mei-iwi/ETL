@@ -66,6 +66,17 @@ class SearchResultSessions:
                     self._drop(token)
                     self.metrics['invalidated'] += 1
 
+    def current(self, token, owner, request_key):
+        """Fresh send-time fence; never an authorization grant or TTL refresh."""
+        try:
+            revision = self._revision(owner)
+            with self._lock:
+                entry = self._entries.get(token)
+                return bool(entry and entry.owner == owner and entry.request_key == request_key
+                    and entry.revision == revision and self.clock() - entry.created < self.ttl)
+        except Exception:
+            return False
+
     def begin(self, owner, request_key, rank):
         """rank returns (complete bounded ordered hits, has_more); no snippets."""
         revision = self._revision(owner)

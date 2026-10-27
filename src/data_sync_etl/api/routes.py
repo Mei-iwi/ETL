@@ -238,8 +238,11 @@ async def search_materials(body: SearchRequest, request: Request):
                     if gateway is not None:
                         criteria = {key: value for key, value in payload.items() if key != 'page'}
                         try:
-                            return True, gateway.read(criteria, access, page=body.page, size=body.size,
-                                                      window_pages=body.window_pages)
+                            result = gateway.read(criteria, access, page=body.page, size=body.size,
+                                                  window_pages=body.window_pages)
+                            request.scope.setdefault('state', {})['search_session_guard'] = gateway.visibility_guard(
+                                result['search_session']['id'], criteria, access)
+                            return True, result
                         except SearchError as exc:
                             if exc.status != 409:
                                 raise
@@ -293,6 +296,7 @@ async def search_materials(body: SearchRequest, request: Request):
 @router.post('/api/v1/search/page', tags=[TAG_SEARCH], response_model=SearchResponse,
              responses=SEARCH_ERROR_RESPONSES)
 async def search_session_page(body: SearchPageRequest, request: Request):
+    call = None
     try:
         access = await run_in_threadpool(search_access, request)
         container = request.app.state.container
@@ -300,19 +304,34 @@ async def search_session_page(body: SearchPageRequest, request: Request):
         if not getattr(container.settings, 'search_result_sessions_enabled', False) or gateway is None:
             raise SearchError('SEARCH_SESSION_UNAVAILABLE', 409)
         criteria = body.model_dump(exclude={'page', 'session_id', 'window_pages'})
-        with anyio.fail_after(10):
-            result = await anyio.to_thread.run_sync(lambda: gateway.read(criteria, access,
-                page=body.page, size=body.size, token=body.session_id, window_pages=body.window_pages),
-                abandon_on_cancel=True)
+        def reauthorize():
+            if search_access(request) != access:
+                raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
+        service = container.search
+        call = service.new_http_call('bow', access=access, authorize=reauthorize)
+        def execute():
+            with service.runtime_admission('bow', access=access, call=call):
+                call.reauthorize()
+                return gateway.read(criteria, access, page=body.page, size=body.size,
+                    token=body.session_id, window_pages=body.window_pages)
+        with anyio.fail_after(min(10, call.remaining())):
+            result = await anyio.to_thread.run_sync(execute, abandon_on_cancel=True)
+        request.scope.setdefault('state', {})['search_session_guard'] = gateway.visibility_guard(
+            body.session_id, criteria, access)
         if await run_in_threadpool(search_access, request) != access:
             raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
         return result
     except HTTPException:
         raise
     except TimeoutError:
+        if call is not None:
+            call.cancel('deadline')
         raise search_error(SearchError('SEARCH_TIMEOUT')) from None
     except Exception as exc:
         raise search_error(exc) from None
+    finally:
+        if call is not None:
+            call.abandon()
 
 
 def evaluation_services(request):

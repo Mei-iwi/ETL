@@ -17,6 +17,8 @@ configured = auth.configured
 @pytest.fixture
 def session_api(configured):
     container, password, _ = configured
+    # This adapter fixture never measures/loads a real embedding model.
+    container.indexing.embedding.start_preload = lambda: None
     state = {'revision': 'offline-r1', 'rank': 0, 'hydrate': 0, 'complete': True, 'denied': False}
     refs = tuple(RankedHit(f'r{i}', f'v{i}', None, None, 1 / (i + 1)) for i in range(22))
 
@@ -124,3 +126,48 @@ def test_no_client_scope_and_window_bounds(session_api):
         headers=auth.csrf(client)).status_code == 422
     with pytest.raises(SearchError, match='UNAVAILABLE'):
         gateway.keys({}, SearchAccess())
+
+
+def test_viewer_page_read_does_not_require_admin_feature_flag(session_api, monkeypatch):
+    from data_sync_etl.security.auth import Principal
+
+    client, container, _, _ = session_api
+    principal = Principal('master:fixture-viewer', 'VIEWER', 'master_users', 'offline-session')
+    monkeypatch.setattr(client.app.state.auth, 'principal', lambda *args, **kwargs: principal)
+    container.settings.admin_enabled = False
+    response = begin(client)
+    assert response.status_code == 200, response.text
+    assert response.json()['access_scope'] == 'authenticated_user'
+    response = page(client, response.json()['search_session']['id'])
+    assert response.status_code == 200, response.text
+
+
+def test_late_revision_change_is_blocked_at_http_send(session_api, monkeypatch):
+    client, _, state, gateway = session_api
+    token = begin(client).json()['search_session']['id']
+    original = gateway.read
+    def changed_after_hydration(*args, **kwargs):
+        result = original(*args, **kwargs)
+        state['revision'] = 'late-revocation'
+        return result
+    monkeypatch.setattr(gateway, 'read', changed_after_hydration)
+    response = page(client, token)
+    assert response.status_code == 409, response.text
+    assert 'fresh metadata' not in response.text and 'total' not in response.json()
+
+
+def test_cancelled_rank_cannot_publish_a_session():
+    from data_sync_etl.application.search_runtime import CURRENT_SEARCH, SearchCall
+
+    call = SearchCall(10, lambda: None, lambda: None)
+    def rank(*args):
+        call.cancel('fixture-disconnect')
+        return [RankedHit('r', 'v', None, None, .8)], False
+    gateway = SearchSessionGateway(lambda _: 'fixture-r1', rank, lambda *_: [], lambda *_: {'message': 'OK'})
+    context = CURRENT_SEARCH.set(call)
+    try:
+        with pytest.raises(SearchError, match='SEARCH_TIMEOUT'):
+            gateway.read({}, SearchAccess('authenticated_admin', actor_id='alice'), page=1, size=5)
+        assert not gateway.sessions._entries
+    finally:
+        CURRENT_SEARCH.reset(context)

@@ -39,7 +39,11 @@ export async function fetchSearchPage(key: string, criteria: SearchRequest, sign
             }
         }
         check()
-        result ??= await transport.full({ ...criteria, window_pages: 1 }, signal)
+        // Old servers reject unknown request fields. Window prefetch is not
+        // requested until a trustworthy browser revocation policy exists.
+        const legacyCriteria = { ...criteria }
+        delete legacyCriteria.window_pages
+        result ??= await transport.full(legacyCriteria, signal)
         check()
         const info = result.search_session
         if (info && typeof info.id === 'string' && /^[A-Za-z0-9_-]{40,64}$/.test(info.id)

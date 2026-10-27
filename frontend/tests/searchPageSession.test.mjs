@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { clearSearchViewCache, fetchSearchPage, readSearchView } from '../src/pages/search/searchViewCache.ts'
+import { searchMaterials, searchSessionPage } from '../src/services/searchApi.ts'
+import { searchResponse } from './helpers/searchResponses.mjs'
 
 const criteria = { query: 'raw multilingual query', method: 'vector', filters: {}, page: 1, size: 5 }
 const token = 's'.repeat(43)
@@ -71,7 +73,10 @@ test('aborted StrictMode probe never starts transport', async () => {
 })
 test('legacy or invalid optional session fields retain full-search behavior', async () => {
     const { run, transport, calls } = setup()
-    transport.full = async request => { calls.full++; return { ...request, items: [], search_session: { id: 'bad', ttl_seconds: Infinity } } }
+    transport.full = async request => {
+        assert.equal('window_pages' in request, false) // Old strict servers accept it.
+        calls.full++; return { ...request, items: [], search_session: { id: 'bad', ttl_seconds: Infinity } }
+    }
     await run(); await run(2)
     assert.deepEqual(calls, { full: 2, page: 0 })
 })
@@ -80,4 +85,31 @@ test('bounded LRU evicts oldest criteria', async () => {
     for (let i = 0; i < 9; i++) await run(1, `actor-${i}`)
     await run(2, 'actor-0')
     assert.equal(calls.full, 10)
+})
+
+test('real frontend transport validates full/page wire contract with one heavy request', async () => {
+    clearSearchViewCache()
+    const old = globalThis.fetch
+    const paths = []
+    try {
+        globalThis.fetch = async (path, init) => {
+            const body = JSON.parse(init.body)
+            paths.push(path)
+            assert.equal(init.cache, 'no-store')
+            if (path.endsWith('/page')) assert.equal(body.session_id, token)
+            else assert.equal('window_pages' in body, false)
+            const response = searchResponse(body)
+            response.total = 22; response.total_pages = 5
+            response.items[0].resource_id = `r${body.page}`
+            response.search_session = { id: token, ttl_seconds: 30 }
+            response.total_exact = true
+            return Response.json(response)
+        }
+        for (const page of [1, 2, 3, 1, 4]) {
+            const result = await fetchSearchPage('verified-alice', { ...criteria, page }, new AbortController().signal,
+                { full: searchMaterials, page: searchSessionPage })
+            assert.equal(result.items[0].resource_id, `r${page}`)
+        }
+        assert.deepEqual(paths, ['/api/v1/search', ...Array(4).fill('/api/v1/search/page')])
+    } finally { globalThis.fetch = old; clearSearchViewCache() }
 })
