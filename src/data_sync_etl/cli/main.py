@@ -3,6 +3,7 @@ import json
 import sys
 
 import pymupdf
+from sqlalchemy.exc import ProgrammingError
 
 from data_sync_etl.composition import Container
 from data_sync_etl.domain.core import DomainError
@@ -247,7 +248,11 @@ def main():
             return 1
     except Exception as exc:
         code = str(exc).split(':', 1)[0] if isinstance(exc, DomainError) else None
-        if code in {'SHARED_MONGO_CONFLICT_SOURCE_ENABLED', 'SHARED_MONGO_CONFLICT_IDENTITY_BOOTSTRAP'}:
+        if (isinstance(exc, ProgrammingError)
+                and getattr(exc.orig, 'sqlstate', None) in {'42703', '42P01'}):
+            print('MASTER_SCHEMA_MIGRATION_REQUIRED: verify the MASTER schema and run '
+                  'python -m alembic upgrade head before restarting the worker.', file=sys.stderr)
+        elif code in {'SHARED_MONGO_CONFLICT_SOURCE_ENABLED', 'SHARED_MONGO_CONFLICT_IDENTITY_BOOTSTRAP'}:
             print(f'{code}: shared mode requires SOURCE_MONGO_ENABLED=false and MASTER_MONGO_IDENTITY_BOOTSTRAP=false.', file=sys.stderr)
         elif code in {'MONGO_IDENTITY_PROJECTION_REQUIRES_SHARED_DEV_POSTGRES', 'MONGO_METADATA_APPLY_REQUIRES_DEV'}:
             print(f'{code}: verify APP_ENVIRONMENT=development/test; identity projection requires shared mode and PostgreSQL SOURCE.', file=sys.stderr)
