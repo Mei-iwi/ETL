@@ -229,9 +229,6 @@ Kết quả phải có `Models/argos/translate-en_vi-1_9/metadata.json`, tokeniz
 **Thêm một lần vào `.env`**, đổi đường dẫn nếu đặt model ở nơi khác:
 
 ```dotenv
-# Binary có trong PATH; cũng có thể dùng đường dẫn tuyệt đối tới từng .exe.
-FFMPEG_PATH=ffmpeg
-FFPROBE_PATH=ffprobe
 # Đường dẫn tương đối được tính từ gốc repo khi khởi động API/worker.
 WHISPER_MODEL_PATH=Models/faster-whisper-large-v3
 WHISPER_DEVICE=cpu
@@ -242,6 +239,8 @@ TRANSLATION_TARGET_LANGUAGE=vi
 # false: SOURCE tự xếp hàng xử lý nội dung; true: giữ chế độ đăng ký metadata-only.
 SOURCE_METADATA_MEDIA_ENABLED=false
 ```
+
+FFmpeg và ffprobe dùng tên lệnh mặc định trong `config.py`; thêm thư mục chứa cả hai binary vào `PATH`, không cần khai báo đường dẫn trong `.env`. Trên Windows, nếu tiến trình đang chạy chưa nhận `PATH` mới, bộ xử lý media sẽ tìm thêm trong `PATH` đã lưu của hệ thống và tài khoản. Nếu cần dùng bộ công cụ riêng, vẫn có thể đặt `FFMPEG_PATH`/`FFPROBE_PATH`; đường dẫn chỉ định được ưu tiên và không tự thay thế khi sai. Khởi động lại API/worker sau khi sửa `.env` để nạp lại cấu hình model.
 
 Giữ `OCR_ENGINE=tesseract`, `TESSERACT_PATH` và `TESSERACT_LANGUAGES=vie+eng` ở phần OCR đã có, **không khai báo lại các biến này ở cuối file**. Đường dẫn Windows có khoảng trắng nên đặt trong dấu nháy. Các đường dẫn `.test-tmp/media-tools/...` đã dùng để kiểm thử vẫn chạy nếu còn tệp, nhưng không nên dùng thư mục test làm nơi cài công cụ lâu dài.
 
@@ -255,7 +254,7 @@ python -m alembic current
 python -m alembic upgrade 0018
 ```
 
-DB từng áp dụng migration media cũ mang revision `0017` trước khi merge cần đối chiếu schema/lịch sử riêng: revision đó trùng số với migration xóa mềm trên `main`. Không chạy upgrade hoặc stamp mù trên DB này; giữ các cột/dữ liệu media đã có. Lượt merge chỉ kiểm thử migration trên DB cô lập, không sửa DB đang phục vụ.
+DB từng áp dụng migration media cũ mang revision `0017` trước khi merge cần đối chiếu schema/lịch sử riêng: revision đó trùng số với migration xóa mềm trên `main`. Migration `0018` nhận diện trường hợp có đủ hai cột JSON nullable `resource_versions.processing_options` và `content_units.source_locator`, chưa có cả bốn cột xóa mềm MASTER và bảng `resource_deletion_events`; khi đó chỉ bổ sung schema xóa mềm, giữ nguyên cột và dữ liệu media. Schema có dấu hiệu sửa dở sẽ dừng với `0018_LEGACY_SCHEMA_REQUIRES_MANUAL_REVIEW`; không tự stamp hoặc xóa cột để vượt kiểm tra. Nếu worker thoát ngay sau `STALE_RECOVERY` vì thiếu bảng/cột, CLI báo `MASTER_SCHEMA_MIGRATION_REQUIRED`; kiểm tra DB MASTER rồi chạy migration trước khi khởi động lại.
 
 Đường dẫn tương đối tính từ thư mục làm việc của API/worker; nên chạy tại gốc repo. Máy hiện tại dùng `WHISPER_MODEL_PATH=D:/HK7/KLTN/ETL/Models/faster-whisper-large-v3`. Bỏ cấu hình model nếu chưa cài: mặc định `None` trả lỗi ASR có kiểm soát, không tải mạng.
 

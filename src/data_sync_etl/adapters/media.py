@@ -3,7 +3,9 @@
 import hashlib
 import json
 import math
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,7 +18,43 @@ from data_sync_etl.domain.format_validation import InvalidFileContent
 from data_sync_etl.ports.processing import OCRResult
 
 
+def _windows_search_path():
+    """Read persisted PATH when a long-running worker inherited an older value."""
+    import winreg
+
+    paths = [os.environ.get("PATH", "")]
+    for hive, key in (
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        (winreg.HKEY_CURRENT_USER, "Environment"),
+    ):
+        try:
+            with winreg.OpenKey(hive, key) as registry_key:
+                value, kind = winreg.QueryValueEx(registry_key, "Path")
+            if kind in (winreg.REG_SZ, winreg.REG_EXPAND_SZ) and isinstance(value, str):
+                paths.append(os.path.expandvars(value))
+        except OSError:
+            continue
+    return os.pathsep.join(paths)
+
+
+def resolve_media_tool(executable):
+    """Resolve default tool names without embedding machine-specific locations."""
+    # An explicit binary path remains authoritative, even when it is invalid.
+    if str(executable).lower() not in ("ffmpeg", "ffmpeg.exe", "ffprobe", "ffprobe.exe"):
+        return executable
+    found = shutil.which(executable)
+    if found:
+        return found
+    if sys.platform == "win32":
+        found = shutil.which(executable, path=_windows_search_path())
+        if found:
+            return found
+    raise DomainError("MEDIA_RUNTIME_UNAVAILABLE")
+
+
 def command(args, timeout, code="MEDIA_DECODE_FAILED"):
+    args = [resolve_media_tool(args[0]), *args[1:]]
     try:
         return subprocess.run(args, capture_output=True, timeout=timeout, check=True)
     except FileNotFoundError:
