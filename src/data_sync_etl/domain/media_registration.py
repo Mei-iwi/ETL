@@ -79,7 +79,10 @@ class Mp4RegistrationValidator(_BaseFormatValidator):
                     length, minimum = int.from_bytes(extra, 'big'), 16
                 if length == 0:
                     length = size - offset
-                if length <= minimum or offset + length > size or (offset == 0 and kind != b'ftyp'):
+                # Header-only free padding is emitted by MP4 muxers. Keep
+                # required/data boxes nonempty and enforce every box boundary.
+                if (length < minimum or (length == minimum and kind != b'free')
+                        or offset + length > size or (offset == 0 and kind != b'ftyp')):
                     raise InvalidFileContent('INVALID_MEDIA')
                 if kind == b'ftyp' and (length < 20 or length > 1024):
                     raise InvalidFileContent('INVALID_MEDIA')
