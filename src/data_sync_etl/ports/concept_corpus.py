@@ -60,7 +60,7 @@ class RevocationAuthorityPort(EligibilityReader, Protocol):
 
 
 class ReviewIdentityPort(Protocol):
-    def verify(self, reviewer: str, statement: str, proof=None) -> dict: ...
+    def verify(self, reviewer: str, statement: str, proof=None, *, context=None) -> dict: ...
 
 
 class ConceptResolver(Protocol):

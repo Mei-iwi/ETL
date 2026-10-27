@@ -10,7 +10,7 @@ from data_sync_etl.domain.indexing import digest
 from data_sync_etl.domain.lexical import QUERY_STOPWORDS, surface_tokens
 from data_sync_etl.ports.concept_corpus import ConceptBlocked, ResourceEvidence
 
-EXTRACTOR = 'corpus-phrases-v5'
+EXTRACTOR = 'corpus-phrases-v6'
 POLICY = 'public-explicit-reviewed-v1'
 FORBIDDEN = re.compile(r'https?://|www\.|\S+@\S+|[<>]|\b(?:select|insert|drop)\b.*\b(?:from|table|into)\b|'
     r'approve\s+me|ignore\s+(?:all|previous)|bỏ\s+kiểm\s+duyệt|(?:password|secret|token)\s*[=:]', re.I)
@@ -18,6 +18,7 @@ PAIR = re.compile(r'(?:^|[\n;:.])\s*([^()\n;:.]{2,100}?)\s*\(([^()\n]{2,80})\)',
 DEFINITION = re.compile(r'(?:^|[\n;:.])\s*([^()\n;:.]{2,100}?)\s+(?:nghĩa là|means|signifie)\s+([^()\n;:.]{2,100})', re.I)
 SYNONYM = re.compile(r'(?:^|[\n;:.])\s*([^()\n;:.]{2,100}?)\s+(?:còn gọi là|also called|aussi appelé)\s+([^()\n;:.]{2,100})', re.I)
 LABELLED = re.compile(r'(?:^|[|;])\s*(vi|en|fr)\s*:\s*([^|;\n]{2,100})', re.I)
+SPELLING = re.compile(r'(?:^|[\n;:.])\s*([^()\n;:.]{2,100}?)\s+(?:viết không dấu là|unaccented form is)\s+([^()\n;:.]{2,100})', re.I)
 NEGATED_PAIR = re.compile(r'\bnot\b|\bkhông\s+(?:phải|là|có nghĩa)|\bne\b.+\bpas\b', re.I)
 VI_WORDS = frozenset('của và là bộ nhớ dữ liệu đệm trí tuệ nhân tạo phân số quang hợp học máy'.split())
 FR_WORDS = frozenset('le la les des une un mémoire apprentissage automatique banque photosynthèse'.split())
@@ -62,10 +63,12 @@ def explicit_pairs(text):
         if 2 <= len(labelled) <= 3 and len({item[1] for item in labelled}) == len(labelled):
             anchor = min(labelled, key=lambda item: (item[1] != 'en', item[1], item[0]))
             for left, right in combinations(labelled, 2):
-                yield left[0], right[0], False, line, [left[1], right[1]], anchor
+                yield left[0], right[0], False, line, [left[1], right[1]], anchor, None
     for pattern, same_language in ((PAIR, False), (DEFINITION, True), (SYNONYM, True)):
         for match in pattern.finditer(text):
-            yield match[1], match[2], same_language, match[0], None, None
+            yield match[1], match[2], same_language, match[0], None, None, None
+    for match in SPELLING.finditer(text):
+        yield match[1], match[2], True, match[0], None, None, 'spelling'
 
 
 def fingerprint(resource):
@@ -165,14 +168,22 @@ def discover(resource: ResourceEvidence, reader=None, limits=DEFAULT_LIMITS):
         evidence = {'version_id': resource.version_id, 'field': field, 'unit_id': unit_id,
             'source_fingerprint': result['fingerprint'], 'text_hash': text_hash, 'scope': resource.scope,
             'extractor': EXTRACTOR, 'source_updated_at': resource.source_updated_at}
-        for left_raw, right_raw, same_language, raw_pair, declared_languages, alignment_anchor in explicit_pairs(text):
+        for left_raw, right_raw, same_language, raw_pair, declared_languages, alignment_anchor, relation_hint in explicit_pairs(text):
             left, right = safe_phrase(left_raw), safe_phrase(right_raw)
             if not left or not right or left == right or FORBIDDEN.search(raw_pair) or NEGATED_PAIR.search(raw_pair):
                 continue
             langs = declared_languages or [language(left), language(right)]
+            if relation_hint == 'spelling':
+                def accentless(value):
+                    return ''.join(c for c in unicodedata.normalize('NFD', value.replace('đ', 'd'))
+                        if unicodedata.category(c) != 'Mn')
+                if (not right.isascii() or left.isascii() or accentless(left) != right or langs[0] not in ('vi', 'fr')):
+                    continue
+                langs = [langs[0], langs[0]]
             kind = ('abbreviation' if right_raw.strip().isupper() else
                     'translation' if 'und' not in langs and langs[0] != langs[1] else
                     'synonym' if same_language and 'und' not in langs else 'related')
+            kind = relation_hint or kind
             terms = [{'text': label, 'language': lang} for label, lang in zip((left, right), langs, strict=True)]
             identity = [resource.domain, resource.sense, kind, sorted((t['language'], t['text']) for t in terms)]
             cid = 'corpus:' + digest(identity)[:32]

@@ -14,6 +14,7 @@ from data_sync_etl.adapters.concept_corpus import FixtureCorpus
 from data_sync_etl.application.concept_discovery import ConceptDiscoveryWorker, term_target
 from data_sync_etl.config import Settings
 from data_sync_etl.domain.corpus_concepts import DiscoveryLimits
+from data_sync_etl.domain.indexing import digest
 from data_sync_etl.ports.concept_corpus import ConceptBlocked, ResourceEvidence
 
 
@@ -31,14 +32,16 @@ def fixture(path):
         item = {**item, 'units': tuple(item.get('units', [])),
                 'approved_unit_ids': frozenset(item.get('approved_unit_ids', []))}
         rows.append(ResourceEvidence(**item))
-    return FixtureCorpus(rows)
+    inventory = FixtureCorpus(rows)
+    inventory.source_generation = digest(['fixture-reference-v1', str(path.absolute())])
+    return inventory
 
 
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     root.add_argument('action', choices=['example', 'audit', 'status', 'discover', 'reconcile', 'run', 'candidates',
                                         'review', 'build', 'validate', 'publish', 'rollback', 'run-worker',
-                                        'pause', 'resume', 'preflight', 'recover', 'gc'])
+                                        'pause', 'resume', 'preflight', 'recover', 'gc', 'health'])
     root.add_argument('--root', type=Path, required=True, help='Explicit private OFFLINE fixture root only')
     root.add_argument('--fixture', type=Path)
     root.add_argument('--generation')
@@ -52,6 +55,8 @@ def parser():
     root.add_argument('--live', action='store_true', help='Reports BLOCKED_LIVE; never opens DB connections')
     root.add_argument('--apply', action='store_true', help='Explicit OFFLINE worker/GC execution; default dry-run')
     root.add_argument('--retain', type=int, default=3, help='GC minimum releases retained (1..100)')
+    root.add_argument('--root-quota-mb', type=int, help='Explicit operator whole-root quota, 1..65536 MiB')
+    root.add_argument('--release-budget-mb', type=int, help='Explicit operator release budget, 1..16384 MiB')
     return root
 
 
@@ -60,10 +65,14 @@ def execute(args):
         raise ConceptBlocked('BLOCKED_LIVE_RO_REVOCATION_ARTIFACT_NOT_VERIFIED')
     if not args.root.is_absolute():
         raise ValueError('Absolute offline root required')
+    if ((args.root_quota_mb is not None and not 1 <= args.root_quota_mb <= 65536)
+            or (args.release_budget_mb is not None and not 1 <= args.release_budget_mb <= 16384)):
+        raise ValueError('Invalid operator storage budgets')
     settings = Settings(_env_file=None)
     # Do not initialize the application, secrets, models or database to run CLI.
     store = ArtifactStore(args.root, create=True, shards=settings.concept_artifact_shards,
-                          max_bytes=settings.concept_artifact_max_mb * 1024 * 1024)
+        max_bytes=(args.release_budget_mb or settings.concept_artifact_max_mb) * 1024 * 1024,
+        max_root_bytes=args.root_quota_mb * 1024 * 1024 if args.root_quota_mb is not None else None)
     marker = store.read_json('offline-fixture.json')
     if marker is None:
         if any(item.name != 'offline-fixture.json' for item in args.root.iterdir()):
@@ -75,6 +84,9 @@ def execute(args):
         return store.preflight()
     if args.action == 'recover':
         return store.recovery_status()
+    if args.action == 'health':
+        return {'status': 'READ_ONLY_HEALTH_SNAPSHOT', 'scheduler': store.read_json('checkpoints/scheduler.json'),
+            'live_status': 'BLOCKED_LIVE', 'freshness': 'LAST_OBSERVATION_ONLY'}
     if args.action == 'gc':
         return store.gc(retain=args.retain, dry_run=not args.apply)
     if args.action in ('pause', 'resume'):

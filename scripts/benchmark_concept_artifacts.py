@@ -68,7 +68,7 @@ class ScaleAuthority:
         return 'synthetic-frozen-authority'
 
 
-def one(root, count, *, incremental=False):
+def one(root, count, *, incremental=False, delta_mode='localized'):
     store = ArtifactStore(root, create=True)
     seed = default_dictionary()
     cpu = process_time()
@@ -112,12 +112,14 @@ def one(root, count, *, incremental=False):
             remaining = max(1, count // 100)
             for item in records(count):
                 bucket = int(sha256(item['concept_id'].encode()).hexdigest()[:8], 16) % store.shards
-                if remaining and bucket == 0:
+                if remaining and (bucket == 0 or delta_mode != 'localized'):
                     item['definition'] = 'Synthetic localized one-percent delta.'
                     remaining -= 1
+                    if delta_mode == 'revoke':
+                        continue
                 yield item
 
-        delta = {'changed_fraction': .01, 'distribution': 'localized_to_bucket_zero',
+        delta = {'changed_fraction': .01, 'distribution': delta_mode,
             'warning': 'Random changes spread across every shard can require a full rebuild.'}
         for reuse in (False, True):
             start, cpu_start = perf_counter(), process_time()
@@ -149,6 +151,7 @@ def main():
     parser.add_argument('--one-size', type=int)
     parser.add_argument('--incremental', action='store_true', help='Compare full/reused localized 1% delta offline')
     parser.add_argument('--allow-million', action='store_true', help='Explicit separate resource approval for >100k synthetic records')
+    parser.add_argument('--delta-mode', choices=['localized', 'distributed', 'revoke'], default='localized')
     args = parser.parse_args()
     if not args.root.is_absolute():
         parser.error('Explicit absolute OFFLINE output root required')
@@ -158,7 +161,7 @@ def main():
     if args.one_size is not None:
         if not 1 <= args.one_size <= 1000000:
             parser.error('Size exceeds synthetic benchmark limit')
-        print(json.dumps(one(args.root, args.one_size, incremental=args.incremental)))
+        print(json.dumps(one(args.root, args.one_size, incremental=args.incremental, delta_mode=args.delta_mode)))
         return
     if args.root.exists():
         parser.error('Use a fresh benchmark root; never overwrite old evidence')
@@ -167,6 +170,7 @@ def main():
     for size in args.sizes:
         completed = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--root', str(args.root / str(size)),
             '--one-size', str(size), *(['--incremental'] if args.incremental else []),
+            '--delta-mode', args.delta_mode,
             *(['--allow-million'] if args.allow_million else [])],
             capture_output=True, text=True, check=True, timeout=300)
         outputs.append(json.loads(completed.stdout))

@@ -4,10 +4,13 @@ from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from threading import Event, RLock
+from time import time
 from types import MappingProxyType
 
 from bson import BSON
 
+from data_sync_etl.domain.concept_authority import REQUIRED_COVERAGE, AuthorityAttestation
+from data_sync_etl.domain.concept_read_evidence import ReadEvidenceGate
 from data_sync_etl.domain.corpus_concepts import eligible, fingerprint
 from data_sync_etl.domain.indexing import digest
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
@@ -66,19 +69,24 @@ class ReadOnlyMongoEvidenceReader:
         self._close_connection = lambda: None
 
     @classmethod
-    def from_secret_reference(cls, secret_file, database, gate, *, client_factory=None, query_gate=None):
+    def from_secret_reference(cls, secret_file, database, gate, *, client_factory=None, query_gate=None,
+                              read_evidence=None):
         # A flag/URI is not verification. Never even read a secret before the
         # separately supplied trusted attestor has passed; no admin probe.
         gate.require()
         query_gate = query_gate or CorpusQueryPlanGate()
         for name in cls.PROJECTIONS:
             query_gate.require(name)
+        if client_factory is None or read_evidence is not None:
+            (read_evidence or ReadEvidenceGate()).require(database, secret_file)
         path = Path(secret_file)
         if path.stat().st_size > 4096:
             raise ConceptBlocked('CORPUS_SECRET_INVALID')
         uri = path.read_text(encoding='utf-8').strip()
         if not uri.startswith(('mongodb://', 'mongodb+srv://')):
             raise ConceptBlocked('CORPUS_SECRET_INVALID')
+        if read_evidence is not None:
+            read_evidence.verify_secret(uri)
         if client_factory is None:
             from pymongo import MongoClient
             client_factory = MongoClient
@@ -87,7 +95,12 @@ class ReadOnlyMongoEvidenceReader:
             connectTimeoutMS=3000, socketTimeoutMS=3000, waitQueueTimeoutMS=500, appname='etl-corpus-readonly')
         try:
             db = client.get_database(database, read_concern=ReadConcern('majority'))
-            reader = cls({name: db[name].find for name in cls.PROJECTIONS}, gate, query_gate=query_gate)
+            class BoundGate:
+                def require(self):
+                    gate.require()
+                    if read_evidence is not None:
+                        read_evidence.require(database, secret_file)
+            reader = cls({name: db[name].find for name in cls.PROJECTIONS}, BoundGate(), query_gate=query_gate)
             reader._close_connection = client.close
             return reader
         except Exception:
@@ -96,6 +109,17 @@ class ReadOnlyMongoEvidenceReader:
 
     def close(self):
         self._close_connection()
+
+    def _cursor(self, collection, selector, *, batch, limit):
+        cursor = None
+        try:
+            cursor = self._finders[collection](selector, projection=dict(self.PROJECTIONS[collection]),
+                max_time_ms=self.max_time_ms)
+            return cursor.batch_size(batch).limit(limit)
+        except Exception:
+            if cursor is not None:
+                cursor.close()
+            raise ConceptBlocked('CORPUS_SOURCE_UNAVAILABLE') from None
 
     def fields(self, resource):
         """Bridge a MASTER-verified envelope to projected Mongo text. No OCR/media."""
@@ -137,8 +161,7 @@ class ReadOnlyMongoEvidenceReader:
             self._identity(unit_id)
         self._query_gate.require('mongo_content_units')
         selector = {'resource_version_id': version_id, 'is_current': True, '_id': {'$in': sorted(allowed_unit_ids)}}
-        cursor = self._finders['mongo_content_units'](selector, projection=dict(self.PROJECTIONS['mongo_content_units']),
-            max_time_ms=self.max_time_ms).batch_size(self.batch_size).limit(self.max_docs + 1)
+        cursor = self._cursor('mongo_content_units', selector, batch=self.batch_size, limit=self.max_docs + 1)
         used = 0
         try:
             for index, document in enumerate(cursor):
@@ -154,6 +177,10 @@ class ReadOnlyMongoEvidenceReader:
                 if used > self.max_bytes:
                     raise ConceptBlocked('CORPUS_BYTE_BUDGET')
                 yield document
+        except ConceptBlocked:
+            raise
+        except Exception:
+            raise ConceptBlocked('CORPUS_SOURCE_UNAVAILABLE') from None
         finally:
             cursor.close()
 
@@ -161,8 +188,7 @@ class ReadOnlyMongoEvidenceReader:
         self._gate.require()
         self._identity(mongo_id)
         self._query_gate.require('learning_resources')
-        cursor = self._finders['learning_resources']({'_id': mongo_id},
-            projection=dict(self.PROJECTIONS['learning_resources']), max_time_ms=self.max_time_ms).batch_size(2).limit(2)
+        cursor = self._cursor('learning_resources', {'_id': mongo_id}, batch=2, limit=2)
         try:
             result = None
             for row in cursor:
@@ -173,6 +199,10 @@ class ReadOnlyMongoEvidenceReader:
                     raise ConceptBlocked('CORPUS_BYTE_BUDGET')
                 result = row
             return result
+        except ConceptBlocked:
+            raise
+        except Exception:
+            raise ConceptBlocked('CORPUS_SOURCE_UNAVAILABLE') from None
         finally:
             cursor.close()
 
@@ -206,6 +236,8 @@ class FixtureCorpus:
         self._rows, self._lock, self._sequence = {}, RLock(), 0
         self._token = digest(['offline-fixture-authority-v1'])
         self._review_token = '0' * 64
+        self._available = True
+        self._review_authority = lambda: 'synthetic-review-only'
         for resource in resources:
             self.put(resource)
 
@@ -237,7 +269,21 @@ class FixtureCorpus:
 
     def token(self):
         with self._lock:
-            return digest([self._token, self._review_token])
+            return digest([self._token, self._review_token, self._review_authority()])
+
+    def bind_review_authority(self, token_provider):
+        with self._lock:
+            self._review_authority = token_provider
+
+    def set_available(self, available):
+        with self._lock:
+            if self._available != available:
+                self._available = available
+                self._token = digest([self._token, 'availability', available])
+
+    def attestation(self):
+        return AuthorityAttestation(self.token(), REQUIRED_COVERAGE, time() + 60,
+            complete=self.completeness_verified, available=self._available)
 
     def set_review_token(self, token):
         with self._lock:

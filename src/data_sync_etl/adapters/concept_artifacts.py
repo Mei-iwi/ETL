@@ -11,9 +11,11 @@ import sqlite3
 from contextlib import closing, contextmanager
 from hashlib import sha256
 from pathlib import Path
+from threading import local
 from time import monotonic, time
 from uuid import uuid4
 
+from data_sync_etl.adapters.concept_capacity import RootCapacity
 from data_sync_etl.domain.concepts import Concept
 from data_sync_etl.domain.corpus_concepts import EXTRACTOR, POLICY
 from data_sync_etl.domain.indexing import digest
@@ -75,7 +77,7 @@ def merge_reviewed_aliases(first, second, *, max_aliases=64, max_provenance=8):
 class ArtifactStore:
     def __init__(self, root, *, create=False, mode='offline_test_only', max_bytes=512 * 1024 * 1024,
                  max_file_bytes=16 * 1024 * 1024, min_free_bytes=1024 * 1024, shards=4,
-                 max_aliases=64, max_provenance=8):
+                 max_aliases=64, max_provenance=8, max_root_bytes=None):
         self.root = Path(root)
         if not self.root.is_absolute() or '..' in self.root.parts or not 1 <= shards <= 16:
             raise ValueError('Absolute private root and bounded shards required')
@@ -87,6 +89,10 @@ class ArtifactStore:
         if not 1 <= max_aliases <= 256 or not 1 <= max_provenance <= 64:
             raise ValueError('Invalid concept record limits')
         self.max_aliases, self.max_provenance = max_aliases, max_provenance
+        self.max_root_bytes = max_root_bytes if max_root_bytes is not None else max(16 * 1024 * 1024, 4 * max_bytes)
+        if self.max_root_bytes < 1024:
+            raise ValueError('Invalid root quota')
+        self._quota = local()
         if create:
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -104,18 +110,39 @@ class ArtifactStore:
         no_links(self.root)
         info = self.root.stat()
         free = shutil.disk_usage(self.root).free
-        return {'mode': self.mode, 'absolute': self.root.is_absolute(), 'links_rejected': True,
+        usage = self.capacity()
+        return {'mode': self.mode, 'absolute': self.root.is_absolute(), 'links_rejected': True, 'root_capacity': usage,
             'available_bytes': free, 'capacity_ok': free >= self.min_free_bytes,
             'private_posix_mode': (info.st_mode & 0o077 == 0) if os.name != 'nt' else None,
             'same_device_root': info.st_dev, 'acl_owner_verified': False,
             'directory_fsync_supported_here': os.name != 'nt', 'distributed_fencing_verified': False,
             'live_status': 'BLOCKED_LIVE'}
 
+    def capacity(self):
+        no_links(self.root)
+        return RootCapacity(self.root, self.max_root_bytes).snapshot()
+
+    def ensure_capacity(self, reserve=0, *, refresh=False, control=False):
+        usage = getattr(self._quota, 'usage', None)
+        if usage is None or refresh:
+            usage = self.capacity()['logical_file_bytes']
+            if getattr(self._quota, 'active', False):
+                self._quota.usage = usage
+        limit = self.max_root_bytes if control else self.max_root_bytes - min(65536, self.max_root_bytes // 10)
+        if usage + reserve > limit:
+            raise ConceptBlocked('ARTIFACT_ROOT_QUOTA')
+
+    def account_growth(self, amount):
+        if getattr(self._quota, 'usage', None) is not None:
+            self._quota.usage += amount
+
     def write_json(self, relative, value):
         data = canonical(value).encode('utf-8')
         if len(data) > self.max_file_bytes or shutil.disk_usage(self.root).free < self.min_free_bytes + len(data):
             raise ConceptBlocked('ARTIFACT_DISK_BUDGET')
         target = self.path(relative)
+        old_size = target.stat().st_size if target.exists() else 0
+        self.ensure_capacity(len(data), control=str(relative).startswith(('gc/', 'checkpoints/')))
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         temporary = self.path(str(relative) + '.' + uuid4().hex + '.tmp')
         try:
@@ -125,6 +152,7 @@ class ArtifactStore:
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, target)
+            self.account_growth(len(data) - old_size)
             sync_directory(target.parent)
         finally:
             if temporary.exists():
@@ -141,7 +169,11 @@ class ArtifactStore:
     @contextmanager
     def writer_lock(self):
         with self._file_lock('publisher.lock'):
-            yield
+            self._quota.active, self._quota.usage = True, None
+            try:
+                yield
+            finally:
+                self._quota.active, self._quota.usage = False, None
 
     @contextmanager
     def worker_lock(self):
@@ -224,6 +256,9 @@ class ArtifactStore:
         with self.writer_lock():
             if self.current() != expected_parent or not fence():
                 raise ConceptBlocked('PUBLISH_FENCE_CHANGED')
+            # Conservative peak admission; actual sorter/shard growth is checked
+            # again periodically. This is cooperative accounting, not OS quota.
+            self.ensure_capacity(3 * self.max_bytes, refresh=True)
             parent = self.load(expected_parent).manifest if expected_parent else None
             reusable = bool(reuse_shards and parent and parent['seed_hash'] == seed_hash
                 and parent['limits'] == {'max_aliases': self.max_aliases, 'runtime_provenance_sample': self.max_provenance}
@@ -261,6 +296,8 @@ class ArtifactStore:
                                  (concept.concept_id, payload, bucket))
                     if index % 500 == 0 and (not fence() or shutil.disk_usage(self.root).free < self.min_free_bytes):
                         raise ConceptBlocked('BUILD_CANCELLED_OR_DISK_FULL')
+                    if index % 500 == 0:
+                        self.ensure_capacity(refresh=True)
                 conn.commit()
                 entries, count = [], 0
                 for bucket in range(self.shards):
@@ -299,6 +336,7 @@ class ArtifactStore:
                         os.fsync(output.fileno())
                     entries.append({'name': name, 'bytes': target.stat().st_size, 'sha256': checksum(target),
                         'content_sha256': logical.hexdigest(), 'records': bucket_count})
+                    self.ensure_capacity(refresh=True)
                 if sum(item['bytes'] for item in entries) > self.max_bytes:
                     raise ConceptBlocked('ARTIFACT_RELEASE_BUDGET')
             finally:
@@ -331,6 +369,7 @@ class ArtifactStore:
                     self.path(relative).unlink()
                 stage.rmdir()
             release = self.load(generation)
+            self.ensure_capacity(refresh=True)
             if not fence():
                 raise ConceptBlocked('PUBLISH_FENCE_CHANGED')
             if activate:

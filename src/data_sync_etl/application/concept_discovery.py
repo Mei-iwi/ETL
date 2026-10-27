@@ -2,6 +2,8 @@
 import json
 import os
 import re
+from dataclasses import asdict
+from threading import RLock
 from time import monotonic, process_time, time
 
 from data_sync_etl.application.concept_events import PendingConceptChanges
@@ -9,6 +11,7 @@ from data_sync_etl.domain.concept_authority import OfflineReviewAuthority, revie
 from data_sync_etl.domain.concepts import Concept, default_dictionary
 from data_sync_etl.domain.corpus_concepts import (
     DEFAULT_LIMITS,
+    EXTRACTOR,
     POLICY,
     EligibilityFence,
     discover,
@@ -17,6 +20,7 @@ from data_sync_etl.domain.corpus_concepts import (
     valid_relation,
 )
 from data_sync_etl.domain.indexing import digest
+from data_sync_etl.domain.lexical import ANALYZER_VERSION
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
 
 
@@ -36,11 +40,30 @@ class ReviewLedger:
         self.store, self.max_bytes, self.max_records = store, max_bytes, max_records
         self.on_decision, self._count = on_decision, 0
         self.authority = authority
+        self._next_expiry = float('inf')
+        self._valid_receipts = digest([])
+        self._healthy, self._trust_lock = True, RLock()
+
+    def authority_token(self):
+        token = self.authority.token() if hasattr(self.authority, 'token') else 'synthetic-review-only'
+        now = self.authority.clock() if hasattr(self.authority, 'clock') else time()
+        with self._trust_lock:
+            return digest([token, self._healthy, self._valid_receipts, now < self._next_expiry])
 
     def snapshot(self):
+        try:
+            return self._snapshot()
+        except Exception:
+            with self._trust_lock:
+                self._healthy = False
+            raise
+
+    def _snapshot(self):
         target = self.store.path('review/decisions.jsonl')
         previous, decisions = '0' * 64, {}
         self._used_proofs = set()
+        next_expiry = float('inf')
+        valid_receipts = []
         self._count = 0
         if target.exists():
             if target.stat().st_size > self.max_bytes:
@@ -57,8 +80,27 @@ class ReviewLedger:
                     proof_hash = item.get('identity', {}).get('proof_hash')
                     if proof_hash:
                         self._used_proofs.add(proof_hash)
+                    identity = item.get('identity', {})
+                    if identity.get('nonce_hash'):
+                        self._used_proofs.add(identity['nonce_hash'])
                     self._count = index + 1
-                    decisions[(item['kind'], item['target'], item['binding'])] = item['decision']
+                    decision = item['decision']
+                    if getattr(self.authority, 'require_authenticated', False):
+                        try:
+                            statement = digest([item['candidate_id'], item['binding'], item['kind'], item['target'], item['decision']])
+                            identity = self.authority.verify(item['reviewer'], statement, item.get('proof'),
+                                context={'domain': item['domain'], 'kind': item['kind'], 'action': item['decision']})
+                        except (ConceptBlocked, KeyError, TypeError):
+                            identity = {}
+                        if identity.get('authenticated') is not True or not self.authority.receipt_valid(identity):
+                            decision = 'rejected'
+                        else:
+                            next_expiry = min(next_expiry, identity['expires'])
+                            valid_receipts.append(identity['proof_hash'])
+                    decisions[(item['kind'], item['target'], item['binding'])] = decision
+        with self._trust_lock:
+            self._valid_receipts, self._next_expiry = digest(sorted(valid_receipts)), next_expiry
+            self._healthy = True
         return previous, decisions
 
     def decide(self, candidate, *, kind, target, decision, reviewer, proof=None):
@@ -72,10 +114,11 @@ class ReviewLedger:
             raise ValueError('Review target mismatch')
         if self.authority is None:
             raise ConceptBlocked('REVIEW_IDENTITY_NOT_VERIFIED')
-        identity = self.authority.verify(reviewer, review_statement(candidate, kind, target, decision), proof)
+        identity = self.authority.verify(reviewer, review_statement(candidate, kind, target, decision), proof,
+            context={'domain': candidate['domain'], 'kind': kind, 'action': decision})
         with self.store.writer_lock():
             previous, _ = self.snapshot()
-            if identity.get('proof_hash') in self._used_proofs:
+            if identity.get('proof_hash') in self._used_proofs or identity.get('nonce_hash') in self._used_proofs:
                 raise ConceptBlocked('REVIEW_PROOF_REPLAY')
             if self._count >= self.max_records:
                 raise ConceptBlocked('REVIEW_LEDGER_BUDGET')
@@ -83,23 +126,30 @@ class ReviewLedger:
                 'binding': candidate['binding'], 'reviewer': reviewer, 'reviewed_at': time(),
                 'policy': POLICY, 'scope': 'offline_fixture'}
             record['identity'] = identity
+            if proof is not None:
+                record.update(candidate_id=candidate['id'], domain=candidate['domain'], proof=proof)
             record['hash'] = digest(record)
             target_path = self.store.path('review/decisions.jsonl')
             target_path.parent.mkdir(exist_ok=True, mode=0o700)
             data = (json.dumps(record, sort_keys=True, ensure_ascii=False) + '\n').encode('utf-8')
-            if (target_path.stat().st_size if target_path.exists() else 0) + len(data) > self.max_bytes:
+            if len(data) > 4096 or (target_path.stat().st_size if target_path.exists() else 0) + len(data) > self.max_bytes:
                 raise ConceptBlocked('REVIEW_LEDGER_BUDGET')
+            self.store.ensure_capacity(len(data))
+            with self._trust_lock:
+                self._healthy = False
             with target_path.open('ab') as output:
                 os.chmod(target_path, 0o600)
                 output.write(data)
                 output.flush()
                 os.fsync(output.fileno())
+            self.store.account_growth(len(data))
             self.on_decision(record['hash'])
+            self.snapshot()  # Commit validated cache only after the new review token.
             return record['hash']
 
 
 def reviewed_concept(candidate, ledger_hash, decisions):
-    if candidate['kind'] not in ('translation', 'synonym', 'abbreviation'):
+    if candidate['kind'] not in ('translation', 'synonym', 'abbreviation', 'spelling'):
         return None
     required = [('relation', candidate['id']), *[('term', term_target(term, candidate)) for term in candidate['terms']]]
     if any(decisions.get((kind, target, candidate['binding'])) != 'approved' for kind, target in required):
@@ -122,6 +172,8 @@ def reviewed_concept(candidate, ledger_hash, decisions):
         terms[1]['kind'] = 'abbreviation'
         labels.pop(terms[1]['language'], None)
         labels[terms[0]['language']] = terms[0]['text']
+    if candidate['kind'] == 'spelling' and len(terms) > 1:
+        terms[1]['kind'] = 'spelling'
     return Concept.model_validate(dict(concept_id=concept_id, preferred_labels=labels,
         definition='Explicit corpus mapping reviewed in an offline fixture ledger.', domain=candidate['domain'],
         terms=terms, sources=source, review_status='approved', version=POLICY))
@@ -145,6 +197,9 @@ class ConceptDiscoveryWorker:
             review_authority = OfflineReviewAuthority()
         self.fence, self.ledger = EligibilityFence(inventory), ReviewLedger(store, on_decision=callback,
             authority=review_authority)
+        bind = getattr(inventory, 'bind_review_authority', None)
+        if bind:
+            bind(self.ledger.authority_token)
         callback(self.ledger.snapshot()[0])
 
     def _urgent(self, state):
@@ -172,14 +227,22 @@ class ConceptDiscoveryWorker:
         return f'contributions/{key[:2]}/{key}.json'
 
     def status(self):
-        return self.store.read_json('checkpoints/state.json', default={
+        state = self.store.read_json('checkpoints/state.json', default={
             'after': '', 'processed': 0, 'writes': 0, 'sweeps': 0, 'failures': 0,
             'paused': False, 'next_due': 0., 'status': 'NEW'})
+        contract = digest([2, POLICY, EXTRACTOR, ANALYZER_VERSION, asdict(self.limits),
+            getattr(self.inventory, 'source_generation', self.inventory.scope)])
+        if state.get('checkpoint_contract') != contract:
+            state.update(after='', checkpoint_version=2, checkpoint_contract=contract,
+                reconciliation_reason='CHECKPOINT_CONTRACT_CHANGED')
+        return state
 
     def tick(self):
         with self.store.writer_lock():
             state = self.status()
             try:
+                quarantined = self.events.quarantine_invalid_locked()
+                state['quarantined_events'] = state.get('quarantined_events', 0) + quarantined
                 self._urgent(state)
             except (OSError, ConceptBlocked):
                 state.update(status='RETRY_REQUIRED', error_code='URGENT_REPLAY_REQUIRED',
@@ -283,8 +346,8 @@ class ConceptDiscoveryWorker:
     def build(self):
         if self.inventory.scope != 'offline_fixture':
             raise ConceptBlocked('LIVE_PUBLISH_NOT_VERIFIED')
-        token = self.fence.capture()
         ledger_hash, decisions = self.ledger.snapshot()
+        token = self.fence.capture()
         coverage = {'resources_scanned': 0, 'resources_eligible': 0, 'relations_seen': 0,
                     'approved_relations': 0, 'pending_or_rejected': 0}
         def concepts():

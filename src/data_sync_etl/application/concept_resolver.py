@@ -10,7 +10,7 @@ from time import monotonic, time
 
 from data_sync_etl.domain.concepts import Concept, Dictionary, Snapshot, normalize
 from data_sync_etl.domain.indexing import digest
-from data_sync_etl.domain.lexical import surface_tokens
+from data_sync_etl.domain.lexical import QUERY_STOPWORDS, surface_tokens
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
 
 
@@ -139,10 +139,22 @@ class ConceptDictionaryProvider:
                 return cached[0]
             self.metrics['misses'] += 1
         tokens = surface_tokens(query)
-        if len(tokens) > 32:
+        if len(tokens) > 160:
             raise ConceptBlocked('LOOKUP_BUDGET')
-        aliases = {normalize(' '.join(tokens[start:start + size])) for start in range(len(tokens))
-                   for size in range(1, min(6, len(tokens) - start) + 1)}
+        if len(tokens) <= 32:
+            aliases = {normalize(' '.join(tokens[start:start + size])) for start in range(len(tokens))
+                       for size in range(1, min(6, len(tokens) - start) + 1)}
+        else:
+            # Candidate lookup only; Dictionary.expand still sees the full raw
+            # query, including negation. Never rewrite the Vector input.
+            aliases = {normalize(token) for token in tokens if token not in QUERY_STOPWORDS and len(token) > 2}
+            if len(aliases) > 128:
+                raise ConceptBlocked('LOOKUP_BUDGET')
+            for size in range(2, 7):
+                for start in range(len(tokens) - size + 1):
+                    if len(aliases) >= 128:
+                        break
+                    aliases.add(normalize(' '.join(tokens[start:start + size])))
         rows = release.lookup(aliases, max_records=self.max_records, budget_ms=self.lookup_ms)
         if not rows:
             return self.base

@@ -9,7 +9,9 @@ import pytest
 from data_sync_etl.application.concept_discovery import ReviewLedger
 from data_sync_etl.domain.concept_authority import (
     REQUIRED_COVERAGE,
+    REVIEW_VERSION,
     AuthorityAttestation,
+    ReviewerKeyPolicy,
     SignedReviewAuthority,
     review_statement,
 )
@@ -51,9 +53,12 @@ def test_review_identity_default_deny_and_signed_decision_binding(pipeline):
     with pytest.raises(ConceptBlocked, match='IDENTITY'):
         ReviewLedger(store).decide(candidate, **args)
     key = b'synthetic-test-issuer-key-32-bytes-only'
-    authority = SignedReviewAuthority({'test-issuer': key}, clock=lambda: 100)
+    policy = ReviewerKeyPolicy(frozenset({'test-reviewer'}), frozenset({'computing'}), frozenset({'approved', 'rejected'}),
+        frozenset({'term', 'relation'}), 1000)
+    authority = SignedReviewAuthority({'test-issuer': key}, policies={'test-issuer': policy}, clock=lambda: 100)
     body = dict(issuer='test-issuer', subject='test-reviewer', role='concept_reviewer',
-        statement=review_statement(candidate, 'relation', candidate['id'], 'approved'), expires=200, nonce='syntheticnonce123')
+        statement=review_statement(candidate, 'relation', candidate['id'], 'approved'), expires=200, nonce='syntheticnonce123',
+        issued_at=90, scope={'domain': 'computing', 'kind': 'relation', 'action': 'approved'}, version=REVIEW_VERSION)
 
     def signed(value):
         return {**value, 'signature': hmac.new(key, json.dumps(value, sort_keys=True,

@@ -18,6 +18,26 @@ class PendingConceptChanges:
             raise ConceptBlocked('CHANGE_QUEUE_BUDGET')
         return state
 
+    def quarantine_invalid_locked(self):
+        """Caller owns writer fence. Persist a redacted receipt before removal."""
+        state, removed = self._read(), 0
+        for key, item in list(state.items()):
+            valid = (isinstance(item, dict) and set(item) == {'resource_id', 'revision', 'fingerprint', 'kind'}
+                and isinstance(item.get('resource_id'), str) and 0 < len(item['resource_id']) <= 128
+                and key == digest(item['resource_id']) and type(item.get('revision')) is int and item['revision'] >= 0
+                and isinstance(item.get('fingerprint'), str) and len(item['fingerprint']) == 64
+                and all(c in '0123456789abcdef' for c in item['fingerprint'])
+                and isinstance(item.get('kind'), str) and item['kind'] in PRIORITY)
+            if not valid:
+                receipt = digest([key, item])
+                self.store.write_json('quarantine/events/' + receipt + '.json',
+                    {'event_hash': receipt, 'reason': 'INVALID_CHANGE_EVENT', 'raw_event': 'OMITTED'})
+                del state[key]
+                removed += 1
+        if removed:
+            self.store.write_json('events/pending.json', state)
+        return removed
+
     def enqueue(self, resource, kind):
         return self.enqueue_many([(resource, kind)])
 
