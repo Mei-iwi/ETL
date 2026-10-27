@@ -10,7 +10,7 @@ from data_sync_etl.domain.indexing import digest
 from data_sync_etl.domain.lexical import QUERY_STOPWORDS, surface_tokens
 from data_sync_etl.ports.concept_corpus import ConceptBlocked, ResourceEvidence
 
-EXTRACTOR = 'corpus-phrases-v7-no-seed'
+EXTRACTOR = 'corpus-phrases-v8-bound-span'
 POLICY = 'public-explicit-reviewed-v1'
 FORBIDDEN = re.compile(r'https?://|www\.|\S+@\S+|[<>]|\b(?:select|insert|drop)\b.*\b(?:from|table|into)\b|'
     r'approve\s+me|ignore\s+(?:all|previous)|bỏ\s+kiểm\s+duyệt|(?:password|secret|token)\s*[=:]', re.I)
@@ -169,6 +169,11 @@ def discover(resource: ResourceEvidence, reader=None, limits=DEFAULT_LIMITS):
             left, right = safe_phrase(left_raw), safe_phrase(right_raw)
             if not left or not right or left == right or FORBIDDEN.search(raw_pair) or NEGATED_PAIR.search(raw_pair):
                 continue
+            offset = text.find(raw_pair)
+            if offset < 0:
+                continue
+            relation_evidence = {**evidence, 'char_start': offset, 'char_end': offset + len(raw_pair),
+                                 'span_fingerprint': digest(raw_pair)}
             langs = declared_languages or [language(left), language(right)]
             if relation_hint == 'spelling':
                 def accentless(value):
@@ -199,7 +204,8 @@ def discover(resource: ResourceEvidence, reader=None, limits=DEFAULT_LIMITS):
                         + (5 if 'und' not in langs else 0) + (3 if field == 'unit' else 2)
                         + (2 if resource.sense else 0),
                     'rank_is_probability': False,
-                    'evidence': [evidence], 'binding': digest([POLICY, EXTRACTOR, identity, concept_id, result['fingerprint'], text_hash])}
+                    'evidence': [relation_evidence], 'binding': digest([
+                        POLICY, EXTRACTOR, identity, concept_id, result['fingerprint'], relation_evidence])}
         # Filtered technical n-grams are mention candidates only, never concepts.
         words = surface_tokens(text)
         for start in range(len(words)):
@@ -226,9 +232,13 @@ def valid_relation(candidate, authority_fingerprint):
             return False
         if evidence['source_fingerprint'] != authority_fingerprint or evidence['scope'] not in ('offline_fixture', 'verified_public'):
             return False
+        if (type(evidence['char_start']) is not int or type(evidence['char_end']) is not int
+                or not 0 <= evidence['char_start'] < evidence['char_end'] <= DEFAULT_LIMITS.max_chars
+                or not re.fullmatch(r'[0-9a-f]{64}', evidence['span_fingerprint'])):
+            return False
         identity = [candidate['domain'], candidate['sense'], candidate['kind'],
                     sorted((term['language'], term['text']) for term in terms)]
         return (candidate['id'] == 'corpus:' + digest(identity)[:32]
-                and candidate['binding'] == digest([POLICY, EXTRACTOR, identity, candidate['concept_id'], authority_fingerprint, evidence['text_hash']]))
+                and candidate['binding'] == digest([POLICY, EXTRACTOR, identity, candidate['concept_id'], authority_fingerprint, evidence]))
     except (KeyError, IndexError, TypeError):
         return False
