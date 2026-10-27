@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from data_sync_etl.adapters.concept_sources import conceptnet
-from data_sync_etl.domain.concepts import Dictionary, ExpansionPolicy, empty_dictionary
+from data_sync_etl.domain.concepts import Dictionary, ExpansionPolicy, Relation, Snapshot, empty_dictionary
 from data_sync_etl.domain.lexical import ANALYZER_VERSION, analyze, bm25, lexical_document
 from tests.corpus_dictionary_support import reviewed_dictionary
 from tests.unit.test_search import searchable as searchable
@@ -104,3 +104,44 @@ def test_ambiguous_corpus_senses_abstain_without_context(tmp_path):
         snapshot.concepts.append(other)
         assert not Dictionary(snapshot).expand('zircon lattice').terms
         assert empty_dictionary().expand('zircon lattice').terms == []
+
+
+def test_generic_relation_depth_cycles_review_and_budgets_remain_enforced(tmp_path):
+    # Generic domain graph contract only; runtime artifacts do not admit graph
+    # edges merely because this isolated model fixture can construct them.
+    source = 'en: zircon lattice | fr: réseau cristallin\nen: mineral spectra | fr: spectres minéraux'
+    with reviewed_dictionary(tmp_path, source, 'zircon lattice mineral spectra') as dictionary:
+        snapshot = dictionary.snapshot.model_copy(deep=True)
+        first = next(c for c in snapshot.concepts if 'zircon lattice' in c.preferred_labels.values())
+        second = next(c for c in snapshot.concepts if 'mineral spectra' in c.preferred_labels.values())
+        edge = Relation(source_id=first.concept_id, target_id=second.concept_id, kind='related',
+                        confidence=.95, sources=first.sources, review_status='approved', allow_expansion=True)
+        first.relations = [edge]
+        second.relations = [edge.model_copy(update={'source_id': second.concept_id, 'target_id': first.concept_id})]
+        current = Dictionary(snapshot)
+        assert 'mineral spectra' not in {t.term for t in current.expand('zircon lattice').terms}
+        policy = ExpansionPolicy(allowed_relations=['related'], max_depth=3, max_total=3)
+        expansion = current.expand('zircon lattice', policy=policy)
+        assert 'mineral spectra' in {t.term for t in expansion.terms}
+        assert len({(t.concept_id, t.term, t.language) for t in expansion.terms}) == len(expansion.terms)
+        assert sum(t.relation != 'original' for t in expansion.terms) <= 3
+        edge.review_status = 'pending'
+        second.relations = []
+        assert 'mineral spectra' not in {t.term for t in Dictionary(snapshot).expand('zircon lattice', policy=policy).terms}
+
+
+def test_snapshot_and_external_publication_conflicts_remain_rejected(tmp_path):
+    from pydantic import ValidationError
+
+    from scripts.concept_dictionary import publish
+
+    with reviewed_dictionary(tmp_path, 'en: zircon lattice | fr: réseau cristallin', 'zircon lattice') as dictionary:
+        base = dictionary.snapshot
+        candidate = base.model_copy(deep=True)
+        candidate.concepts[0].definition = 'conflicting external claim'
+        with pytest.raises(ValueError, match='Conflict'):
+            publish(base, candidate, 'new')
+        data = base.model_dump()
+        data['concepts'][0]['terms'][0]['normalized'] = 'wrong normalization'
+        with pytest.raises(ValidationError):
+            Snapshot.model_validate(data)
