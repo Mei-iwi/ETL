@@ -6,7 +6,7 @@ from pathlib import Path
 from statistics import mean
 from time import perf_counter
 
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.indexing import digest
 from data_sync_etl.domain.lexical import ANALYZER_VERSION, RANKING_VERSION, bm25, lexical_document
 
@@ -27,7 +27,7 @@ def percentile(values, quantile):
 
 
 def benchmark(corpus, *, k=5, repeats=5):
-    dictionary = default_dictionary()
+    dictionary = empty_dictionary()
     documents = {d['id']: lexical_document([d['text']], d.get('title')) for d in corpus['documents']}
     rows, times = [], {method: [] for method in ('bm25', 'equivalents', 'contextual')}
     # Warm tokenizer before latency samples; exclude one-time import/model load.

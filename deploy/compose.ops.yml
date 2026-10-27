@@ -12,8 +12,10 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       ETL_MAINTENANCE_APPROVAL: ${ETL_MAINTENANCE_APPROVAL:-NOT_APPROVED}
-      INDEX_EMBEDDING_DIMENSION: "384"
-    secrets: [ops-connections]
+      INDEX_EMBEDDING_DIMENSION: ${INDEX_EMBEDDING_DIMENSION:-384}
+    secrets:
+      - source: ops-connections
+        target: ops-connections.json
     networks: [data]
     healthcheck: {disable: true}
     tmpfs: ["/run/etl:rw,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=67108864"]

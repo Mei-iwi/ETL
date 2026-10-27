@@ -316,6 +316,18 @@ class Container:
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
                                     query_cache_runtime=self.indexing.embedding, semantic=self.semantic,
                                     metadata=self.metadata_search)
+        # No live adapter can attest all PG/Mongo/provider writers yet. A flag
+        # alone must never mint authority or enable stale result replay.
+        self.search_sessions = None
+        if self.settings.concept_dynamic_enabled:
+            from data_sync_etl.application.concept_resolver import ConceptDictionaryProvider
+            # No verified live revocation/RO/storage attestor exists yet. Flags
+            # alone MUST NOT activate corpus aliases or start a builder/poller.
+            self.search.concept_resolver = ConceptDictionaryProvider(self.search.dictionary,
+                enabled=True, cache_bytes=self.settings.concept_dynamic_cache_max_mb * 1024 * 1024,
+                lookup_ms=self.settings.concept_dynamic_lookup_budget_ms,
+                max_records=self.settings.concept_dynamic_max_lookup_records,
+                refresh_seconds=self.settings.concept_dynamic_refresh_interval_seconds)
         if self.settings.semantic_enabled and self.semantic is not None:
             self.capabilities = replace(self.capabilities, embedding_runtime=self.semantic.embedding)
         self.evaluations = EvaluationService(self.search, EvaluationFileStore(

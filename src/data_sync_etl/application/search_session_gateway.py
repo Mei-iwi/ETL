@@ -1,0 +1,87 @@
+"""HTTP adapter for rank reuse. Requires an independently verified authority.
+
+Production composition deliberately supplies no adapter until a revision fence
+covers every writer (ACL, metadata, content, model, dictionary and provider).
+Callbacks must rank complete bounded references and hydrate with current rights.
+No response DTO, snippet, URL or authorization decision is retained here.
+"""
+from dataclasses import asdict
+from threading import BoundedSemaphore
+
+from data_sync_etl.application.search_runtime import CURRENT_SEARCH
+from data_sync_etl.application.search_sessions import SearchResultSessions
+from data_sync_etl.domain.indexing import digest
+from data_sync_etl.domain.search import SearchError
+
+
+class SearchSessionGateway:
+    def __init__(self, authority, rank_once, hydrate, envelope, **limits):
+        self.sessions = SearchResultSessions(authority, **limits)
+        self.rank_once, self.hydrate, self.envelope = rank_once, hydrate, envelope
+        self._capacity = BoundedSemaphore(4)
+
+    @staticmethod
+    def keys(criteria, access):
+        if not access.actor_id or not access.internal:
+            raise SearchError('SEARCH_SESSION_UNAVAILABLE', 409)
+        scope = asdict(access)
+        scope['resource_ids'] = sorted(scope['resource_ids'])
+        return digest(scope), digest(criteria)
+
+    def visibility_guard(self, token, criteria, access):
+        owner, key = self.keys(criteria, access)
+        return lambda: self.sessions.current(token, owner, key)
+
+    @staticmethod
+    def _check():
+        call = CURRENT_SEARCH.get()
+        if call is not None:
+            call.reauthorize()
+
+    def read(self, criteria, access, *, page, size, token=None, window_pages=1):
+        if not self._capacity.acquire(blocking=False):
+            raise SearchError('SEARCH_SESSION_BUSY', 503)
+        try:
+            self._check()
+            owner, key = self.keys(criteria, access)
+            if token is None:
+                def rank():
+                    self._check()
+                    ranked = self.rank_once(criteria, access)
+                    self._check()
+                    return ranked
+                token = self.sessions.begin(owner, key, rank)
+            revision = self.sessions._revision(owner)
+            header = self.envelope(criteria, access)
+            if (header.get('message') != 'OK' or any(value not in ('OK', 'READY', 'DISABLED', 'NOT_REQUESTED')
+                    for value in (header.get('branch_status') or {}).values())):
+                raise SearchError('SEARCH_SESSION_UNAVAILABLE', 409)
+
+            def hydrate(refs):
+                self._check()
+                items = self.hydrate(refs, criteria, access)
+                self._check()
+                if (len(items) != len(refs) or any(
+                        (item.get('resource_id'), item.get('resource_version_id'), item.get('bag_id'),
+                         item.get('content_unit_id'), item.get('score')) !=
+                        (hit.resource_id, hit.version_id, hit.bag_id, hit.unit_id, hit.score)
+                        for item, hit in zip(items, refs, strict=False))):
+                    self.sessions.invalidate_owner(owner)
+                    raise SearchError('SEARCH_SESSION_MISS', 409)
+                return items
+
+            def read(number):
+                result = self.sessions.page(token, owner, key, number, size,
+                    hydrate)
+                return {**header, **result}
+
+            result = read(page)
+            window = [read(number) for number in range(page + 1,
+                min(page + window_pages, result['total_pages'] + 1))]
+            if self.sessions._revision(owner) != revision:
+                raise SearchError('SEARCH_SESSION_MISS', 409)
+            self._check()
+            return {**result, 'search_session': {'id': token, 'ttl_seconds': self.sessions.ttl},
+                    'page_window': window, 'total_exact': True}
+        finally:
+            self._capacity.release()

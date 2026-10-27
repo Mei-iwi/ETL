@@ -40,6 +40,11 @@ class SourceFileImportService:
         self.process, self.retry_processing, self.settings = process, retry_processing, settings
         self.formats = formats or FormatValidatorRegistry()
         self.validator = self.formats.find_validator('source.pdf')
+        self._media_policy_scan_started = False
+
+    def _media_processing_enabled(self):
+        return (not self.settings.source_metadata_media_enabled
+                and self.settings.source_reference_enabled and self.settings.source_temporary_files_enabled)
 
     def availability(self):
         storage_error = None
@@ -79,9 +84,13 @@ class SourceFileImportService:
                 new_master = checkpoint["last_updated_at"] is None or latest > checkpoint["last_updated_at"]
                 due = bool(auto and auto["enabled"] and checkpoint["updated_at"] <= now()
                            - timedelta(seconds=self.settings.source_file_reconcile_seconds))
-                if not (active_scan or new_master or due):
+                # A restart with processing enabled must revisit terminal
+                # metadata-only imports, even without a new SOURCE delta or
+                # automatic Master Sync. Reuse the bounded discovery cursor.
+                policy_scan = self._media_processing_enabled() and not self._media_policy_scan_started
+                if not (active_scan or new_master or due or policy_scan):
                     return 0
-                after = checkpoint["last_id"] if active_scan else None
+                after = checkpoint["last_id"] if active_scan and not policy_scan else None
             # Only read metadata here; never copy a blob in the Master Sync transaction.
             page = self.source.version_page(after=after or None, size=min(100, self.settings.sync_batch_size))
             with self.uow() as repo:
@@ -90,9 +99,35 @@ class SourceFileImportService:
                 repo.update("sync_checkpoints", "source-file-discovery", {
                     "last_id": page["next_cursor"], "updated_at": now(),
                     # Changes during a resumed scan trigger another reconciliation afterwards.
-                    "last_updated_at": checkpoint["last_updated_at"] if active_scan else latest,
+                    "last_updated_at": checkpoint["last_updated_at"] if active_scan and not policy_scan else latest,
                 })
+            if policy_scan:
+                self._media_policy_scan_started = True
             return len(page["items"])
+
+    def _resume_metadata_media(self, repo, row, source):
+        if (not self._media_processing_enabled() or row['status'] != 'METADATA_ONLY'
+                or not row['target_version_id'] or row['processing_job_id'] is not None
+                or row['last_error_code'] not in (None, 'UNSUPPORTED_SOURCE_FORMAT')
+                or not row['storage_object_key'].lower().endswith(('.mp3', '.mp4'))
+                or not source.get('resource_active', True) or source.get('resource_deleted_at') is not None
+                or source['source_lifecycle_status'] not in self.settings.source_file_allowed_statuses):
+            return
+        resource = repo.get('master_learning_resources', row['resource_id'])
+        target = repo.get('resource_versions', row['target_version_id'])
+        if (resource is None or not resource['is_active'] or resource_deleted(resource)
+                or resource.get('source_origin') != 'POSTGRESQL' or target is None
+                or target['resource_id'] != row['resource_id']
+                or target['lifecycle_status'] not in ('INGESTED', 'APPROVED', 'PUBLISHED')
+                or target['source_hash'].lower() != row['source_hash'].lower()):
+            return
+        # Preserve the target, retry counters and historical jobs. The existing
+        # leased claim + resolver revalidates rights/hash before idempotent job
+        # creation; never decode media or load a model during discovery.
+        repo.update('source_file_imports', row['id'], {
+            'status': 'PENDING', 'last_error_code': None, 'next_retry_at': None,
+            'claim_token': None, 'lease_expires_at': None, 'updated_at': now(),
+        })
 
     def _discover(self, repo, source):
         unsupported_media = False  # MP3/MP4 now share the normal processing pipeline.
@@ -118,6 +153,7 @@ class SourceFileImportService:
                     "claim_token": None, "lease_expires_at": None, "updated_at": now(),
                 })
             else:
+                self._resume_metadata_media(repo, row, source)
                 if (self.settings.source_metadata_media_enabled and row['last_error_code'] == 'UNSUPPORTED_SOURCE_FORMAT'
                         and row['target_version_id'] is None and row['status'] == 'FAILED'):
                     repo.update('source_file_imports', row['id'], {'status': 'PENDING', 'last_error_code': None})

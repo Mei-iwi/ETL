@@ -14,6 +14,8 @@ import {
 } from "../../services/libraryLookupApi"
 import { startProcessing } from "../../services/processingApi"
 import styles from "./LibraryCreatePages.module.css"
+import { LIBRARY_FILE_ACCEPT, LIBRARY_FILE_FORMATS, libraryFileError } from './libraryFileFormats'
+import { SelectedMediaPreview } from './MediaFilePreview'
 
 type CreateResourceResponse = {
     id: string
@@ -22,11 +24,6 @@ type CreateResourceResponse = {
 }
 
 type SubmitStage = "idle" | "creating" | "processing"
-
-const ALLOWED_EXTENSIONS = [
-    ".pdf", ".docx", ".xlsx", ".txt", ".csv",
-    ".png", ".jpg", ".jpeg", ".pptx", ".mp3", ".mp4",
-]
 
 function formatFileSize(size: number): string {
     if (size < 1024) return `${size} B`
@@ -165,14 +162,9 @@ export function LibraryCreatePage() {
     function applySelectedFile(file?: File) {
         if (!file) return
 
-        const valid = ALLOWED_EXTENSIONS.some((extension) =>
-            file.name.toLowerCase().endsWith(extension),
-        )
-
-        if (!valid) {
-            setError(
-                "Định dạng tệp không được hỗ trợ. Hãy chọn PDF, DOCX, XLSX, TXT, CSV, PNG, JPG, PPTX, MP3 hoặc MP4.",
-            )
+        const fileError = libraryFileError(file)
+        if (fileError) {
+            setError(fileError)
             return
         }
 
@@ -446,7 +438,7 @@ export function LibraryCreatePage() {
                                 </span>
 
                                 <span className={styles.fileTypes}>
-                                    PDF · DOCX · XLSX · TXT · CSV · PNG · JPG · PPTX · MP3 · MP4
+                                    {LIBRARY_FILE_FORMATS}
                                 </span>
 
                                 <input
@@ -455,7 +447,7 @@ export function LibraryCreatePage() {
                                     id="file"
                                     type="file"
                                     name="file"
-                                    accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx,.mp3,.mp4"
+                                    accept={LIBRARY_FILE_ACCEPT}
                                     onChange={handleFileInputChange}
                                     required
                                 />
@@ -604,6 +596,7 @@ export function LibraryCreatePage() {
                     </div>
                 )}
 
+                <SelectedMediaPreview file={selectedFile} />
                 {selectedMediaType && <ProcessingPreferences
                     value={processingPreferences}
                     onChange={setProcessingPreferences}

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from data_sync_etl.config import Settings
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.evidence_selection import (
     EvidenceCandidate,
     bounded_evidence,
@@ -66,7 +66,7 @@ def test_selector_separates_version_ranking_from_real_near_tie_evidence_and_loca
     rows = [candidate('topic', 'Cây xanh phát triển dưới ánh sáng.', .81, bag='b1'),
             candidate('answer', 'Giấy lọc không tách được muối hòa tan khỏi nước.', .80, bag='b2')]
     before = deepcopy(rows)
-    dictionary = default_dictionary()
+    dictionary = empty_dictionary()
     query = 'Giấy lọc không tách được muối hòa tan'
     assert select_evidence(rows, version_id='v').chunk['id'] == 'topic'
     selected = select_evidence(rows, version_id='v', strategy='context', query=query,

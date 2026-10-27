@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import {
   BrowserRouter,
   Routes,
@@ -24,7 +25,7 @@ import { LibraryIndexingPage } from './pages/library/LibraryIndexingPage'
 import { LibraryResourceDetailPage } from './pages/library/LibraryResourceDetailPage'
 import { LibraryVersionHistoryPage } from './pages/library/LibraryVersionHistoryPage'
 
-import { QueryMethodPage } from './pages/search/QueryMethodPage'
+const QueryMethodPage = lazy(() => import('./pages/search/QueryMethodPage').then(module => ({ default: module.QueryMethodPage })))
 
 import { EvaluationDataPage } from './pages/experiments/EvaluationDataPage'
 import { EvaluationResultsPage } from './pages/experiments/EvalutionResultsPage'
@@ -82,7 +83,7 @@ export default function App() {
           <Route path='search'>
             <Route index element={<Navigate to='query-methods' replace />} />
             <Route path='materials' element={<SearchAlias />} />
-            <Route path='query-methods' element={<QueryMethodPage />} />
+            <Route path='query-methods' element={<Suspense fallback={<p role="status">Đang mở tra cứu học liệu…</p>}><QueryMethodPage /></Suspense>} />
             <Route path='result' element={<SearchAlias />} />
           </Route>
           <Route path='experiments'>

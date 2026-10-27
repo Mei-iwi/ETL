@@ -17,13 +17,13 @@ for (const length of [undefined, 'invalid', '-1', '2']) {
     test('actual bytes enforce preview budget with Content-Length=' + length, async () => {
         const item = streamed([new Array(8).fill(1), new Array(8).fill(2), new Array(8).fill(3)],
             length === undefined ? {} : { 'Content-Length': length })
-        await assert.rejects(readPreviewBlob(item.response, undefined, 10), /30 MB/)
+        await assert.rejects(readPreviewBlob(item.response, undefined, 10), /vượt giới hạn/)
         assert.equal(item.cancelled(), true)
     })
 }
 test('declared oversized file is cancelled before buffering', async () => {
     const item = streamed([[1]], { 'Content-Length': '999' })
-    await assert.rejects(readPreviewBlob(item.response, undefined, 10), /30 MB/)
+    await assert.rejects(readPreviewBlob(item.response, undefined, 10), /vượt giới hạn/)
     assert.equal(item.cancelled(), true)
 })
 test('small body keeps MIME and exact bytes', async () => {

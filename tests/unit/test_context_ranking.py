@@ -10,20 +10,24 @@ def test_function_words_cannot_beat_actual_query_evidence():
     assert ranker.score(1) > ranker.score(0)
 
 
-def test_exact_phrase_beats_translation_and_scattered_words():
-    query = 'machine learning'
-    ranker = ContextRanker(query, query_terms(query), [
-        'machine tools for learning tasks', 'apprentissage automatique', 'machine learning',
-    ])
-    assert ranker.score(2) > ranker.score(1) > ranker.score(0)
+def test_exact_phrase_beats_translation_and_scattered_words(tmp_path):
+    from tests.corpus_dictionary_support import reviewed_dictionary
+    query = 'zircon lattice'
+    with reviewed_dictionary(tmp_path, 'en: zircon lattice | fr: réseau cristallin', query) as dictionary:
+        ranker = ContextRanker(query, query_terms(query), [
+            'zircon tools for lattice tasks', 'réseau cristallin', 'zircon lattice',
+        ], dictionary=dictionary, expansion=dictionary.expand(query))
+        assert ranker.score(2) > ranker.score(1) > ranker.score(0)
 
 
-def test_qualified_concepts_beat_partial_overlap():
-    query = 'unsupervised learning'
-    ranker = ContextRanker(query, query_terms(query), [
-        'supervised learning learning learning', 'học không giám sát',
-    ])
-    assert ranker.score(1) > ranker.score(0)
+def test_qualified_concepts_beat_partial_overlap(tmp_path):
+    from tests.corpus_dictionary_support import reviewed_dictionary
+    query = 'zircon lattice'
+    with reviewed_dictionary(tmp_path, 'en: zircon lattice | fr: réseau cristallin', query) as dictionary:
+        ranker = ContextRanker(query, query_terms(query), [
+            'another lattice lattice lattice', 'réseau cristallin',
+        ], dictionary=dictionary, expansion=dictionary.expand(query))
+        assert ranker.score(1) > ranker.score(0)
 
 
 def test_query_compounds_match_source_sequences_without_crossing_words():
@@ -52,4 +56,4 @@ def test_snippet_prefers_distinctive_query_word_to_repeated_generic_hits():
 
 def test_snippet_finds_cjk_phrase_inside_a_long_unsegmented_passage():
     text = '背景内容' * 200 + '机器学习方法'
-    assert '机器学习' in snippet_text(text, set(), query='học máy')
+    assert '机器学习' in snippet_text(text, {'机器学习'}, query='机器学习')

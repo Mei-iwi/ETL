@@ -13,7 +13,7 @@ from data_sync_etl.domain.indexing import digest
 
 ANALYZER_VERSION = 'underthesea-8.3.0-nfc-surface-compound-alnum-v2'
 REPRESENTATION_VERSION = 'bag-lexical-tf-v1'
-RANKING_VERSION = 'bm25-concept-coverage-v4'
+RANKING_VERSION = 'bm25-concept-core-evidence-v5'
 TOKEN = re.compile(r'c\+\+|c#|\.net\b|\d+(?:\.\d+)+|[^\W_]+', re.IGNORECASE)
 SPECIAL = re.compile(r'(c\+\+|c#|\.net\b)', re.IGNORECASE)
 _ANALYSIS = ContextVar('lexical_request_analysis', default=None)
@@ -37,6 +37,12 @@ QUERY_STOPWORDS = frozenset(
     'the a an of and to in is are for on what how why where when which who whom whose '
     'does do can could would should please explain about this that these those it its '
     'as be been being'.split())
+
+# Keep these words in the index and score: they can qualify a real phrase.
+# On their own they cannot establish the subject of a multiword query.
+AUXILIARY_MATCH_TERMS = frozenset(
+    'một hai ba bốn năm sáu bảy tám chín mười '
+    'one two three four five six seven eight nine ten'.split())
 
 
 def surface_tokens(text):
@@ -168,7 +174,8 @@ def contains_phrase(tokens, query):
 
 
 def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
-         dictionary=None, policy=None, domain=None, contextual=True, expansion=None, min_coverage=0., corpus=None):
+         dictionary=None, policy=None, domain=None, contextual=True, expansion=None, min_coverage=0., corpus=None,
+         focus_query=None, accent_insensitive=False):
     """Weighted BM25, maximum alternative per concept (no alias stacking).
 
     N, avgdl and DF cover ALL authorized verified bags including nonhits.
@@ -177,13 +184,18 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
     The strongest weighted alias contributes once per concept. Literal leftover
     surface words are unique query features. Title contributes an extra TF boost.
     """
-    from data_sync_etl.domain.concepts import ExpansionPolicy, default_dictionary
+    from data_sync_etl.domain.concepts import ExpansionPolicy, empty_dictionary
 
     if not documents:
         return {}
     policy = policy or ExpansionPolicy()
-    dictionary = dictionary or default_dictionary()
+    dictionary = dictionary or empty_dictionary()
     expansion = expansion or dictionary.expand(query, domain=domain, policy=policy, contextual=contextual)
+    focus = (dictionary.expand(focus_query, domain=domain, policy=policy, contextual=contextual)
+             if focus_query and focus_query != query else expansion)
+    focus_ids = ({mention.concept_id for mention in focus.recognized if mention.concept_id}
+                 if expand_concepts and policy.enabled else set())
+    original_terms = set(surface_tokens(focus_query or query)) - QUERY_STOPWORDS
     terms = {t for t in surface_tokens(query) if t not in QUERY_STOPWORDS}
     if not query_terms(query):
         return {}
@@ -205,7 +217,7 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         # Longest dictionary matches prevent a qualified phrase from becoming
         # evidence for a shorter, different sense. Passage boundaries are kept.
         counts, title = Counter(), Counter()
-        if groups:
+        if groups or focus_ids:
             title.update((cid, m.group()) for m, cid in dictionary.observations(' '.join(doc.title_tokens), policy=policy))
             counts.update(title)
             for passage in doc.passages:
@@ -222,12 +234,39 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         if len(exact) % period == 0 and exact == exact[:period] * (len(exact) // period):
             exact = exact[:period]
             break
+    # A substantial phrase actually present in this authorized corpus supplies
+    # a subject anchor without a curated ontology. Incidental qualifiers alone
+    # must not outrank it. No anchor is inferred for unknown/long queries.
+    anchors = set()
+    if not focus_ids and 3 <= len(exact) <= 12:
+        informative_query = set(exact) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS
+        for doc in documents.values():
+            if len(informative_query.intersection(doc.terms)) < 2:
+                continue
+            for tokens in [doc.title_tokens, *doc.passages]:
+                for width in range(min(6, len(exact)), 2, -1):
+                    for start in range(len(exact) - width + 1):
+                        phrase = exact[start:start + width]
+                        informative = set(phrase) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS
+                        if len(informative) >= 2 and contains_phrase(tokens, phrase):
+                            anchors.add(tuple(phrase))
+        if anchors:
+            longest = max(map(len, anchors))
+            anchors = {phrase for phrase in anchors if len(phrase) == longest}
     for key, doc in documents.items():
         tf = dict(zip(doc.terms, doc.frequencies, strict=True))
         title_tf = dict(zip(doc.title_terms, doc.title_frequencies, strict=True))
         score = sum(contribution(tf[t] + policy.title_boost * title_tf.get(t, 0), df[t], doc.length)
                     for t in sorted(terms & tf.keys()))
         counts, title = observed[key]
+        if focus_ids and not any(cid in focus_ids and count for (cid, _), count in counts.items()):
+            continue  # A qualifier cannot replace an explicitly recognized subject.
+        if anchors and not any(set(phrase) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS <= tf.keys()
+                               for phrase in anchors):
+            continue
+        if (len(original_terms) > 1 and not focus_ids
+                and (original_terms & tf.keys()) <= AUXILIARY_MATCH_TERMS):
+            continue
         matched_features = sum(term in tf for term in terms)
         matched_features += sum(any(counts[t.concept_id, t.term] for t in alternatives)
                                 for alternatives in groups.values())
@@ -242,6 +281,16 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
                                          for tokens in [doc.title_tokens, *doc.passages]):
                 score *= policy.phrase_boost
             result[key] = score
+    if accent_insensitive:
+        from data_sync_etl.domain.query_variants import corpus_accent_variant
+
+        variant = corpus_accent_variant(query, documents)
+        if variant is not None:
+            assisted = bm25(variant, documents, k1=k1, b=b, expand_concepts=expand_concepts,
+                            dictionary=dictionary, policy=policy, domain=domain, contextual=contextual,
+                            min_coverage=min_coverage, corpus=corpus)
+            result = {key: max(result.get(key, 0.), .8 * assisted.get(key, 0.))
+                      for key in result.keys() | assisted.keys()}
     return result
 
 

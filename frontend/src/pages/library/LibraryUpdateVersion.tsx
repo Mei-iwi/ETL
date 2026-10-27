@@ -22,6 +22,8 @@ import type {
     UpdateResourceMetadataRequest,
 } from '../../types/resourceMetadata'
 import styles from './LibraryPages.module.css'
+import { LIBRARY_FILE_ACCEPT, LIBRARY_FILE_FORMATS, libraryFileError } from './libraryFileFormats'
+import { SelectedMediaPreview } from './MediaFilePreview'
 
 type ResourceDetailResponse = {
     source_origin?: string | null
@@ -38,6 +40,7 @@ type UpdateStage = 'idle' | 'metadata' | 'uploading' | 'processing'
 export function LibraryUpdateVersion() {
     const [processingPreferences, setProcessingPreferences] = useState(defaultProcessingPreferences)
     const [replacementFileName, setReplacementFileName] = useState('')
+    const [replacementFile, setReplacementFile] = useState<File | null>(null)
     const selectedMediaType = getMediaFileType(replacementFileName)
     const { resourceId } = useParams<{ resourceId: string }>()
     const navigate = useNavigate()
@@ -155,6 +158,9 @@ export function LibraryUpdateVersion() {
         const formData = new FormData(event.currentTarget)
         const fileValue = formData.get('file')
         const file = fileValue instanceof File && fileValue.size > 0 ? fileValue : null
+        const selectedFile = fileValue instanceof File && fileValue.name ? fileValue : null
+        const fileError = selectedFile ? libraryFileError(selectedFile) : null
+        if (fileError) { setVersionError(fileError); return }
 
         const payload: UpdateResourceMetadataRequest = {
             title: title.trim(),
@@ -362,15 +368,21 @@ export function LibraryUpdateVersion() {
                             id="file"
                             name="file"
                             type="file"
-                            accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.pptx,.mp3,.mp4"
+                            accept={LIBRARY_FILE_ACCEPT}
                             onChange={event => {
-                                setReplacementFileName(event.currentTarget.files?.[0]?.name ?? '')
+                                const chosen = event.currentTarget.files?.[0] ?? null
+                                const error = chosen ? libraryFileError(chosen) : null
+                                setVersionError(error ?? '')
+                                setReplacementFile(error ? null : chosen)
+                                setReplacementFileName(error ? '' : chosen?.name ?? '')
                                 setProcessingPreferences(defaultProcessingPreferences)
                             }}
                             disabled={formDisabled}
                         />
+                        <small>{LIBRARY_FILE_FORMATS}</small>
                     </div>
 
+                    <SelectedMediaPreview file={replacementFile} />
                     {selectedMediaType && <ProcessingPreferences
                         value={processingPreferences}
                         onChange={setProcessingPreferences}

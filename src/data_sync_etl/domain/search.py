@@ -20,6 +20,22 @@ def normalize_query(value):
     return unicodedata.normalize('NFC', value).strip()
 
 
+MAX_QUERY_CHARS = 2000
+MAX_QUERY_TOKENS = 256
+
+
+def bounded_query(value):
+    """Preserve full intent, identifiers and negation within explicit budgets."""
+    from data_sync_etl.domain.lexical import surface_tokens
+
+    if not isinstance(value, str) or len(value) > 8000:
+        raise ValueError('Invalid search query length')
+    value = normalize_query(value)
+    if not 1 <= len(value) <= MAX_QUERY_CHARS or len(surface_tokens(value)) > MAX_QUERY_TOKENS:
+        raise ValueError('Invalid search query budget')
+    return value
+
+
 def binary_score(query, keywords):
     left, right = set(query), set(keywords)
     matched = sorted(left & right)

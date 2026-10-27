@@ -43,7 +43,7 @@ def authorize(request, principal):
     catalogs = ('/api/v1/subjects', '/api/v1/providers', '/api/v1/resource-types', '/api/v1/grade-levels')
     if method == 'GET' and (path in catalogs or path in ('/api/v1/search/model-status', '/api/v1/resources')):
         return
-    if ((path == '/api/v1/search' and method == 'POST')
+    if ((path in ('/api/v1/search', '/api/v1/search/page') and method == 'POST')
             or (path.startswith('/api/v1/chunks/') and path.endswith('/context') and method == 'GET')):
         return  # SearchAccess verifies explicit resource grants and eligibility.
     version = re.fullmatch(r'/api/v1/resource-versions/([^/]+)/(file|source-info|chunks|content-units|index-status|etl-status|process|postprocess|index|reindex|ocr-jobs|processing-options|bilingual|processing-source|translations/retry|exports/(?:json|txt|srt|vtt)|segments/[^/]+/frame)', path)

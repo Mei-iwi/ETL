@@ -11,7 +11,7 @@ from pydantic import (
 )
 
 from data_sync_etl.domain.indexing import IndexingError
-from data_sync_etl.domain.search import SearchError, normalize_query
+from data_sync_etl.domain.search import SearchError, bounded_query
 
 Method = Literal['bow', 'vector', 'hybrid']
 Identifier = Annotated[str, Field(min_length=1, max_length=30, pattern=r'^\S(?:.*\S)?$')]
@@ -32,7 +32,8 @@ class SearchFilters(StrictDTO):
 
 
 class SearchRequest(StrictDTO):
-    query: str = Field(max_length=600)
+    window_pages: int = Field(default=1, ge=1, le=3)
+    query: str = Field(max_length=8000)
     method: Method = 'hybrid'
     filters: SearchFilters = Field(default_factory=SearchFilters)
     page: int = Field(default=1, ge=1, le=10001)
@@ -41,16 +42,22 @@ class SearchRequest(StrictDTO):
     @field_validator('query')
     @classmethod
     def query_text(cls, value):
-        value = normalize_query(value)
-        if not 1 <= len(value) <= 300:
-            raise ValueError('Invalid search query length')
-        return value
+        return bounded_query(value)
 
     @model_validator(mode='after')
     def offset_bound(self):
         if (self.page - 1) * self.size > 10000:
             raise ValueError('Search offset exceeded')
         return self
+
+
+class SearchPageRequest(SearchRequest):
+    session_id: str = Field(min_length=40, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')
+
+
+class SearchSessionInfo(StrictDTO):
+    id: str = Field(min_length=40, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')
+    ttl_seconds: float = Field(gt=0, le=60)
 
 
 class SearchItem(StrictDTO):
@@ -104,6 +111,10 @@ class SearchItem(StrictDTO):
 
 
 class SearchResponse(StrictDTO):
+    search_session: SearchSessionInfo | None = None
+    page_window: list['SearchResponse'] | None = Field(default=None, max_length=2)
+    total_exact: bool | None = None
+    session_status: Literal['UNAVAILABLE'] | None = None
     branch_status: dict[str, str] | None = None
     query_expansion: dict | None = None
     search_fingerprint: str | None = None
@@ -127,6 +138,9 @@ class SearchResponse(StrictDTO):
         # Preserve byte-for-byte legacy field presence, including nullable item
         # metadata. response_model_exclude_none would remove required nulls too.
         result = handler(self)
+        for name in ('search_session', 'page_window', 'total_exact', 'session_status'):
+            if getattr(self, name) is None:
+                result.pop(name, None)
         if self.vector_index is None:
             result.pop('vector_index', None)
         if self.branch_status is None:

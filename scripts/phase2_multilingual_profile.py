@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from time import perf_counter
 
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.evaluation import checksum, percentile
 from data_sync_etl.domain.lexical import analysis_scope, bm25, lexical_document
 from data_sync_etl.domain.retrieval_fusion import vector_priority_rrf, version_rrf
@@ -31,7 +31,7 @@ def run(args):
     queries = base['queries'] + extra['queries']
     if len(queries) > 100 or len(base['documents']) > 100:
         raise ValueError('Bounded public fixture required')
-    dictionary = default_dictionary()
+    dictionary = empty_dictionary()
     fingerprint = dictionary.fingerprint
     documents = {d['id']: lexical_document([d['text']], d['title']) for d in base['documents']}
     keys, versions = list(documents), {key: key for key in documents}

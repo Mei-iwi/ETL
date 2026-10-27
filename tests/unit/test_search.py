@@ -90,7 +90,7 @@ def test_context_locator_round_trip():
 
 
 @pytest.mark.parametrize('body', [
-    {'query': ' '}, {'query': 'x'*301}, {'query': 1}, {'query': 'x', 'method': 'bm25'},
+    {'query': ' '}, {'query': 'x'*2001}, {'query': 1}, {'query': 'x', 'method': 'bm25'},
     {'query': 'x', 'size': True}, {'query': 'x', 'size': 51}, {'query': 'x', 'page': 0},
     {'query': 'x', 'page': 10001, 'size': 50}, {'query': 'x', 'extra': 1},
     {'query': 'x', 'filters': {'subject_id': 'x'*31}},

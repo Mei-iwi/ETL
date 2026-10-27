@@ -22,7 +22,7 @@ class ResourceVisibilityBoundary:
             path,
         )
         job_match = re.fullmatch(r'/api/v1/processing-jobs/([^/]+)(?:/[^/]+)?', path)
-        global_read = ((path == '/api/v1/search' and scope['method'] == 'POST')
+        global_read = ((path in ('/api/v1/search', '/api/v1/search/page') and scope['method'] == 'POST')
                        or (path == '/api/v1/resources' and scope['method'] == 'GET'))
         global_read |= bool(re.fullmatch(r'/api/v1/chunks/[^/]+/context', path))
         if not (global_read or resource_match or version_match or job_match) or (resource_match and scope['method'] == 'DELETE'):
@@ -34,6 +34,20 @@ class ResourceVisibilityBoundary:
         initial_epoch = await run_in_threadpool(epoch) if global_read else None
 
         def visible():
+            session_guard = scope.get('state', {}).get('search_session_guard')
+            if session_guard is not None:
+                try:
+                    if not session_guard():
+                        return False
+                except Exception:
+                    return False
+            concept_guard = scope.get('state', {}).get('concept_visibility_guard')
+            if concept_guard is not None:
+                try:
+                    if not concept_guard():
+                        return False
+                except Exception:
+                    return False
             with request.app.state.container.uow() as repo:
                 if global_read:
                     return repo.resource_visibility_epoch() == initial_epoch

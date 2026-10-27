@@ -71,12 +71,17 @@ def test_bad_source_response_is_not_saved(tmp_path, monkeypatch, payload):
 
 @pytest.mark.parametrize('concept_id,reviewer,message', [
     ('wd:Q123', 'reviewer', 'available IDs:'),
-    ('etl:machine_learning', 'YOUR_REVIEWER_ID', 'actual reviewer identifier'),
+    ('wd:Q1', 'YOUR_REVIEWER_ID', 'actual reviewer identifier'),
 ])
 def test_review_explains_unknown_ids_and_rejects_placeholder_reviewer(tmp_path, concept_id, reviewer, message):
+    from data_sync_etl.adapters.concept_sources import wikidata
+    source = tmp_path / 'empty-corpus-contract.json'
+    snapshot, _ = wikidata({'entities': {'Q1': {'labels': {'en': {'value': 'fixture mineral'}}}}},
+                           domain='ISOLATED_TEST_ONLY', version='pending')
+    source.write_text(snapshot.model_dump_json(), encoding='utf-8')
     output = tmp_path / 'reviewed.json'
     result = subprocess.run([sys.executable, 'scripts/concept_dictionary.py', 'review',
-        'src/data_sync_etl/domain/data/concepts.json', str(output), '--concept-id', concept_id,
+        str(source), str(output), '--concept-id', concept_id,
         '--status', 'approved', '--reviewer', reviewer], capture_output=True, text=True)
     assert result.returncode == 2
     assert message in result.stderr

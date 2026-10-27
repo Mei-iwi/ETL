@@ -10,7 +10,7 @@ from data_sync_etl.domain.concepts import (
     Dictionary,
     ExpansionPolicy,
     concept_analysis_scope,
-    default_dictionary,
+    empty_dictionary,
 )
 from data_sync_etl.domain.lexical import bm25, lexical_document, query_terms, surface_tokens
 from scripts.benchmark_multilingual_fixture import fixture_snapshot
@@ -41,7 +41,7 @@ def test_fixture_only_translation_acronym_symbols_and_disambiguation(query, doma
 def test_draft_not_published_or_silently_enabled_and_ambiguous_term_retained():
     dictionary = Dictionary(fixture_snapshot(FIXTURE))
     assert not dictionary.expand('base de données UCLN', domain='mathematics').terms
-    assert not any(cid.startswith('fixture:') for cid in default_dictionary().concepts)
+    assert not any(cid.startswith('fixture:') for cid in empty_dictionary().concepts)
     trial = Dictionary(fixture_snapshot(FIXTURE, research_approved=True))
     assert not trial.expand('cell').terms
     bounded = trial.expand('database photosynthesis', policy=ExpansionPolicy(max_total=2, max_per_concept=1))
@@ -58,7 +58,7 @@ def test_literal_identifiers_negation_and_phrases_remain_distinct():
 
 
 def test_request_observations_are_bounded_policy_partitioned_and_not_shared(monkeypatch):
-    dictionary = default_dictionary()
+    dictionary = empty_dictionary()
     original = dictionary._observations
     calls = []
     def observed(text, *, policy):

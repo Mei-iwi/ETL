@@ -39,6 +39,3 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
 ignore = ["E501"]
-
-[tool.setuptools.package-data]
-data_sync_etl = ["domain/data/*.json"]

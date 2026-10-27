@@ -1,39 +1,32 @@
+"""Cross-language recall requires a reviewed corpus edge; raw BoW stays literal."""
 import pytest
 
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.lexical import bm25, lexical_document
+from tests.corpus_dictionary_support import reviewed_dictionary
 
 
-@pytest.mark.parametrize('query,expected', [
-    ('How to add fractions with different denominators?', 'fractions'),
-    ('photosynthesis', 'plants'),
-    ('directly proportional', 'proportion'),
-])
-def test_curriculum_translation_retrieves_source_language_without_an_encoder(query, expected):
-    documents = {
-        'fractions': lexical_document(['Cộng hai phân số khác mẫu số bằng cách quy đồng.']),
-        'plants': lexical_document(['Quang hợp ở thực vật cần ánh sáng.']),
-        'proportion': lexical_document(['Hai đại lượng tỉ lệ thuận có hệ số không đổi.']),
-        'unrelated': lexical_document(['Cách sử dụng mật khẩu an toàn.']),
-    }
-    ranking = bm25(query, documents)
-    assert max(ranking, key=ranking.get) == expected
-    assert 'unrelated' not in ranking
+@pytest.mark.parametrize('query', ['zircon lattice', 'réseau cristallin'])
+def test_corpus_relation_retrieves_source_language_only_after_review(tmp_path, query):
+    docs = {'relevant': lexical_document(['Mạng tinh thể.']),
+            'unrelated': lexical_document(['Mật khẩu an toàn.'])}
+    assert bm25(query, docs) == {}
+    with reviewed_dictionary(tmp_path,
+            'vi: mạng tinh thể | en: zircon lattice | fr: réseau cristallin', query) as dictionary:
+        scores = bm25(query, docs, dictionary=dictionary)
+        assert set(scores) == {'relevant'}
+        assert all(term.sources for term in dictionary.expand(query).terms)
 
 
-def test_curriculum_concepts_do_not_equate_opposite_operations_or_greenness_with_photosynthesis():
-    dictionary = default_dictionary()
-    for query, forbidden in [('subtract fractions', 'etl:fraction_addition'),
-                             ('inverse proportion', 'etl:direct_proportion'),
-                             ('green leaf', 'etl:photosynthesis')]:
-        expanded = dictionary.expand(query)
-        assert forbidden not in {term.concept_id for term in expanded.terms}
+def test_no_seed_pair_or_unknown_acronym_is_implicitly_approved():
+    for query in ('photosynthesis', 'green leaf', 'BCNN', 'ML', 'QH'):
+        assert not empty_dictionary().expand(query).terms
 
 
-def test_coverage_rejects_incidental_generic_word_but_keeps_a_translated_concept():
-    documents = {'generic': lexical_document(['time schedule tomorrow']),
-                 'translation': lexical_document(['Cộng hai phân số khác mẫu số.'])}
-    unrelated = 'quantum gravity wormhole time spacetime black holes'
-    assert bm25(unrelated, documents)
-    assert not bm25(unrelated, documents, min_coverage=.15)
-    assert 'translation' in bm25('add fractions with different denominators', documents, min_coverage=.15)
+def test_literal_coverage_retains_real_matches_and_rejects_incidental_word():
+    docs = {'generic': lexical_document(['time schedule tomorrow']),
+            'specific': lexical_document(['zircon lattice spectral properties'])}
+    query = 'quantum gravity wormhole time spacetime black holes'
+    assert bm25(query, docs)
+    assert not bm25(query, docs, min_coverage=.2)
+    assert 'specific' in bm25('zircon lattice', docs, min_coverage=.5)

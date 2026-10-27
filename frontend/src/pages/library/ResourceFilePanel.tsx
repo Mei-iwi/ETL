@@ -4,12 +4,14 @@ import styles from './LibraryResourceDetailPage.module.css'
 import { SearchContext } from '../search/SearchContext'
 import { canOpenFile, fileResponseError } from './fileReadiness'
 import type { FileIndexStatus } from './fileReadiness'
-import { readPreviewBlob } from './previewBody'
+import { MEDIA_PREVIEW_MAX_BYTES, readPreviewBlob } from './previewBody'
 import { originalSourceUrl } from './sourceReference'
 import type { SourceInfo } from './sourceReference'
 import { SpreadsheetPreview } from './SpreadsheetPreview'
 import { parseSpreadsheetPreview } from './spreadsheetData'
 import type { SpreadsheetData } from './spreadsheetData'
+import { MediaPlayer } from './MediaFilePreview'
+import { mediaPreviewType } from './libraryFileFormats'
 
 type Version = { id: string; version_number: number; created_at: string }
 
@@ -142,7 +144,8 @@ function FilePreview({ url }: { url: string }) {
         void fetch(`${url}?view=preview`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(240000)]) })
             .then(async response => {
                 if (!response.ok) throw new Error(await fileResponseError(response))
-                const blob = await readPreviewBlob(response, controller.signal)
+                const blob = await readPreviewBlob(response, controller.signal,
+                    mediaPreviewType(response.headers.get('Content-Type') ?? '') ? MEDIA_PREVIEW_MAX_BYTES : undefined)
                 const text = blob.type.startsWith('text/') ? await blob.slice(0, 200000).text() : ''
                 const grid = blob.type.split(';')[0] === 'application/json' ? parseSpreadsheetPreview(await blob.text().then(JSON.parse)) : null
                 if (controller.signal.aborted) return
@@ -153,10 +156,11 @@ function FilePreview({ url }: { url: string }) {
     }, [url])
     if (error) return <p role="alert" className={styles.error}>{error}</p>
     if (!file) return <p className={styles.message}>Đang tải tệp…</p>
+    const mediaKind = mediaPreviewType(file.type)
     return <div className={styles.filePreview}>
-        <p className={styles.subtitle}>{file.grid ? 'Bảng tính' : file.type === 'application/pdf' ? 'Bản xem PDF' : file.type.startsWith('image/') ? 'Hình ảnh' :
+        <p className={styles.subtitle}>{mediaKind === 'audio' ? 'Âm thanh MP3' : mediaKind === 'video' ? 'Video MP4' : file.grid ? 'Bảng tính' : file.type === 'application/pdf' ? 'Bản xem PDF' : file.type.startsWith('image/') ? 'Hình ảnh' :
             file.type.startsWith('text/') ? 'Văn bản' : 'Tệp học liệu'} · {(file.size / 1024 / 1024).toFixed(2)} MB · Tải xuống giữ định dạng gốc</p>
-        {file.grid ? <SpreadsheetPreview data={file.grid} /> : file.type === 'application/pdf' ? <iframe title="Xem tệp PDF" src={file.url} /> :
+        {mediaKind ? <MediaPlayer key={file.url} url={file.url} kind={mediaKind} /> : file.grid ? <SpreadsheetPreview data={file.grid} /> : file.type === 'application/pdf' ? <iframe title="Xem tệp PDF" src={file.url} /> :
             file.type.startsWith('image/') ? <img src={file.url} alt="Nội dung tệp học liệu" /> :
                 file.type.startsWith('text/') ? <pre>{file.text}{file.size > 200000 && '\n… Tải tệp để xem toàn bộ.'}</pre> :
                     <p className={styles.message}>Định dạng này chưa hỗ trợ xem trực tiếp tại đây. Hãy mở tại nguồn hoặc tải tệp để xem đúng định dạng.</p>}

@@ -8,7 +8,6 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import lru_cache
-from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -105,7 +104,7 @@ class Concept(Strict):
 
 class Snapshot(Strict):
     version: str = Field(min_length=1)
-    concepts: list[Concept] = Field(min_length=1, max_length=10000)
+    concepts: list[Concept] = Field(default_factory=list, max_length=10000)
 
     @model_validator(mode='after')
     def references(self):
@@ -172,9 +171,9 @@ class ExpandedQuery(Strict):
 
 
 @lru_cache(maxsize=1)
-def default_dictionary():
-    return Dictionary(Snapshot.model_validate_json(
-        Path(__file__).with_name('data').joinpath('concepts.json').read_text(encoding='utf-8')))
+def empty_dictionary():
+    """Literal-only fallback; no filesystem IO or implicit terminology authority."""
+    return Dictionary(Snapshot(version='corpus-only-v1', concepts=[]))
 
 
 class Dictionary:
@@ -367,20 +366,20 @@ class Dictionary:
         return list({(r['query_concept_id'], r['matched_phrase'], r['field']): r for r in result}.values())
 
 
-def concept_matches(tokens):
+def concept_matches(tokens, *, dictionary=None):
     """Reviewed source concepts for passage ranking; longest match wins."""
-    dictionary = default_dictionary()
+    dictionary = dictionary or empty_dictionary()
     expansion = dictionary.expand(' '.join(tokens))
     return [(dictionary.concepts[m.concept_id].preferred_labels.get('en', m.concept_id), m.phrase)
             for m in expansion.recognized if m.concept_id]
 
 
-def concept_frequencies(tokens):
-    return Counter(concept for concept, _ in concept_matches(tokens))
+def concept_frequencies(tokens, *, dictionary=None):
+    return Counter(concept for concept, _ in concept_matches(tokens, dictionary=dictionary))
 
 
 def equivalent_terms(query, tokens, *, expansion=None, dictionary=None, policy=None):
-    dictionary = dictionary or default_dictionary()
+    dictionary = dictionary or empty_dictionary()
     expansion = expansion or dictionary.expand(query)
     return {word for row in dictionary.evidence(expansion, ' '.join(tokens), policy=policy)
             for word in row['matched_phrase'].casefold().split()}

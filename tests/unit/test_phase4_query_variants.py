@@ -1,85 +1,69 @@
+"""Accent restoration requires corpus approval and never rewrites Vector input."""
 import unicodedata
 
 import pytest
 from pydantic import ValidationError
 
 from data_sync_etl.api.search_schemas import SearchRequest
-from data_sync_etl.domain.concepts import Dictionary, ExpansionPolicy, default_dictionary
+from data_sync_etl.domain.concepts import Dictionary, ExpansionPolicy, empty_dictionary
 from data_sync_etl.domain.query_variants import approved_accent_variant, fold
+from tests.corpus_dictionary_support import reviewed_dictionary
 from tests.unit.test_search import searchable as searchable
 from tests.unit.test_semantic import semantic_search as semantic_search
 
 
 def variant(query, dictionary=None, **kwargs):
-    return approved_accent_variant(query, dictionary or default_dictionary(), policy=ExpansionPolicy(), **kwargs)
+    return approved_accent_variant(query, dictionary or empty_dictionary(), policy=ExpansionPolicy(), **kwargs)
 
 
-def test_only_missing_accents_are_restored_and_original_syntax_is_preserved():
-    assert variant('co so du lieu') == 'cơ sở dữ liệu'
-    assert variant('cách cong hai phân số') == 'cách cộng hai phân số'
-    assert variant('khong co so du lieu C++ C# CO₂ HL26_R013') == 'khong cơ sở dữ liệu C++ C# CO₂ HL26_R013'
-    assert variant('cơ sở dữ liệu') is None
-    assert variant('có so du lieu') is None  # Explicit accent contradicts the approved phrase.
-    assert variant('co-so-du-lieu') is None
-    assert variant('HL26_co_so_du_lieu') is None
-    assert variant('co so du lieu', domain='biology') is None
-    assert variant('ma bo nam') is None  # Never turn single-word collisions into synonyms.
+def test_only_corpus_approved_missing_accents_are_restored(tmp_path):
+    assert variant('mang tinh the') is None
+    with reviewed_dictionary(tmp_path, 'Mạng tinh thể viết không dấu là mang tinh the', 'mang tinh the') as dictionary:
+        assert variant('mang tinh the', dictionary) == 'mạng tinh thể'
+        assert variant('khong mang tinh the C++ C#', dictionary) == 'khong mạng tinh thể C++ C#'
+        assert variant('mạng tinh thể', dictionary) is None
+        assert variant('màng tinh the', dictionary) is None
+        assert variant('mang-tinh-the', dictionary) is None
+        assert variant('HL26_mang_tinh_the', dictionary) is None
+        assert variant('mang tinh the', dictionary, domain='other-domain') is None
+    assert variant('ma bo nam') is None
     assert fold('Đường') == 'duong'
 
 
-def test_pending_low_confidence_and_ambiguous_phrases_cannot_restore_accents():
-    snapshot = default_dictionary().snapshot.model_copy(deep=True)
-    concept = next(c for c in snapshot.concepts if any(t.normalized == 'cơ sở dữ liệu' for t in c.terms))
-    for term in concept.terms:
-        term.review_status = 'pending'
-    assert variant('co so du lieu', Dictionary(snapshot)) is None
-    for term in concept.terms:
-        term.review_status, term.confidence = 'approved', .1
-    assert variant('co so du lieu', Dictionary(snapshot)) is None
-    snapshot = default_dictionary().snapshot.model_copy(deep=True)
-    concept = next(c for c in snapshot.concepts if any(t.normalized == 'cơ sở dữ liệu' for t in c.terms))
-    other = concept.model_copy(deep=True)
-    other.concept_id = 'fixture:ambiguous'
-    for term in other.terms:
-        term.concept_id = other.concept_id
-    snapshot.concepts.append(other)
-    assert variant('co so du lieu', Dictionary(snapshot)) is None
+def test_pending_low_confidence_and_ambiguous_phrases_cannot_restore_accents(tmp_path):
+    with reviewed_dictionary(tmp_path, 'Mạng tinh thể viết không dấu là mang tinh the', 'mang tinh the') as dictionary:
+        snapshot = dictionary.snapshot.model_copy(deep=True)
+        for term in snapshot.concepts[0].terms:
+            term.review_status = 'pending'
+        assert variant('mang tinh the', Dictionary(snapshot)) is None
+        for term in snapshot.concepts[0].terms:
+            term.review_status, term.confidence = 'approved', .1
+        assert variant('mang tinh the', Dictionary(snapshot)) is None
+        snapshot = dictionary.snapshot.model_copy(deep=True)
+        other = snapshot.concepts[0].model_copy(deep=True)
+        other.concept_id += ':ambiguous'
+        for term in other.terms:
+            term.concept_id = other.concept_id
+        snapshot.concepts.append(other)
+        assert variant('mang tinh the', Dictionary(snapshot)) is None
 
 
-@pytest.mark.parametrize('method', ['bow', 'vector', 'hybrid'])
-@pytest.mark.parametrize('searchable', [{'texts': ['Lá xanh.']}, {'texts': ['Lá xanh.'], 'meanings': True}], indirect=True)
-def test_native_empty_is_reproduced_and_opt_in_uses_bounded_variants_with_real_context(searchable, monkeypatch, method):
-    c, version = searchable
+@pytest.mark.parametrize('method', ['vector', 'hybrid'])
+@pytest.mark.parametrize('searchable', [{'texts': ['Mạng tinh thể.']}], indirect=True)
+def test_vector_always_encodes_raw_query_even_with_approved_lexical_variant(searchable, tmp_path, monkeypatch, method):
+    c, _ = searchable
     encoded = []
     def encode(text):
         encoded.append(text)
-        return [.1, .2, .3] if 'lá xanh' in text.casefold() else [1., 0., 0.]
+        return [.1, .2, .3]
     monkeypatch.setattr(c.indexing.embedding, 'embed', encode)
-    baseline_total = 0 if method == 'vector' else 1  # The literal word "xanh" already gives lexical recall.
-    baseline = c.search.search('la xanh', method)
-    assert baseline['total'] == baseline_total
-    assert encoded == ([] if method == 'bow' else ['la xanh'])
-    encoded.clear()
-    c.settings.search_approved_accent_variants_enabled = True
-    result = c.search.search('la xanh', method)
-    assert result['total'] == 1
-    assert encoded == ([] if method == 'bow' else ['la xanh', 'lá xanh'])
-    assert result['query'] == 'la xanh'
-    assert result['query_expansion']['retrieval_queries'] == ['la xanh', 'lá xanh']
-    assert result['query_expansion']['lexical_variant_weight'] == c.settings.search_expansion.synonyms
-    if method == 'bow':
-        c.settings.search_approved_accent_variants_enabled = False
-        native = c.search.search('lá xanh', method)
+    with reviewed_dictionary(tmp_path, 'Mạng tinh thể viết không dấu là mang tinh the', 'mang tinh the') as dictionary:
+        c.search.dictionary = dictionary
         c.settings.search_approved_accent_variants_enabled = True
-        assert result['items'][0]['score'] == pytest.approx(max(
-            baseline['items'][0]['score'], c.settings.search_expansion.synonyms * native['items'][0]['score']))
-    assert 'approved-accent' in result['ranking_algorithm']
-    item = result['items'][0]
-    assert item['resource_version_id'] == version['id']
-    context = c.search.context(item['context_id'], neighbors=0)
-    assert any(item['snippet'] in chunk['text'] for chunk in context['chunks'])
-    c.settings.search_approved_accent_variants_enabled = False
-    assert c.search.search('la xanh', method)['total'] == baseline_total  # Rollback, no reindex.
+        result = c.search.search('mang tinh the', method)
+        assert encoded == ['mang tinh the']
+        assert result['query'] == 'mang tinh the'
+        assert result['total'] == 1
 
 
 @pytest.mark.parametrize('text', ['C++ C# CO₂ CO2 H2O', 'HL26_R013 HL26_V010', '🙂', '!!!',
@@ -91,7 +75,7 @@ def test_unicode_symbols_negation_and_unusual_inputs_are_not_globally_folded(tex
     assert request.query == unicodedata.normalize('NFC', text).strip()
 
 
-@pytest.mark.parametrize('text', ['', '   ', 'x'*301, '\ud800'])
+@pytest.mark.parametrize('text', ['', '   ', 'x'*2001, '\ud800'])
 def test_invalid_search_lengths_remain_explicit_errors(text):
     with pytest.raises(ValidationError):
         SearchRequest(query=text)

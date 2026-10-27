@@ -6,6 +6,7 @@ export class SearchApiError extends Error {
 
     constructor(status: number, code: string, message: string) {
         super(message)
+        this.name = 'SearchApiError'
         this.status = status
         this.code = code
     }
@@ -76,12 +77,14 @@ function validContext(value: unknown, id: string, neighbors: number): value is C
 }
 
 const messages: Record<string, string> = {
+    SEARCH_NETWORK_ERROR: 'Không kết nối được máy chủ. Vui lòng thử lại.',
+    SEARCH_INVALID_RESPONSE: 'Dữ liệu tìm kiếm không hợp lệ. Vui lòng thử lại.',
     BLOCKED_LEXICAL_ANALYZER: 'Bộ phân tích chỉ mục chưa sẵn sàng. Vui lòng liên hệ quản trị viên.',
     SEARCH_MODEL_LOADING: 'Đang chuẩn bị tìm kiếm. Có thể chọn BoW.',
     SEARCH_RUNTIME_BUSY: 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
     SEARCH_ACCESS_RESTRICTED: 'Truy cập tìm kiếm nội bộ bị hạn chế.',
     SEARCH_LIMIT_EXCEEDED: 'Kho dữ liệu vượt giới hạn. Hãy thu hẹp bộ lọc.',
-    SEARCH_TIMEOUT: 'Tìm kiếm quá thời gian. Vui lòng thử lại hoặc chọn BoW.',
+    SEARCH_TIMEOUT: 'Tìm kiếm quá thời gian. Vui lòng thử lại.',
     SEARCH_MODEL_WARMUP_TIMEOUT: 'Chuẩn bị tìm kiếm quá thời gian. Vui lòng thử lại hoặc chọn BoW.',
     BLOCKED_EMBEDDING_RUNTIME: 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.',
     INVALID_EMBEDDING: 'Tìm kiếm theo ngữ nghĩa chưa sẵn sàng. Có thể chọn BoW.',
@@ -89,6 +92,26 @@ const messages: Record<string, string> = {
     SEARCH_SCHEMA_UNAVAILABLE: 'Chưa kết nối được dữ liệu chỉ mục tìm kiếm. Vui lòng thử lại sau.',
     SEARCH_INDEX_STALE: 'Chỉ mục vừa thay đổi. Vui lòng tìm lại.',
     CONTEXT_STALE: 'Nội dung đã thay đổi. Vui lòng tìm lại.',
+}
+
+function safeErrorMessage(status: number, code: string) {
+    return Object.hasOwn(messages, code) ? messages[code] : status === 401 ? 'Yêu cầu xác thực để truy cập nội dung này.'
+        : status === 403 ? 'Truy cập tìm kiếm bị hạn chế.'
+            : status === 404 ? 'Không tìm thấy nội dung hoặc không có quyền truy cập.'
+                : status === 409 ? 'Nội dung vừa thay đổi. Vui lòng tìm lại.'
+                    : status === 422 ? 'Truy vấn hoặc bộ lọc chưa hợp lệ.'
+                        : `Không thể tải dữ liệu tìm kiếm (HTTP ${status}).`
+}
+
+export function searchFailureMessage(error: unknown) {
+    // HMR may replace the constructor while a request still holds an older
+    // Error instance. Class identity must not erase its typed failure reason.
+    // Never display arbitrary error.message or backend/proxy text.
+    if (record(error) && integer(error.status) && error.status <= 599 && typeof error.code === 'string')
+        return safeErrorMessage(error.status, error.code)
+    if (error instanceof DOMException && error.name === 'AbortError')
+        return 'Phiên truy cập đã thay đổi. Vui lòng tìm lại.'
+    return 'Tìm kiếm thất bại. Vui lòng thử lại.'
 }
 
 export type SearchModelStatus = { state: 'UNINITIALIZED' | 'LOADING' | 'READY' | 'FAILED' | 'STOPPED'; ready: boolean }
@@ -108,16 +131,23 @@ const invalidResponse = () => new SearchApiError(502, 'SEARCH_INVALID_RESPONSE',
 
 async function request<T>(path: string, validate: (value: unknown) => value is T, signal?: AbortSignal, payload?: SearchRequest, method: 'GET' | 'POST' = 'GET'): Promise<T> {
     // Server deadlines are cooperative; abort stops waiting, not running inference.
-    const combined = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(payload ? 90000 : 20000)])
+    const combined = AbortSignal.any([...(signal ? [signal] : []),
+        AbortSignal.timeout(payload && payload.method !== 'bow' ? 90000 : 20000)])
+    let abortWait: () => void
+    const aborted = new Promise<never>((_, reject) => {
+        abortWait = () => reject(combined.reason)
+        combined.addEventListener('abort', abortWait, { once: true })
+    })
     try {
-        const response = await fetch(path, {
+        combined.throwIfAborted()
+        const response = await Promise.race([fetch(path, {
             method: payload ? 'POST' : method, signal: combined,
             cache: 'no-store',
             headers: { Accept: 'application/json', ...(payload ? { 'Content-Type': 'application/json' } : {}) },
             ...(payload ? { body: JSON.stringify(payload) } : {}),
-        })
+        }), aborted])
         let body: unknown
-        try { body = await response.json() } catch (error) {
+        try { body = await Promise.race([response.json(), aborted]) } catch (error) {
             if (combined.aborted) throw error
             if (response.ok) {
                 if (error instanceof SyntaxError) throw invalidResponse()
@@ -131,12 +161,7 @@ async function request<T>(path: string, validate: (value: unknown) => value is T
             const code = detail && typeof detail === 'object' && 'code' in detail && typeof detail.code === 'string'
                 ? detail.code : 'SEARCH_UNAVAILABLE'
             // Only local, allowlisted text is displayed; never show adapter/proxy details.
-            const message = Object.hasOwn(messages, code) ? messages[code] : response.status === 401 ? 'Yêu cầu xác thực để truy cập nội dung này.'
-                : response.status === 403 ? 'Truy cập tìm kiếm bị hạn chế.'
-                    : response.status === 404 ? 'Không tìm thấy nội dung hoặc không có quyền truy cập.'
-                        : response.status === 409 ? 'Nội dung vừa thay đổi. Vui lòng tìm lại.'
-                            : response.status === 422 ? 'Truy vấn hoặc bộ lọc chưa hợp lệ.'
-                                : `Không thể tải dữ liệu tìm kiếm (HTTP ${response.status}).`
+            const message = safeErrorMessage(response.status, code)
             throw new SearchApiError(response.status, code, message)
         }
         if (!validate(body)) throw invalidResponse()
@@ -148,11 +173,17 @@ async function request<T>(path: string, validate: (value: unknown) => value is T
         }
         if (error instanceof SearchApiError) throw error
         throw new SearchApiError(0, 'SEARCH_NETWORK_ERROR', 'Không kết nối được máy chủ. Vui lòng thử lại.')
+    } finally {
+        combined.removeEventListener('abort', abortWait!)
     }
 }
 
 export function searchMaterials(payload: SearchRequest, signal?: AbortSignal) {
     return request('/api/v1/search', (value): value is SearchResponse => validSearch(value, payload), signal, payload)
+}
+
+export function searchSessionPage(payload: SearchRequest & { session_id: string }, signal?: AbortSignal) {
+    return request('/api/v1/search/page', (value): value is SearchResponse => validSearch(value, payload), signal, payload)
 }
 
 export function getChunkContext(id: string, signal?: AbortSignal, neighbors = 1) {

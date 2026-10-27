@@ -67,6 +67,7 @@ from data_sync_etl.api.search_access import search_access
 from data_sync_etl.api.search_schemas import (
     SEARCH_ERROR_RESPONSES,
     ContextResponse,
+    SearchPageRequest,
     SearchRequest,
     SearchResponse,
     search_error,
@@ -214,7 +215,9 @@ async def retry_search_model(request: Request, response: Response):
 async def search_materials(body: SearchRequest, request: Request):
     call = None
     try:
-        access = search_access(request)  # Never acquire runtime capacity before authorization.
+        # MASTER authorization can perform blocking DB reads. Keep it off the
+        # event loop; runtime capacity is still acquired only after authorization.
+        access = await run_in_threadpool(search_access, request)
         service = request.app.state.container.search
         def reauthorize():
             # A request-local trusted policy lookup, never a role/user from JSON.
@@ -228,7 +231,25 @@ async def search_materials(body: SearchRequest, request: Request):
             try:
                 with service.runtime_admission(body.method, access=access, call=call):
                     call.reauthorize()
-                    return True, service.search_http(**body.model_dump(), access=access)
+                    payload = body.model_dump(exclude={'window_pages'})
+                    container = request.app.state.container
+                    enabled = getattr(container.settings, 'search_result_sessions_enabled', False)
+                    gateway = getattr(container, 'search_sessions', None) if enabled else None
+                    if gateway is not None:
+                        criteria = {key: value for key, value in payload.items() if key != 'page'}
+                        try:
+                            result = gateway.read(criteria, access, page=body.page, size=body.size,
+                                                  window_pages=body.window_pages)
+                            request.scope.setdefault('state', {})['search_session_guard'] = gateway.visibility_guard(
+                                result['search_session']['id'], criteria, access)
+                            return True, result
+                        except SearchError as exc:
+                            if exc.status != 409:
+                                raise
+                    result = service.search_http(**payload, access=access)
+                    if enabled:
+                        result = {**result, 'session_status': 'UNAVAILABLE'}
+                    return True, result
             except Exception as exc:
                 return False, exc  # Preserve the API error, not an ExceptionGroup.
 
@@ -259,10 +280,53 @@ async def search_materials(body: SearchRequest, request: Request):
         if not succeeded:
             raise value
         call.check()
-        call.reauthorize()
+        await run_in_threadpool(call.reauthorize)
+        if call.concept_guard is not None:
+            request.scope.setdefault('state', {})['concept_visibility_guard'] = call.concept_guard
         return value
     except HTTPException:
         raise
+    except Exception as exc:
+        raise search_error(exc) from None
+    finally:
+        if call is not None:
+            call.abandon()
+
+
+@router.post('/api/v1/search/page', tags=[TAG_SEARCH], response_model=SearchResponse,
+             responses=SEARCH_ERROR_RESPONSES)
+async def search_session_page(body: SearchPageRequest, request: Request):
+    call = None
+    try:
+        access = await run_in_threadpool(search_access, request)
+        container = request.app.state.container
+        gateway = getattr(container, 'search_sessions', None)
+        if not getattr(container.settings, 'search_result_sessions_enabled', False) or gateway is None:
+            raise SearchError('SEARCH_SESSION_UNAVAILABLE', 409)
+        criteria = body.model_dump(exclude={'page', 'session_id', 'window_pages'})
+        def reauthorize():
+            if search_access(request) != access:
+                raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
+        service = container.search
+        call = service.new_http_call('bow', access=access, authorize=reauthorize)
+        def execute():
+            with service.runtime_admission('bow', access=access, call=call):
+                call.reauthorize()
+                return gateway.read(criteria, access, page=body.page, size=body.size,
+                    token=body.session_id, window_pages=body.window_pages)
+        with anyio.fail_after(min(10, call.remaining())):
+            result = await anyio.to_thread.run_sync(execute, abandon_on_cancel=True)
+        request.scope.setdefault('state', {})['search_session_guard'] = gateway.visibility_guard(
+            body.session_id, criteria, access)
+        if await run_in_threadpool(search_access, request) != access:
+            raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
+        return result
+    except HTTPException:
+        raise
+    except TimeoutError:
+        if call is not None:
+            call.cancel('deadline')
+        raise search_error(SearchError('SEARCH_TIMEOUT')) from None
     except Exception as exc:
         raise search_error(exc) from None
     finally:
@@ -416,7 +480,7 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
                                   preview=container.file_previews if view == 'preview' and not download else None)
     suffix = PurePosixPath(version['storage_object_key']).suffix.lower()
     media_types = {'.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-                   '.txt': 'text/plain', '.csv': 'text/csv',
+                   '.txt': 'text/plain', '.csv': 'text/csv', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4',
                    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'}

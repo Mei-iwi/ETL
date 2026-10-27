@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from time import perf_counter
 
-from data_sync_etl.domain.concepts import concept_analysis_scope, default_dictionary
+from data_sync_etl.domain.concepts import concept_analysis_scope, empty_dictionary
 from data_sync_etl.domain.evaluation import checksum, percentile
 from data_sync_etl.domain.lexical import analysis_scope, bm25, lexical_document
 
@@ -37,7 +37,7 @@ def main():
     baseline = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = baseline
     spec.loader.exec_module(baseline)
-    current = default_dictionary()
+    current = empty_dictionary()
     before = baseline.Dictionary(baseline.Snapshot.model_validate(current.snapshot.model_dump()))
     corpus = json.loads(Path('fixtures/search/concept_benchmark.json').read_text(encoding='utf-8'))
     texts = {d['id'] + ':' + str(i): d['text'] for d in corpus['documents'] for i in range(args.scale)}

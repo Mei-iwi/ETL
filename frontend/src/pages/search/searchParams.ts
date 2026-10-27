@@ -1,5 +1,7 @@
 import type { SearchMethod, SearchRequest } from '../../types/search'
 
+export const SEARCH_QUERY_MAX_LENGTH = 2000
+
 export const methods: { value: SearchMethod; label: string; }[] = [
     { value: 'hybrid', label: 'Tìm kết hợp'},
     { value: 'bow', label: 'Theo từ khóa'},

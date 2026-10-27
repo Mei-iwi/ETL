@@ -57,9 +57,9 @@ def test_source_media_registration_keeps_validation_no_ocr(importing, extension,
     monkeypatch.setattr(c.source_resolver, 'temporary_path', forbidden)
     service = MetadataSearchService(c.uow, None, Store(), Embedding(), c.settings)
     assert service.reconcile(apply=True)['ready'] == 1
-    from data_sync_etl.domain.concepts import default_dictionary
+    from data_sync_etl.domain.concepts import empty_dictionary
     items, _, _, _ = service.retrieve('Demo Learning Resource', 'bow', {}, SearchAccess('local_demo'),
-        dictionary=default_dictionary(), policy=c.settings.search_expansion)
+        dictionary=empty_dictionary(), policy=c.settings.search_expansion)
     assert len(items) == 1 and items[0]['context_id'] is None
 
 

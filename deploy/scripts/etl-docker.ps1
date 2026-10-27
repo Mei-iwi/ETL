@@ -10,6 +10,7 @@ param(
     [string]$NetworkName = 'etl-data',
     [switch]$Workers,
     [switch]$Drive,
+    [switch]$Media,
     [switch]$RemoteDatabase,
     [switch]$SourceNeon,
     [ValidateSet('legacy','auth','auth-tls','db-auth','db-auth-tls')][string]$AuthProfile = 'auth',
@@ -26,7 +27,12 @@ if (-not $EnvFile) {
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) { throw 'Docker env file missing. Copy deploy/docker.env.example to docker.env and configure it.' }
 $EnvFile = (Resolve-Path -LiteralPath $EnvFile).Path
 $databaseMode = 'same-host'
+$mediaEnabled = 'false'
 foreach ($line in Get-Content -LiteralPath $EnvFile) {
+    if ($line -match '^\s*MEDIA_ENABLED\s*=') {
+        if ($line -notmatch '^\s*MEDIA_ENABLED\s*=\s*["'']?(true|false)["'']?\s*(?:#.*)?$') { throw 'Invalid MEDIA_ENABLED in Docker env file.' }
+        $mediaEnabled = $Matches[1]
+    }
     if ($line -match '^\s*DATABASE_MODE\s*=') {
         if ($line -notmatch '^\s*DATABASE_MODE\s*=\s*["'']?(same-host|remote|source-neon)["'']?\s*(?:#.*)?$') { throw 'Invalid DATABASE_MODE in Docker env file.' }
         $databaseMode = $Matches[1]
@@ -40,6 +46,11 @@ if ($databaseMode -eq 'remote') { $RemoteDatabase = $true }
 Write-Output "Docker env: $EnvFile"
 Write-Output "Database profile: $(if ($SourceNeon) {'source-neon'} elseif ($RemoteDatabase) {'remote'} else {'same-host'})"
 $composeArgs = @('compose','--env-file',$EnvFile,'-f',(Join-Path $deployDir 'compose.app.yml'))
+if ($env:MEDIA_ENABLED) {
+    if ($env:MEDIA_ENABLED -cnotin @('true','false')) { throw 'Invalid MEDIA_ENABLED.' }
+    $mediaEnabled = $env:MEDIA_ENABLED
+}
+if ($Media -or $mediaEnabled -eq 'true') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.media.yml')) }
 if ($Drive) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.drive.yml')) }
 if ($RemoteDatabase) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.remote-db.yml')) }
 if ($SourceNeon) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.source-neon.yml')) }

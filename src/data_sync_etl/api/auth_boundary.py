@@ -56,7 +56,7 @@ class AuthBoundary:
                 if principal.mode in ('db_users', 'master_users'):
                     from data_sync_etl.security.authorization import authorize
                     await run_in_threadpool(authorize, request, principal)
-                if (unsafe and path != '/api/v1/search' and not path.startswith('/api/v1/auth/')
+                if (unsafe and path not in ('/api/v1/search', '/api/v1/search/page') and not path.startswith('/api/v1/auth/')
                         and not self.settings.admin_enabled):
                     raise AuthError('AUTH_ADMIN_DISABLED', 403)
             if unsafe:
