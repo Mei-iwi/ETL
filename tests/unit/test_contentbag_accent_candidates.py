@@ -44,3 +44,13 @@ def test_native_exact_score_is_not_replaced_by_weaker_accent_candidate():
     native = bm25('mạng tinh thể', docs)
     assert bm25('mạng tinh thể', docs, accent_insensitive=True) == native
     assert bm25('unknown astronomical query', docs, accent_insensitive=True) == {}
+
+
+def test_one_large_passage_cannot_skip_the_time_budget():
+    docs = {'one': lexical_document(['mạng tinh thể ' + 'filler ' * 600])}
+    ticks = [0]
+    def clock():
+        ticks[0] += 1
+        return 0. if ticks[0] <= 4 else 1.
+    assert corpus_accent_variant('mang tinh the', docs, clock=clock) is None
+    assert ticks[0] == 5

@@ -50,6 +50,8 @@ def corpus_accent_variant(query, documents, *, max_tokens=100000, budget_ms=20.,
             if used > max_tokens or (clock() - started) * 1000 >= budget_ms:
                 return None
             for start in range(len(tokens)):
+                if start % 128 == 0 and (clock() - started) * 1000 >= budget_ms:
+                    return None
                 if fold(tokens[start]) not in first_words:
                     continue
                 for width in range(2, min(6, len(tokens) - start) + 1):
