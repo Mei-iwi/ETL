@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { clearSearchViewCache, fetchSearchPage, readSearchView } from '../src/pages/search/searchViewCache.ts'
-import { searchMaterials, searchSessionPage } from '../src/services/searchApi.ts'
+import { searchMaterials, searchSessionPage, searchFailureMessage } from '../src/services/searchApi.ts'
 import { searchResponse } from './helpers/searchResponses.mjs'
+import { identityScope } from '../src/auth/authScope.ts'
 
 const criteria = { query: 'raw multilingual query', method: 'vector', filters: {}, page: 1, size: 5 }
 const token = 's'.repeat(43)
@@ -21,6 +22,40 @@ function setup() {
     return { calls, clock, transport, run }
 }
 const failure = (status, code) => Object.assign(new Error(code), { status, code })
+
+test('a failure from an older HMR constructor keeps safe actionable text', () => {
+    const oldError = Object.assign(new Error('PRIVATE_BACKEND_DETAILS'), { status: 503, code: 'SEARCH_TIMEOUT' })
+    assert.match(searchFailureMessage(oldError), /quá thời gian/)
+    assert.equal(searchFailureMessage(oldError).includes('PRIVATE_BACKEND_DETAILS'), false)
+    assert.match(searchFailureMessage({ status: 403, code: 'PRIVATE_ERROR', message: 'SECRET' }), /hạn chế/)
+    assert.equal(searchFailureMessage({ status: 503, code: 'PRIVATE_ERROR', message: 'SECRET' }).includes('SECRET'), false)
+})
+
+test('focus refresh of same grants keeps a pending search and token usable', async () => {
+    const { transport, calls } = setup()
+    const alice = { id: 'alice', role: 'VIEWER', mode: 'master_users', roles: ['viewer'], resource_ids: ['r2', 'r1'] }
+    const before = identityScope('master_users', alice)
+    let release
+    const full = transport.full
+    transport.full = request => new Promise(resolve => { release = () => full(request).then(resolve) })
+    const pending = fetchSearchPage(before, criteria, new AbortController().signal, transport)
+    const after = identityScope('master_users', { ...alice, resource_ids: ['r1', 'r2'], display_name: 'new display name' })
+    if (before !== after) clearSearchViewCache()
+    release()
+    assert.ok((await pending).search_session)
+    await fetchSearchPage(after, { ...criteria, page: 2 }, new AbortController().signal, transport)
+    assert.deepEqual(calls, { full: 1, page: 1 })
+})
+
+test('actor/role/permission/admin flag changes invalidate UI identity', () => {
+    const alice = { id: 'alice', mode: 'master_users', role: 'VIEWER', roles: ['viewer'],
+        resource_ids: ['r1'], permissions: [], admin_feature_enabled: false }
+    const original = identityScope('master_users', alice)
+    for (const change of [{ id: 'bob' }, { role: 'ADMIN' }, { roles: ['operator'] }, { permissions: ['process'] },
+        { resource_ids: [] }, { must_change_password: true }, { admin_feature_enabled: true }])
+        assert.notEqual(identityScope('master_users', { ...alice, ...change }), original)
+    assert.notEqual(identityScope('db_users', alice), original)
+})
 
 test('rank session reused for pages 2/3/1/4; each page freshly hydrated', async () => {
     const { run, calls } = setup()

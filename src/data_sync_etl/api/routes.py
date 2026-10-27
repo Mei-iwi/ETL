@@ -480,7 +480,7 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
                                   preview=container.file_previews if view == 'preview' and not download else None)
     suffix = PurePosixPath(version['storage_object_key']).suffix.lower()
     media_types = {'.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-                   '.txt': 'text/plain', '.csv': 'text/csv',
+                   '.txt': 'text/plain', '.csv': 'text/csv', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4',
                    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'}

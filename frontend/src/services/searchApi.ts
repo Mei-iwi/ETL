@@ -6,6 +6,7 @@ export class SearchApiError extends Error {
 
     constructor(status: number, code: string, message: string) {
         super(message)
+        this.name = 'SearchApiError'
         this.status = status
         this.code = code
     }
@@ -76,6 +77,8 @@ function validContext(value: unknown, id: string, neighbors: number): value is C
 }
 
 const messages: Record<string, string> = {
+    SEARCH_NETWORK_ERROR: 'Không kết nối được máy chủ. Vui lòng thử lại.',
+    SEARCH_INVALID_RESPONSE: 'Dữ liệu tìm kiếm không hợp lệ. Vui lòng thử lại.',
     BLOCKED_LEXICAL_ANALYZER: 'Bộ phân tích chỉ mục chưa sẵn sàng. Vui lòng liên hệ quản trị viên.',
     SEARCH_MODEL_LOADING: 'Đang chuẩn bị tìm kiếm. Có thể chọn BoW.',
     SEARCH_RUNTIME_BUSY: 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',
@@ -89,6 +92,26 @@ const messages: Record<string, string> = {
     SEARCH_SCHEMA_UNAVAILABLE: 'Chưa kết nối được dữ liệu chỉ mục tìm kiếm. Vui lòng thử lại sau.',
     SEARCH_INDEX_STALE: 'Chỉ mục vừa thay đổi. Vui lòng tìm lại.',
     CONTEXT_STALE: 'Nội dung đã thay đổi. Vui lòng tìm lại.',
+}
+
+function safeErrorMessage(status: number, code: string) {
+    return Object.hasOwn(messages, code) ? messages[code] : status === 401 ? 'Yêu cầu xác thực để truy cập nội dung này.'
+        : status === 403 ? 'Truy cập tìm kiếm bị hạn chế.'
+            : status === 404 ? 'Không tìm thấy nội dung hoặc không có quyền truy cập.'
+                : status === 409 ? 'Nội dung vừa thay đổi. Vui lòng tìm lại.'
+                    : status === 422 ? 'Truy vấn hoặc bộ lọc chưa hợp lệ.'
+                        : `Không thể tải dữ liệu tìm kiếm (HTTP ${status}).`
+}
+
+export function searchFailureMessage(error: unknown) {
+    // HMR may replace the constructor while a request still holds an older
+    // Error instance. Class identity must not erase its typed failure reason.
+    // Never display arbitrary error.message or backend/proxy text.
+    if (record(error) && integer(error.status) && error.status <= 599 && typeof error.code === 'string')
+        return safeErrorMessage(error.status, error.code)
+    if (error instanceof DOMException && error.name === 'AbortError')
+        return 'Phiên truy cập đã thay đổi. Vui lòng tìm lại.'
+    return 'Tìm kiếm thất bại. Vui lòng thử lại.'
 }
 
 export type SearchModelStatus = { state: 'UNINITIALIZED' | 'LOADING' | 'READY' | 'FAILED' | 'STOPPED'; ready: boolean }
@@ -138,12 +161,7 @@ async function request<T>(path: string, validate: (value: unknown) => value is T
             const code = detail && typeof detail === 'object' && 'code' in detail && typeof detail.code === 'string'
                 ? detail.code : 'SEARCH_UNAVAILABLE'
             // Only local, allowlisted text is displayed; never show adapter/proxy details.
-            const message = Object.hasOwn(messages, code) ? messages[code] : response.status === 401 ? 'Yêu cầu xác thực để truy cập nội dung này.'
-                : response.status === 403 ? 'Truy cập tìm kiếm bị hạn chế.'
-                    : response.status === 404 ? 'Không tìm thấy nội dung hoặc không có quyền truy cập.'
-                        : response.status === 409 ? 'Nội dung vừa thay đổi. Vui lòng tìm lại.'
-                            : response.status === 422 ? 'Truy vấn hoặc bộ lọc chưa hợp lệ.'
-                                : `Không thể tải dữ liệu tìm kiếm (HTTP ${response.status}).`
+            const message = safeErrorMessage(response.status, code)
             throw new SearchApiError(response.status, code, message)
         }
         if (!validate(body)) throw invalidResponse()

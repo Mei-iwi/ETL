@@ -294,16 +294,27 @@ class SearchService:
     def _allowed_units(self, repo, snapshot, access):
         resource = repo.get('master_learning_resources', snapshot[0]['resource_id'])
         nodes = {unit['id']: unit for unit in snapshot[2]}
-        allowed = set()
-        for unit in snapshot[2]:
-            if not access.allows(resource or {}, snapshot[0], unit):
-                continue
-            ancestor = unit
-            while ancestor is not None and access.allows(resource, snapshot[0], ancestor):
-                ancestor = nodes.get(ancestor['parent_unit_id'])
-            if ancestor is None:
-                allowed.add(unit['id'])
-        return allowed
+        # Memoize only inside this fresh snapshot, not across requests/phases.
+        # Walking every ancestor for every leaf was quadratic on deep trees.
+        eligible = {key: access.allows(resource or {}, snapshot[0], unit) for key, unit in nodes.items()}
+        resolved = {}
+        for key in nodes:
+            trail, visiting, cursor = [], set(), key
+            while cursor in nodes and cursor not in resolved:
+                if cursor in visiting:
+                    valid = False  # A malformed cycle cannot keep a request busy.
+                    break
+                visiting.add(cursor)
+                trail.append(cursor)
+                if not eligible[cursor]:
+                    valid = False
+                    break
+                cursor = nodes[cursor]['parent_unit_id']
+            else:
+                valid = resolved.get(cursor, True)
+            for unit_id in trail:
+                resolved[unit_id] = valid
+        return {key for key, valid in resolved.items() if valid}
 
     @staticmethod
     def _metadata(repo, filters, access, limit):
@@ -532,6 +543,9 @@ class SearchService:
                                      limit=self.settings.search_max_bags + 1,
                                      max_chars=self.settings.index_max_source_chars)
                          if phase_reader is not None and candidates else None)
+        candidates_by_version = {}
+        for candidate in candidates:
+            candidates_by_version.setdefault(candidate.resource_version_id, []).append(candidate)
         by_bag, bow, semantic, snapshots, ready_count, source_chars = {}, {}, {}, {}, 0, 0
         excluded, semantic_metadata = set(), {}
         authorized_roots, evidence_by_version = {}, {}
@@ -566,7 +580,7 @@ class SearchService:
             semantic_hits = (self.semantic.scores(snapshot, semantic_metadata[version_id],
                 roots, allowed, vector, lambda: self._deadline(started), semantic_budget, **evidence_options)
                 if use_semantic else {})
-            version_bags = [bag for bag in candidates if bag.resource_version_id == version_id]
+            version_bags = candidates_by_version[version_id]
             reader = initial_phase or (getattr(self.bags, 'search_bags', None) if _batch_bags else None)
             current_bags = (reader([bag.id for bag in version_bags], version_id=version_id, generation=snapshot[1])
                             if reader is not None else None)
@@ -799,11 +813,12 @@ class SearchService:
                             raise SearchError('SEMANTIC_INDEX_STALE', 409)
                     allowed = self._allowed_units(repo, fresh, access)
                     whole_file_access[version_id] = bool(fresh[2]) and {unit['id'] for unit in fresh[2]} <= allowed
-                    fresh_roots = {root for root, leaves in bag_structure(fresh[2]).items()
+                    fresh_structure = bag_structure(fresh[2])
+                    fresh_roots = {root for root, leaves in fresh_structure.items()
                                    if set(leaves) <= allowed}
                     if fresh_roots != authorized_roots[version_id]:
                         raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
-                    if any(not set(bag_structure(fresh[2])[bag_id]) <= allowed
+                    if any(not set(fresh_structure[bag_id]) <= allowed
                            for bag_id, (bag, *_) in by_bag.items() if bag.resource_version_id == version_id):
                         if _batch_texts and self._postgres_version_changed(repo, snapshots[version_id]):
                             excluded.add(version_id)

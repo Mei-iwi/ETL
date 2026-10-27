@@ -1,11 +1,13 @@
 export const PREVIEW_MAX_BYTES = 30 * 1024 * 1024
+export const MEDIA_PREVIEW_MAX_BYTES = 50 * 1024 * 1024
 
 /** Count actual response bytes, even if Content-Length is absent or dishonest. */
 export async function readPreviewBlob(response: Response, signal?: AbortSignal, maxBytes = PREVIEW_MAX_BYTES): Promise<Blob> {
+    const limitError = () => new Error(`Tệp vượt giới hạn xem trước (${Math.ceil(maxBytes / 1024 / 1024)} MB). Hãy tải về để xem.`)
     const declared = response.headers.get('Content-Length')
     if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
         await response.body?.cancel()
-        throw new Error('Tệp lớn hơn 30 MB. Hãy tải về để xem.')
+        throw limitError()
     }
     if (!response.body) throw new Error('Không đọc được nội dung tệp.')
     const reader = response.body.getReader()
@@ -18,7 +20,7 @@ export async function readPreviewBlob(response: Response, signal?: AbortSignal, 
             signal?.throwIfAborted()
             if (done) break
             received += value.byteLength
-            if (received > maxBytes) throw new Error('Tệp lớn hơn 30 MB. Hãy tải về để xem.')
+            if (received > maxBytes) throw limitError()
             chunks.push(new Uint8Array(value).buffer)
         }
         return new Blob(chunks, { type: response.headers.get('Content-Type') || 'application/octet-stream' })

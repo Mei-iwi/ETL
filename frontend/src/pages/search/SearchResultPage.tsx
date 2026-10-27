@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { ArrowUpRight, FileText, SearchX } from 'lucide-react'
-import { searchMaterials, searchSessionPage, SearchApiError } from '../../services/searchApi'
+import { searchMaterials, searchSessionPage, searchFailureMessage } from '../../services/searchApi'
 import type { SearchResponse } from '../../types/search'
 import layout from '../library/LibraryPages.module.css'
 import styles from './SearchPages.module.css'
@@ -10,12 +10,14 @@ import { canVisit, useAuth } from '../../auth/AuthProvider'
 import { SearchContext } from './SearchContext'
 import { clearSearchViewCache, fetchSearchPage, readSearchView, saveSearchView } from './searchViewCache'
 import { searchEmptyState } from './searchResultState'
+import { identityScope } from '../../auth/authScope'
 
 export function SearchResults({ params, onBusyChange }: { params: URLSearchParams; onBusyChange?: (busy: boolean) => void }) {
     const { principal, mode } = useAuth()
     const criteria = readSearch(params)
     const encoded = writeSearch(criteria).toString()
-    const cacheKey = JSON.stringify([mode, principal, encoded])
+    const scope = identityScope(mode, principal)
+    const cacheKey = JSON.stringify([scope, encoded])
     const [, setParams] = useSearchParams()
     const [result, setResult] = useState<SearchResponse | null>(() => readSearchView(cacheKey))
     const [error, setError] = useState('')
@@ -44,11 +46,16 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
         void Promise.resolve().then(() => {
             if (controller.signal.aborted) return
             onBusyChange?.(true)
-            return fetchSearchPage(JSON.stringify([mode, principal]), request, controller.signal,
+            return fetchSearchPage(scope, request, controller.signal,
                 { full: searchMaterials, page: searchSessionPage })
         })
             .then(data => { if (data && !controller.signal.aborted) { saveSearchView(cacheKey, data); setResult(data); setError('') } })
-            .catch(reason => { if (!controller.signal.aborted) { clearSearchViewCache(); setError(reason instanceof SearchApiError ? reason.message : 'Tìm kiếm thất bại. Vui lòng thử lại.') } })
+            .catch(reason => {
+                if (!controller.signal.aborted) {
+                    clearSearchViewCache()
+                    setError(searchFailureMessage(reason))
+                }
+            })
             .finally(() => { if (!controller.signal.aborted) { retrying.current = false; onBusyChange?.(false) } })
         return () => { controller.abort(); if (activeRequest.current === controller) activeRequest.current = null; onBusyChange?.(false) }
     }, [encoded, cacheKey, attempt, onBusyChange])
