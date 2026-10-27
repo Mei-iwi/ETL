@@ -1,281 +1,188 @@
 # ETL — Kho học liệu số
 
-Mở rộng MP3/MP4, phụ đề, OCR video và nguyên ngữ/bản dịch: xem [cài đặt và API](MEDIA_PIPELINE.md), [kết quả kiểm thử và giới hạn](MEDIA_ACCEPTANCE.md).
+Đồng bộ SOURCE → MASTER, trích xuất PDF/Office/ảnh/MP3/MP4 và tìm kiếm BoW, BGE-M3 Vector, Hybrid. Backend FastAPI, frontend React/TypeScript, PostgreSQL và MongoDB. Tệp **SOURCE chỉ lưu tham chiếu**, đọc tạm từ nguồn khi xử lý/xem/tải; tệp **LOCAL** dùng storage riêng.
 
-Đồng bộ SOURCE → MASTER, OCR/trích xuất nội dung và tìm kiếm BoW, BGE-M3 Vector, Hybrid. Tệp SOURCE được đọc trực tiếp từ nguồn; tệp LOCAL dùng storage riêng. Backend FastAPI, frontend React/TypeScript, PostgreSQL và MongoDB.
+Hướng dẫn theo thứ tự **local trước, Docker sau**. Cài mới nên dùng `single_admin` và BGE-M3 1024 chiều. Sau khi đồng bộ users ổn định mới chuyển sang `master_users`. Không có mật khẩu đăng nhập mặc định.
 
-Các lệnh Windows dùng **Git Bash tại gốc repo**, trừ khối ghi PowerShell. Linux dùng `npm` thay `npm.cmd` và thay `D:/etl/...` bằng đường dẫn tuyệt đối Linux. Không dùng dấu backtick PowerShell để xuống dòng trong Git Bash.
+## 1. Quy ước và vị trí cấu hình
 
-| Cấu hình | Vị trí và vai trò |
-| --- | --- |
-| `.env` ← `.env.example` | API/worker local và Compose DB ở gốc repo |
-| `docker.env` ← `deploy/docker.env.example` | Image, mount, auth và chế độ kết nối Docker ứng dụng |
-| `D:/etl/private/connections.json` | Bốn thông số kết nối DB của Docker |
-| `D:/etl/private/auth/` | Password hash, session key, proxy key; không có mật khẩu mặc định |
-| `D:/etl/models/bge-m3/` | Model offline và manifest kiểm tra checksum |
-
-Env thật, secret, model và báo cáo chạy thử không đưa vào Git. Thay `YOUR_*` bằng giá trị thật. Biến đã export trong terminal có thể ghi đè env file.
-
-## 1. Chạy local
-
-### 1.1. Cài thư viện
-
-Cần Python 3.12, Node.js 22.12+, Git; Docker chỉ cần nếu chạy DB trong container.
+Khối `bash` chạy bằng **Git Bash trên Windows** hoặc Bash trên Linux, tại gốc repo. Xuống dòng dùng `\`, không dùng backtick PowerShell. Khối `powershell` chạy trong PowerShell. Linux dùng `npm` thay `npm.cmd`.
 
 ```bash
-py -3.12 -m venv .venv
-source .venv/Scripts/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev,embeddings,google-drive]"
-npm.cmd --prefix frontend ci
-test -f .env || cp .env.example .env
-mkdir -p /d/etl/private/auth /d/etl/source /d/etl/source-temp /d/etl/storage /d/etl/models/bge-m3
+git clone https://github.com/Mei-iwi/ETL.git
+cd ETL
+# Đã có repo: mở terminal tại thư mục chứa pyproject.toml, không clone lại.
 ```
 
-Linux: tạo venv bằng `python3.12 -m venv .venv`, kích hoạt bằng `source .venv/bin/activate`. Không chép venv từ máy/thư mục khác.
+| Vị trí | Vai trò |
+| --- | --- |
+| `.env.example` → `.env` ở gốc | API/worker local và DB Compose ở gốc repo |
+| `deploy/docker.env.example` → `docker.env` ở gốc | Docker app: image, mount, auth, feature flags và profile DB |
+| `D:/etl/private/connections.json` | Đúng 4 thông số DB runtime Docker; không lấy từ `.env` |
+| `D:/etl/private/ops-connections.json` | Kết nối owner, chỉ dùng khi chủ DB khởi tạo/bảo trì |
+| `D:/etl/private/auth/` | Password hash, session signing key và proxy key |
+| `D:/etl/models/bge-m3/` | BGE-M3, revision marker, manifest checksum |
+| `D:/etl/models/faster-whisper-large-v3/` | Model nhận dạng tiếng nói, nếu bật media |
+| `D:/etl/models/argos/` | Gói dịch offline, nếu cần dịch |
+| `D:/etl/source/`, `source-temp/`, `storage/` | Ba thư mục riêng: nguồn, tệp tạm SOURCE, storage LOCAL |
 
-### 1.2. Tesseract và LibreOffice
+`D:/etl` là đường dẫn gợi ý Windows. Linux dùng thư mục riêng, ví dụ `/home/<user>/etl-runtime`; thay mọi đường dẫn cấu hình bằng **đường dẫn tuyệt đối thật**, không giữ `<user>`/`YOUR_*`. Không commit env thật, secret, model, dữ liệu. Biến export trong terminal có thể ghi đè env file.
 
-Tesseract đọc ảnh/PDF scan; LibreOffice chuyển Word/PPT sang PDF để xem. **PowerShell Windows:**
+## 2. Chạy local
+
+### 2.1. Cài công cụ hệ thống
+
+Cần Python **3.12**, Node.js **22.12+** (khuyến nghị 24), Git. Docker chỉ cần nếu chạy DB bằng container. Dành đủ dung lượng cho model/dependencies; chạy đồng thời BGE-M3 và Whisper large-v3 nên dùng máy RAM khoảng 32 GB. Máy ít RAM cần giảm tải/chọn Whisper nhỏ hơn và tự kiểm chứng chất lượng, thời gian.
+
+**Windows — PowerShell:**
 
 ```powershell
+winget install --id Python.Python.3.12 --exact
+winget install --id OpenJS.NodeJS.LTS --exact
+winget install --id Git.Git --exact
 winget install --id UB-Mannheim.TesseractOCR --exact
 winget install --id TheDocumentFoundation.LibreOffice --exact
-& 'C:\Program Files\Tesseract-OCR\tesseract.exe' --list-langs
+winget install --id Gyan.FFmpeg --exact
 ```
 
-Nếu thiếu `vie` hoặc `eng`, chạy **PowerShell Administrator**:
+Mở lại terminal sau khi cài. Tesseract dùng OCR; LibreOffice dựng bản xem Word/PPT; cần **cả FFmpeg và ffprobe** để xử lý media. Nếu thiếu ngôn ngữ OCR, chạy PowerShell Administrator:
 
 ```powershell
-foreach ($lang in @('vie', 'eng')) {
+foreach ($lang in @('vie','eng')) {
     $file = "C:\Program Files\Tesseract-OCR\tessdata\$lang.traineddata"
     if (-not (Test-Path -LiteralPath $file)) {
         Invoke-WebRequest "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$lang.traineddata" -OutFile $file
     }
 }
-```
-
-Ubuntu/Debian:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y tesseract-ocr tesseract-ocr-vie tesseract-ocr-eng libreoffice-writer libreoffice-impress
-tesseract --list-langs
-```
-
-### 1.3. Chuẩn bị BGE-M3 1024 chiều
-
-Tải một lần nếu chưa có model/manifest hợp lệ; cần Internet và chấp nhận giấy phép model. Runtime không tải lại.
-
-```bash
-python deploy/runtime/model.py prepare \
-  --directory D:/etl/models/bge-m3 --manifest D:/etl/models/bge-m3/etl-model-manifest.json \
-  --model-id BAAI/bge-m3 --revision 5617a9f61b028005a4858fdac845db406aefb181 \
-  --dimension 1024 --accept-model-license
-```
-
-### 1.3a. Cài môi trường MP3/MP4, Whisper và dịch cục bộ
-
-Thực hiện tại gốc repo, trong venv của mục 1.1. Máy đã có model/binary hợp lệ có thể bỏ qua bước tải. Cần FFmpeg **và ffprobe**, Tesseract `vie+eng` ở mục 1.2, Whisper đa ngôn ngữ và gói dịch đúng cặp ngôn ngữ. Model chỉ tải lúc cài đặt; API/worker không tự tải hoặc gửi tài liệu sang dịch vụ dịch bên ngoài.
-
-```bash
-python -m pip install -e ".[dev,embeddings,google-drive,media,translation]"
-python -m pip check
-```
-
-Extra `media` pin faster-whisper 1.2.1 và PyAV `<17`; không tự nâng PyAV riêng vì API giải mã bản mới không tương thích. Cấu hình đã kiểm thử dùng CPU/int8, 4 threads và 1 slot media, phù hợp máy RAM khoảng 16 GB. GPU là tùy chọn, cần môi trường CUDA tương thích riêng.
-
-**FFmpeg — PowerShell Windows:**
-
-```powershell
-winget install --id Gyan.FFmpeg --exact
-# Mở lại terminal sau khi cài để cập nhật PATH.
-ffmpeg -version
-ffprobe -version
 & 'C:\Program Files\Tesseract-OCR\tesseract.exe' --list-langs
+ffmpeg -version
+ffprobe -version
+node --version
+py -3.12 --version
 ```
 
-**Ubuntu/Debian:**
+**Ubuntu 24.04 — Bash:**
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ffmpeg tesseract-ocr tesseract-ocr-vie tesseract-ocr-eng
+sudo apt-get install -y git curl python3.12 python3.12-venv tesseract-ocr tesseract-ocr-vie tesseract-ocr-eng libreoffice-writer libreoffice-impress ffmpeg
+# Nếu chưa có Node phù hợp, cài bằng nvm:
+curl -fL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh -o /tmp/etl-install-nvm.sh
+bash /tmp/etl-install-nvm.sh
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh"
+nvm install 24
+nvm use 24
+node --version
+tesseract --list-langs
 ffmpeg -version
 ffprobe -version
-tesseract --list-langs
 ```
 
-**Tải Whisper large-v3 đầy đủ, đa ngôn ngữ (CTranslate2)**. Checkpoint [Systran/faster-whisper-large-v3](https://huggingface.co/Systran/faster-whisper-large-v3) chuyển từ `openai/whisper-large-v3`, không phải turbo/distil/English-only. Dùng [faster-whisper 1.2.1](https://github.com/SYSTRAN/faster-whisper/tree/v1.2.1) hiện có; không cần nâng dependency hay cài CUDA. Large-v3 ưu tiên chất lượng và có thể chậm hơn small; GPU 4 GB không được mặc định là đủ.
+### 2.2. Tạo môi trường dự án
 
-Chạy Git Bash hoặc PowerShell tại gốc repo bằng Python `.venv`. `huggingface_hub` đã là dependency của faster-whisper; chỉ cài nếu kiểm tra import báo thiếu. Tải cần Internet một lần, runtime chỉ dùng local. Bộ inference bên dưới khoảng **3,09 GB**; kiểm tra dung lượng trống trước khi tải. Base/small trên máy hiện tại đã được xóa theo yêu cầu; chỉ giữ thư mục large-v3.
-
-**Git Bash — tải model:**
+**Windows Git Bash:**
 
 ```bash
-cd /d/HK7/KLTN/ETL
-unset HF_HUB_OFFLINE
-export HF_HUB_DISABLE_XET=1
-./.venv/Scripts/python.exe -c "import huggingface_hub"
-# Chỉ khi import ở trên báo thiếu:
-# ./.venv/Scripts/python.exe -m pip install huggingface_hub
-./.venv/Scripts/python.exe -c "import shutil; print('Free bytes:', shutil.disk_usage('.').free)"
-./.venv/Scripts/python.exe - <<'PY'
-from huggingface_hub import snapshot_download
+py -3.12 -m venv .venv
+source .venv/Scripts/activate
+export ETL_HOME=D:/etl
+```
 
-snapshot_download(
-    repo_id="Systran/faster-whisper-large-v3",
-    revision="edaa852ec7e145841d8ffdb056a99866b5f0a478",
-    local_dir="Models/faster-whisper-large-v3",
-    allow_patterns=["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"],
-)
+**Linux:**
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+export ETL_HOME="$HOME/etl-runtime"
+```
+
+**Cả hai OS** (Linux đổi `npm.cmd` thành `npm`):
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install 'torch==2.14.1+cpu' --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -e '.[dev,embeddings,google-drive,media,translation]'
+python -m pip check
+npm.cmd --prefix frontend ci
+test -f .env || cp .env.example .env
+mkdir -p "$ETL_HOME/private/auth" "$ETL_HOME/models" "$ETL_HOME/source" "$ETL_HOME/source-temp" "$ETL_HOME/storage"
+```
+
+Không dùng media có thể cài `.[dev,embeddings,google-drive]`. Extra media dùng faster-whisper 1.2.1/PyAV `<17`; không tự nâng PyAV riêng. Không chép venv từ máy/đường dẫn khác. Nếu `hf.exe`/`pip.exe` báo launcher ở đường dẫn cũ, tạo venv mới, dùng `python -m pip`; các lệnh tải dưới đây không cần `hf.exe`.
+
+### 2.3. Tải và kiểm tra model
+
+Cần Internet lúc tải và chấp nhận giấy phép model. Đã có model đúng revision/manifest thì dùng lại. Runtime đọc local, không tải lại khi start.
+
+**BGE-M3 1024 chiều**, theo [revision chính thức](https://huggingface.co/BAAI/bge-m3/tree/5617a9f61b028005a4858fdac845db406aefb181):
+
+```bash
+mkdir -p "$ETL_HOME/models/bge-m3"
+python deploy/runtime/model.py prepare --directory "$ETL_HOME/models/bge-m3" --manifest "$ETL_HOME/models/bge-m3/etl-model-manifest.json" --model-id BAAI/bge-m3 --revision 5617a9f61b028005a4858fdac845db406aefb181 --dimension 1024 --accept-model-license
+python deploy/runtime/model.py verify --directory "$ETL_HOME/models/bge-m3" --manifest "$ETL_HOME/models/bge-m3/etl-model-manifest.json" --model-id BAAI/bge-m3 --revision 5617a9f61b028005a4858fdac845db406aefb181 --dimension 1024
+python deploy/runtime/model.py encode --directory "$ETL_HOME/models/bge-m3" --manifest "$ETL_HOME/models/bge-m3/etl-model-manifest.json" --model-id BAAI/bge-m3 --revision 5617a9f61b028005a4858fdac845db406aefb181 --dimension 1024
+```
+
+`prepare` tải và tạo manifest; `verify` kiểm tra revision/checksum; `encode` nạp model thật và kiểm tra 1024 chiều. Cần có weights, tokenizer, `modules.json`, `1_Pooling/`, `etl-model-revision.txt`, `etl-model-manifest.json`. Thư mục có tên `bge-m3` chưa chứng minh model đúng.
+
+**Whisper cho MP3/MP4**, bỏ qua nếu không dùng media. Dùng [Systran/faster-whisper-large-v3](https://huggingface.co/Systran/faster-whisper-large-v3/tree/edaa852ec7e145841d8ffdb056a99866b5f0a478), định dạng CTranslate2:
+
+```bash
+HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_DISABLE_XET=1 python - "$ETL_HOME/models/faster-whisper-large-v3" <<'PY'
+import sys
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id="Systran/faster-whisper-large-v3",
+    revision="edaa852ec7e145841d8ffdb056a99866b5f0a478", local_dir=sys.argv[1],
+    allow_patterns=["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"])
+PY
+python - "$ETL_HOME/models/faster-whisper-large-v3" <<'PY'
+import hashlib, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+for name in ("config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"):
+    assert (p/name).is_file() and (p/name).stat().st_size > 0, name
+with (p/"model.bin").open("rb") as f:
+    assert hashlib.file_digest(f,"sha256").hexdigest() == "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1"
+print("Whisper files/checksum OK")
 PY
 ```
 
-Sau khi lệnh tải kết thúc thành công, kiểm tra đủ tệp và checksum trong Git Bash:
+Không thay bằng model `.en`, turbo/distil hoặc weights PyTorch. Muốn dùng model nhỏ hơn phải tải đúng repo/revision và đổi đường dẫn, không chỉ đổi tên thư mục.
+
+**Argos Anh → Việt, tùy chọn.** Chỉ cần nguyên ngữ thì đặt `TRANSLATION_PROVIDER=disabled`, bỏ bước này. Gói trong [danh mục Argos chính thức](https://github.com/argosopentech/argospm-index/blob/main/index.json):
 
 ```bash
-./.venv/Scripts/python.exe - <<'PY'
-from pathlib import Path
-import hashlib
-
-p = Path("Models/faster-whisper-large-v3")
-for name in ["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"]:
-    assert (p / name).is_file() and (p / name).stat().st_size > 0, name
-with (p / "model.bin").open("rb") as f:
-    checksum = hashlib.file_digest(f, "sha256").hexdigest()
-assert checksum == "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1", checksum
-print("Checksum OK:", checksum)
+mkdir -p "$ETL_HOME/models/argos"
+curl -fL --retry 3 -A 'Mozilla/5.0' https://argos-net.com/v1/translate-en_vi-1_9.argosmodel -o "$ETL_HOME/models/translate-en_vi-1_9.argosmodel"
+python - "$ETL_HOME/models/translate-en_vi-1_9.argosmodel" "$ETL_HOME/models/argos" <<'PY'
+import sys
+from zipfile import ZipFile
+with ZipFile(sys.argv[1]) as package:
+    package.extractall(sys.argv[2])
 PY
-
-# Chuẩn bị mẫu kiểm thử FLEURS công khai (chạy 1 lần nếu chưa có thư mục .test-tmp/media-tools):
-./.venv/Scripts/python.exe -m pip install pyarrow fsspec aiohttp
-./.venv/Scripts/python.exe scripts/prepare_media_test_assets.py --download-public-samples
-
-# Đánh giá mô hình ASR offline với 3 ngôn ngữ mẫu:
-HF_HUB_OFFLINE=1 ./.venv/Scripts/python.exe scripts/evaluate_media_asr.py --model Models/faster-whisper-large-v3 --languages vi_vn fr_fr ja_jp --report .test-tmp/asr-large-v3.json
 ```
 
-Lệnh evaluator cần các mẫu audio/reference local theo bước tải trên. Khi kiểm tra thành công, restart API/worker để nạp cấu hình model mới.
+Cần `argos/translate-en_vi-1_9/metadata.json`, tokenizer và `model/model.bin`. `TRANSLATION_MODEL_ROOT` trỏ **thư mục cha `argos`**. Ngôn ngữ khác cần gói tương ứng; gói en→vi không dịch mọi ngôn ngữ. Thiếu model dịch không được coi là có bản dịch.
 
-**PowerShell — lệnh tương đương:**
+### 2.4. Cấu hình `.env`
 
-```powershell
-.\.venv\Scripts\python.exe -c "import huggingface_hub"
-# Chỉ khi import ở trên báo thiếu:
-# .\.venv\Scripts\python.exe -m pip install huggingface_hub
-.\.venv\Scripts\python.exe -c "import shutil; print('Free bytes:', shutil.disk_usage('.').free)"
-Remove-Item Env:HF_HUB_OFFLINE -ErrorAction SilentlyContinue
-$env:HF_HUB_DISABLE_XET="1"
-@'
-from huggingface_hub import snapshot_download
-snapshot_download(
-    repo_id="Systran/faster-whisper-large-v3",
-    revision="edaa852ec7e145841d8ffdb056a99866b5f0a478",
-    local_dir="Models/faster-whisper-large-v3",
-    allow_patterns=["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"],
-)
-'@ | .\.venv\Scripts\python.exe -
-```
-
-Revision và danh sách tệp được xác minh từ Hugging Face ngày 26/10/2026. Chạy lại cùng lệnh để tận dụng tệp/cache đã tải và tiếp tục phần thiếu khi Hub hỗ trợ; không xóa cache trong lúc tải. Không lấy trọng số PyTorch. Model/cache được `.gitignore` loại trừ.
-
-Model large-v3 trên máy hiện tại đã tải đủ 3.087.284.237 byte weights, checksum đã khớp và evaluator offline CPU/int8 đã chạy thành công trên ba mẫu local. Kết quả và giới hạn nằm trong MEDIA_ACCEPTANCE; chưa kiểm chứng video 30 phút. Nếu đường Xet đứng khi cài máy khác, đặt `$env:HF_HUB_DISABLE_XET="1"` trong PowerShell rồi chạy lại lệnh tải; HTTP cũng có thể bị gián đoạn theo kết nối.
-
-**Kiểm tra sau tải:** có thư mục chưa có nghĩa model đã sẵn sàng. Kiểm tra đủ năm tệp, checksum rồi nạp CPU/int8 thật; lệnh cuối dùng mẫu speech local đã có, không truy cập DB:
-
-```powershell
-@'
-from pathlib import Path
-import hashlib
-p = Path("Models/faster-whisper-large-v3")
-for name in ["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"]:
-    assert (p / name).is_file() and (p / name).stat().st_size > 0, name
-with (p / "model.bin").open("rb") as f:
-    checksum = hashlib.file_digest(f, "sha256").hexdigest()
-assert checksum == "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1", checksum
-print("large-v3 edaa852ec7e145841d8ffdb056a99866b5f0a478", checksum)
-'@ | .\.venv\Scripts\python.exe -
-
-# Chuẩn bị mẫu kiểm thử FLEURS công khai (nếu chưa có):
-.\.venv\Scripts\python.exe -m pip install pyarrow fsspec aiohttp
-.\.venv\Scripts\python.exe scripts/prepare_media_test_assets.py --download-public-samples
-
-$env:HF_HUB_OFFLINE="1"
-.\.venv\Scripts\python.exe scripts/evaluate_media_asr.py --model Models/faster-whisper-large-v3 --languages vi_vn fr_fr ja_jp --report .test-tmp/asr-large-v3.json
-```
-
-Lệnh đánh giá cần audio/reference local theo [MEDIA_ACCEPTANCE.md](MEDIA_ACCEPTANCE.md); báo cáo gồm transcript, timestamp, WER/CER, thời gian cold start, thời gian nạp model và revision nếu có metadata tải. Evaluator dùng beam=3, cửa sổ VAD 15 giây, không điều kiện hóa trên văn bản trước. Muốn so sánh lại với small phải tải lại small trước; kết quả small trước khi xóa vẫn là bằng chứng lịch sử. Đây là kiểm tra mẫu ngắn, không thay thế pipeline video 30 phút. Runtime từ chối bộ model thiếu tokenizer để tránh tải ngầm và không tự fallback sang small. BGE-M3 và Argos không thay đổi.
-
-**Tải và giải nén gói Argos Anh → Việt 1.9** vào thư mục model riêng:
-
-> *Lưu ý*: Máy chủ `argos-net.com` có Cloudflare bảo vệ, chặn `User-Agent` mặc định của urllib (`HTTP 403 Forbidden`). Dùng `curl` kèm `-A "Mozilla/5.0"` để tải file trước khi giải nén:
-
-**Git Bash:**
-```bash
-mkdir -p Models/argos .test-tmp/media-setup
-curl -A "Mozilla/5.0" -L -o .test-tmp/media-setup/translate-en_vi-1_9.argosmodel "https://argos-net.com/v1/translate-en_vi-1_9.argosmodel"
-./.venv/Scripts/python.exe -c "from zipfile import ZipFile; ZipFile('.test-tmp/media-setup/translate-en_vi-1_9.argosmodel').extractall('Models/argos')"
-```
-
-**PowerShell:**
-```powershell
-New-Item -ItemType Directory -Force -Path "Models/argos", ".test-tmp/media-setup" | Out-Null
-curl.exe -A "Mozilla/5.0" -L -o ".test-tmp/media-setup/translate-en_vi-1_9.argosmodel" "https://argos-net.com/v1/translate-en_vi-1_9.argosmodel"
-.\.venv\Scripts\python.exe -c "from zipfile import ZipFile; ZipFile('.test-tmp/media-setup/translate-en_vi-1_9.argosmodel').extractall('Models/argos')"
-```
-
-Kết quả phải có `Models/argos/translate-en_vi-1_9/metadata.json`, tokenizer và `model/model.bin`. `TRANSLATION_MODEL_ROOT` trỏ tới **thư mục cha `Models/argos`**, không trỏ vào một gói con. Cặp nguồn/đích khác cần gói tương ứng; chỉ gói Anh → Việt ở trên đã được kiểm chứng. Thiếu gói dịch không làm mất nguyên ngữ.
-
-**Thêm một lần vào `.env`**, đổi đường dẫn nếu đặt model ở nơi khác:
+Sửa các khóa đã có, tránh khai báo lặp. Mẫu Windows cho DB local; Linux thay mọi `D:/etl` bằng đường dẫn thực và dùng `/usr/bin/tesseract`, `/usr/bin/libreoffice`:
 
 ```dotenv
-# Đường dẫn tương đối được tính từ gốc repo khi khởi động API/worker.
-WHISPER_MODEL_PATH=Models/faster-whisper-large-v3
-WHISPER_DEVICE=cpu
-WHISPER_COMPUTE_TYPE=int8
-TRANSLATION_PROVIDER=argos
-TRANSLATION_MODEL_ROOT=Models/argos
-TRANSLATION_TARGET_LANGUAGE=vi
-# false: SOURCE tự xếp hàng xử lý nội dung; true: giữ chế độ đăng ký metadata-only.
-SOURCE_METADATA_MEDIA_ENABLED=false
-```
-
-FFmpeg và ffprobe dùng tên lệnh mặc định trong `config.py`; thêm thư mục chứa cả hai binary vào `PATH`, không cần khai báo đường dẫn trong `.env`. Trên Windows, nếu tiến trình đang chạy chưa nhận `PATH` mới, bộ xử lý media sẽ tìm thêm trong `PATH` đã lưu của hệ thống và tài khoản. Nếu cần dùng bộ công cụ riêng, vẫn có thể đặt `FFMPEG_PATH`/`FFPROBE_PATH`; đường dẫn chỉ định được ưu tiên và không tự thay thế khi sai. Khởi động lại API/worker sau khi sửa `.env` để nạp lại cấu hình model.
-
-Giữ `OCR_ENGINE=tesseract`, `TESSERACT_PATH` và `TESSERACT_LANGUAGES=vie+eng` ở phần OCR đã có, **không khai báo lại các biến này ở cuối file**. Đường dẫn Windows có khoảng trắng nên đặt trong dấu nháy. Các đường dẫn `.test-tmp/media-tools/...` đã dùng để kiểm thử vẫn chạy nếu còn tệp, nhưng không nên dùng thư mục test làm nơi cài công cụ lâu dài.
-
-Giới hạn mặc định: 50 MiB, 30 phút/tệp, timeout media 900 giây, tối đa 120 khung/5.000 đoạn, dịch 60 giây/đoạn và 600 giây/tài liệu. Có thể đặt rõ các biến `MEDIA_*`, `ASR_WINDOW_SECONDS`, `TRANSLATION_*` theo `.env.example`; không bắt buộc thêm tất cả nếu dùng mặc định.
-
-**Schema và chạy:** sau khi tích hợp `main`, phần media dùng MASTER revision `0018`, nối tiếp `0017` xóa mềm. Với DB theo lịch sử `main`, kiểm tra đúng MASTER local/dev, sao lưu và dừng API/worker trước khi nâng; không chạy lệnh nâng trên SOURCE hoặc production:
-
-```bash
-python -m alembic current
-# Sau khi kiểm tra lịch sử migration và chuẩn bị như trên:
-python -m alembic upgrade 0018
-```
-
-DB từng áp dụng migration media cũ mang revision `0017` trước khi merge cần đối chiếu schema/lịch sử riêng: revision đó trùng số với migration xóa mềm trên `main`. Migration `0018` nhận diện trường hợp có đủ hai cột JSON nullable `resource_versions.processing_options` và `content_units.source_locator`, chưa có cả bốn cột xóa mềm MASTER và bảng `resource_deletion_events`; khi đó chỉ bổ sung schema xóa mềm, giữ nguyên cột và dữ liệu media. Schema có dấu hiệu sửa dở sẽ dừng với `0018_LEGACY_SCHEMA_REQUIRES_MANUAL_REVIEW`; không tự stamp hoặc xóa cột để vượt kiểm tra. Nếu worker thoát ngay sau `STALE_RECOVERY` vì thiếu bảng/cột, CLI báo `MASTER_SCHEMA_MIGRATION_REQUIRED`; kiểm tra DB MASTER rồi chạy migration trước khi khởi động lại.
-
-Đường dẫn tương đối tính từ thư mục làm việc của API/worker; nên chạy tại gốc repo. Máy hiện tại dùng `WHISPER_MODEL_PATH=D:/HK7/KLTN/ETL/Models/faster-whisper-large-v3`. Bỏ cấu hình model nếu chưa cài: mặc định `None` trả lỗi ASR có kiểm soát, không tải mạng.
-
-Khởi động lại API và worker OCR theo mục 1.7 để nạp `.env` và model: Ctrl+C từng tiến trình, sau đó chạy lại trong hai terminal PowerShell tại gốc repo:
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn data_sync_etl.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
-# Terminal thứ hai:
-.\.venv\Scripts\python.exe -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1
-```
-
-Quay lại small: máy hiện tại đã xóa small nên cần tải/cài lại model này trước khi đổi `WHISPER_MODEL_PATH=Models/faster-whisper-small`, giữ CPU/int8 rồi restart hai tiến trình như trên; không xóa large-v3. Không cần migration cho việc đổi model. API, lựa chọn track/ngôn ngữ, xem nguyên ngữ/bản dịch và xuất kết quả: [MEDIA_PIPELINE.md](MEDIA_PIPELINE.md). Kết quả kiểm chứng và giới hạn: [MEDIA_ACCEPTANCE.md](MEDIA_ACCEPTANCE.md).
-
-### 1.4. Sửa `.env`
-
-Giữ các giá trị còn lại từ `.env.example`; sửa URL, password và đường dẫn theo máy. Mẫu dùng DB local:
-
-```dotenv
+APP_ENVIRONMENT=development
+POSTGRES_USER=etl
+POSTGRES_DB=etl
+POSTGRES_PASSWORD=YOUR_MASTER_PASSWORD
+POSTGRES_PORT=5432
 DATABASE_URL=postgresql+psycopg://etl:YOUR_MASTER_PASSWORD@127.0.0.1:5432/etl
 SOURCE_ADAPTER=postgresql
+SOURCE_POSTGRES_USER=etl_source_admin
+SOURCE_POSTGRES_DB=etl_source
+SOURCE_POSTGRES_PASSWORD=YOUR_SOURCE_OWNER_PASSWORD
+SOURCE_POSTGRES_PORT=5433
 SOURCE_DATABASE_URL=postgresql+psycopg://etl_source_reader:YOUR_READER_PASSWORD@127.0.0.1:5433/etl_source
+SOURCE_MIGRATION_DATABASE_URL=postgresql+psycopg://etl_source_admin:YOUR_SOURCE_OWNER_PASSWORD@127.0.0.1:5433/etl_source
 MONGO_URI=mongodb://127.0.0.1:27018
 MONGO_DATABASE=etl_content
 MONGO_METADATA_MODE=shared
@@ -289,60 +196,82 @@ OCR_ENGINE=tesseract
 TESSERACT_PATH="C:/Program Files/Tesseract-OCR/tesseract.exe"
 TESSERACT_LANGUAGES=vie+eng
 OFFICE_PDF_EXECUTABLE="C:/Program Files/LibreOffice/program/soffice.exe"
+FFMPEG_PATH=ffmpeg
+FFPROBE_PATH=ffprobe
 INDEX_EMBEDDING_MODEL_PATH=D:/etl/models/bge-m3
 INDEX_EMBEDDING_MODEL_ID=BAAI/bge-m3
 INDEX_EMBEDDING_MODEL_VERSION=5617a9f61b028005a4858fdac845db406aefb181
 INDEX_EMBEDDING_DIMENSION=1024
 INDEX_HISTORICAL_EMBEDDING_DIMENSIONS=[]
-SEARCH_MODEL_WARMUP_TIMEOUT_SECONDS=120
 INDEX_AUTO_ENABLED=false
+MASTER_SYNC_AUTO_INTERVAL_SECONDS=30
+SEARCH_MODEL_WARMUP_TIMEOUT_SECONDS=120
+SOURCE_METADATA_MEDIA_ENABLED=false
+WHISPER_MODEL_PATH=D:/etl/models/faster-whisper-large-v3
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+TRANSLATION_PROVIDER=disabled
+# Đã cài Argos: đổi provider thành argos và bỏ comment dòng root.
+# TRANSLATION_MODEL_ROOT=D:/etl/models/argos
+TRANSLATION_TARGET_LANGUAGE=vi
 ```
 
-Linux dùng `/usr/bin/tesseract`, `/usr/bin/libreoffice`. Password trong URL phải percent-encode ký tự đặc biệt. SOURCE runtime dùng tài khoản chỉ SELECT. Tệp nguồn local nằm ở `<SOURCE_FILE_STORAGE_ROOT>/<bucket>/<object_key>`; kho SOURCE, LOCAL và thư mục tạm tách riêng. [Nguồn Google Drive](deploy/DRIVE_SETUP.md) cần credentials/quyền riêng.
+Thay password thật, percent-encode ký tự đặc biệt trong URL PostgreSQL/MongoDB. Với Compose ở gốc, nên dùng password owner chỉ gồm chữ/số để các URL migration nội suy không bị sai; có thể tự tạo bằng `python -c "import secrets; print(secrets.token_hex(24))"`, dùng hai giá trị khác nhau cho hai owner. `SOURCE_MIGRATION_DATABASE_URL` chỉ dùng owner của DB nguồn riêng mới/trống; bỏ dòng này khi dùng SOURCE có sẵn/remote. `SOURCE_ADAPTER=json` chỉ đọc fixture, không đọc PostgreSQL.
 
-Nếu tên trong tham chiếu SOURCE cũ khác tên thật trên Drive, ưu tiên sửa metadata ở hệ thống nguồn. Khi SOURCE chỉ đọc, có thể cấu hình `SOURCE_DRIVE_FILENAME_ALIASES` bằng JSON ánh xạ chính xác `files/<file_id>/<tên SOURCE>` sang tên thật đã kiểm chứng; mặc định `{}`. Ánh xạ chỉ áp dụng đúng file ID và tên nguồn đó, phải cùng phần mở rộng, không chứa đường dẫn. Vẫn kiểm tra thư mục Drive được phép, MIME, kích thước, revision và SHA-256 so với SOURCE; không bật cơ chế so tên gần đúng. Restart API, source-file worker và OCR worker sau khi đổi cấu hình. Không tự bỏ qua `SOURCE_VERSION_MUTATED`: với bản ghi chưa có phiên bản đích/job, chỉ phục hồi sau khi xác minh lại bytes/hash và lưu bản ghi trước sửa; phiên bản đã nhập phải giữ kiểm tra bất biến.
+`SOURCE_METADATA_MEDIA_ENABLED=false`: xử lý nội dung MP3/MP4; `true`: chỉ đăng ký metadata. Tệp local-source nằm ở `<SOURCE_FILE_STORAGE_ROOT>/<bucket>/<object_key>` theo metadata nguồn; SHA-256 phải khớp. Ba thư mục nguồn/storage/tạm phải tách riêng, không lồng nhau. Nếu FFmpeg/ffprobe chưa vào PATH, đặt đường dẫn binary tuyệt đối rồi restart tiến trình.
 
-### 1.5. Chuẩn bị DB
+### 2.5. Chuẩn bị database
 
-**DB có schema sẵn:** điền URL ở trên, không chạy lại nhóm khởi tạo DB rỗng bên dưới. Riêng việc bổ sung media cần kiểm tra/nâng MASTER theo mục 1.3a. Nếu DB local đã tạo nhưng đang dừng:
+**DB có sẵn:** chỉ sửa kết nối và kiểm tra. Không bootstrap/seed lại hoặc tự đổi validator384→1024 trên dữ liệu cũ:
 
 ```bash
-docker compose up -d postgres source-postgres mongo
+python -m alembic current
+python -m data_sync_etl.adapters.mongo.schema --check
 ```
 
-**Chỉ dành cho DB local mới/trống:** thêm vào `.env` các giá trị sau; password MASTER phải khớp `DATABASE_URL`. Password owner SOURCE khác password reader.
+Nâng DB có dữ liệu cần chủ DB sao lưu, kiểm tra lịch sử migration và dừng API/worker trước khi phê duyệt. MASTER hiện có revision media `0018`; dùng `head` theo checkout, không tự `stamp` để bỏ qua lỗi.
 
-```dotenv
-POSTGRES_USER=etl
-POSTGRES_DB=etl
-POSTGRES_PASSWORD=YOUR_MASTER_PASSWORD
-POSTGRES_PORT=5432
-SOURCE_POSTGRES_USER=etl_source_admin
-SOURCE_POSTGRES_DB=etl_source
-SOURCE_POSTGRES_PASSWORD=YOUR_SOURCE_OWNER_PASSWORD
-SOURCE_POSTGRES_PORT=5433
-MONGO_PORT=27018
-```
+**Chỉ cho ba DB local mới/trống**, dùng Compose ở gốc repo:
 
 ```bash
 docker compose up --build -d
 docker compose ps -a
 docker compose logs master-migrate source-migrate mongo-init
+# Cả 3 job phải exit0; mongo-init dùng INDEX_EMBEDDING_DIMENSION=1024 trong .env.
 docker compose exec -T source-postgres psql -v ON_ERROR_STOP=1 -U etl_source_admin -d etl_source < scripts/sql/source_reader.sql
 docker compose exec source-postgres psql -U etl_source_admin -d etl_source
 ```
 
-Trong psql chạy `\password etl_source_reader`, nhập password khớp `SOURCE_DATABASE_URL`, rồi `\q`. Ba job khởi tạo phải exit 0. DB mới chưa có người dùng/học liệu. Không chạy nhóm khởi tạo này trên Dev/Production hoặc remote có sẵn.
+Trong psql chạy `\password etl_source_reader`, nhập password khớp `SOURCE_DATABASE_URL`, rồi `\q`. Owner SOURCE khác reader; reader chỉ SELECT các bảng đồng bộ. Dùng đúng URL MASTER cho migration MASTER, không nhầm với SOURCE.
 
-### 1.6. Đăng nhập
-
-Tạo secret một lần, bỏ qua nếu đã có; nhập password admin ít nhất 15 ký tự:
+Nếu tự cài PostgreSQL/Mongo thay vì Compose: chủ DB tạo DB/role, sau đó khởi tạo **DB rỗng**:
 
 ```bash
-python -m data_sync_etl.security.cli init --directory D:/etl/private/auth
+python -m alembic upgrade head
+python -m alembic -c alembic_source.ini upgrade head
+python -m data_sync_etl.adapters.mongo.schema --bootstrap-empty
 ```
 
-Thêm vào `.env`:
+Lệnh thứ hai cần SOURCE owner URL, không chạy trên SOURCE có sẵn. Cấp reader theo script ở trên rồi kiểm tra lại. Mongo có xác thực cần đúng `authSource` và role trong URI.
+
+**Danh mục/dữ liệu thử, tùy chọn:** DB mới chưa có provider/loại/người dùng/học liệu. Chỉ trên SOURCE demo rỗng của bạn:
+
+```bash
+python scripts/source_seed.py --confirm-empty-demo-source
+python -m data_sync_etl.cli sync-master --full --stream all
+```
+
+Seed không tự chạy và từ chối ghi đè metadata có sẵn. Không có password user demo bảo đảm đăng nhập; dùng admin riêng. Với SOURCE thật, dùng dữ liệu do hệ thống nguồn quản lý, không seed demo. DDL tham chiếu: [alembic_source/schema_v1.sql](alembic_source/schema_v1.sql).
+
+### 2.6. Secret và tài khoản đăng nhập
+
+Tạo một lần; nhập password ít nhất 15 ký tự ở prompt ẩn. Có secret thì dùng lại, không chạy `init` đè:
+
+```bash
+python -m data_sync_etl.security.cli init --directory "$ETL_HOME/private/auth"
+```
+
+Sửa `.env`, điền email thật:
 
 ```dotenv
 AUTH_MODE=single_admin
@@ -359,215 +288,570 @@ AUTH_PROXY_KEY_FILE=D:/etl/private/auth/auth_proxy_key
 AUTH_STATE_PATH=D:/etl/private/auth/sessions.sqlite3
 ```
 
-| Nhu cầu | Cấu hình |
-| --- | --- |
-| Chỉ admin cấu hình riêng | `AUTH_MODE=single_admin` |
-| User MASTER và admin riêng | `AUTH_MODE=master_users`, `AUTH_MASTER_FRESHNESS_SECONDS=120`, `AUTH_MASTER_PBKDF2_SALT_ENCODING=auto` |
-| Auth DB độc lập | `AUTH_MODE=db_users`; theo [hướng dẫn Auth DB](deploy/AUTH_DATABASE_SETUP.md) |
+`ADMIN_ENABLED=true` bật chức năng, **không bỏ login**. Không có password gốc trong file hash. Vite đọc proxy key từ `.env` backend; không cần `frontend/.env` cho cấu hình mặc định, không đặt secret vào `VITE_*`.
 
-User MASTER dùng mật khẩu tài khoản SOURCE đã đồng bộ, không dùng password DB. User/email verified/role phải hợp lệ và đồng bộ users còn mới. `ADMIN_ENABLED=true` bật chức năng, không bỏ login. Chi tiết: [MASTER users](deploy/AUTH_MASTER_USERS_SETUP.md).
+Đổi password: tạo hash ở tệp mới, đổi đường dẫn hash trong cấu hình và restart API; không cần đổi proxy/session key chỉ vì đổi password:
 
-Với `master_users`, bật luồng Auto users và giữ Master Sync Worker chạy. Worker ưu tiên users, làm mới thêm tối đa một lần trong lượt đồng bộ dài; không tự bật luồng đang tắt. Khoảng cách giữa hai lần users thành công phải dưới `AUTH_MASTER_FRESHNESS_SECONDS` (mặc định 120 giây), tính cả thời gian xử lý và chờ lịch. `AUTH_MASTER_STALE` trả 503 khi dữ liệu xác thực quá cũ; kiểm tra worker/lịch users thay vì tắt kiểm tra freshness. Khi cập nhật code worker, khởi động lại tiến trình worker để nạp bản sửa.
+```bash
+python -m data_sync_etl.security.cli hash --output "$ETL_HOME/private/auth/admin_password_hash_new"
+```
 
-### 1.7. Khởi động
+### 2.7. Khởi động đầy đủ
 
-Mỗi tiến trình mở terminal riêng; kích hoạt venv trước lệnh Python:
+Mỗi dòng là **một terminal riêng** tại gốc repo. Mỗi terminal Python kích hoạt cùng venv (`source .venv/Scripts/activate`, Linux `.venv/bin/activate`). API không tự chạy ba worker.
 
 | Tiến trình | Lệnh |
 | --- | --- |
 | API | `python -m uvicorn data_sync_etl.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers` |
-| React | `npm.cmd --prefix frontend run dev` |
+| React/Vite | `npm.cmd --prefix frontend run dev` |
 | Đồng bộ metadata | `python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-1` |
-| Xác minh/tham chiếu tệp | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
-| OCR/xử lý nội dung | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
-
-Mở **http://127.0.0.1:3000/login**; Swagger admin qua **http://127.0.0.1:3000/docs**. Chạy Full baseline rồi bật Auto Incremental trong giao diện Đồng bộ, đặc biệt luồng users khi dùng MASTER auth. Worker đang chạy không tự bật lịch đồng bộ.
-
-Khi model/schema/index hợp lệ, đặt `INDEX_AUTO_ENABLED=true` để tự lập chỉ mục. Đổi `.env` phải restart API/worker; đổi origin/proxy key phải restart React. Dừng bằng Ctrl+C.
-
-Quản trị viên có thể xóa tại **Kho học liệu → Chi tiết → Xóa học liệu**, bên dưới nút **Cập nhật thông tin**; mở **Danh sách học liệu → Đã xóa → Khôi phục** để đưa học liệu trở lại. Cần `ADMIN_ENABLED=true` và vai trò ADMIN. Thao tác xóa mềm giữ nguyên file và dữ liệu nguồn; khôi phục vẫn kiểm tra trạng thái tại nguồn.
-
-## 2. Chạy Docker
-
-Host cần Git, Docker Desktop/Engine và Compose v2. Image chứa Python, Tesseract `vie+eng`, LibreOffice và embedding dependencies. Model, secret và DB nằm riêng; host không cần Python/Node/Tesseract.
-
-### 2.1. Cấu hình
+| Xác minh nguồn, nhập tham chiếu, tạo job | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
+| Trích xuất/OCR/ASR và hoàn thiện chỉ mục | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
 
 ```bash
-test -f docker.env || cp deploy/docker.env.example docker.env
-mkdir -p /d/etl/private/auth /d/etl/source /d/etl/models/bge-m3
-test -f /d/etl/private/connections.json || cp deploy/config/connections.example.json /d/etl/private/connections.json
+curl -fsS http://127.0.0.1:8000/health
 ```
 
-Sửa `docker.env` ở gốc repo, tối thiểu:
+Mở **http://127.0.0.1:3000/login**. Swagger sau đăng nhập qua **http://127.0.0.1:3000/docs**; gọi trực tiếp backend8000 có thể bị chặn bởi boundary.
+
+1. Đăng nhập admin → **Đồng bộ dữ liệu nguồn** → chạy Full baseline nếu chưa chạy CLI.
+2. Bật Auto Incremental cho các luồng cần thiết; lịch/enable lưu trong DB, worker chạy không tự bật lịch.
+3. Model/schema đã READY thì đặt `INDEX_AUTO_ENABLED=true`, restart API và worker.
+4. Tệp mới: source-file worker xác minh → tạo job → OCR worker xử lý → ContentUnit/ContentBag/chỉ mục. Thêm/cập nhật tệp LOCAL từ giao diện cũng tạo job.
+5. MP3/MP4 cũ ở `METADATA_ONLY` được quét lại theo lô khi source-file worker khởi động trong chế độ xử lý, xếp hàng trên đúng phiên bản cũ. Tệp bị xóa/từ chối/sai hash không tự bỏ chặn.
+
+Dừng bằng Ctrl+C. Đổi `.env`/model phải restart API và **cả ba worker**; đổi auth origin/proxy key cần restart Vite. Có thể thêm `--reload` cho API khi phát triển; tránh chạy nhiều tiến trình model trùng.
+
+### 2.8. User MASTER cùng admin riêng
+
+Sau Full users thành công, bật Auto users và giữ Master Sync Worker chạy, sửa `.env`:
+
+```dotenv
+AUTH_MODE=master_users
+AUTH_MASTER_FRESHNESS_SECONDS=120
+AUTH_MASTER_PBKDF2_SALT_ENCODING=auto
+MASTER_SYNC_AUTO_INTERVAL_SECONDS=30
+ADMIN_ENABLED=true
+```
+
+Restart API/Vite. Admin riêng dùng email/hash cấu hình; user MASTER dùng password tài khoản nguồn đã đồng bộ, không dùng password PostgreSQL. Tài khoản phải active, email verified, có role hợp lệ. ADMIN lấy từ role đã xác minh, không từ dropdown/client flag.
+
+`AUTH_MASTER_STALE`: lần đồng bộ users thành công quá hạn. Kiểm tra heartbeat/lịch/thời gian chạy, không chỉ watermark incremental và không nới freshness để che lỗi. Auth DB độc lập `AUTH_MODE=db_users` có quy trình riêng: [AUTH_DATABASE_SETUP.md](deploy/AUTH_DATABASE_SETUP.md). Cấu hình mặc định ở đây bắt login; không bật localhost bypass trên LAN.
+
+## 3. Chạy Docker
+
+Host cần Git, Docker Desktop **Linux containers + Compose v2** trên Windows hoặc Docker Engine/Compose v2 trên Linux. Host không cần Python/Node/Tesseract/embedding. Image có công cụ; **model, secret, DB không nằm trong image**. Có thể dùng lại model từ2.3 hoặc tải bằng container dưới đây.
+
+Máy chưa có Docker: cài theo [Windows](https://docs.docker.com/desktop/setup/install/windows-install/) hoặc [Ubuntu](https://docs.docker.com/engine/install/ubuntu/). Windows bật virtualization trong BIOS, mở PowerShell Administrator:
+
+```powershell
+wsl --install --no-distribution
+wsl --update
+winget install --id Docker.DockerDesktop --exact
+```
+
+Khởi động lại Windows nếu được yêu cầu, mở Docker Desktop, chọn WSL 2 và Linux containers, chờ Engine chạy. Các lệnh dự án bên dưới chạy trong Git Bash.
+
+Ubuntu 24.04 mới, chưa có gói Docker xung đột:
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+```
+
+Đăng xuất rồi đăng nhập lại để áp dụng nhóm Docker (nhóm này có quyền tương đương root). Máy đã có Docker/Podman cần xử lý gói xung đột theo hướng dẫn chính thức trước khi cài. Clone repo bằng lệnh ở 2.2 rồi đứng tại thư mục gốc.
+
+### 3.1. Tạo thư mục và `docker.env`
+
+```bash
+docker version
+docker compose version
+# Git Bash Windows:
+export ETL_HOME=D:/etl
+export MSYS_NO_PATHCONV=1
+# Linux: thay dòng export ETL_HOME ở trên bằng:
+# export ETL_HOME="$HOME/etl-runtime"
+mkdir -p "$ETL_HOME/private" "$ETL_HOME/models" "$ETL_HOME/source"
+test -f docker.env || cp deploy/docker.env.example docker.env
+test -f "$ETL_HOME/private/connections.json" || cp deploy/config/connections.example.json "$ETL_HOME/private/connections.json"
+test -f "$ETL_HOME/private/ops-connections.json" || cp deploy/config/ops-connections.example.json "$ETL_HOME/private/ops-connections.json"
+```
+
+Sửa `docker.env`, giữ các khóa khác từ example:
 
 ```dotenv
 BACKEND_IMAGE=etl-portable-backend:local
 FRONTEND_IMAGE=etl-portable-frontend:local
 WEB_PORT=8080
+ETL_DATA_NETWORK=etl-data
+DATABASE_MODE=same-host
+CONNECTIONS_FILE=D:/etl/private/connections.json
 MODEL_DIR=D:/etl/models/bge-m3
 MODEL_MANIFEST_FILE=D:/etl/models/bge-m3/etl-model-manifest.json
-CONNECTIONS_FILE=D:/etl/private/connections.json
 SOURCE_LOCAL_DIR=D:/etl/source
-DATABASE_MODE=same-host
+INDEX_EMBEDDING_MODEL_ID=BAAI/bge-m3
+INDEX_EMBEDDING_MODEL_VERSION=5617a9f61b028005a4858fdac845db406aefb181
+INDEX_EMBEDDING_DIMENSION=1024
+INDEX_HISTORICAL_EMBEDDING_DIMENSIONS=[]
+INDEX_AUTO_ENABLED=false
 SOURCE_REFERENCE_ENABLED=true
 SOURCE_TEMPORARY_FILES_ENABLED=true
 AUTH_MODE=single_admin
+AUTH_APP_ENVIRONMENT=production
+ADMIN_ENABLED=true
+AUTH_DEV_ADMIN_BYPASS=false
+AUTH_PUBLIC_ENABLED=false
+AUTH_DEPLOYMENT_PROFILE=localhost
+AUTH_COOKIE_SECURE=false
+AUTH_ORIGIN=http://127.0.0.1:8080
 ADMIN_LOGIN_EMAIL=YOUR_ADMIN_EMAIL
 ADMIN_PASSWORD_HASH_SECRET_FILE=D:/etl/private/auth/admin_password_hash
 SESSION_SIGNING_KEY_SECRET_FILE=D:/etl/private/auth/session_signing_key
 AUTH_PROXY_KEY_SECRET_FILE=D:/etl/private/auth/auth_proxy_key
+MEDIA_ENABLED=false
+INSTALL_MEDIA=false
 ```
 
-Giữ BGE-M3 1024D và auth localhost theo template; dùng user MASTER thì đổi `AUTH_MODE=master_users`. Hai cờ SOURCE chỉ bật khi được phép truy xuất nguồn. Nếu đổi `WEB_PORT`, đổi cả `AUTH_ORIGIN` (mặc định `http://127.0.0.1:8080`). LAN/HTTPS cần [cấu hình proxy/TLS](deploy/README.md), không bật bypass.
+Đổi WEB_PORT phải đổi AUTH_ORIGIN. Đường dẫn host dùng `D:/...` hoặc `/home/...`; path container dùng `/opt/...`/`/run/secrets/...`, không trộn.
 
-Sửa `connections.json` với đúng bốn key:
+Sửa `connections.json` runtime, đúng4 key, thay password thật:
 
 ```json
 {
-  "DATABASE_URL": "postgresql+psycopg://etl:YOUR_MASTER_PASSWORD@postgres:5432/etl",
+  "DATABASE_URL": "postgresql+psycopg://etl_master_runtime:YOUR_RUNTIME_PASSWORD@master-postgres:5432/etl_master",
   "SOURCE_DATABASE_URL": "postgresql+psycopg://etl_source_reader:YOUR_READER_PASSWORD@source-postgres:5432/etl_source",
-  "MONGO_URI": "mongodb://mongo:27017",
+  "MONGO_URI": "mongodb://etl_runtime:YOUR_MONGO_RUNTIME_PASSWORD@mongo:27017/etl_content?authSource=etl_content",
   "MONGO_DATABASE": "etl_content"
 }
 ```
 
-Docker ứng dụng lấy URL từ file này, không dùng URL của `.env` local. DB cùng network dùng alias/cổng nội bộ; `127.0.0.1` trong container là chính container. Mongo có auth cần credentials/`authSource` được cấp.
+Container không dùng127.0.0.1 để kết nối DB khác container/host. Docker Desktop có thể dùng `host.docker.internal` cho DB trên host; Linux cần DNS/IP hợp lệ. Không thêm owner/migration URL vào runtime JSON.
 
-### 2.2. DB, network và build
+### 3.2. Network, DB và build
 
-Chuẩn bị DB theo mục 1.5 hoặc [Compose DB riêng](deploy/DATABASE_SETUP.md); Start không tự migrate. Với DB của Compose gốc, nối network một lần (tên thật lấy từ `docker ps -a`):
+DB có sẵn/remote: bỏ khởi tạo DB dưới đây, xem4.1. DB/app có Compose riêng:
 
 ```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Network
-docker network connect --alias postgres etl-data etl-master-data-postgres-1
-docker network connect --alias source-postgres etl-data etl-master-data-source-postgres-1
-docker network connect --alias mongo etl-data etl-master-data-mongo-1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Build
+docker network inspect etl-data >/dev/null 2>&1 || docker network create etl-data
 ```
 
-Bỏ lệnh connect nếu endpoint đã tồn tại. SOURCE Neon không cần container SOURCE. Ba worker dùng chung backend image, không build riêng.
+**Chỉ DB Docker mới/trống:** bằng editor tạo ba file ngoài repo, mỗi file một password: `master-password`, `source-password`, `mongo-password`. Bổ sung `docker.env`:
 
-### 2.3. Model và secret
-
-Có model/manifest và secret từ local thì dùng lại. Nếu chưa có, sau khi build chạy:
-
-```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
-  -Action PrepareModel -ModelDirectory D:/etl/models/bge-m3 \
-  -ModelId BAAI/bge-m3 -ModelRevision 5617a9f61b028005a4858fdac845db406aefb181 \
-  -ModelDimension 1024 -AcceptModelLicense
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/setup-auth.ps1 \
-  -Directory D:/etl/private/auth -AdminEmail YOUR_ADMIN_EMAIL -Image etl-portable-backend:local
+```dotenv
+DB_PROJECT=etl-databases
+MASTER_DB_NAME=etl_master
+SOURCE_DB_NAME=etl_source
+MASTER_DB_ADMIN=etl_master_owner
+SOURCE_DB_ADMIN=etl_source_owner
+MONGO_DB_ADMIN=etl_mongo_owner
+MASTER_PASSWORD_FILE=D:/etl/private/master-password
+SOURCE_PASSWORD_FILE=D:/etl/private/source-password
+MONGO_PASSWORD_FILE=D:/etl/private/mongo-password
+OPS_CONNECTIONS_FILE=D:/etl/private/ops-connections.json
 ```
 
-Script secret không sửa `docker.env`; kiểm tra email/đường dẫn. Model mount read-only. `PrepareModel` dùng image `etl-portable-backend:local`; nếu đổi tag đặt `ETL_MODEL_TOOL_IMAGE` theo image đã build.
-
-### 2.4. Start, kiểm tra và cập nhật
+Sửa `ops-connections.json` theo [ops example](deploy/config/ops-connections.example.json): MASTER owner `etl_master_owner`, SOURCE owner `etl_source_owner`, Mongo owner `etl_mongo_owner` với `authSource=admin`; password khớp ba file trên. File này dùng `SOURCE_MIGRATION_DATABASE_URL`, không phải URL reader.
 
 ```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Check
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Start -Workers
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Status
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Logs
+docker compose --env-file docker.env -f deploy/compose.database.yml up -d
+docker compose --env-file docker.env -f deploy/compose.database.yml ps
+# Windows Git Bash:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Build -EnvFile docker.env
+# Linux thay dòng trên bằng:
+# bash deploy/scripts/etl-docker.sh build
 ```
 
-`Check` kiểm tra auth/model/DB; `Start -Workers` chạy API, frontend và ba worker. Mở **http://127.0.0.1:8080/login**; Swagger admin tại **http://127.0.0.1:8080/docs**.
+Build không cần model đã tải. Muốn media: điền `MEDIA_ENABLED=true`, `INSTALL_MEDIA=true`, `WHISPER_MODEL_DIR` theo3.5 **trước build**. Build không tự chạy worker.
 
-| Thao tác | Nhóm lệnh `-Action` |
-| --- | --- |
-| Đổi code, cập nhật image/container | `Build` → `Start -Workers` |
-| Đổi `docker.env` | `Start -Workers` để tạo lại container cần thiết |
-| Đổi nội dung secret/JSON cùng đường dẫn | `Stop` → `Check` → `Start -Workers` |
-| Dừng, giữ dữ liệu | `Stop` |
-
-Launcher mặc định đọc `docker.env` ở gốc repo. Dùng `-EnvFile D:/etl/private/app.env` cho mọi lệnh nếu chọn vị trí khác. Không dùng `down -v` để sửa lỗi.
-
-Linux dùng đường dẫn Linux trong `docker.env`; UID 10001 phải đọc được model/secret:
+DB Compose không tự migration/seed. **Chỉ chủ DB mới/trống** chạy bảo trì này. Ops đọc dimension từ `docker.env`; truyền rõ 1024 để kiểm soát Mongo bootstrap:
 
 ```bash
-bash deploy/scripts/etl-docker.sh network
-bash deploy/scripts/etl-docker.sh build
+export ETL_MAINTENANCE_APPROVAL=APPROVED_DATABASE_MAINTENANCE
+OPS=(docker compose --env-file docker.env -f deploy/compose.ops.yml --profile ops)
+"${OPS[@]}" run --rm ops master-migrate
+"${OPS[@]}" run --rm ops source-migrate
+"${OPS[@]}" run --rm -e INDEX_EMBEDDING_DIMENSION=1024 ops mongo-bootstrap-empty
+unset ETL_MAINTENANCE_APPROVAL
+```
+
+MASTER runtime role, trong DB mới:
+
+```bash
+docker compose --env-file docker.env -f deploy/compose.database.yml exec master-postgres psql -U etl_master_owner -d etl_master
+```
+
+Trong psql:
+
+```sql
+CREATE ROLE etl_master_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+\password etl_master_runtime
+GRANT CONNECT ON DATABASE etl_master TO etl_master_runtime;
+GRANT USAGE ON SCHEMA public TO etl_master_runtime;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO etl_master_runtime;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO etl_master_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE etl_master_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO etl_master_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE etl_master_owner IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO etl_master_runtime;
+\q
+```
+
+SOURCE reader, password phải khớp runtime JSON:
+
+```bash
+docker compose --env-file docker.env -f deploy/compose.database.yml exec -T source-postgres psql -v ON_ERROR_STOP=1 -U etl_source_owner -d etl_source < scripts/sql/source_reader.sql
+docker compose --env-file docker.env -f deploy/compose.database.yml exec source-postgres psql -U etl_source_owner -d etl_source
+# Trong psql: \password etl_source_reader ; rồi \q
+```
+
+Mongo runtime user, nhập password owner ở prompt:
+
+```bash
+docker compose --env-file docker.env -f deploy/compose.database.yml exec mongo mongosh --username etl_mongo_owner --authenticationDatabase admin --password
+```
+
+Trong mongosh:
+
+```javascript
+use etl_content
+db.createUser({user: "etl_runtime", pwd: passwordPrompt(), roles: [{role: "readWrite", db: "etl_content"}]})
+exit
+```
+
+DB đã có role/user thì kiểm tra và cấp quyền phù hợp, không CREATE lại mù quáng. Linux cần cho UID/GID 10001 đọc connection/model; sau khi editor đã lưu hai connection JSON:
+
+```bash
+sudo chown 10001:10001 "$ETL_HOME/private/connections.json" "$ETL_HOME/private/ops-connections.json"
+sudo chmod 600 "$ETL_HOME/private/connections.json" "$ETL_HOME/private/ops-connections.json"
+```
+
+Đây là bước Linux; không chmod777 toàn bộ private. Không cấp owner secret cho API/worker.
+
+### 3.3. Model bằng container, không cần Python host
+
+Có model/manifest đúng từ2.3 thì bỏ tải. Các lệnh dùng image vừa build, mount thư mục ngoài image; root chỉ dùng trong container tải model một lần, không đổi user dịch vụ app:
+
+```bash
+mkdir -p "$ETL_HOME/models/bge-m3"
+docker run --rm --user 0:0 --mount "type=bind,source=$ETL_HOME/models,target=/models" --entrypoint python etl-portable-backend:local /opt/etl/model.py prepare --directory /models/bge-m3 --manifest /models/bge-m3/etl-model-manifest.json --model-id BAAI/bge-m3 --revision 5617a9f61b028005a4858fdac845db406aefb181 --dimension 1024 --accept-model-license
+docker run --rm --mount "type=bind,source=$ETL_HOME/models,target=/models,readonly" --entrypoint python etl-portable-backend:local /opt/etl/model.py verify --directory /models/bge-m3 --manifest /models/bge-m3/etl-model-manifest.json --model-id BAAI/bge-m3 --revision 5617a9f61b028005a4858fdac845db406aefb181 --dimension 1024
+```
+
+Đổi tên image ở mọi lệnh trực tiếp nếu BACKEND_IMAGE có tag khác. Mount `/opt/models/minilm` là tên tương thích trong image, **không có nghĩa dùng MiniLM**; model thật do ID/revision/dimension quyết định. Linux cấp quyền đọc sau khi tải (chỉ thư mục model):
+
+```bash
+sudo chown -R 10001:10001 "$ETL_HOME/models"
+sudo chmod -R u+rX "$ETL_HOME/models"
+```
+
+Runtime không cần ghi model. Tải thêm model sau bước này cần kiểm tra lại quyền đọc của UID 10001.
+
+### 3.4. Secret đăng nhập Docker
+
+Windows Git Bash, thay email thật:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/setup-auth.ps1 -Directory D:/etl/private/auth -AdminEmail YOUR_ADMIN_EMAIL -Image etl-portable-backend:local
+```
+
+Linux:
+
+```bash
+sudo install -d -o 10001 -g 10001 -m 0700 "$ETL_HOME/private/auth-docker"
+ETL_AUTH_SETUP_IMAGE=etl-portable-backend:local bash deploy/scripts/setup-auth.sh "$ETL_HOME/private/auth-docker" YOUR_ADMIN_EMAIL
+```
+
+Nhập password ẩn; script in các **đường dẫn** cần chép vào `docker.env`. Linux dùng ba path `auth-docker` vừa in. Có secret thì dùng lại, không ghi đè. Windows có thể dùng lại secret local. `*_SECRET_FILE` là path host Docker, khác `*_FILE` của local.
+
+### 3.5. Docker MP3/MP4 và Argos, tùy chọn
+
+Sửa `docker.env` trước build/start:
+
+```dotenv
+MEDIA_ENABLED=true
+INSTALL_MEDIA=true
+SOURCE_METADATA_MEDIA_ENABLED=false
+WHISPER_MODEL_DIR=D:/etl/models/faster-whisper-large-v3
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+# Gợi ý khi host đủ RAM, chạy đồng thời BGE-M3 + large-v3:
+API_MEMORY_LIMIT=6g
+OCR_MEMORY_LIMIT=10g
+```
+
+Launcher tự thêm `compose.media.yml` khi MEDIA_ENABLED=true, mount Whisper read-only tại `/opt/models/whisper`; PowerShell cũng có `-Media`. FFmpeg/Tesseract ở image, thư viện media cần build với extra media.
+
+Tải Whisper bằng container nếu chưa có:
+
+```bash
+docker run --rm --user 0:0 -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -e HF_HUB_DISABLE_XET=1 --mount "type=bind,source=$ETL_HOME/models,target=/models" --entrypoint python etl-portable-backend:local -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Systran/faster-whisper-large-v3', revision='edaa852ec7e145841d8ffdb056a99866b5f0a478', local_dir='/models/faster-whisper-large-v3', allow_patterns=['config.json','model.bin','preprocessor_config.json','tokenizer.json','vocabulary.json'])"
+docker run --rm -i --mount "type=bind,source=$ETL_HOME/models,target=/models,readonly" --entrypoint python etl-portable-backend:local - <<'PY'
+import hashlib
+from pathlib import Path
+p = Path('/models/faster-whisper-large-v3')
+for n in ('config.json','model.bin','preprocessor_config.json','tokenizer.json','vocabulary.json'):
+    assert (p/n).is_file() and (p/n).stat().st_size > 0, n
+with (p/'model.bin').open('rb') as f:
+    assert hashlib.file_digest(f,'sha256').hexdigest() == '69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1'
+print('Whisper files/checksum OK')
+PY
+```
+
+**Argos:** dùng lệnh curl ở2.3 tải gói vào `$ETL_HOME/models`, giải nén không cần Python host:
+
+```bash
+docker run --rm --user 0:0 --mount "type=bind,source=$ETL_HOME/models,target=/models" --entrypoint python etl-portable-backend:local -c "from zipfile import ZipFile; ZipFile('/models/translate-en_vi-1_9.argosmodel').extractall('/models/argos')"
+```
+
+Overlay media chưa mount Argos. Muốn bật dịch, tạo file riêng ngoài repo `$ETL_HOME/private/compose.translation.yml`:
+
+```yaml
+services:
+  api: &translation
+    environment:
+      TRANSLATION_PROVIDER: argos
+      TRANSLATION_MODEL_ROOT: /opt/models/argos
+      TRANSLATION_TARGET_LANGUAGE: vi
+    volumes:
+      - type: bind
+        source: ${ARGOS_MODEL_DIR:?Set ARGOS_MODEL_DIR}
+        target: /opt/models/argos
+        read_only: true
+        bind: {create_host_path: false}
+  source-file-worker: *translation
+  ocr-worker: *translation
+```
+
+Thêm `ARGOS_MODEL_DIR=D:/etl/models/argos` vào `docker.env`, dùng mảng APP ở3.6 kèm overlay này. Launcher không tự đọc overlay tùy chỉnh. Không cần dịch: có thể dùng overlay chỉ đặt `TRANSLATION_PROVIDER: disabled`; thiếu gói thì không được coi đã có bản dịch.
+
+### 3.6. Check/start/status/stop và baseline
+
+**Windows Git Bash:**
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Check -EnvFile docker.env
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Start -EnvFile docker.env -Workers
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Status -EnvFile docker.env
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Logs -EnvFile docker.env
+# Khi cần dừng:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Stop -EnvFile docker.env
+```
+
+**Linux:**
+
+```bash
 bash deploy/scripts/etl-docker.sh check
 bash deploy/scripts/etl-docker.sh start --workers
-bash deploy/scripts/etl-docker.sh stop
+bash deploy/scripts/etl-docker.sh status
+bash deploy/scripts/etl-docker.sh logs
+# bash deploy/scripts/etl-docker.sh stop
 ```
 
-Model/secret Linux và xuất/nhập image `.tar`: [hướng dẫn Docker](deploy/README.md). Archive image không chứa model, secret hoặc dữ liệu DB.
+Start không build/migration. Bỏ `-Workers`/`--workers` chỉ chạy API/frontend. Check xác minh model, auth và DB/schema; sửa lỗi rồi mới Start. Mở **http://127.0.0.1:8080/login**, Swagger **http://127.0.0.1:8080/docs**; health: `curl -fsS http://127.0.0.1:8080/health`.
 
-## 3. Đổi DB sang remote/Neon
+Dùng Drive: thêm **`-Drive` vào mọi lệnh launcher PowerShell**, Linux đặt `export ETL_WITH_DRIVE=true`; cấu hình ở4.2. Media tự chọn từ env, Drive cần lựa chọn launcher riêng.
 
-| Chạy | File cần sửa |
-| --- | --- |
-| Local | `.env`: `DATABASE_URL`, `SOURCE_DATABASE_URL`, `MONGO_URI`, `MONGO_DATABASE` |
-| Docker | Bốn key trên trong `connections.json`; `docker.env`: `DATABASE_MODE`, đường dẫn CA |
-
-**Chỉ SOURCE Neon:** giữ MASTER/Mongo local, đổi `SOURCE_DATABASE_URL`. Docker đặt `DATABASE_MODE=source-neon`, `SOURCE_DATABASE_CA_FILE=D:/etl/private/neon-ca.pem`. URL SOURCE Docker:
-
-```text
-postgresql+psycopg://etl_source_reader:ENCODED_PASSWORD@YOUR_NEON_HOST:5432/Learning_Resources?sslmode=verify-full&channel_binding=require&sslrootcert=/run/secrets/source-database-ca.pem
-```
-
-Local thay `sslrootcert` bằng `D%3A%2Fetl%2Fprivate%2Fneon-ca.pem`. Dùng đúng hostname, tên DB phân biệt hoa/thường, role chỉ đọc và CA bundle được DBA cấp. `SOURCE_POSTGRES_*` chỉ tạo DB Docker local, không chọn nguồn ETL; runtime dùng `SOURCE_DATABASE_URL`. Bỏ `SOURCE_MIGRATION_DATABASE_URL` nếu không chủ ý migrate DB nguồn local.
-
-**Các DB remote:** đặt `DATABASE_MODE=remote`, `DATABASE_CA_FILE` và URL TLS theo [mẫu remote](deploy/config/connections.remote.example.json). Không chạy migration/seed lên remote. Sau thay đổi restart API/worker local; Docker chạy `Stop` → `Check` → `Start -Workers`.
-
-## 4. Kiểm tra và xử lý lỗi
-
-BoW yêu cầu bằng chứng về khái niệm đã nhận diện; từ phụ như “hai” không đủ để nhận một truy vấn nhiều từ. Nhánh metadata dùng cùng quy tắc và `SEARCH_BOW_MIN_COVERAGE`. Với không dấu, dùng `SEARCH_APPROVED_ACCENT_VARIANTS_ENABLED=true`; không tự phê duyệt bản dịch hoặc sửa từ điển seed.
-
-Vector giữ `SEARCH_VECTOR_MIN_SIMILARITY=0.6`. Đường bổ trợ mặc định `SEARCH_VECTOR_ANCHOR_FALLBACK_ENABLED=true`, `SEARCH_VECTOR_ANCHOR_MIN_SIMILARITY=0.4` chỉ nhận điểm dense dưới ngưỡng chính khi đoạn nguồn đã xác minh có cụm định danh nhiều từ hoặc khái niệm tương đương đã duyệt. Điểm xếp hạng vẫn là cosine; không cần model mới hoặc reindex. Cấu hình ở `.env` local / `docker.env`; restart API hoặc tạo lại container. Tắt cờ bổ trợ để quay về ngưỡng chính.
-
-`branch_status.metadata=METADATA_SCHEMA_NOT_READY` là chỉ mục metadata chưa được provision hợp lệ, không phải vector nội dung bị hỏng. Kiểm tra bằng `python -m data_sync_etl.cli metadata-search-schema` (không `--apply`); mọi thay đổi collection/schema cần quyền và phê duyệt riêng. Không hạ ngưỡng hoặc tự tạo schema để che trạng thái này.
-
-Từ điển dẫn xuất từ học liệu có luồng thử nghiệm **offline**, không tạo collection MongoDB hoặc sửa schema MASTER. Các cờ `CONCEPT_DYNAMIC_ENABLED`, `CONCEPT_DYNAMIC_BUILDER_ENABLED`, `CONCEPT_DISCOVERY_SEMANTIC_ENABLED` mặc định `false`; bật cờ không thay thế xác minh quyền đọc, thu hồi quyền và artifact volume. Hiện chưa cho phép đọc corpus/publish dùng chung trên hệ thống thật.
-
-Thử bằng dữ liệu giả lập, không tải model hoặc kết nối DB:
-
-```powershell
-$conceptRoot = Join-Path (Get-Location) '.test-tmp/concept-demo'
-python -m data_sync_etl.cli.concepts example --root $conceptRoot
-python -m data_sync_etl.cli.concepts run --root $conceptRoot --fixture "$conceptRoot/example-corpus.json" --loop
-# Ctrl+C để dừng; xem các thao tác duyệt/build/publish offline bằng --help.
-python -m data_sync_etl.cli.concepts --help
-```
-
-Hướng dẫn đầy đủ: [từ điển corpus offline](deploy/CONCEPT_DICTIONARY_OFFLINE.md). Chỉ quan hệ corpus đã duyệt, còn hiệu lực và đủ quyền mới được mở rộng truy vấn lexical. Khi từ điển tắt hoặc chưa sẵn sàng, hệ thống tìm bằng câu truy vấn gốc; không dùng từ điển tĩnh dự phòng.
-
-Thử nghiệm khôi phục dấu từ cụm trong ContentBag có cờ riêng `SEARCH_CORPUS_ACCENT_CANDIDATES_ENABLED=false` trong `.env.example` và `deploy/docker.env.example`. Cờ mặc định tắt; chỉ bật trong môi trường kiểm thử sau khi kiểm chứng chất lượng trên dữ liệu của bạn. Vector luôn dùng câu truy vấn gốc.
-
-| Hiện tượng | Kiểm tra |
-| --- | --- |
-| `AUTH_MASTER_STALE` | Full baseline/Auto users và Master Sync Worker; không bỏ freshness guard |
-| Search rỗng | Nội dung/index READY, quyền, model/revision/dimension khớp; không hạ ngưỡng về 0 để che lỗi |
-| `SOURCE_REFERENCE_DISABLED` / không xem tệp | Hai cờ SOURCE, quyền nguồn, mount/credentials và metadata/hash |
-| Container unhealthy / BLOCKED | `-Action Logs`, `-Action Check`; đọc mã lỗi cụ thể trước khi sửa |
-| Thiếu `argon2` / launcher trỏ đường dẫn cũ | Đúng venv và dependencies mục 1.1; tạo venv mới nếu đã di chuyển repo |
-
-Vector 384D không dùng lại như 1024D: đổi model cần backup, điều chỉnh validator và tái lập chỉ mục theo quy trình maintenance. Semantic Chunk và các tùy chọn fusion/evidence vẫn opt-in; giữ mặc định nếu chưa kiểm chứng.
-
-Thử nghiệm query không dấu: `SEARCH_APPROVED_ACCENT_VARIANTS_ENABLED=true` trong `.env` local hoặc `docker.env`, rồi restart API/tạo lại container. Cờ mặc định `false`; chỉ dùng cụm tiếng Việt đã duyệt, giữ query gốc và thêm tối đa một biến thể. Không cần reindex; không bật cùng ColBERT. Đây chưa phải cấu hình được nghiệm thu chất lượng production; rollback bằng `false`. Export lexical V1 từ chối chế độ này để tránh báo parity sai.
-
-Metadata search là nhánh riêng cho tiêu đề MASTER và mô tả/tags Mongo liên kết: `SEARCH_METADATA_ENABLED=true`, `SEARCH_METADATA_CONTENT_ENABLED=true`; MP3/MP4 đăng ký metadata dùng `SOURCE_METADATA_MEDIA_ENABLED=true`. Cần collection chỉ mục được cấp phép; bật cờ không tự tạo schema. Vector metadata dùng adapter BGE-M3/FlagEmbedding: `SEMANTIC_MODEL_PATH` trỏ đến checkpoint local và `SEMANTIC_MODEL_REVISION` khớp file `etl-model-revision.txt`; không bắt buộc bật `SEMANTIC_ENABLED` cho content. Luồng này không trích xuất âm thanh/video.
-
-Xóa mềm học liệu (cần migration MASTER `0017` được phê duyệt): admin đã đăng nhập với `ADMIN_ENABLED=true` gọi `DELETE /api/v1/resources/{id}`; khôi phục bằng `POST /api/v1/resources/{id}/restore`. JSON tùy chọn: `{"reason":"Lý do","expected_revision":0}`; lấy revision mới từ response cho thao tác tiếp theo. Dùng session/CSRF như các lệnh quản trị khác. Xóa chỉ đặt visibility override tại MASTER, không sửa SOURCE hay xóa tệp/nội dung; không hỗ trợ xóa riêng phiên bản. Restore không đổi trạng thái xuất bản và cần xác minh/xây lại thế hệ chỉ mục trước khi tìm kiếm lại. Kết quả tìm kiếm được xác minh lại khi điều hướng/trở lại tab; trạng thái bộ lọc vẫn giữ trong URL. Không tự chạy migration trên DB đang phục vụ.
-
-Sau khi chỉ mục đã sẵn sàng và được phép ghi, có thể bật `SEARCH_METADATA_AUTO_REFRESH_ENABLED=true` trong `.env`/`docker.env` và chạy **Master Sync Worker** hiện có; thêm `SEARCH_METADATA_REFRESH_DENSE=true` nếu cần cập nhật vector. Worker quét mặc định 5 học liệu mỗi 30 giây, lưu checkpoint và retry; không OCR lại. Các cờ tự động mặc định `false`. Xem số lượng trạng thái và thời điểm hoàn tất vòng quét bằng `python -m data_sync_etl.cli metadata-search-diagnostics`; đây là số liệu storage, không phải số học liệu người dùng được phép xem.
-
-Thử nghiệm kho metadata trên 200 học liệu: `SEARCH_METADATA_INDEXED_CANDIDATES_ENABLED=true`, giới hạn authority `SEARCH_METADATA_AUTHORITY_LIMIT=10000`, giới hạn kết quả khớp `SEARCH_METADATA_MATCH_LIMIT=2000`. Cần provision chỉ mục ứng viên và chạy refresh/backfill trước. Kiểm tra bằng `python -m data_sync_etl.cli metadata-search-schema --candidates`; lệnh thêm `--apply` chỉ cho DB test cô lập trong development/test. Không chạy lệnh ghi trên DB đang phục vụ. Truy vấn từ vựng dùng inverted index nhưng vẫn đọc authority theo lô để xác minh quyền và độ mới; dense trên 200 vẫn báo `BLOCKED_SCALE`, không dùng danh sách từ khóa thay cho vector. Mặc định cờ này `false`; tắt lại để rollback.
-
-Nếu đang dùng contextual content embedding, có thể thử `SEMANTIC_INPUT_IDENTITY_ENABLED=true` để nhận diện thế hệ từ đúng đầu vào embedding, và `SEARCH_METADATA_REFRESH_CONTENT_SEMANTIC=true` để worker cập nhật các phiên bản đã từng lập semantic index khi metadata ngữ cảnh thay đổi. Cần `SEMANTIC_ENABLED=true` và model offline sẵn sàng; không tự OCR hoặc lập semantic index lần đầu. Cả hai cờ mặc định `false`; khi đổi cờ identity cần xây lại thế hệ tương ứng. Chưa nghiệm thu chất lượng production; không điều chỉnh ngưỡng từ bộ nhãn draft.
-
-Đối soát **Kho tệp** chạy nền: API trả `202`, giao diện cập nhật tiến độ từng tệp mỗi 2 giây; có thể rời trang mà không hủy lượt quét. `SOURCE_READ_TIMEOUT_SECONDS` (mặc định `120`) giới hạn riêng từng tệp, không giới hạn cả kho trong 30 giây. Tệp lỗi/hết thời gian được ghi **Chưa xác minh**, các tệp khác vẫn tiếp tục. Nếu API bị dừng, mở lại trang và bấm **Quét đối soát** để ưu tiên phần chưa quét; không tái sử dụng hash cũ làm kết quả xác minh mới. Chỉ ghi nhật ký đối soát, không sửa dữ liệu học liệu hoặc lưu bản sao SOURCE lâu dài.
-
-Đổi password admin cấu hình: `python -m data_sync_etl.security.cli hash --output D:/etl/private/auth/admin_password_hash_v2`, đổi đường dẫn secret rồi restart. Password user MASTER đổi ở SOURCE rồi đồng bộ.
-
-Kiểm thử fixture, không cần DB đang phục vụ:
+**Có overlay tùy chỉnh hoặc dùng CLI:** khai báo APP một lần trong terminal Git Bash/Bash; bỏ comment đúng những dòng cần dùng:
 
 ```bash
-python -m pytest tests/unit -q
-node --experimental-strip-types --test --test-concurrency=1 frontend/tests/*.test.mjs
-npm.cmd --prefix frontend run build
+APP=(docker compose --env-file docker.env -f deploy/compose.app.yml -f deploy/compose.auth.yml)
+# APP+=(-f deploy/compose.media.yml)
+# APP+=(-f deploy/compose.drive.yml)
+# APP+=(-f deploy/compose.source-neon.yml)
+# APP+=(-f deploy/compose.remote-db.yml)
+# APP+=(-f "$ETL_HOME/private/compose.translation.yml")
+"${APP[@]}" --profile workers config --quiet
+"${APP[@]}" run --rm --no-deps api check-auth
+"${APP[@]}" run --rm --no-deps --entrypoint python api /opt/etl/model.py verify
+"${APP[@]}" --profile ops run --rm --no-deps preflight
+"${APP[@]}" --profile workers up -d --no-build api frontend master-sync-worker source-file-worker ocr-worker
+"${APP[@]}" --profile workers ps
 ```
 
-Hợp đồng schema ở `fixtures/contracts/`; truy vấn/nhãn đánh giá ở `fixtures/search/`. Nhãn draft chưa được nghiệm thu. Báo cáo sinh mới đặt trong `.test-tmp/` hoặc `artifacts/`; `docs/` và `research/` chỉ giữ ở máy, không thuộc cây source Git.
+Không dùng đồng thời overlay source-neon và remote-db. Bộ tùy chỉnh dùng cùng APP cho build/start/stop, tránh mất mount/env.
+
+Đồng bộ baseline từ UI như2.7. CLI trong container cần nạp runtime secret: `docker exec python ...` đơn thuần không kế thừa DSN mà tiến trình API đã tự nạp:
+
+```bash
+app_cli() {
+  "${APP[@]}" run --rm --no-deps --entrypoint python api -c "import sys; sys.path.insert(0,'/opt/etl'); from runtime import load_connections; load_connections(); from data_sync_etl.cli.main import main; raise SystemExit(main())" "$@"
+}
+app_cli sync-master --full --stream all
+app_cli source-file-precheck
+```
+
+**SOURCE demo mới/rỗng**, chỉ nếu bạn chọn dữ liệu thử và đã khởi tạo schema: mount script/fixture/owner secret vào container setup riêng, không cấp owner cho app. `REPO_HOST` dùng Windows Git Bash; Linux dùng `export REPO_HOST="$PWD"`:
+
+```bash
+export REPO_HOST="$(pwd -W)"
+docker run --rm --network etl-data --mount "type=bind,source=$REPO_HOST/scripts/source_seed.py,target=/setup/seed.py,readonly" --mount "type=bind,source=$REPO_HOST/fixtures/source,target=/fixtures,readonly" --mount "type=bind,source=$ETL_HOME/private/ops-connections.json,target=/setup/ops.json,readonly" --entrypoint python etl-portable-backend:local -c "import json,os,runpy; from pathlib import Path; os.environ.update(json.loads(Path('/setup/ops.json').read_text())); runpy.run_path('/setup/seed.py',run_name='__main__')" --confirm-empty-demo-source --fixture-root /fixtures
+app_cli sync-master --full --stream all
+```
+
+DB nguồn thật có dữ liệu thì bỏ seed. Không có danh mục thì biểu mẫu chưa chọn được provider/loại. Sau schema/model READY: đặt `INDEX_AUTO_ENABLED=true`, Start/`up -d` lại để recreate theo env; không chỉ `docker restart` container cũ. Sau Full users và Auto users ổn định có thể đổi `AUTH_MODE=master_users` trong `docker.env`, giữ auth profile mặc định rồi Start lại; không dùng profile db-auth cho MASTER users.
+
+### 3.7. Build lại và chuyển máy
+
+```bash
+# Windows Git Bash; thêm -Drive nếu dùng Drive:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Build -EnvFile docker.env
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Start -EnvFile docker.env -Workers
+# Linux:
+# bash deploy/scripts/etl-docker.sh build
+# bash deploy/scripts/etl-docker.sh start --workers
+```
+
+Local sửa code không cập nhật image. Phải build đúng tag/env rồi recreate; custom APP: `"${APP[@]}" build api frontend`, tiếp theo `"${APP[@]}" --profile workers up -d --no-build`. Ctrl+F5 trình duyệt. Không xóa volume để chữa image cũ.
+
+Xuất/nhập image — Windows Git Bash:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Export -EnvFile docker.env -Archive D:/etl/etl-images.tar
+# Máy nhận: clone cùng code, chuẩn bị docker.env/secret/model/DB rồi:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Import -EnvFile docker.env -Archive D:/etl/etl-images.tar
+```
+
+Linux: `bash deploy/scripts/etl-docker.sh export /absolute/etl-images.tar`, máy nhận dùng `import` cùng path. Chép cả `.tar.sha256`. Image archive **không có model/secret/DB/storage**: chuyển model kèm manifest, cấp secret, khôi phục DB/storage riêng theo quyền của chủ dữ liệu; sửa host path rồi Check/Start. Máy offline cần có sẵn cả image PostgreSQL/Mongo nếu chạy DB tại đó. Giữ đúng kiến trúc image/host (`linux/amd64` không mặc định native ARM).
+
+## 4. Đổi DB, Drive và chỉ mục nâng cao
+
+### 4.1. DB remote/Neon: sửa cấu hình, không sửa code
+
+| Thành phần | API/worker local | Docker app |
+| --- | --- | --- |
+| MASTER | `.env`: DATABASE_URL | connections.json: DATABASE_URL |
+| SOURCE | `.env`: SOURCE_ADAPTER=postgresql, SOURCE_DATABASE_URL | connections.json: SOURCE_DATABASE_URL |
+| Mongo | `.env`: MONGO_URI, MONGO_DATABASE | Hai key tương ứng trong connections.json |
+| TLS/profile | CA path host trong URL | docker.env: profile/CA host; JSON dùng CA path container |
+
+`SOURCE_POSTGRES_*`/`POSTGRES_*` chỉ cấu hình container DB local, không chọn runtime khi URL đã trỏ remote. Đổi password DB có volume phải dùng công cụ quản trị DB rồi cập nhật URL, không chỉ sửa env.
+
+**SOURCE Neon, MASTER/Mongo vẫn Docker local:** DBA tạo reader chỉ SELECT trong đúng database, ví dụ `Learning_Resources`. `source_reader.sql` mặc định `etl_source`; sửa câu GRANT CONNECT thành đúng tên, nháy kép nếu giữ chữ hoa. Đặt password bằng công cụ quản trị; không dùng neondb_owner/superuser làm runtime.
+
+```bash
+curl -fL https://curl.se/ca/cacert.pem -o "$ETL_HOME/private/neon-ca.pem"
+```
+
+Local `.env` (thay endpoint/database/password thật):
+
+```dotenv
+SOURCE_ADAPTER=postgresql
+SOURCE_DATABASE_URL=postgresql+psycopg://etl_source_reader:YOUR_READER_PASSWORD@YOUR_ENDPOINT.neon.tech:5432/Learning_Resources?sslmode=verify-full&channel_binding=require&sslrootcert=D%3A%2Fetl%2Fprivate%2Fneon-ca.pem
+# Không đặt SOURCE_MIGRATION_DATABASE_URL tới Neon nếu không có công việc owner được duyệt.
+```
+
+Docker `docker.env`:
+
+```dotenv
+DATABASE_MODE=source-neon
+SOURCE_DATABASE_CA_FILE=D:/etl/private/neon-ca.pem
+```
+
+Trong connections.json chỉ thay URL SOURCE, giữ MASTER/Mongo nội bộ:
+
+```text
+postgresql+psycopg://etl_source_reader:YOUR_READER_PASSWORD@YOUR_ENDPOINT.neon.tech:5432/Learning_Resources?sslmode=verify-full&channel_binding=require&sslrootcert=/run/secrets/source-database-ca.pem
+```
+
+Launcher tự chọn `compose.source-neon.yml`; APP tùy chỉnh phải thêm overlay này. CA file host khác path container. Chọn endpoint pooled/direct phù hợp trên dashboard Neon, không tự chế hostname.
+
+Nếu chỉ SOURCE đã có trên Neon, còn MASTER/Mongo là DB Docker **mới/trống**, vẫn chuẩn bị password/owner JSON, build image và tạo role MASTER/Mongo theo 3.2. Khởi động riêng hai DB, chạy đúng hai tác vụ sau; không chạy source-migrate/source-seed lên Neon:
+
+```bash
+docker compose --env-file docker.env -f deploy/compose.database.yml up -d master-postgres mongo
+export ETL_MAINTENANCE_APPROVAL=APPROVED_DATABASE_MAINTENANCE
+OPS=(docker compose --env-file docker.env -f deploy/compose.ops.yml --profile ops)
+"${OPS[@]}" run --rm ops master-migrate
+"${OPS[@]}" run --rm -e INDEX_EMBEDDING_DIMENSION=1024 ops mongo-bootstrap-empty
+unset ETL_MAINTENANCE_APPROVAL
+```
+
+Owner JSON vẫn cần đủ bốn key; có thể đặt `SOURCE_MIGRATION_DATABASE_URL` thành chuỗi rỗng khi không sử dụng tác vụ SOURCE. Runtime JSON vẫn dùng URL reader Neon. MASTER/Mongo đã có dữ liệu thì dùng quy trình nâng cấp đã được chủ DB duyệt, không khởi tạo lại.
+
+**Tất cả DB remote:** `DATABASE_MODE=remote`, `DATABASE_CA_FILE=/absolute/private/database-ca.pem`; dùng [connections.remote.example.json](deploy/config/connections.remote.example.json). PostgreSQL cần sslmode=verify-full; Mongo cần tls=true và tlsCAFile=/run/secrets/database-ca.pem. DNS/firewall/CA/quyền do quản trị cấp; profile DB không tự mở giao diện ra LAN. Đổi cấu hình cần restart local hoặc Start/recreate Docker.
+
+### 4.2. SOURCE Google Drive
+
+Cần quyền đọc folder/tệp và credential Google hợp lệ: service account được share folder hoặc OAuth authorized_user. Cấp credential theo [DRIVE_SETUP.md](deploy/DRIVE_SETUP.md), không thể suy ra credential từ file ID.
+
+Local `.env`:
+
+```dotenv
+SOURCE_DRIVE_ENABLED=true
+SOURCE_DRIVE_AUTH_TYPE=authorized_user
+SOURCE_DRIVE_CREDENTIALS_FILE=D:/etl/private/drive.json
+SOURCE_DRIVE_BUCKETS={"DRIVE":"YOUR_APPROVED_FOLDER_ID"}
+SOURCE_LOCAL_BUCKETS=[]
+SOURCE_DRIVE_FILENAME_POLICY=canonical_id
+SOURCE_DRIVE_FILENAME_ALIASES={}
+```
+
+Bucket khớp SOURCE; object key dạng `files/<file_id>/<filename>`. canonical_id cho đổi tên theo file ID đã kiểm chứng và cùng loại tệp; vẫn kiểm tra folder/MIME/quyền/revision/hash. Không cần alias cứng từng file. Muốn kiểm tra tên nghiêm ngặt dùng exact.
+
+Docker thêm `DRIVE_CREDENTIALS_FILE=D:/etl/private/drive.json`, các khóa AUTH_TYPE/BUCKETS/LOCAL_BUCKETS/FILENAME_POLICY tương ứng vào docker.env; image đọc credential qua secret. Thêm `-Drive` vào launcher PowerShell hoặc `ETL_WITH_DRIVE=true` cho Bash. Restart API/source-file/OCR sau thay đổi.
+
+### 4.3. Index, metadata search và semantic chunk
+
+ContentBag cơ bản dùng model1024D và INDEX_AUTO_ENABLED=true sau khi schema/model đúng. Bật auto không có nghĩa đã có index: cần nội dung xử lý xong, OCR worker chạy và INDEX_BUILD hoàn tất. Tìm kiếm vẫn kiểm tra quyền/phiên bản/dẫn chứng, không ép trả top1 khi không có học liệu phù hợp.
+
+Giữ OFF các cờ chưa nghiệm thu trong example: CONCEPT_DYNAMIC_ENABLED, SEARCH_RESULT_SESSIONS_ENABLED, SEARCH_CORPUS_ACCENT_CANDIDATES_ENABLED… Đổi MiniLM384 sang BGE1024 trên DB cũ cần sao lưu, chuyển validator có kiểm soát và xây lại embedding/chỉ mục, không chỉ đổi thư mục rồi dùng vector384.
+
+**Metadata title/description/tags**, tùy chọn: SEARCH_METADATA_ENABLED=true; SEARCH_METADATA_CONTENT_ENABLED=true để kết hợp nội dung. Cần provision/backfill trước, không chỉ bật cờ. CLI ghi metadata hiện chỉ cho DB test cô lập ở development/test, không dùng làm migration production:
+
+```bash
+python -m data_sync_etl.cli metadata-search-schema
+python -m data_sync_etl.cli metadata-search-diagnostics
+# Chỉ đúng DB test riêng đã được phép ghi:
+# python -m data_sync_etl.cli metadata-search-schema --apply
+# python -m data_sync_etl.cli metadata-search-index --apply --dense
+```
+
+SEARCH_METADATA_AUTO_REFRESH_ENABLED=true/SEARCH_METADATA_REFRESH_DENSE=true cần Master Sync Worker và index đã provision; mặc định OFF. Metadata-only media chỉ tìm qua metadata khi nhánh này READY; không giả transcript khi chưa ASR.
+
+**Contextual chunk BGE-M3 song song**, tùy chọn: local cài thêm `python -m pip install -c deploy/docker/constraints.semantic.txt -e '.[dev,embeddings,semantic,google-drive,media,translation]'`. Đặt SEMANTIC_ENABLED=true, SEMANTIC_MODEL_PATH tới BGE-M3 và SEMANTIC_MODEL_REVISION đúng marker. Docker đặt INSTALL_SEMANTIC=true trước build, SEMANTIC_MODEL_DIR tới BGE-M3; chỉ bật SEMANTIC_ENABLED sau schema/backfill được duyệt. Không đổi model/ngưỡng/reranker mù quáng để chữa no-results.
+
+```bash
+python -m data_sync_etl.cli semantic-schema
+# Chỉ trên môi trường đã được chủ DB cho phép provision/backfill:
+# python -m data_sync_etl.cli semantic-schema --apply
+# python -m data_sync_etl.cli semantic-index --resource-version-id YOUR_VERSION_ID --apply
+python -m data_sync_etl.cli semantic-status --resource-version-id YOUR_VERSION_ID
+```
+
+Docker dùng `"${APP[@]}" run --rm --no-deps api semantic-schema`/semantic-status/semantic-index tương ứng. Entry point hỗ trợ các lệnh này; CLI khác dùng app_cli ở3.6.
+
+## 5. Kiểm tra cuối và xử lý lỗi
+
+| Kiểm tra / hiện tượng | Xử lý |
+| --- | --- |
+| Hoàn tất cài đặt | DB/schema đúng, model verify+encode PASS, API health OK, login được, 3 worker chạy, Full/Auto đúng; thử1 tệp tới CONTENT_READY/index READY rồi tìm bằng3 chế độ |
+| Thiếu argon2/pymongo… | Kiểm tra venv: `python -c "import sys; print(sys.executable)"`; cài đúng extra, pip check |
+| SOURCE_REFERENCE_DISABLED | Sửa đúng .env/docker.env và restart/recreate đúng tiến trình |
+| METADATA_ONLY / Chưa xử lý | SOURCE_METADATA_MEDIA_ENABLED=false, đủ model/binary, restart source-file worker; kiểm tra tạo job và OCR worker nhận. PUBLISHED không đồng nghĩa đã trích xuất |
+| AUTH_MASTER_STALE | Kiểm tra Auto users/interval/heartbeat/lần COMPLETED; không chỉ watermark |
+| Docs trắng/OpenAPI403 | Đăng nhập qua frontend proxy3000/8080; không gọi backend để bỏ boundary |
+| SOURCE_HASH_MISMATCH / SOURCE_VERSION_MUTATED | Xác minh bytes/hash/phiên bản ở nguồn; không bỏ kiểm tra hoặc ghi đè lịch sử |
+| BLOCKED_INDEX_SCHEMA / NO_READY_INDEX | Đối chiếu dimension/revision/validator và INDEX_BUILD; reindex theo quy trình được duyệt |
+| CONNECTIONS_SECRET_VALUES_INVALID | JSON đúng4 key, không placeholder, password/host/database đúng |
+| DATABASE_SCHEMA_NOT_READY | Chủ DB kiểm tra đúng database/migration/grants; không tự migrate SOURCE/production |
+| SOURCE_READ_ONLY_ROLE_REQUIRED | Reader không superuser/owner/write grants; đúng các bảng SELECT theo script |
+| STT_RUNTIME_UNAVAILABLE | Đúng bộ CTranslate2/tokenizer/vocabulary, CPU/int8 và dependency; path local tồn tại |
+| Media timeout/OOM | Kiểm tra RAM/cgroup, FFmpeg/ffprobe, thời lượng/kích thước; không tăng đồng thời worker/timeout vô hạn |
+| Tìm kiếm lỗi/đổi focus | Nạp frontend mới; xem HTTP/detail.code trong Network. Hết phiên phải login lại; model/index lỗi phải xử lý nguyên nhân, không coi là thiếu tài liệu |
+| Docker vẫn bản cũ | Build đúng tag/env/overlay, recreate, Ctrl+F5; không chỉ docker restart và không xóa volume |
+| Linux permission denied | UID10001 đọc secret/model; frontend đọc proxy key qua group10001; không chmod777 private |
+
+Migration/seed/các lệnh --apply sẽ ghi DB khi bạn chạy: chỉ dùng đúng môi trường được phép. Không chạy full suite trên DB Dev/Production để kiểm tra cài đặt. Hướng dẫn media/API: [MEDIA_PIPELINE.md](MEDIA_PIPELINE.md); bằng chứng/giới hạn: [MEDIA_ACCEPTANCE.md](MEDIA_ACCEPTANCE.md). LAN/HTTPS cần [TLS/reverse proxy](deploy/README.md), không bật localhost bypass trên LAN.
