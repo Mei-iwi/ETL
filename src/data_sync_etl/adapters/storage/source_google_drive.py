@@ -25,6 +25,9 @@ class SourceGoogleDriveFileReader:
         self.settings, self.roots = settings, dict(settings.source_drive_buckets)
         self.session_factory, self.clock, self.sleep = session_factory, clock, sleep
         self.filename_aliases = dict(settings.source_drive_filename_aliases)
+        self.filename_policy = getattr(settings, 'source_drive_filename_policy', 'exact')
+        if self.filename_policy not in ('exact', 'canonical_id'):
+            raise SourceFileError('INVALID_DRIVE_FILENAME_POLICY')
         for key, actual_name in self.filename_aliases.items():
             file_id, original_name = self._reference(key)
             if not isinstance(actual_name, str):
@@ -178,8 +181,16 @@ class SourceGoogleDriveFileReader:
         if not isinstance(mime, str) or mime.startswith('application/vnd.google-apps.'):
             raise SourceFileError('UNSUPPORTED_DRIVE_NATIVE')
         expected_name = self.filename_aliases.get(f"files/{metadata.get('id')}/{filename}", filename)
-        if metadata.get('name') != expected_name:
-            raise SourceFileError('DRIVE_FILENAME_MISMATCH')
+        if self.filename_policy == 'exact':
+            if metadata.get('name') != expected_name:
+                raise SourceFileError('DRIVE_FILENAME_MISMATCH')
+        else:
+            # Drive ID is the identity. Renames are allowed only within the
+            # original file type; folder/MIME/revision checks remain below and
+            # the SOURCE resolver verifies SHA-256 before publishing bytes.
+            _, actual_name = self._reference(f"files/{metadata.get('id')}/{metadata.get('name')}")
+            if actual_name.rsplit('.', 1)[-1].lower() != filename.rsplit('.', 1)[-1].lower():
+                raise SourceFileError('DRIVE_FILENAME_MISMATCH')
         try:
             validator = self.formats.find_validator(filename)
         except Exception:

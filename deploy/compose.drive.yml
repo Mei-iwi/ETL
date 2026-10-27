@@ -6,6 +6,7 @@ services:
       SOURCE_DRIVE_BUCKETS: ${SOURCE_DRIVE_BUCKETS:?Set the approved bucket-to-folder JSON mapping}
       SOURCE_LOCAL_BUCKETS: ${SOURCE_LOCAL_BUCKETS:-[]}
       SOURCE_DRIVE_AUTH_TYPE: ${SOURCE_DRIVE_AUTH_TYPE:-service_account}
+      SOURCE_DRIVE_FILENAME_POLICY: ${SOURCE_DRIVE_FILENAME_POLICY:-exact}
       SOURCE_DRIVE_CREDENTIALS_FILE: /run/secrets/drive.json
     secrets:
       - source: drive
