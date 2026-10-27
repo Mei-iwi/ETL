@@ -40,9 +40,20 @@ class SearchSessionGateway:
                     for value in (header.get('branch_status') or {}).values())):
                 raise SearchError('SEARCH_SESSION_UNAVAILABLE', 409)
 
+            def hydrate(refs):
+                items = self.hydrate(refs, criteria, access)
+                if (len(items) != len(refs) or any(
+                        (item.get('resource_id'), item.get('resource_version_id'), item.get('bag_id'),
+                         item.get('content_unit_id'), item.get('score')) !=
+                        (hit.resource_id, hit.version_id, hit.bag_id, hit.unit_id, hit.score)
+                        for item, hit in zip(items, refs, strict=False))):
+                    self.sessions.invalidate_owner(owner)
+                    raise SearchError('SEARCH_SESSION_MISS', 409)
+                return items
+
             def read(number):
                 result = self.sessions.page(token, owner, key, number, size,
-                    lambda refs: self.hydrate(refs, criteria, access))
+                    hydrate)
                 return {**header, **result}
 
             result = read(page)
