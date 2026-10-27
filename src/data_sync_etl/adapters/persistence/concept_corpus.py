@@ -23,6 +23,11 @@ from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.ports.concept_corpus import ConceptBlocked, ResourceEvidence
 
 
+def evidence_columns(model, *names):
+    """Explicit projections: no account IDs, file paths, error text or payloads."""
+    return [getattr(model, name) for name in names]
+
+
 class MasterCorpusInventory:
     completeness_verified = False
     scope = 'verified_public'
@@ -63,11 +68,17 @@ class MasterCorpusInventory:
     def _page(self, condition, limit):
         access, result = SearchAccess('authenticated_user', allow_public=True), []
         with self._read() as conn:
-            resources = conn.execute(select(MasterLearningResource.__table__).where(condition)
+            resources = conn.execute(select(*evidence_columns(MasterLearningResource,
+                'id', 'title', 'mongo_id', 'source_origin', 'is_active', 'publication_status',
+                'deleted_at', 'master_deleted_at', 'source_missing_at', 'deletion_revision', 'updated_at')).where(condition)
                 .order_by(MasterLearningResource.id).limit(limit)).mappings()
             for source in resources:
                 resource = dict(source)
-                version = conn.execute(select(ResourceVersion.__table__).where(ResourceVersion.resource_id == resource['id'])
+                version = conn.execute(select(*evidence_columns(ResourceVersion,
+                    'id', 'resource_id', 'version_number', 'source_hash', 'lifecycle_status', 'final_approved_at', 'updated_at'),
+                    ResourceVersion.final_approved_by.is_not(None).label('final_approved_by'),
+                    ResourceVersion.rejection_reason.is_not(None).label('rejection_reason'))
+                    .where(ResourceVersion.resource_id == resource['id'])
                     .order_by(ResourceVersion.version_number.desc(), ResourceVersion.id.desc()).limit(1)).mappings().first()
                 if version is None:
                     result.append(ResourceEvidence(resource_id=resource['id'], version_id='', revision=0,
@@ -76,12 +87,15 @@ class MasterCorpusInventory:
                         published=resource['publication_status'] == 'PUBLISHED', authority_fingerprint=digest(resource)))
                     continue
                 version = dict(version)
-                units = [dict(row) for row in conn.execute(select(ContentUnit.__table__)
+                units = [dict(row) for row in conn.execute(select(*evidence_columns(ContentUnit,
+                    'id', 'resource_version_id', 'review_status', 'retrieval_eligible', 'updated_at'))
                     .where(ContentUnit.resource_version_id == version['id']).order_by(ContentUnit.id)
                     .limit(self.max_units + 1)).mappings()]
                 if len(units) > self.max_units:
                     raise ConceptBlocked('CORPUS_UNIT_BUDGET')
-                imports = [dict(row) for row in conn.execute(select(SourceFileImport.__table__)
+                imports = [dict(row) for row in conn.execute(select(*evidence_columns(SourceFileImport,
+                    'resource_id', 'source_resource_active', 'source_version_number', 'source_hash',
+                    'source_lifecycle_status', 'status', 'last_error_code', 'source_updated_at'))
                     .where(SourceFileImport.target_version_id == version['id']).limit(2)).mappings()]
                 mapping = resource.get('source_origin') == 'LOCAL' and not imports
                 if resource.get('source_origin') == 'POSTGRESQL' and len(imports) == 1:
@@ -93,9 +107,12 @@ class MasterCorpusInventory:
                         and item['last_error_code'] in (None, 'UNSUPPORTED_SOURCE_FORMAT'))
                 approved = frozenset(unit['id'] for unit in units if access.allows(resource, version, unit)) if mapping else frozenset()
                 metadata = mapping and metadata_allowed(resource, version, access)
-                job = conn.execute(select(OcrJob.__table__).where(OcrJob.resource_version_id == version['id'])
+                job = conn.execute(select(*evidence_columns(OcrJob,
+                    'id', 'status', 'failed_pages', 'completed_pages', 'total_pages'))
+                    .where(OcrJob.resource_version_id == version['id'])
                     .order_by(OcrJob.created_at.desc(), OcrJob.id.desc()).limit(1)).mappings().first()
-                stages = [dict(row) for row in conn.execute(select(EtlStageRun.__table__)
+                stages = [dict(row) for row in conn.execute(select(*evidence_columns(EtlStageRun,
+                    'stage', 'status', 'input_fingerprint'))
                     .where(EtlStageRun.resource_version_id == version['id']).order_by(EtlStageRun.created_at.desc(), EtlStageRun.id.desc())
                     .limit(50)).mappings()]
                 ready = bool(job and processing_state_from_stages(dict(job), stages) == 'CONTENT_READY')

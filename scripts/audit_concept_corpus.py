@@ -114,18 +114,71 @@ def local_master_audit(settings):
             engine.dispose()
 
 
-def main():
+def validate_read_contract():
+    """Exercise injected synthetic capabilities, never Settings/secrets/DB clients."""
+    from data_sync_etl.adapters.concept_corpus import (
+        CorpusQueryPlanGate,
+        CorpusReadOnlyAccessGate,
+        ReadOnlyMongoEvidenceReader,
+    )
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows, self.closed = rows, False
+
+        def batch_size(self, value):
+            return self
+
+        def limit(self, value):
+            return self
+
+        def __iter__(self):
+            return iter(self.rows)
+
+        def close(self):
+            self.closed = True
+
+    cursors = []
+
+    def find(selector, **options):
+        if set(options['projection']) != set(ReadOnlyMongoEvidenceReader.PROJECTIONS['learning_resources']):
+            raise RuntimeError('Contract projection mismatch')
+        if options['max_time_ms'] != 1000 or selector != {'_id': 'synthetic-metadata'}:
+            raise RuntimeError('Contract budget/selector mismatch')
+        cursor = Cursor([{'_id': 'synthetic-metadata', 'description': 'Synthetic public corpus'}])
+        cursors.append(cursor)
+        return cursor
+
+    reader = ReadOnlyMongoEvidenceReader({'learning_resources': find}, CorpusReadOnlyAccessGate(lambda: True),
+        query_gate=CorpusQueryPlanGate(lambda name: name == 'learning_resources'))
+    if reader.metadata('synthetic-metadata')['description'] != 'Synthetic public corpus' or not cursors[0].closed:
+        raise RuntimeError('Contract cursor mismatch')
+    return {'status': 'BLOCKED_LIVE', 'contract_status': 'OFFLINE_VERIFIED',
+        'database_connection_performed': False, 'database_writes': False, 'operator_evidence_verified': False,
+        'allowed_collections': {name: sorted(fields) for name, fields in reader.PROJECTIONS.items()},
+        'excluded_collections': ['users', 'content_bags', 'ocr_pages'],
+        'budgets': {'batch_size': reader.batch_size, 'max_docs': reader.max_docs,
+            'max_bytes': reader.max_bytes, 'max_time_ms': reader.max_time_ms},
+        'missing_evidence': ['bound read-only principal', 'query/index adequacy', 'complete revocation authority']}
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--local-readonly', action='store_true', help='Local metadata/privilege audit only; never SOURCE')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--local-readonly', action='store_true', help='Local metadata/privilege audit only; never SOURCE')
+    mode.add_argument('--validate-contract', action='store_true', help='Synthetic read-contract check; no env/secrets/DB IO')
     parser.add_argument('--output', type=Path, help='New private report file; refuses overwrite')
-    args = parser.parse_args()
-    settings = Settings()
-    report = static_audit(settings)
-    report['live'] = ({'mongo': local_mongo_audit(settings), 'master': local_master_audit(settings)}
-                      if args.local_readonly else {'status': 'NOT_RUN'})
-    report['status'] = 'BLOCKED'
-    report['next_gate'] = ('Do not start corpus discovery/publishing until safe public evidence/revocation '
-                           'and read-only credentials/artifact durability are verified.')
+    args = parser.parse_args(argv)
+    if args.validate_contract:
+        report = validate_read_contract()
+    else:
+        settings = Settings()
+        report = static_audit(settings)
+        report['live'] = ({'mongo': local_mongo_audit(settings), 'master': local_master_audit(settings)}
+                          if args.local_readonly else {'status': 'NOT_RUN'})
+        report['status'] = 'BLOCKED'
+        report['next_gate'] = ('Do not start corpus discovery/publishing until safe public evidence/revocation '
+                               'and read-only credentials/artifact durability are verified.')
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

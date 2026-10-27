@@ -68,7 +68,7 @@ class ScaleAuthority:
         return 'synthetic-frozen-authority'
 
 
-def one(root, count):
+def one(root, count, *, incremental=False):
     store = ArtifactStore(root, create=True)
     seed = default_dictionary()
     cpu = process_time()
@@ -106,6 +106,30 @@ def one(root, count):
         start = perf_counter()
         assert release.lookup([f'synthetic concept {index % count:06}'], budget_ms=100)
         uncached.append((perf_counter() - start) * 1000)
+    delta = None
+    if incremental:
+        def changed():
+            remaining = max(1, count // 100)
+            for item in records(count):
+                bucket = int(sha256(item['concept_id'].encode()).hexdigest()[:8], 16) % store.shards
+                if remaining and bucket == 0:
+                    item['definition'] = 'Synthetic localized one-percent delta.'
+                    remaining -= 1
+                yield item
+
+        delta = {'changed_fraction': .01, 'distribution': 'localized_to_bucket_zero',
+            'warning': 'Random changes spread across every shard can require a full rebuild.'}
+        for reuse in (False, True):
+            start, cpu_start = perf_counter(), process_time()
+            updated = store.build(changed(), seed_hash=seed.fingerprint, source_token=ScaleAuthority().token(),
+                ledger_hash='synthetic-approval-fixture', expected_parent=manifest['generation'], fence=lambda: True,
+                reuse_shards=reuse)
+            delta['reuse' if reuse else 'full_rebuild'] = {'seconds': perf_counter() - start,
+                'cpu_seconds': process_time() - cpu_start, 'generation': updated['generation'],
+                'counters': dict(store.last_build_stats)}
+        assert delta['reuse']['generation'] == delta['full_rebuild']['generation']
+    for provider in providers.values():
+        provider.close()
     return {'scope': 'offline_synthetic', 'concepts': count, 'term_keys': 2 * count,
         'artifact_implementation_sha256': sha256((Path(__file__).resolve().parents[1] /
             'src/data_sync_etl/adapters/concept_artifacts.py').read_bytes()).hexdigest(),
@@ -113,6 +137,7 @@ def one(root, count):
         'cold_verify_seconds': load_seconds, 'shard_disk_bytes': sum(row['bytes'] for row in manifest['shards']),
         'cpu_seconds': process_time() - cpu, 'peak_rss_bytes': peak_rss(),
         'disk_lookup_uncached_ms': quantiles(uncached), 'runtime': measurements,
+        'incremental_delta': delta,
         'python': platform.python_version(), 'platform': platform.system(), 'logical_cpus': os.cpu_count(),
         'independent_review_or_production_acceptance': False}
 
@@ -122,13 +147,18 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--sizes', nargs='+', type=int, default=[10000, 100000])
     parser.add_argument('--one-size', type=int)
+    parser.add_argument('--incremental', action='store_true', help='Compare full/reused localized 1% delta offline')
+    parser.add_argument('--allow-million', action='store_true', help='Explicit separate resource approval for >100k synthetic records')
     args = parser.parse_args()
     if not args.root.is_absolute():
         parser.error('Explicit absolute OFFLINE output root required')
+    sizes = [args.one_size] if args.one_size is not None else args.sizes
+    if any(not 1 <= size <= (1000000 if args.allow_million else 100000) for size in sizes):
+        parser.error('Default cap is 100k; >100k requires separate --allow-million opt-in and resource review')
     if args.one_size is not None:
         if not 1 <= args.one_size <= 1000000:
             parser.error('Size exceeds synthetic benchmark limit')
-        print(json.dumps(one(args.root, args.one_size)))
+        print(json.dumps(one(args.root, args.one_size, incremental=args.incremental)))
         return
     if args.root.exists():
         parser.error('Use a fresh benchmark root; never overwrite old evidence')
@@ -136,7 +166,9 @@ def main():
     outputs = []
     for size in args.sizes:
         completed = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--root', str(args.root / str(size)),
-            '--one-size', str(size)], capture_output=True, text=True, check=True)
+            '--one-size', str(size), *(['--incremental'] if args.incremental else []),
+            *(['--allow-million'] if args.allow_million else [])],
+            capture_output=True, text=True, check=True, timeout=300)
         outputs.append(json.loads(completed.stdout))
         (args.root / 'results.json').write_text(json.dumps(outputs, indent=2) + '\n', encoding='utf-8')
     print(json.dumps(outputs, indent=2))

@@ -37,7 +37,8 @@ def fixture(path):
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     root.add_argument('action', choices=['example', 'audit', 'status', 'discover', 'reconcile', 'run', 'candidates',
-                                        'review', 'build', 'validate', 'publish', 'rollback'])
+                                        'review', 'build', 'validate', 'publish', 'rollback', 'run-worker',
+                                        'pause', 'resume', 'preflight', 'recover', 'gc'])
     root.add_argument('--root', type=Path, required=True, help='Explicit private OFFLINE fixture root only')
     root.add_argument('--fixture', type=Path)
     root.add_argument('--generation')
@@ -49,6 +50,8 @@ def parser():
     root.add_argument('--reviewer')
     root.add_argument('--loop', action='store_true', help='Standalone worker until Ctrl+C; default one tick')
     root.add_argument('--live', action='store_true', help='Reports BLOCKED_LIVE; never opens DB connections')
+    root.add_argument('--apply', action='store_true', help='Explicit OFFLINE worker/GC execution; default dry-run')
+    root.add_argument('--retain', type=int, default=3, help='GC minimum releases retained (1..100)')
     return root
 
 
@@ -68,6 +71,22 @@ def execute(args):
         store.write_json('offline-fixture.json', {'scope': 'offline_fixture'})
     elif marker != {'scope': 'offline_fixture'}:
         raise ConceptBlocked('OFFLINE_ROOT_REQUIRED')
+    if args.action == 'preflight':
+        return store.preflight()
+    if args.action == 'recover':
+        return store.recovery_status()
+    if args.action == 'gc':
+        return store.gc(retain=args.retain, dry_run=not args.apply)
+    if args.action in ('pause', 'resume'):
+        with store.writer_lock():
+            state = store.read_json('checkpoints/state.json')
+            if state is None:
+                raise ConceptBlocked('WORKER_NOT_INITIALIZED')
+            state['paused'] = args.action == 'pause'
+            if args.action == 'resume':
+                state.update(next_due=0., failures=0)
+            store.write_json('checkpoints/state.json', state)
+        return state
     if args.action == 'example':
         target = store.path('example-corpus.json')
         if target.exists():
@@ -91,6 +110,17 @@ def execute(args):
     worker = ConceptDiscoveryWorker(inventory, store, batch_size=settings.concept_builder_batch_size,
         tick_seconds=settings.concept_builder_tick_seconds,
         limits=DiscoveryLimits(max_chars=settings.concept_builder_max_chars, max_candidates=settings.concept_builder_max_candidates))
+    if args.action == 'run-worker':
+        if not args.apply:
+            return {'status': 'DRY_RUN', 'scope': 'offline_fixture', 'live_status': 'BLOCKED_LIVE'}
+        from data_sync_etl.application.concept_scheduler import ConceptWorkerScheduler
+        from data_sync_etl.workers.lifecycle import worker_lifecycle
+        scheduler = ConceptWorkerScheduler(worker, lambda: fixture(args.fixture))
+        with store.worker_lock(), worker_lifecycle() as stop:
+            result = scheduler.step()
+            while args.loop and not stop.wait(1.):
+                result = scheduler.step()
+        return result
     if args.action == 'reconcile':
         worker.reconcile()
         return worker.tick()
@@ -98,7 +128,7 @@ def execute(args):
         result = worker.tick()
         if args.loop:
             from data_sync_etl.workers.lifecycle import worker_lifecycle
-            with worker_lifecycle() as stop:
+            with store.worker_lock(), worker_lifecycle() as stop:
                 while not stop.is_set():
                     # Fixture file is an offline source, not a permanently frozen
                     # cache. Reload bounded input between ticks; NEVER use old

@@ -54,6 +54,7 @@ def test_readonly_factory_never_reads_secret_before_verified_gate(tmp_path):
 
 def test_readonly_factory_has_small_pool_majority_and_no_generic_client(tmp_path):
     from data_sync_etl.adapters.concept_corpus import (
+        CorpusQueryPlanGate,
         CorpusReadOnlyAccessGate,
         ReadOnlyMongoEvidenceReader,
     )
@@ -78,7 +79,8 @@ def test_readonly_factory_has_small_pool_majority_and_no_generic_client(tmp_path
         seen.update(kwargs)
         return Client()
     reader = ReadOnlyMongoEvidenceReader.from_secret_reference(secret, 'fixture',
-        CorpusReadOnlyAccessGate(lambda: True), client_factory=factory)
+        CorpusReadOnlyAccessGate(lambda: True), client_factory=factory,
+        query_gate=CorpusQueryPlanGate(lambda name: name in ('learning_resources', 'mongo_content_units')))
     assert seen['maxPoolSize'] == 2 and seen['socketTimeoutMS'] == 3000
     assert seen['read_concern'] == {'level': 'majority'}
     assert not hasattr(reader, 'client') and not hasattr(reader, 'command')

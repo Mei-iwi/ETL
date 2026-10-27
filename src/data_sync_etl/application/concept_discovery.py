@@ -2,8 +2,10 @@
 import json
 import os
 import re
-from time import monotonic, time
+from time import monotonic, process_time, time
 
+from data_sync_etl.application.concept_events import PendingConceptChanges
+from data_sync_etl.domain.concept_authority import OfflineReviewAuthority, review_statement
 from data_sync_etl.domain.concepts import Concept, default_dictionary
 from data_sync_etl.domain.corpus_concepts import (
     DEFAULT_LIMITS,
@@ -25,16 +27,20 @@ def term_target(term, candidate):
 class ReviewLedger:
     """Append-only hash chain, bounded private audit file, separate term/relation review.
 
-    Reviewer IDs are operator-supplied identities, not proof of independent review.
-    All current publication is explicitly labelled offline_fixture.
+    Default identity authority denies. Workers explicitly inject a synthetic
+    authority only for offline_fixture; signed issuers require external keys.
+    All current publication is still explicitly labelled offline_fixture.
     """
-    def __init__(self, store, max_bytes=8 * 1024 * 1024, max_records=10000, on_decision=lambda _: None):
+    def __init__(self, store, max_bytes=8 * 1024 * 1024, max_records=10000, on_decision=lambda _: None,
+                 authority=None):
         self.store, self.max_bytes, self.max_records = store, max_bytes, max_records
         self.on_decision, self._count = on_decision, 0
+        self.authority = authority
 
     def snapshot(self):
         target = self.store.path('review/decisions.jsonl')
         previous, decisions = '0' * 64, {}
+        self._used_proofs = set()
         self._count = 0
         if target.exists():
             if target.stat().st_size > self.max_bytes:
@@ -48,11 +54,14 @@ class ReviewLedger:
                     if item.get('previous') != previous or digest(item) != actual:
                         raise ConceptBlocked('REVIEW_CHAIN_INVALID')
                     previous = actual
+                    proof_hash = item.get('identity', {}).get('proof_hash')
+                    if proof_hash:
+                        self._used_proofs.add(proof_hash)
                     self._count = index + 1
                     decisions[(item['kind'], item['target'], item['binding'])] = item['decision']
         return previous, decisions
 
-    def decide(self, candidate, *, kind, target, decision, reviewer):
+    def decide(self, candidate, *, kind, target, decision, reviewer, proof=None):
         if (not re.fullmatch(r'[A-Za-z0-9:_-]{3,80}', reviewer)
                 or reviewer.upper().startswith(('YOUR_', 'ACTUAL_', 'PLACEHOLDER'))):
             raise ValueError('Explicit reviewer identity required; no email/placeholder')
@@ -61,13 +70,19 @@ class ReviewLedger:
         targets = ({term_target(term, candidate) for term in candidate['terms']} if kind == 'term' else {candidate['id']})
         if target not in targets:
             raise ValueError('Review target mismatch')
+        if self.authority is None:
+            raise ConceptBlocked('REVIEW_IDENTITY_NOT_VERIFIED')
+        identity = self.authority.verify(reviewer, review_statement(candidate, kind, target, decision), proof)
         with self.store.writer_lock():
             previous, _ = self.snapshot()
+            if identity.get('proof_hash') in self._used_proofs:
+                raise ConceptBlocked('REVIEW_PROOF_REPLAY')
             if self._count >= self.max_records:
                 raise ConceptBlocked('REVIEW_LEDGER_BUDGET')
             record = {'previous': previous, 'kind': kind, 'target': target, 'decision': decision,
                 'binding': candidate['binding'], 'reviewer': reviewer, 'reviewed_at': time(),
                 'policy': POLICY, 'scope': 'offline_fixture'}
+            record['identity'] = identity
             record['hash'] = digest(record)
             target_path = self.store.path('review/decisions.jsonl')
             target_path.parent.mkdir(exist_ok=True, mode=0o700)
@@ -90,7 +105,8 @@ def reviewed_concept(candidate, ledger_hash, decisions):
     if any(decisions.get((kind, target, candidate['binding'])) != 'approved' for kind, target in required):
         return None
     source = [{'name': 'offline corpus review; not independent quality acceptance',
-               'identifier': digest([candidate['binding'], ledger_hash])}]
+               'identifier': digest([candidate['binding'], [decisions[(kind, target, candidate['binding'])]
+                    for kind, target in required]])}]
     concept_id = candidate.get('concept_id', candidate['id'])
     labels, terms = {}, []
     for term in candidate['terms']:
@@ -113,15 +129,42 @@ def reviewed_concept(candidate, ledger_hash, decisions):
 
 class ConceptDiscoveryWorker:
     def __init__(self, inventory, store, *, reader=None, limits=DEFAULT_LIMITS, batch_size=20,
-                 tick_seconds=2., retry_limit=5, clock=time, pressure=lambda: False):
+                 tick_seconds=2., retry_limit=5, clock=time, pressure=lambda: False, review_authority=None,
+                 max_tick_bytes=2 * 1024 * 1024, cpu_seconds=1.):
         if not 1 <= batch_size <= 500 or not 0 < tick_seconds <= 300 or not 1 <= retry_limit <= 20:
             raise ValueError('Invalid worker budgets')
         self.inventory, self.store, self.reader, self.limits = inventory, store, reader, limits
         self.batch_size, self.tick_seconds, self.retry_limit = batch_size, tick_seconds, retry_limit
+        if not 1024 <= max_tick_bytes <= 16 * 1024 * 1024 or not 0 < cpu_seconds <= 30:
+            raise ValueError('Invalid worker resource bounds')
+        self.max_tick_bytes, self.cpu_seconds = max_tick_bytes, cpu_seconds
         self.clock, self.pressure = clock, pressure
+        self.events = PendingConceptChanges(store)
         callback = getattr(inventory, 'set_review_token', lambda _: None)
-        self.fence, self.ledger = EligibilityFence(inventory), ReviewLedger(store, on_decision=callback)
+        if review_authority is None and inventory.scope == 'offline_fixture':
+            review_authority = OfflineReviewAuthority()
+        self.fence, self.ledger = EligibilityFence(inventory), ReviewLedger(store, on_decision=callback,
+            authority=review_authority)
         callback(self.ledger.snapshot()[0])
+
+    def _urgent(self, state):
+        # Small durable revocations are processed even under Search pressure.
+        # This queue is supplied by a trusted source adapter, NOT a claimed live CDC.
+        acknowledged = []
+        for event in self.events.peek(4):
+            if event['kind'] != 'revoke':
+                break
+            current = self.inventory.current(event['resource_id'])
+            if current is not None and fingerprint(current) == event['fingerprint']:
+                record = {'resource_id': current.resource_id, 'version_id': current.version_id,
+                    'revision': current.revision, 'fingerprint': fingerprint(current), 'terms': [], 'relations': [],
+                    'evidence_fingerprint': digest([]), 'extractor': 'revocation-tombstone', 'policy': POLICY}
+                self.store.write_json(self.contribution_key(current.resource_id), record)
+                state['urgent_revocations'] = state.get('urgent_revocations', 0) + 1
+            # Duplicate/outdated events are safe to ack; current authority fences
+            # old generations independently of backlog processing/rebuild.
+            acknowledged.append(event)
+        self.events.acknowledge_many_locked(acknowledged)
 
     @staticmethod
     def contribution_key(resource_id):
@@ -136,10 +179,38 @@ class ConceptDiscoveryWorker:
     def tick(self):
         with self.store.writer_lock():
             state = self.status()
-            if state['paused'] or self.pressure() or self.clock() < state['next_due']:
-                return {**state, 'status': 'PAUSED_OR_WAITING'}
-            started = monotonic()
             try:
+                self._urgent(state)
+            except (OSError, ConceptBlocked):
+                state.update(status='RETRY_REQUIRED', error_code='URGENT_REPLAY_REQUIRED',
+                    next_due=self.clock() + 2, failures=state['failures'] + 1)
+                self.store.write_json('checkpoints/state.json', state)
+                return state
+            try:
+                pressure = self.pressure()
+            except Exception:
+                return {**state, 'status': 'PRESSURE_UNAVAILABLE'}
+            if state['paused'] or pressure or self.clock() < state['next_due']:
+                self.store.write_json('checkpoints/state.json', state)
+                return {**state, 'status': 'PAUSED_OR_WAITING'}
+            started, cpu_started, io_bytes = monotonic(), process_time(), 0
+            try:
+                pending = self.events.peek(min(100, self.batch_size))
+                # Fairness: bounded priority work, then a full normal inventory
+                # batch. Cursor remains tied exclusively to that normal batch.
+                for event in pending:
+                    current = self.inventory.current(event['resource_id'])
+                    if current is not None and fingerprint(current) == event['fingerprint']:
+                        record = discover(current, self.reader, self.limits)
+                        io_bytes += len(json.dumps(record, ensure_ascii=False).encode('utf-8'))
+                        if (io_bytes > self.max_tick_bytes or process_time() - cpu_started > self.cpu_seconds
+                                or monotonic() - started > self.tick_seconds):
+                            raise ConceptBlocked('TICK_RESOURCE_BUDGET_REPLAY')
+                        latest = self.inventory.current(current.resource_id)
+                        if latest is None or fingerprint(latest) != record['fingerprint']:
+                            raise ConceptBlocked('DISCOVERY_SOURCE_CHANGED')
+                        self.store.write_json(self.contribution_key(current.resource_id), record)
+                self.events.acknowledge_many_locked(pending)
                 rows = self.inventory.page(state['after'], self.batch_size)
                 # Revoke/delete first WITHIN the batch. Cursor commits only after
                 # the entire original keyset batch is durable, never by priority ID.
@@ -148,6 +219,9 @@ class ConceptDiscoveryWorker:
                     key = self.contribution_key(resource.resource_id)
                     previous = self.store.read_json(key)
                     record = discover(resource, self.reader, self.limits)
+                    io_bytes += len(json.dumps(record, ensure_ascii=False).encode('utf-8'))
+                    if io_bytes > self.max_tick_bytes or process_time() - cpu_started > self.cpu_seconds:
+                        raise ConceptBlocked('TICK_RESOURCE_BUDGET_REPLAY')
                     current = self.inventory.current(resource.resource_id)
                     if current is None or fingerprint(current) != record['fingerprint']:
                         raise ConceptBlocked('DISCOVERY_SOURCE_CHANGED')
@@ -168,7 +242,8 @@ class ConceptDiscoveryWorker:
                         # unprocessed remainder by advancing to the max resource ID.
                         raise ConceptBlocked('TICK_BUDGET_REPLAY')
                 state.update(after=rows[-1].resource_id if rows else '', failures=0, error_code=None, status='CANDIDATE_ONLY',
-                             last_processed_at=self.clock(), last_batch_seconds=monotonic() - started)
+                             last_processed_at=self.clock(), last_batch_seconds=monotonic() - started,
+                             last_cpu_seconds=process_time() - cpu_started, last_output_bytes=io_bytes)
                 if not rows:
                     state['sweeps'] += 1
                     state['last_completed_sweep_at'] = self.clock()

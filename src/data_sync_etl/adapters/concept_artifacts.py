@@ -77,7 +77,7 @@ class ArtifactStore:
                  max_file_bytes=16 * 1024 * 1024, min_free_bytes=1024 * 1024, shards=4,
                  max_aliases=64, max_provenance=8):
         self.root = Path(root)
-        if not self.root.is_absolute() or not 1 <= shards <= 16:
+        if not self.root.is_absolute() or '..' in self.root.parts or not 1 <= shards <= 16:
             raise ValueError('Absolute private root and bounded shards required')
         no_links(self.root)
         if mode != 'offline_test_only':
@@ -92,11 +92,24 @@ class ArtifactStore:
 
     def path(self, relative):
         item = Path(relative)
-        if item.anchor or item.drive or '..' in item.parts or '\\' in str(relative):
+        if (item.anchor or item.drive or '..' in item.parts or '\\' in str(relative)
+                or any(':' in part or part.endswith((' ', '.')) for part in item.parts)):
             raise ConceptBlocked('ARTIFACT_PATH_FORBIDDEN')
         target = self.root / item
         no_links(target)
         return target
+
+    def preflight(self):
+        """Inspection only: never changes owner/ACL or certifies live storage."""
+        no_links(self.root)
+        info = self.root.stat()
+        free = shutil.disk_usage(self.root).free
+        return {'mode': self.mode, 'absolute': self.root.is_absolute(), 'links_rejected': True,
+            'available_bytes': free, 'capacity_ok': free >= self.min_free_bytes,
+            'private_posix_mode': (info.st_mode & 0o077 == 0) if os.name != 'nt' else None,
+            'same_device_root': info.st_dev, 'acl_owner_verified': False,
+            'directory_fsync_supported_here': os.name != 'nt', 'distributed_fencing_verified': False,
+            'live_status': 'BLOCKED_LIVE'}
 
     def write_json(self, relative, value):
         data = canonical(value).encode('utf-8')
@@ -105,13 +118,17 @@ class ArtifactStore:
         target = self.path(relative)
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         temporary = self.path(str(relative) + '.' + uuid4().hex + '.tmp')
-        with temporary.open('xb') as output:
-            os.chmod(temporary, 0o600)
-            output.write(data)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, target)
-        sync_directory(target.parent)
+        try:
+            with temporary.open('xb') as output:
+                os.chmod(temporary, 0o600)
+                output.write(data)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, target)
+            sync_directory(target.parent)
+        finally:
+            if temporary.exists():
+                temporary.unlink()  # Only the UUID temporary created by this call.
 
     def read_json(self, relative, *, default=None):
         path = self.path(relative)
@@ -123,7 +140,18 @@ class ArtifactStore:
 
     @contextmanager
     def writer_lock(self):
-        target = self.path('publisher.lock')
+        with self._file_lock('publisher.lock'):
+            yield
+
+    @contextmanager
+    def worker_lock(self):
+        """Single local scheduler; independent of short publication transactions."""
+        with self._file_lock('worker.lock'):
+            yield
+
+    @contextmanager
+    def _file_lock(self, relative):
+        target = self.path(relative)
         with target.open('a+b') as lock:
             if not target.stat().st_size:
                 lock.write(b'0')
@@ -148,6 +176,39 @@ class ArtifactStore:
                 else:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
+    @contextmanager
+    def reader_lease(self, generation):
+        if not GENERATION.fullmatch(generation):
+            raise ConceptBlocked('INVALID_GENERATION')
+        # Registration and GC use the same local writer fence. A crashed process
+        # releases its OS lock; no TTL is used to expire an active reader.
+        relative = f'pins/{generation}/{uuid4().hex}.lease'
+        with self.writer_lock():
+            if not self.path('releases/' + generation).is_dir():
+                raise ConceptBlocked('GENERATION_REMOVED')
+            self.path(f'pins/{generation}').mkdir(parents=True, exist_ok=True)
+            lock = self._file_lock(relative)
+            lock.__enter__()
+        try:
+            yield
+        finally:
+            lock.__exit__(None, None, None)
+            self.path(relative).unlink(missing_ok=True)
+
+    def _pinned_locked(self, generation):
+        folder = self.path('pins/' + generation)
+        if not folder.exists():
+            return False
+        for index, lease in enumerate(folder.iterdir()):
+            if index >= 1000 or not re.fullmatch(r'[0-9a-f]{32}\.lease', lease.name):
+                return True  # Unknown/unbounded pin state is never permission to GC.
+            try:
+                with self._file_lock(f'pins/{generation}/{lease.name}'):
+                    pass
+            except ConceptBlocked:
+                return True
+        return False
+
     def current(self):
         pointer = self.read_json('current.json')
         if pointer is None:
@@ -158,11 +219,19 @@ class ArtifactStore:
         return value
 
     def build(self, concepts, *, seed_hash, source_token, ledger_hash, expected_parent=None, fence=lambda: False,
-              activate=False, coverage=None):
+              activate=False, coverage=None, reuse_shards=True):
         """Streaming build. SQL staging sorts canonically without Python corpus RAM."""
         with self.writer_lock():
             if self.current() != expected_parent or not fence():
                 raise ConceptBlocked('PUBLISH_FENCE_CHANGED')
+            parent = self.load(expected_parent).manifest if expected_parent else None
+            reusable = bool(reuse_shards and parent and parent['seed_hash'] == seed_hash
+                and parent['limits'] == {'max_aliases': self.max_aliases, 'runtime_provenance_sample': self.max_provenance}
+                and len(parent['shards']) == self.shards)
+            old_shards = {item['name']: item for item in parent['shards']} if reusable else {}
+            self.last_build_stats = {'reused': 0, 'rebuilt': 0, 'linked_bytes': 0, 'copied_bytes': 0,
+                'rebuilt_shard_bytes': 0, 'logical_payload_bytes_hashed': 0,
+                'parent_verification_bytes': sum(item['bytes'] for item in parent['shards']) if parent else 0}
             stage = self.path('staging/' + uuid4().hex)
             stage.mkdir(parents=True, mode=0o700)
             staging_db = stage / 'sort.sqlite'
@@ -197,19 +266,39 @@ class ArtifactStore:
                 for bucket in range(self.shards):
                     name = f'shard-{bucket:02}.sqlite'
                     target = stage / name
-                    with closing(sqlite3.connect(target)) as shard, shard:
-                        shard.execute('PRAGMA page_size=16384')
-                        shard.execute('PRAGMA cache_size=-2048')
-                        shard.execute('CREATE TABLE records(id TEXT PRIMARY KEY,payload TEXT NOT NULL) WITHOUT ROWID')
-                        shard.execute('CREATE TABLE aliases(alias TEXT,concept_id TEXT,PRIMARY KEY(alias,concept_id)) WITHOUT ROWID')
-                        for cid, payload in conn.execute('SELECT id,payload FROM records WHERE bucket=? ORDER BY id', (bucket,)):
-                            shard.execute('INSERT INTO records VALUES(?,?)', (cid, payload))
-                            aliases = {term['normalized'] for term in json.loads(payload)['terms']}
-                            shard.executemany('INSERT INTO aliases VALUES(?,?)', ((alias, cid) for alias in sorted(aliases)))
-                            count += 1
+                    logical, bucket_count = sha256(), 0
+                    for cid, payload in conn.execute('SELECT id,payload FROM records WHERE bucket=? ORDER BY id', (bucket,)):
+                        data = cid.encode() + b'\0' + payload.encode('utf-8') + b'\n'
+                        logical.update(data)
+                        self.last_build_stats['logical_payload_bytes_hashed'] += len(data)
+                        bucket_count += 1
+                    old = old_shards.get(name)
+                    if old and old.get('content_sha256') == logical.hexdigest() and old.get('records') == bucket_count:
+                        origin = self.path(f"releases/{expected_parent}/{name}")
+                        try:
+                            os.link(origin, target)
+                            self.last_build_stats['linked_bytes'] += old['bytes']
+                        except OSError:
+                            shutil.copyfile(origin, target)
+                            self.last_build_stats['copied_bytes'] += old['bytes']
+                        self.last_build_stats['reused'] += 1
+                    else:
+                        with closing(sqlite3.connect(target)) as shard, shard:
+                            shard.execute('PRAGMA page_size=16384')
+                            shard.execute('PRAGMA cache_size=-2048')
+                            shard.execute('CREATE TABLE records(id TEXT PRIMARY KEY,payload TEXT NOT NULL) WITHOUT ROWID')
+                            shard.execute('CREATE TABLE aliases(alias TEXT,concept_id TEXT,PRIMARY KEY(alias,concept_id)) WITHOUT ROWID')
+                            for cid, payload in conn.execute('SELECT id,payload FROM records WHERE bucket=? ORDER BY id', (bucket,)):
+                                shard.execute('INSERT INTO records VALUES(?,?)', (cid, payload))
+                                aliases = {term['normalized'] for term in json.loads(payload)['terms']}
+                                shard.executemany('INSERT INTO aliases VALUES(?,?)', ((alias, cid) for alias in sorted(aliases)))
+                        self.last_build_stats['rebuilt'] += 1
+                        self.last_build_stats['rebuilt_shard_bytes'] += target.stat().st_size
+                    count += bucket_count
                     with target.open('r+b') as output:
                         os.fsync(output.fileno())
-                    entries.append({'name': name, 'bytes': target.stat().st_size, 'sha256': checksum(target)})
+                    entries.append({'name': name, 'bytes': target.stat().st_size, 'sha256': checksum(target),
+                        'content_sha256': logical.hexdigest(), 'records': bucket_count})
                 if sum(item['bytes'] for item in entries) > self.max_bytes:
                     raise ConceptBlocked('ARTIFACT_RELEASE_BUDGET')
             finally:
@@ -235,11 +324,17 @@ class ArtifactStore:
             if not destination.exists():
                 os.replace(stage, destination)
                 sync_directory(destination.parent)
+            else:
+                # Only this call's UUID staging directory, never old evidence.
+                for child in stage.iterdir():
+                    relative = str(child.relative_to(self.root)).replace('\\', '/')
+                    self.path(relative).unlink()
+                stage.rmdir()
             release = self.load(generation)
             if not fence():
                 raise ConceptBlocked('PUBLISH_FENCE_CHANGED')
             if activate:
-                self.write_json('current.json', {'generation': generation})
+                self._switch(generation, expected_parent)
             return release.manifest
 
     def activate(self, generation, *, fence):
@@ -247,7 +342,31 @@ class ArtifactStore:
             release = self.load(generation)
             if not fence(release.manifest):
                 raise ConceptBlocked('PUBLISH_FENCE_CHANGED')
-            self.write_json('current.json', {'generation': generation})
+            current = self.current()
+            if current != generation and current != release.manifest.get('parent'):
+                raise ConceptBlocked('PUBLISH_PARENT_CHANGED')
+            self._switch(generation, current)
+
+    def _switch(self, generation, expected_parent):
+        if self.current() != expected_parent:
+            raise ConceptBlocked('PUBLISH_PARENT_CHANGED')
+        self.write_json('publish-intent.json', {'generation': generation, 'previous': expected_parent,
+            'status': 'PREPARED'})
+        if expected_parent and expected_parent != generation:
+            self.write_json('last-good.json', {'generation': expected_parent})
+        self.write_json('current.json', {'generation': generation})
+        self.write_json('publish-intent.json', {'generation': generation, 'previous': expected_parent,
+            'status': 'COMMITTED'})
+
+    def recovery_status(self):
+        """No automatic rollback: only an authority-checked operator can switch."""
+        intent = self.read_json('publish-intent.json')
+        current = self.current()
+        if current:
+            self.load(current)
+        return {'current': current, 'intent': intent,
+            'status': 'INTERRUPTED' if intent and intent.get('status') == 'PREPARED' else 'CONSISTENT',
+            'automatic_rollback': False, 'live_status': 'BLOCKED_LIVE'}
 
     def load(self, generation=None):
         generation = generation or self.current()
@@ -260,6 +379,11 @@ class ArtifactStore:
         if (manifest.get('extractor') != EXTRACTOR or manifest.get('policy') != POLICY
                 or manifest.get('analyzer') != ANALYZER_VERSION):
             raise ConceptBlocked('ARTIFACT_POLICY_MISMATCH')
+        names = [item.get('name', '') for item in manifest.get('shards', [])]
+        if (len({name.casefold() for name in names}) != len(names)
+                or manifest.get('scope') != 'offline_fixture'
+                or manifest.get('revocation_completeness') != 'fixture_only'):
+            raise ConceptBlocked('INVALID_MANIFEST')
         logical = {key: value for key, value in manifest.items() if key not in ('generation', 'created_at', 'parent')}
         if digest(logical) != generation or not 1 <= len(manifest.get('shards', [])) <= 16:
             raise ConceptBlocked('MANIFEST_HASH_MISMATCH')
@@ -278,7 +402,118 @@ class ArtifactStore:
             release = self.load(generation)
             if not fence(release.manifest['source_token']):
                 raise ConceptBlocked('ROLLBACK_PRIVACY_FENCE')
-            self.write_json('current.json', {'generation': generation})
+            self._switch(generation, self.current())
+
+    def gc(self, *, retain=3, min_age_seconds=3600, grace_seconds=60, dry_run=True, now=None,
+           max_catalog=1000, max_total_bytes=1024 * 1024 * 1024):
+        """Two-phase derived-release GC only; default is inspection, never deletion.
+
+        Local OS leases protect active/pinned readers. This is not distributed
+        fencing and cannot be enabled on unverified network/shared storage.
+        """
+        if not 1 <= retain <= 100 or min_age_seconds < 0 or grace_seconds < 0:
+            raise ValueError('Invalid retention policy')
+        instant = time() if now is None else now
+        with self.writer_lock():
+            folder = self.path('releases')
+            catalog = []
+            if folder.exists():
+                for index, item in enumerate(folder.iterdir()):
+                    if index >= max_catalog or not GENERATION.fullmatch(item.name):
+                        raise ConceptBlocked('GC_CATALOG_NOT_VERIFIED')
+                    manifest = self.read_json(f'releases/{item.name}/manifest.json')
+                    if (not manifest or manifest.get('generation') != item.name
+                            or manifest.get('scope') != 'offline_fixture'):
+                        raise ConceptBlocked('GC_RELEASE_NOT_VERIFIED')
+                    catalog.append(manifest)
+            catalog.sort(key=lambda item: (item['created_at'], item['generation']), reverse=True)
+            protected = {item['generation'] for item in catalog[:retain]}
+            protected.add(self.current())
+            last_good = self.read_json('last-good.json')
+            if last_good:
+                protected.add(last_good['generation'])
+            result = {'dry_run': dry_run, 'candidates': [], 'tombstoned': [], 'deleted': [], 'pinned': [],
+                'release_bytes_before': sum(shard['bytes'] for item in catalog for shard in item['shards']),
+                'max_total_release_bytes': max_total_bytes, 'live_status': 'BLOCKED_LIVE'}
+            result['resumed_retirements'] = self._clean_trash_locked(protected, dry_run=dry_run)
+            for manifest in reversed(catalog):
+                generation = manifest['generation']
+                if generation in protected or instant - manifest['created_at'] < min_age_seconds:
+                    continue
+                if self._pinned_locked(generation):
+                    result['pinned'].append(generation)
+                    continue
+                result['candidates'].append(generation)
+                if dry_run:
+                    continue
+                # Validate complete checksums immediately before marking/deleting.
+                self.load(generation)
+                marker_path = f'gc/tombstones/{generation}.json'
+                marker = self.read_json(marker_path)
+                expected = digest(manifest)
+                if marker is None:
+                    self.write_json(marker_path, {'manifest_sha256': expected, 'marked_at': instant,
+                        'files': sorted({'manifest.json', *[item['name'] for item in manifest['shards']]})})
+                    result['tombstoned'].append(generation)
+                    continue
+                if marker.get('manifest_sha256') != expected:
+                    raise ConceptBlocked('GC_TOMBSTONE_MISMATCH')
+                if instant - marker['marked_at'] < grace_seconds:
+                    continue
+                release_path = self.path('releases/' + generation)
+                allowed = {'manifest.json', *[item['name'] for item in manifest['shards']]}
+                children = list(release_path.iterdir())
+                if {item.name for item in children} != allowed:
+                    raise ConceptBlocked('GC_UNKNOWN_RELEASE_FILES')
+                for child in children:
+                    target = self.path(f'releases/{generation}/{child.name}')
+                    if not target.is_file():
+                        raise ConceptBlocked('GC_UNKNOWN_RELEASE_FILES')
+                trash = self.path('gc/trash/' + generation)
+                trash.parent.mkdir(exist_ok=True)
+                os.replace(release_path, trash)
+                sync_directory(folder)
+                # If deletion is interrupted (e.g. Windows file locking), the
+                # next GC resumes this owned trash tree from its durable marker.
+                self._clean_trash_locked(protected, dry_run=False)
+                result['deleted'].append(generation)
+            deleted = set(result['deleted'])
+            result['release_bytes_after'] = sum(shard['bytes'] for item in catalog
+                if item['generation'] not in deleted for shard in item['shards'])
+            result['quota_met'] = result['release_bytes_after'] <= max_total_bytes
+            return result
+
+    def _clean_trash_locked(self, protected, *, dry_run):
+        folder = self.path('gc/trash')
+        removed = []
+        if not folder.exists():
+            return removed
+        for index, item in enumerate(folder.iterdir()):
+            generation = item.name
+            if index >= 1000 or not GENERATION.fullmatch(generation) or generation in protected:
+                raise ConceptBlocked('GC_TRASH_NOT_VERIFIED')
+            self.path('gc/trash/' + generation)
+            marker = self.read_json(f'gc/tombstones/{generation}.json')
+            files = marker.get('files', []) if marker else []
+            if (not files or any(name != 'manifest.json' and not re.fullmatch(r'shard-\d{2}\.sqlite', name) for name in files)
+                    or self._pinned_locked(generation)):
+                raise ConceptBlocked('GC_TRASH_NOT_VERIFIED')
+            children = list(item.iterdir())
+            if not {child.name for child in children} <= set(files):
+                raise ConceptBlocked('GC_UNKNOWN_RELEASE_FILES')
+            for child in children:
+                target = self.path(f'gc/trash/{generation}/{child.name}')
+                if not target.is_file():
+                    raise ConceptBlocked('GC_UNKNOWN_RELEASE_FILES')
+            if dry_run:
+                continue
+            for child in children:
+                self.path(f'gc/trash/{generation}/{child.name}').unlink()
+            item.rmdir()
+            self.path(f'gc/tombstones/{generation}.json').unlink()
+            sync_directory(folder)
+            removed.append(generation)
+        return removed
 
 
 class Release:

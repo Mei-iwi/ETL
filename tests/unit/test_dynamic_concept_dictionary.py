@@ -8,6 +8,7 @@ import pytest
 
 from data_sync_etl.adapters.concept_artifacts import ArtifactStore
 from data_sync_etl.adapters.concept_corpus import (
+    CorpusQueryPlanGate,
     CorpusReadOnlyAccessGate,
     FixtureCorpus,
     ReadOnlyMongoEvidenceReader,
@@ -88,7 +89,8 @@ def test_read_capability_projection_budgets_cancel_and_identity():
     def find(selector, **kwargs):
         calls.append((selector, kwargs))
         return cursor
-    reader = ReadOnlyMongoEvidenceReader({'mongo_content_units': find}, CorpusReadOnlyAccessGate(lambda: True), batch_size=2)
+    reader = ReadOnlyMongoEvidenceReader({'mongo_content_units': find}, CorpusReadOnlyAccessGate(lambda: True),
+        batch_size=2, query_gate=CorpusQueryPlanGate(lambda name: name == 'mongo_content_units'))
     assert list(reader.units('v1', {'u1'}))[0]['_id'] == 'u1'
     assert cursor.closed and cursor.batch == 2 and cursor.cap == 101
     assert calls[0][1]['max_time_ms'] == 1000

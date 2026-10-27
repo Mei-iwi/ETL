@@ -50,5 +50,18 @@ class ChangeInventory(ResourceEnumerator, EligibilityReader, Protocol):
     """Cursor is an inventory key; periodic rewind is required without complete CDC."""
 
 
+class RevocationAuthorityPort(EligibilityReader, Protocol):
+    """Trusted provider must cover every mutable source, never a role/env flag.
+
+    attestation returns domain.concept_authority.AuthorityAttestation. No live
+    implementation is installed until the external operator verifies its feed.
+    """
+    def attestation(self): ...
+
+
+class ReviewIdentityPort(Protocol):
+    def verify(self, reviewer: str, statement: str, proof=None) -> dict: ...
+
+
 class ConceptResolver(Protocol):
     def pin(self, query: str, domain: str | None = None): ...

@@ -1,10 +1,12 @@
 """Draft synthetic development examples, NOT independently reviewed qrels."""
 import json
+import math
 from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 
 import pytest
+from sqlalchemy import event
 
 from data_sync_etl.adapters.concept_artifacts import ArtifactStore
 from data_sync_etl.adapters.concept_corpus import FixtureCorpus
@@ -99,29 +101,65 @@ def test_http_final_send_fence_blocks_late_private_alias(searchable, pipeline, m
 
 
 @pytest.mark.parametrize('searchable', [{'texts': ['Cache makes repeated data lookups faster.']}], indirect=True)
-def test_synthetic_http_before_after_latency_and_negative_queries(searchable, pipeline, tmp_path):
+def test_synthetic_http_before_after_latency_and_negative_queries(searchable, pipeline, tmp_path, monkeypatch):
     from scripts.benchmark_concept_artifacts import quantiles
-    c, _ = searchable
+    c, version = searchable
     inventory, store, worker, candidate = pipeline
     approve(worker, candidate)
     provider = activate(inventory, store, worker)
     c.search.concept_resolver = provider
+    calls = {'sqlite_statements': 0, 'memory_reader_calls': 0, 'memory_bag_calls': 0}
+
+    def sql_call(*args):
+        calls['sqlite_statements'] += 1
+
+    event.listen(c.engine, 'before_cursor_execute', sql_call)
+    for instance, names, counter in ((c.indexing.reader, ('units', 'get_unit', 'content_fingerprint'), 'memory_reader_calls'),
+                                    (c.indexing.bags, ('get_bag', 'search_candidates'), 'memory_bag_calls')):
+        for name in names:
+            original = getattr(instance, name)
+
+            def counted(*args, _original=original, _counter=counter, **kwargs):
+                calls[_counter] += 1
+                return _original(*args, **kwargs)
+
+            monkeypatch.setattr(instance, name, counted)
+    monkeypatch.setattr(ConceptDiscoveryWorker, 'tick', lambda *args, **kwargs: pytest.fail('HTTP ran builder'))
+    monkeypatch.setattr(ConceptDiscoveryWorker, 'build', lambda *args, **kwargs: pytest.fail('HTTP ran publisher'))
     report = {'scope': 'synthetic_sqlite_asgi_with_embedding_test_double', 'independent_qrels': False,
-              'source_head': '70f5146', 'results': {}}
+              'source_head': None, 'source_head_evidence': 'See checkout acceptance report',
+              'mongo_connections': 0, 'results': {}}
     with TestClient(create_app(c)) as api:
         for enabled in (False, True):
             provider.enabled = enabled
             for method in ('bow', 'vector', 'hybrid'):
-                timings, counts = [], []
+                timings, counts, call_counts, relevant_ranks = [], [], [], []
                 for _ in range(8):
+                    previous = dict(calls)
                     started = perf_counter()
                     response = api.post('/api/v1/search', json={'query': 'bộ nhớ đệm', 'method': method})
                     timings.append((perf_counter() - started) * 1000)
                     assert response.status_code == 200, response.text
                     counts.append(response.json()['total'])
-                report['results'][f'{method}-dynamic-{enabled}'] = {'latency_ms': quantiles(timings), 'totals': counts}
+                    relevant_ranks.append(next((rank for rank, item in enumerate(response.json()['items'], start=1)
+                        if item['resource_version_id'] == version['id']), None))
+                    call_counts.append({key: calls[key] - previous[key] for key in calls})
+                report['results'][f'{method}-dynamic-{enabled}'] = {'latency_ms': quantiles(timings),
+                    'totals': counts, 'fixture_calls_per_request': call_counts, 'relevant_ranks': relevant_ranks}
         for query in ('quantum dinosaur astronomy', 'ngành khoa học chưa có xyz', 'unrelatedzznonexistent'):
             assert api.post('/api/v1/search', json={'query': query, 'method': 'bow'}).json()['total'] == 0
+    event.remove(c.engine, 'before_cursor_execute', sql_call)
+    report['cache'] = provider.status()
+    report['development_bow_metrics'] = {'unique_positive_queries': 1, 'negative_queries_after': 3,
+        'judgement': 'IMPLEMENTER_LABELLED_SYNTHETIC_NOT_INDEPENDENT', 'confidence_interval': 'N_TOO_SMALL',
+        'no_answer_fpr_after': 0.0}
+    for enabled in (False, True):
+        rank = report['results'][f'bow-dynamic-{enabled}']['relevant_ranks'][0]
+        report['development_bow_metrics']['after' if enabled else 'before'] = {
+            'precision_at_1': float(rank == 1), 'recall_at_5': float(rank is not None and rank <= 5),
+            'recall_at_10': float(rank is not None and rank <= 10), 'mrr': 1 / rank if rank else 0,
+            'ndcg': 1 / math.log2(rank + 1) if rank else 0}
+    provider.close()
     output = Path(tmp_path) / 'http-performance.json'
     output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     assert report['results']['bow-dynamic-False']['totals'] == [0] * 8

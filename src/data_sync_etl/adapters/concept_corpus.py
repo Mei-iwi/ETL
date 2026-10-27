@@ -4,8 +4,11 @@ from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from threading import Event, RLock
+from types import MappingProxyType
 
-from data_sync_etl.domain.corpus_concepts import fingerprint
+from bson import BSON
+
+from data_sync_etl.domain.corpus_concepts import eligible, fingerprint
 from data_sync_etl.domain.indexing import digest
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
 
@@ -15,31 +18,61 @@ class CorpusReadOnlyAccessGate:
         self._verifier = verifier
 
     def require(self):
-        if self._verifier is None or self._verifier() is not True:
+        try:
+            verified = self._verifier is not None and self._verifier() is True
+        except Exception:
+            verified = False
+        if not verified:
             raise ConceptBlocked('MONGO_READ_ONLY_NOT_VERIFIED')
 
 
-class ReadOnlyMongoEvidenceReader:
-    PROJECTIONS = {
-        'learning_resources': {'_id': 1, 'description': 1, 'tags': 1, 'updated_at': 1},
-        'mongo_content_units': {'_id': 1, 'content_unit_id': 1, 'resource_version_id': 1,
-            'text': 1, 'is_current': 1, 'projection_generation': 1, 'updated_at': 1},
-    }
+class CorpusQueryPlanGate:
+    """Trusted injected operator attestor, not a flag or self-reported role name.
 
-    def __init__(self, finders, gate, *, batch_size=20, max_docs=100, max_bytes=500_000, max_time_ms=1000):
+    Must bind the configured database/principal, selector shape and budget to
+    independently verified index/query evidence. No live verifier is installed.
+    Synthetic tests may supply a fake; that does not verify a production plan.
+    """
+    def __init__(self, verifier: Callable[[str], bool] | None = None):
+        self._verifier = verifier
+
+    def require(self, collection):
+        try:
+            verified = self._verifier is not None and self._verifier(collection) is True
+        except Exception:
+            verified = False
+        if not verified:
+            raise ConceptBlocked('CORPUS_QUERY_PLAN_NOT_VERIFIED')
+
+
+class ReadOnlyMongoEvidenceReader:
+    PROJECTIONS = MappingProxyType({
+        'learning_resources': MappingProxyType({'_id': 1, 'description': 1, 'tags': 1, 'updated_at': 1}),
+        'mongo_content_units': MappingProxyType({'_id': 1, 'content_unit_id': 1, 'resource_version_id': 1,
+            'text': 1, 'is_current': 1, 'projection_generation': 1, 'updated_at': 1}),
+    })
+
+    def __init__(self, finders, gate, *, batch_size=20, max_docs=100, max_bytes=500_000, max_time_ms=1000,
+                 query_gate=None):
         if not (1 <= batch_size <= 100 and 1 <= max_docs <= 1000 and 1 <= max_bytes <= 10_000_000
                 and 1 <= max_time_ms <= 5000):
             raise ValueError('Invalid corpus read budgets')
         gate.require()
-        self._finders, self._gate = finders, gate
+        if not finders or set(finders) - self.PROJECTIONS.keys() or not all(callable(item) for item in finders.values()):
+            raise ConceptBlocked('CORPUS_CAPABILITY_INVALID')
+        self._finders, self._gate = dict(finders), gate
+        self._query_gate = query_gate or CorpusQueryPlanGate()
         self.batch_size, self.max_docs, self.max_bytes, self.max_time_ms = batch_size, max_docs, max_bytes, max_time_ms
         self._close_connection = lambda: None
 
     @classmethod
-    def from_secret_reference(cls, secret_file, database, gate, *, client_factory=None):
+    def from_secret_reference(cls, secret_file, database, gate, *, client_factory=None, query_gate=None):
         # A flag/URI is not verification. Never even read a secret before the
         # separately supplied trusted attestor has passed; no admin probe.
         gate.require()
+        query_gate = query_gate or CorpusQueryPlanGate()
+        for name in cls.PROJECTIONS:
+            query_gate.require(name)
         path = Path(secret_file)
         if path.stat().st_size > 4096:
             raise ConceptBlocked('CORPUS_SECRET_INVALID')
@@ -54,7 +87,7 @@ class ReadOnlyMongoEvidenceReader:
             connectTimeoutMS=3000, socketTimeoutMS=3000, waitQueueTimeoutMS=500, appname='etl-corpus-readonly')
         try:
             db = client.get_database(database, read_concern=ReadConcern('majority'))
-            reader = cls({name: db[name].find for name in cls.PROJECTIONS}, gate)
+            reader = cls({name: db[name].find for name in cls.PROJECTIONS}, gate, query_gate=query_gate)
             reader._close_connection = client.close
             return reader
         except Exception:
@@ -66,6 +99,8 @@ class ReadOnlyMongoEvidenceReader:
 
     def fields(self, resource):
         """Bridge a MASTER-verified envelope to projected Mongo text. No OCR/media."""
+        if not eligible(resource):
+            return
         used = 0
         if resource.metadata_approved:
             values = {name: resource.fields.get(name, '') for name in ('title', 'description', 'tags')}
@@ -92,13 +127,17 @@ class ReadOnlyMongoEvidenceReader:
 
     def units(self, version_id, allowed_unit_ids, *, cancel=None):
         self._gate.require()
+        self._identity(version_id)
         cancel = cancel or Event()
         if not allowed_unit_ids or len(allowed_unit_ids) > self.max_docs:
             if allowed_unit_ids:
                 raise ConceptBlocked('CORPUS_UNIT_BUDGET')
             return
+        for unit_id in allowed_unit_ids:
+            self._identity(unit_id)
+        self._query_gate.require('mongo_content_units')
         selector = {'resource_version_id': version_id, 'is_current': True, '_id': {'$in': sorted(allowed_unit_ids)}}
-        cursor = self._finders['mongo_content_units'](selector, projection=self.PROJECTIONS['mongo_content_units'],
+        cursor = self._finders['mongo_content_units'](selector, projection=dict(self.PROJECTIONS['mongo_content_units']),
             max_time_ms=self.max_time_ms).batch_size(self.batch_size).limit(self.max_docs + 1)
         used = 0
         try:
@@ -111,7 +150,7 @@ class ReadOnlyMongoEvidenceReader:
                 if (document.get('_id') not in allowed_unit_ids or document.get('resource_version_id') != version_id
                         or document.get('is_current') is not True):
                     raise ConceptBlocked('CORPUS_IDENTITY_MISMATCH')
-                used += len(document.get('text', '').encode('utf-8'))
+                used += self._document_size('mongo_content_units', document)
                 if used > self.max_bytes:
                     raise ConceptBlocked('CORPUS_BYTE_BUDGET')
                 yield document
@@ -120,17 +159,42 @@ class ReadOnlyMongoEvidenceReader:
 
     def metadata(self, mongo_id):
         self._gate.require()
+        self._identity(mongo_id)
+        self._query_gate.require('learning_resources')
         cursor = self._finders['learning_resources']({'_id': mongo_id},
-            projection=self.PROJECTIONS['learning_resources'], max_time_ms=self.max_time_ms).limit(2)
+            projection=dict(self.PROJECTIONS['learning_resources']), max_time_ms=self.max_time_ms).batch_size(2).limit(2)
         try:
-            result = list(cursor)
-            if len(result) > 1 or any(row.get('_id') != mongo_id for row in result):
-                raise ConceptBlocked('CORPUS_IDENTITY_MISMATCH')
-            if result and len(str(result[0]).encode('utf-8')) > self.max_bytes:
-                raise ConceptBlocked('CORPUS_BYTE_BUDGET')
-            return result[0] if result else None
+            result = None
+            for row in cursor:
+                self._gate.require()
+                if result is not None or row.get('_id') != mongo_id:
+                    raise ConceptBlocked('CORPUS_IDENTITY_MISMATCH')
+                if self._document_size('learning_resources', row) > self.max_bytes:
+                    raise ConceptBlocked('CORPUS_BYTE_BUDGET')
+                result = row
+            return result
         finally:
             cursor.close()
+
+    @staticmethod
+    def _identity(value):
+        if not isinstance(value, str) or not value.strip() or len(value) > 128 or '\x00' in value:
+            raise ConceptBlocked('CORPUS_IDENTITY_INVALID')
+
+    @classmethod
+    def _document_size(cls, collection, document):
+        if not isinstance(document, dict) or set(document) - cls.PROJECTIONS[collection].keys():
+            raise ConceptBlocked('CORPUS_PROJECTION_INVALID')
+        for field in ('description', 'text'):
+            if document.get(field) is not None and not isinstance(document[field], str):
+                raise ConceptBlocked('CORPUS_PROJECTION_INVALID')
+        tags = document.get('tags')
+        if tags is not None and (not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags)):
+            raise ConceptBlocked('CORPUS_PROJECTION_INVALID')
+        try:
+            return len(BSON.encode(document))
+        except Exception:
+            raise ConceptBlocked('CORPUS_PROJECTION_INVALID') from None
 
 
 class FixtureCorpus:

@@ -24,12 +24,32 @@ class ConceptDictionaryProvider:
         self._active, self._cache, self._bytes = None, OrderedDict(), 0
         self._lock, self._stop, self._thread = RLock(), Event(), None
         self._killed = False
+        self._leases = {}
         self._latencies = deque(maxlen=256)
         self.metrics = {'status': 'DISABLED' if not enabled else 'BLOCKED_LIVE', 'hits': 0, 'misses': 0,
                         'fallbacks': 0, 'lookups': 0, 'lookup_ms_total': 0.}
 
+    def _retain_locked(self, release):
+        key = release.manifest['generation']
+        if key not in self._leases:
+            lease = self.store.reader_lease(key)
+            lease.__enter__()
+            self._leases[key] = [lease, 0]
+        self._leases[key][1] += 1
+
+    def _release_locked(self, release):
+        if release is None:
+            return
+        key = release.manifest['generation']
+        entry = self._leases.get(key)
+        if entry:
+            entry[1] -= 1
+            if not entry[1]:
+                del self._leases[key]
+                entry[0].__exit__(None, None, None)
+
     def _valid(self, release):
-        return bool(not self._killed and release and self.fence is not None
+        return bool(self.enabled and not self._killed and release and self.fence is not None
             and self.allow_offline and self.fence.inventory.scope == 'offline_fixture'
             and release.manifest['scope'] == 'offline_fixture'
             and release.manifest.get('revocation_completeness') == 'fixture_only'
@@ -45,6 +65,10 @@ class ConceptDictionaryProvider:
             if not self._valid(release):
                 raise ConceptBlocked('BLOCKED_PRIVACY')
             with self._lock:
+                previous = self._active
+                if previous is None or previous.manifest['generation'] != release.manifest['generation']:
+                    self._retain_locked(release)
+                    self._release_locked(previous)
                 self._active = release
                 self.metrics['status'] = 'OFFLINE_READY'
         except Exception:
@@ -59,6 +83,7 @@ class ConceptDictionaryProvider:
                     except Exception:
                         pass
                 if not keep:
+                    self._release_locked(self._active)
                     self._active = None
                 self.metrics['status'] = 'LAST_GOOD' if keep else 'SEED_FALLBACK'
         return self.status()
@@ -78,7 +103,10 @@ class ConceptDictionaryProvider:
     def kill(self):
         with self._lock:
             self._killed = True
+            self._release_locked(self._active)
             self._active = None
+            self._cache.clear()
+            self._bytes = 0
             self.metrics['status'] = 'BLOCKED_PRIVACY'
 
     def start(self):
@@ -97,6 +125,9 @@ class ConceptDictionaryProvider:
         if self._thread is not None:
             self._thread.join(timeout=5)
             self._thread = None
+        with self._lock:
+            self._release_locked(self._active)
+            self._active = None
 
     def _resolve(self, release, query, domain):
         key = digest([release.manifest['generation'], query, domain])
@@ -154,6 +185,9 @@ class ConceptDictionaryProvider:
     def pin(self, query, domain=None):
         with self._lock:
             release = self._active
+            retained = bool(self.enabled and self._valid(release))
+            if retained:
+                self._retain_locked(release)
         dictionary, used = self.base, None
         started = monotonic()
         if self.enabled and self._valid(release) and isinstance(query, str):
@@ -170,7 +204,12 @@ class ConceptDictionaryProvider:
             self.metrics['lookups'] += 1
             self.metrics['lookup_ms_total'] += elapsed
             self._latencies.append(elapsed)
-        yield dictionary
-        if used is not None and not self._valid(used):
-            # Caller must discard response and recompute once using literal/seed.
-            raise ConceptBlocked('DYNAMIC_REVOKED')
+        try:
+            yield dictionary
+            if used is not None and not self._valid(used):
+                # Caller must discard response and recompute once using literal/seed.
+                raise ConceptBlocked('DYNAMIC_REVOKED')
+        finally:
+            if retained:
+                with self._lock:
+                    self._release_locked(release)

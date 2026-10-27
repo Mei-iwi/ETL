@@ -2,18 +2,23 @@
 import re
 import unicodedata
 from dataclasses import asdict, dataclass
+from itertools import combinations
+from time import time
 
 from data_sync_etl.domain.concepts import default_dictionary, normalize
 from data_sync_etl.domain.indexing import digest
 from data_sync_etl.domain.lexical import QUERY_STOPWORDS, surface_tokens
 from data_sync_etl.ports.concept_corpus import ConceptBlocked, ResourceEvidence
 
-EXTRACTOR = 'corpus-phrases-v4'
+EXTRACTOR = 'corpus-phrases-v5'
 POLICY = 'public-explicit-reviewed-v1'
 FORBIDDEN = re.compile(r'https?://|www\.|\S+@\S+|[<>]|\b(?:select|insert|drop)\b.*\b(?:from|table|into)\b|'
     r'approve\s+me|ignore\s+(?:all|previous)|bỏ\s+kiểm\s+duyệt|(?:password|secret|token)\s*[=:]', re.I)
 PAIR = re.compile(r'(?:^|[\n;:.])\s*([^()\n;:.]{2,100}?)\s*\(([^()\n]{2,80})\)', re.M)
 DEFINITION = re.compile(r'(?:^|[\n;:.])\s*([^()\n;:.]{2,100}?)\s+(?:nghĩa là|means|signifie)\s+([^()\n;:.]{2,100})', re.I)
+SYNONYM = re.compile(r'(?:^|[\n;:.])\s*([^()\n;:.]{2,100}?)\s+(?:còn gọi là|also called|aussi appelé)\s+([^()\n;:.]{2,100})', re.I)
+LABELLED = re.compile(r'(?:^|[|;])\s*(vi|en|fr)\s*:\s*([^|;\n]{2,100})', re.I)
+NEGATED_PAIR = re.compile(r'\bnot\b|\bkhông\s+(?:phải|là|có nghĩa)|\bne\b.+\bpas\b', re.I)
 VI_WORDS = frozenset('của và là bộ nhớ dữ liệu đệm trí tuệ nhân tạo phân số quang hợp học máy'.split())
 FR_WORDS = frozenset('le la les des une un mémoire apprentissage automatique banque photosynthèse'.split())
 EN_WORDS = frozenset('the of and memory cache learning machine artificial intelligence cell bank spreadsheet'.split())
@@ -52,9 +57,15 @@ def eligible(resource):
 
 
 def explicit_pairs(text):
-    for pattern, same_language in ((PAIR, False), (DEFINITION, True)):
+    for line in text.splitlines():
+        labelled = [(match[2].strip(), match[1].lower()) for match in LABELLED.finditer(line)]
+        if 2 <= len(labelled) <= 3 and len({item[1] for item in labelled}) == len(labelled):
+            anchor = min(labelled, key=lambda item: (item[1] != 'en', item[1], item[0]))
+            for left, right in combinations(labelled, 2):
+                yield left[0], right[0], False, line, [left[1], right[1]], anchor
+    for pattern, same_language in ((PAIR, False), (DEFINITION, True), (SYNONYM, True)):
         for match in pattern.finditer(text):
-            yield match[1], match[2], same_language, match[0]
+            yield match[1], match[2], same_language, match[0], None, None
 
 
 def fingerprint(resource):
@@ -74,16 +85,33 @@ DEFAULT_LIMITS = DiscoveryLimits()
 
 
 class EligibilityFence:
-    def __init__(self, inventory):
-        self.inventory = inventory
+    def __init__(self, inventory, *, clock=time):
+        self.inventory, self.clock = inventory, clock
+
+    def _complete(self):
+        if not self.inventory.completeness_verified:
+            return False
+        attest = getattr(self.inventory, 'attestation', None)
+        if attest is not None:
+            proof = attest()
+            return proof.valid(self.clock()) and proof.revision == self.inventory.token()
+        # Legacy frozen synthetic authorities remain test-only, never live proof.
+        return self.inventory.scope == 'offline_fixture'
 
     def capture(self):
-        if not self.inventory.completeness_verified:
+        try:
+            complete = self._complete()
+        except Exception:
+            complete = False
+        if not complete:
             raise ConceptBlocked('BLOCKED_PRIVACY')
         return self.inventory.token()
 
     def unchanged(self, token):
-        return self.inventory.completeness_verified and token == self.inventory.token()
+        try:
+            return self._complete() and token == self.inventory.token()
+        except Exception:
+            return False
 
     def verify(self, resource):
         current = self.inventory.current(resource.resource_id)
@@ -137,11 +165,11 @@ def discover(resource: ResourceEvidence, reader=None, limits=DEFAULT_LIMITS):
         evidence = {'version_id': resource.version_id, 'field': field, 'unit_id': unit_id,
             'source_fingerprint': result['fingerprint'], 'text_hash': text_hash, 'scope': resource.scope,
             'extractor': EXTRACTOR, 'source_updated_at': resource.source_updated_at}
-        for left_raw, right_raw, same_language, raw_pair in explicit_pairs(text):
+        for left_raw, right_raw, same_language, raw_pair, declared_languages, alignment_anchor in explicit_pairs(text):
             left, right = safe_phrase(left_raw), safe_phrase(right_raw)
-            if not left or not right or left == right or FORBIDDEN.search(raw_pair):
+            if not left or not right or left == right or FORBIDDEN.search(raw_pair) or NEGATED_PAIR.search(raw_pair):
                 continue
-            langs = [language(left), language(right)]
+            langs = declared_languages or [language(left), language(right)]
             kind = ('abbreviation' if right_raw.strip().isupper() else
                     'translation' if 'und' not in langs and langs[0] != langs[1] else
                     'synonym' if same_language and 'und' not in langs else 'related')
@@ -155,11 +183,17 @@ def discover(resource: ResourceEvidence, reader=None, limits=DEFAULT_LIMITS):
                 # Domain/sense-qualified anchor identity joins separately
                 # REVIEWED bilingual pairs; it is not a surface-only concept ID.
                 anchor = min(terms, key=lambda item: (item['language'] != 'en', item['language'], item['text']))
+                if alignment_anchor and safe_phrase(alignment_anchor[0]):
+                    anchor = {'text': safe_phrase(alignment_anchor[0]), 'language': alignment_anchor[1]}
                 concept_id = (next(iter(known_ids)) if len(known_ids) == 1 else 'corpus:' +
                     digest(['explicit-anchor', resource.domain, resource.sense, anchor['language'], anchor['text']])[:32])
                 relations[cid] = {'id': cid, 'domain': resource.domain, 'sense': resource.sense,
                     'concept_id': concept_id,
                     'kind': kind, 'terms': terms, 'strength': 'E2', 'status': 'pending',
+                    'development_rank': (20 if kind == 'translation' else 10 if kind == 'abbreviation' else 0)
+                        + (5 if 'und' not in langs else 0) + (3 if field == 'unit' else 2)
+                        + (2 if resource.sense else 0),
+                    'rank_is_probability': False,
                     'evidence': [evidence], 'binding': digest([POLICY, EXTRACTOR, identity, concept_id, result['fingerprint'], text_hash])}
         # Filtered technical n-grams are mention candidates only, never concepts.
         words = surface_tokens(text)
@@ -174,7 +208,8 @@ def discover(resource: ResourceEvidence, reader=None, limits=DEFAULT_LIMITS):
                         'domain': resource.domain, 'sense': resource.sense, 'status': 'pending', 'evidence': [evidence]})
                 if len(mentions) >= limits.max_candidates:
                     break
-    result['terms'], result['relations'] = list(mentions.values()), list(relations.values())
+    result['terms'] = list(mentions.values())
+    result['relations'] = sorted(relations.values(), key=lambda item: (-item['development_rank'], item['id']))
     result['evidence_fingerprint'] = digest([result['fingerprint'], sorted(seen_fields)])
     return result
 
