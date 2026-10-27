@@ -1,9 +1,9 @@
 import math
 
 from data_sync_etl.domain.concepts import ExpansionPolicy, empty_dictionary
-from tests.corpus_dictionary_support import reviewed_dictionary
 from data_sync_etl.domain.lexical import query_terms
 from data_sync_etl.domain.meaning_bags import build_meanings, match_meaning
+from tests.corpus_dictionary_support import reviewed_dictionary
 
 
 class NearTieModel:

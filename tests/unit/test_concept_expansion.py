@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 
 from data_sync_etl.adapters.concept_sources import conceptnet
-from data_sync_etl.domain.concepts import Dictionary, ExpansionPolicy, Relation, Snapshot, empty_dictionary
+from data_sync_etl.domain.concepts import (
+    Dictionary,
+    ExpansionPolicy,
+    Relation,
+    Snapshot,
+    empty_dictionary,
+)
 from data_sync_etl.domain.lexical import ANALYZER_VERSION, analyze, bm25, lexical_document
 from tests.corpus_dictionary_support import reviewed_dictionary
 from tests.unit.test_search import searchable as searchable

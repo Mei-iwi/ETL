@@ -6,7 +6,6 @@ import pytest
 from data_sync_etl.application.concept_resolver import ConceptDictionaryProvider
 from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.lexical import bm25, lexical_document
-from tests.unit.test_search import searchable as searchable
 
 
 def test_empty_fallback_never_reads_a_snapshot(monkeypatch):
@@ -32,7 +31,10 @@ def test_unverified_runtime_never_loads_or_falls_back_to_static_aliases():
         assert not dictionary.expand('photosynthesis').terms
 
 
-def test_search_startup_ignores_legacy_snapshot_path(searchable):
-    c, _ = searchable
-    assert c.search.dictionary is empty_dictionary()
-    assert c.search.search('page', 'bow')['total'] > 0
+def test_search_startup_ignores_legacy_snapshot_path(tmp_path, monkeypatch):
+    from data_sync_etl.application.search import SearchService
+    from data_sync_etl.config import Settings
+
+    settings = Settings(_env_file=None, search_concept_snapshot=tmp_path / 'missing-static.json')
+    monkeypatch.setattr(Path, 'read_text', lambda *a, **k: pytest.fail('Legacy snapshot was read'))
+    assert SearchService(None, settings, None).dictionary is empty_dictionary()
