@@ -32,6 +32,7 @@ class SearchFilters(StrictDTO):
 
 
 class SearchRequest(StrictDTO):
+    window_pages: int = Field(default=1, ge=1, le=3)
     query: str = Field(max_length=8000)
     method: Method = 'hybrid'
     filters: SearchFilters = Field(default_factory=SearchFilters)
@@ -48,6 +49,15 @@ class SearchRequest(StrictDTO):
         if (self.page - 1) * self.size > 10000:
             raise ValueError('Search offset exceeded')
         return self
+
+
+class SearchPageRequest(SearchRequest):
+    session_id: str = Field(min_length=40, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')
+
+
+class SearchSessionInfo(StrictDTO):
+    id: str = Field(min_length=40, max_length=64, pattern=r'^[A-Za-z0-9_-]+$')
+    ttl_seconds: float = Field(gt=0, le=60)
 
 
 class SearchItem(StrictDTO):
@@ -101,6 +111,10 @@ class SearchItem(StrictDTO):
 
 
 class SearchResponse(StrictDTO):
+    search_session: SearchSessionInfo | None = None
+    page_window: list['SearchResponse'] | None = Field(default=None, max_length=2)
+    total_exact: bool | None = None
+    session_status: Literal['UNAVAILABLE'] | None = None
     branch_status: dict[str, str] | None = None
     query_expansion: dict | None = None
     search_fingerprint: str | None = None
@@ -124,6 +138,9 @@ class SearchResponse(StrictDTO):
         # Preserve byte-for-byte legacy field presence, including nullable item
         # metadata. response_model_exclude_none would remove required nulls too.
         result = handler(self)
+        for name in ('search_session', 'page_window', 'total_exact', 'session_status'):
+            if getattr(self, name) is None:
+                result.pop(name, None)
         if self.vector_index is None:
             result.pop('vector_index', None)
         if self.branch_status is None:

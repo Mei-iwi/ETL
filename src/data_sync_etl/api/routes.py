@@ -67,6 +67,7 @@ from data_sync_etl.api.search_access import search_access
 from data_sync_etl.api.search_schemas import (
     SEARCH_ERROR_RESPONSES,
     ContextResponse,
+    SearchPageRequest,
     SearchRequest,
     SearchResponse,
     search_error,
@@ -230,7 +231,22 @@ async def search_materials(body: SearchRequest, request: Request):
             try:
                 with service.runtime_admission(body.method, access=access, call=call):
                     call.reauthorize()
-                    return True, service.search_http(**body.model_dump(), access=access)
+                    payload = body.model_dump(exclude={'window_pages'})
+                    container = request.app.state.container
+                    enabled = getattr(container.settings, 'search_result_sessions_enabled', False)
+                    gateway = getattr(container, 'search_sessions', None) if enabled else None
+                    if gateway is not None:
+                        criteria = {key: value for key, value in payload.items() if key != 'page'}
+                        try:
+                            return True, gateway.read(criteria, access, page=body.page, size=body.size,
+                                                      window_pages=body.window_pages)
+                        except SearchError as exc:
+                            if exc.status != 409:
+                                raise
+                    result = service.search_http(**payload, access=access)
+                    if enabled:
+                        result = {**result, 'session_status': 'UNAVAILABLE'}
+                    return True, result
             except Exception as exc:
                 return False, exc  # Preserve the API error, not an ExceptionGroup.
 
@@ -272,6 +288,31 @@ async def search_materials(body: SearchRequest, request: Request):
     finally:
         if call is not None:
             call.abandon()
+
+
+@router.post('/api/v1/search/page', tags=[TAG_SEARCH], response_model=SearchResponse,
+             responses=SEARCH_ERROR_RESPONSES)
+async def search_session_page(body: SearchPageRequest, request: Request):
+    try:
+        access = await run_in_threadpool(search_access, request)
+        container = request.app.state.container
+        gateway = getattr(container, 'search_sessions', None)
+        if not getattr(container.settings, 'search_result_sessions_enabled', False) or gateway is None:
+            raise SearchError('SEARCH_SESSION_UNAVAILABLE', 409)
+        criteria = body.model_dump(exclude={'page', 'session_id', 'window_pages'})
+        with anyio.fail_after(10):
+            result = await anyio.to_thread.run_sync(lambda: gateway.read(criteria, access,
+                page=body.page, size=body.size, token=body.session_id, window_pages=body.window_pages),
+                abandon_on_cancel=True)
+        if await run_in_threadpool(search_access, request) != access:
+            raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
+        return result
+    except HTTPException:
+        raise
+    except TimeoutError:
+        raise search_error(SearchError('SEARCH_TIMEOUT')) from None
+    except Exception as exc:
+        raise search_error(exc) from None
 
 
 def evaluation_services(request):

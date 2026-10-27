@@ -60,14 +60,14 @@ def search_access(request):
             # cross-owner UNREVIEWED content remains RETRIEVAL_DENIED.
             owner_search = (principal.mode == 'master_users' and principal.role != 'ADMIN'
                             and principal.id.startswith('master:') and (
-                                (request.url.path == '/api/v1/search' and request.method == 'POST')
+                                (request.url.path in ('/api/v1/search', '/api/v1/search/page') and request.method == 'POST')
                                 or (request.method == 'GET' and request.url.path.startswith('/api/v1/chunks/')
                                     and request.url.path.endswith('/context'))))
             return SearchAccess('authenticated_admin' if principal.role == 'ADMIN' else 'authenticated_user',
                                 frozenset(principal.resource_ids), principal.id,
                                 principal.id.removeprefix('master:')
                                 if principal.mode == 'master_users' and principal.role != 'ADMIN' else None,
-                                allow_public=(request.url.path == '/api/v1/search' and request.method == 'POST')
+                                allow_public=(request.url.path in ('/api/v1/search', '/api/v1/search/page') and request.method == 'POST')
                                 or (request.url.path.startswith('/api/v1/chunks/')
                                     and request.url.path.endswith('/context') and request.method == 'GET')
                                 or (request.method == 'GET' and request.url.path.startswith('/api/v1/resource-versions/')
@@ -75,7 +75,8 @@ def search_access(request):
                                 allow_owned_unreviewed=owner_search or (request.method == 'GET'
                                     and request.url.path.startswith('/api/v1/resource-versions/')
                                     and request.url.path.rsplit('/', 1)[-1] in ('file', 'source-info')))
-        return SearchAccess('authenticated_admin' if principal.mode == 'single_admin' else 'local_demo')
+        return SearchAccess('authenticated_admin' if principal.mode == 'single_admin' else 'local_demo',
+                            actor_id=principal.id)
     if not settings.search_internal_dev_enabled:
         return SearchAccess()
     # Fail closed when deployed elsewhere or accessed via a reverse proxy. Launch

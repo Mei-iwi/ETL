@@ -8,6 +8,7 @@ from data_sync_etl.domain.concepts import ExpansionPolicy
 
 
 class Settings(BaseSettings):
+    search_result_sessions_enabled: bool = False
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",

@@ -316,6 +316,9 @@ class Container:
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
                                     query_cache_runtime=self.indexing.embedding, semantic=self.semantic,
                                     metadata=self.metadata_search)
+        # No live adapter can attest all PG/Mongo/provider writers yet. A flag
+        # alone must never mint authority or enable stale result replay.
+        self.search_sessions = None
         if self.settings.concept_dynamic_enabled:
             from data_sync_etl.application.concept_resolver import ConceptDictionaryProvider
             # No verified live revocation/RO/storage attestor exists yet. Flags

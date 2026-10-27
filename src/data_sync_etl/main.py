@@ -204,7 +204,7 @@ def create_app(container=None):
                 }
             )
         endpoint = request.scope.get("endpoint")
-        if getattr(endpoint, '__name__', '') in {'search_materials', 'chunk_context'}:
+        if getattr(endpoint, '__name__', '') in {'search_materials', 'search_session_page', 'chunk_context'}:
             return JSONResponse(status_code=422, content={'detail': {
                 'code': 'REQUEST_VALIDATION_ERROR', 'phase': 'search',
                 'message': 'Tham số tìm kiếm không hợp lệ.', 'fields': fields,
