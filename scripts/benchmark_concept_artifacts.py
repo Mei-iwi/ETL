@@ -17,7 +17,7 @@ from time import perf_counter, process_time
 
 from data_sync_etl.adapters.concept_artifacts import ArtifactStore
 from data_sync_etl.application.concept_resolver import ConceptDictionaryProvider
-from data_sync_etl.domain.concepts import default_dictionary, normalize
+from data_sync_etl.domain.concepts import empty_dictionary, normalize
 from data_sync_etl.domain.corpus_concepts import EligibilityFence
 
 
@@ -70,7 +70,7 @@ class ScaleAuthority:
 
 def one(root, count, *, incremental=False, delta_mode='localized'):
     store = ArtifactStore(root, create=True)
-    seed = default_dictionary()
+    seed = empty_dictionary()
     cpu = process_time()
     start = perf_counter()
     manifest = store.build(records(count), seed_hash=seed.fingerprint, source_token=ScaleAuthority().token(),

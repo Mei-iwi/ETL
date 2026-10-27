@@ -7,7 +7,7 @@ from time import monotonic, sleep
 import pytest
 
 from data_sync_etl.adapters.concept_artifacts import ArtifactStore
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
 from tests.unit.test_dynamic_concept_dictionary import activate, approve
 from tests.unit.test_dynamic_concept_dictionary import pipeline as pipeline
@@ -19,7 +19,7 @@ def test_background_hot_loader_starts_stops_and_revocation_never_waits_for_poll(
     inventory, store, worker, candidate = pipeline
     approve(worker, candidate)
     activate(inventory, store, worker)
-    provider = ConceptDictionaryProvider(default_dictionary(), store=store, enabled=True,
+    provider = ConceptDictionaryProvider(empty_dictionary(), store=store, enabled=True,
         fence=EligibilityFence(inventory), allow_offline=True, refresh_seconds=.01, lookup_ms=100)
     provider.start()
     try:
@@ -30,7 +30,7 @@ def test_background_hot_loader_starts_stops_and_revocation_never_waits_for_poll(
         row = inventory.current('r001')
         inventory.put(replace(row, revision=2, public=False))
         with provider.pin('cache') as dictionary:
-            assert dictionary is default_dictionary()
+            assert dictionary is empty_dictionary()
     finally:
         provider.close()
     assert provider._thread is None
@@ -85,7 +85,7 @@ def test_one_hundred_simultaneous_readers_pin_old_generation_during_publish(pipe
         futures = [pool.submit(request, index) for index in range(100)]
         try:
             entered.wait()
-            second = store.build([], seed_hash=default_dictionary().fingerprint, source_token=inventory.token(),
+            second = store.build([], seed_hash=empty_dictionary().fingerprint, source_token=inventory.token(),
                 ledger_hash=worker.ledger.snapshot()[0], expected_parent=first, fence=lambda: True, activate=True)
             assert second['generation'] != first
             assert provider.refresh()['generation'] == second['generation']
@@ -93,7 +93,7 @@ def test_one_hundred_simultaneous_readers_pin_old_generation_during_publish(pipe
             release.set()
         assert {future.result() for future in futures} == {old_fingerprint}
     with provider.pin('cache') as dictionary:
-        assert dictionary is default_dictionary()
+        assert dictionary is empty_dictionary()
     assert store.path('releases/' + first).exists()  # No GC of pinned generations.
     store.rollback(first, fence=worker.fence.unchanged)
     assert provider.refresh()['generation'] == first
@@ -106,7 +106,7 @@ def test_review_rejection_revokes_cached_mapping_before_rebuild(pipeline):
     worker.ledger.decide(candidate, kind='relation', target=candidate['id'],
         decision='rejected', reviewer='fixture-reviewer')
     with provider.pin('cache') as dictionary:
-        assert dictionary is default_dictionary()
+        assert dictionary is empty_dictionary()
     assert worker.build()['count'] == 0
 
 
@@ -122,7 +122,7 @@ def test_crash_before_pointer_flip_keeps_last_good_and_is_recoverable(pipeline, 
         return original(relative, value)
     monkeypatch.setattr(store, 'write_json', crash)
     with pytest.raises(OSError):
-        store.build([], seed_hash=default_dictionary().fingerprint, source_token=inventory.token(),
+        store.build([], seed_hash=empty_dictionary().fingerprint, source_token=inventory.token(),
             ledger_hash=worker.ledger.snapshot()[0], expected_parent=first, fence=lambda: True, activate=True)
     assert store.current() == first
     assert store.load(first).manifest['count'] == 1

@@ -11,7 +11,7 @@ from sqlalchemy import event
 from data_sync_etl.adapters.concept_artifacts import ArtifactStore
 from data_sync_etl.adapters.concept_corpus import FixtureCorpus
 from data_sync_etl.application.concept_discovery import ConceptDiscoveryWorker
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.corpus_concepts import discover
 from data_sync_etl.main import create_app
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
@@ -37,9 +37,10 @@ def test_reviewed_vi_en_fr_equivalence_merges_without_alias_stacking(tmp_path):
     assert store.load().manifest['count'] == 1
 
 
-def test_seed_identity_preserved_and_no_cooccurrence_auto_relation():
+def test_identity_is_corpus_derived_and_no_cooccurrence_auto_relation():
     result = discover(resource(domain='botany', fields={'title': 'Quang hợp (photosynthesis)'}))
-    assert result['relations'][0]['concept_id'] == 'etl:photosynthesis'
+    assert result['relations'][0]['concept_id'].startswith('corpus:')
+    assert result['relations'][0]['status'] == 'pending'
     assert not discover(resource(fields={'title': 'Cache and memory appear together in this lesson.'}))['relations']
     definition = discover(resource(fields={'title': 'memory cache means cache memory'}))
     assert definition['relations'][0]['kind'] == 'synonym'
@@ -164,4 +165,4 @@ def test_synthetic_http_before_after_latency_and_negative_queries(searchable, pi
     output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     assert report['results']['bow-dynamic-False']['totals'] == [0] * 8
     assert report['results']['bow-dynamic-True']['totals'] == [1] * 8
-    assert provider.base.fingerprint == default_dictionary().fingerprint
+    assert provider.base.fingerprint == empty_dictionary().fingerprint

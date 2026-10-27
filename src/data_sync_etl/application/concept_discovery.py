@@ -8,7 +8,7 @@ from time import monotonic, process_time, time
 
 from data_sync_etl.application.concept_events import PendingConceptChanges
 from data_sync_etl.domain.concept_authority import OfflineReviewAuthority, review_statement
-from data_sync_etl.domain.concepts import Concept, default_dictionary
+from data_sync_etl.domain.concepts import Concept, empty_dictionary
 from data_sync_etl.domain.corpus_concepts import (
     DEFAULT_LIMITS,
     EXTRACTOR,
@@ -367,6 +367,6 @@ class ConceptDiscoveryWorker:
                         yield concept
                     else:
                         coverage['pending_or_rejected'] += 1
-        return self.store.build(concepts(), seed_hash=default_dictionary().fingerprint,
+        return self.store.build(concepts(), seed_hash=empty_dictionary().fingerprint,
             source_token=token, ledger_hash=ledger_hash, expected_parent=self.store.current(),
             fence=lambda: self.fence.unchanged(token) and self.ledger.snapshot()[0] == ledger_hash, coverage=coverage)

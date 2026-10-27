@@ -12,7 +12,7 @@ from data_sync_etl.domain.concept_authority import (
     SignedReviewAuthority,
     review_statement,
 )
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.indexing import digest
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
 from tests.unit.test_dynamic_concept_dictionary import activate
@@ -69,16 +69,16 @@ def test_receipt_expiry_does_not_revive_after_ledger_refresh(pipeline, revocatio
     provider = activate(inventory, store, worker)
     try:
         with provider.pin('cache') as dictionary:
-            assert dictionary is not default_dictionary()
+            assert dictionary is not empty_dictionary()
         if revocation == 'expiry':
             clock[0] = 151
         else:
             issuer.revoke_key('issuer-v1')
         with provider.pin('cache') as dictionary:
-            assert dictionary is default_dictionary()
+            assert dictionary is empty_dictionary()
         worker.ledger.snapshot()
         with provider.pin('cache') as dictionary:
-            assert dictionary is default_dictionary()
+            assert dictionary is empty_dictionary()
         assert worker.build()['count'] == 0
     finally:
         provider.close()
@@ -125,7 +125,7 @@ def test_expired_alias_cannot_revive_during_slow_ledger_reverification(pipeline,
             try:
                 assert entered.wait(5)
                 with provider.pin('cache') as dictionary:
-                    assert dictionary is default_dictionary()
+                    assert dictionary is empty_dictionary()
             finally:
                 release.set()
             future.result(timeout=5)

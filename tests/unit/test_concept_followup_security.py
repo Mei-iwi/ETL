@@ -15,7 +15,7 @@ from data_sync_etl.domain.concept_authority import (
     SignedReviewAuthority,
     review_statement,
 )
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.corpus_concepts import EligibilityFence
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
 from tests.unit.test_dynamic_concept_dictionary import activate, approve, resource
@@ -42,7 +42,7 @@ def test_revoke_after_pin_and_restart_never_returns_cached_alias(pipeline, chang
     with pytest.raises(ConceptBlocked, match='DYNAMIC_REVOKED'), provider.pin('cache'):
         inventory.put(replace(resource(), revision=2, **change))
     with provider.pin('cache') as dictionary:
-        assert dictionary is default_dictionary()
+        assert dictionary is empty_dictionary()
     with pytest.raises(ConceptBlocked, match='ROLLBACK'):
         store.rollback(store.current(), fence=worker.fence.unchanged)
 
@@ -119,7 +119,7 @@ def test_disabling_dynamic_flag_mid_request_revokes_pinned_alias(pipeline):
         with pytest.raises(ConceptBlocked, match='DYNAMIC_REVOKED'), provider.pin('cache'):
             provider.enabled = False
         with provider.pin('cache') as dictionary:
-            assert dictionary is default_dictionary()
+            assert dictionary is empty_dictionary()
     finally:
         provider.close()
 

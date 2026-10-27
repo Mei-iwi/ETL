@@ -6,7 +6,7 @@ from time import monotonic, sleep
 
 from data_sync_etl.adapters.concept_artifacts import ArtifactStore
 from data_sync_etl.application.concept_resolver import ConceptDictionaryProvider
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.corpus_concepts import EligibilityFence
 
 if __package__:
@@ -28,7 +28,7 @@ def run(root, seconds):
     if not root.is_absolute() or root.exists() or not 30 <= seconds <= 120:
         raise ValueError('Fresh absolute root and explicit 30..120 seconds required')
     store = ArtifactStore(root, create=True, max_bytes=4 * 1024 * 1024)
-    authority, seed = Authority(), default_dictionary()
+    authority, seed = Authority(), empty_dictionary()
     provider = ConceptDictionaryProvider(seed, store=store, enabled=True, allow_offline=True,
         fence=EligibilityFence(authority), lookup_ms=100)
     started, samples = monotonic(), []

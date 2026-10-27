@@ -8,16 +8,18 @@ from contextlib import contextmanager
 from threading import Event, RLock, Thread
 from time import monotonic, time
 
-from data_sync_etl.domain.concepts import Concept, Dictionary, Snapshot, normalize
+from data_sync_etl.domain.concepts import Concept, Dictionary, Snapshot, empty_dictionary, normalize
 from data_sync_etl.domain.indexing import digest
 from data_sync_etl.domain.lexical import QUERY_STOPWORDS, surface_tokens
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
 
 
 class ConceptDictionaryProvider:
-    def __init__(self, base, *, store=None, enabled=False, fence=None, allow_offline=False,
+    def __init__(self, base=None, *, store=None, enabled=False, fence=None, allow_offline=False,
                  cache_bytes=16 * 1024 * 1024, lookup_ms=20, max_records=32, refresh_seconds=10.):
-        self.base, self.enabled, self.fence, self.allow_offline = base, enabled, fence, allow_offline
+        if base is not None and base.concepts:
+            raise ValueError('Corpus resolver requires an empty literal fallback')
+        self.base, self.enabled, self.fence, self.allow_offline = empty_dictionary(), enabled, fence, allow_offline
         self.store = store if fence is not None and allow_offline else None
         self.cache_bytes, self.lookup_ms, self.max_records = cache_bytes, lookup_ms, max_records
         self.refresh_seconds = refresh_seconds
@@ -85,7 +87,7 @@ class ConceptDictionaryProvider:
                 if not keep:
                     self._release_locked(self._active)
                     self._active = None
-                self.metrics['status'] = 'LAST_GOOD' if keep else 'SEED_FALLBACK'
+                self.metrics['status'] = 'LAST_GOOD' if keep else 'RAW_QUERY_FALLBACK'
         return self.status()
 
     def status(self):
@@ -164,12 +166,11 @@ class ConceptDictionaryProvider:
             if (concept.review_status != 'approved' or any(t.review_status != 'approved' for t in concept.terms)
                     or concept.relations):
                 raise ConceptBlocked('UNREVIEWED_RUNTIME_CONCEPT')
-            # Existing seed identity/definition wins, rather than accepting an
-            # artifact overwrite of the curated source or its approval history.
+            # Multiple reviewed rows may contribute to the same corpus identity.
             existing = merged.get(concept.concept_id)
             if existing is not None:
                 if concept.domain != existing.domain:
-                    raise ConceptBlocked('SEED_DOMAIN_CONFLICT')
+                    raise ConceptBlocked('CORPUS_DOMAIN_CONFLICT')
                 keys = {(term.language, term.normalized) for term in existing.terms}
                 additions = [term for term in concept.terms if (term.language, term.normalized) not in keys]
                 merged[concept.concept_id] = existing.model_copy(update={'terms': [*existing.terms, *additions]})
@@ -219,7 +220,7 @@ class ConceptDictionaryProvider:
         try:
             yield dictionary
             if used is not None and not self._valid(used):
-                # Caller must discard response and recompute once using literal/seed.
+                # Caller must discard response and recompute once using raw terms.
                 raise ConceptBlocked('DYNAMIC_REVOKED')
         finally:
             if retained:

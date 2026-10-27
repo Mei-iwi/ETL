@@ -5,12 +5,12 @@ from dataclasses import asdict, dataclass
 from itertools import combinations
 from time import time
 
-from data_sync_etl.domain.concepts import default_dictionary, normalize
+from data_sync_etl.domain.concepts import normalize
 from data_sync_etl.domain.indexing import digest
 from data_sync_etl.domain.lexical import QUERY_STOPWORDS, surface_tokens
 from data_sync_etl.ports.concept_corpus import ConceptBlocked, ResourceEvidence
 
-EXTRACTOR = 'corpus-phrases-v6'
+EXTRACTOR = 'corpus-phrases-v7-no-seed'
 POLICY = 'public-explicit-reviewed-v1'
 FORBIDDEN = re.compile(r'https?://|www\.|\S+@\S+|[<>]|\b(?:select|insert|drop)\b.*\b(?:from|table|into)\b|'
     r'approve\s+me|ignore\s+(?:all|previous)|bỏ\s+kiểm\s+duyệt|(?:password|secret|token)\s*[=:]', re.I)
@@ -26,9 +26,6 @@ EN_WORDS = frozenset('the of and memory cache learning machine artificial intell
 
 
 def language(text):
-    known = {term.language for term in default_dictionary().aliases.get(normalize(text), [])}
-    if len(known) == 1:
-        return next(iter(known))
     tokens = set(surface_tokens(text))
     scores = {key: len(tokens & words) for key, words in [('vi', VI_WORDS), ('en', EN_WORDS), ('fr', FR_WORDS)]}
     if any(c in text.casefold() for c in 'ăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ'):
@@ -188,16 +185,13 @@ def discover(resource: ResourceEvidence, reader=None, limits=DEFAULT_LIMITS):
             identity = [resource.domain, resource.sense, kind, sorted((t['language'], t['text']) for t in terms)]
             cid = 'corpus:' + digest(identity)[:32]
             if cid not in relations and len(relations) < limits.max_candidates:
-                seed_ids = [{term.concept_id for term in default_dictionary().aliases.get(item['text'], [])
-                             if term.domain == resource.domain} for item in terms]
-                known_ids = set.union(*seed_ids)
                 # Domain/sense-qualified anchor identity joins separately
                 # REVIEWED bilingual pairs; it is not a surface-only concept ID.
                 anchor = min(terms, key=lambda item: (item['language'] != 'en', item['language'], item['text']))
                 if alignment_anchor and safe_phrase(alignment_anchor[0]):
                     anchor = {'text': safe_phrase(alignment_anchor[0]), 'language': alignment_anchor[1]}
-                concept_id = (next(iter(known_ids)) if len(known_ids) == 1 else 'corpus:' +
-                    digest(['explicit-anchor', resource.domain, resource.sense, anchor['language'], anchor['text']])[:32])
+                concept_id = 'corpus:' + digest([
+                    'explicit-anchor', resource.domain, resource.sense, anchor['language'], anchor['text']])[:32]
                 relations[cid] = {'id': cid, 'domain': resource.domain, 'sense': resource.sense,
                     'concept_id': concept_id,
                     'kind': kind, 'terms': terms, 'strength': 'E2', 'status': 'pending',

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from data_sync_etl.adapters.concept_artifacts import ArtifactStore, checksum
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
 from scripts.benchmark_concept_artifacts import records
 from tests.unit.test_dynamic_concept_dictionary import pipeline as pipeline
@@ -23,7 +23,7 @@ def test_million_scale_requires_separate_opt_in_before_creating_root(tmp_path):
 
 
 def make(store, values, parent=None, token='synthetic', **kwargs):
-    return store.build(values, seed_hash=default_dictionary().fingerprint, source_token=token,
+    return store.build(values, seed_hash=empty_dictionary().fingerprint, source_token=token,
         ledger_hash='synthetic-approval-only', expected_parent=parent, fence=lambda: True, **kwargs)
 
 

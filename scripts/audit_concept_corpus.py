@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from data_sync_etl.config import Settings
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.mongo_documents import DOCUMENT_MODELS
 
 READ_ACTIONS = frozenset({
@@ -47,7 +47,7 @@ def privilege_gate(auth):
 
 
 def static_audit(settings):
-    dictionary = default_dictionary()
+    dictionary = empty_dictionary()
     return {
         'environment': 'OFFLINE_STRUCTURAL',
         'seed_concepts': len(dictionary.concepts),

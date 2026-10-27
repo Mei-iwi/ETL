@@ -7,14 +7,14 @@ from collections import namedtuple
 import pytest
 
 from data_sync_etl.adapters.concept_artifacts import ArtifactStore
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.ports.concept_corpus import ConceptBlocked
 from tests.unit.test_dynamic_concept_dictionary import approve
 from tests.unit.test_dynamic_concept_dictionary import pipeline as pipeline
 
 
 def build(store, *, parent=None, token='synthetic', records=(), activate=False):
-    return store.build(records, seed_hash=default_dictionary().fingerprint, source_token=token,
+    return store.build(records, seed_hash=empty_dictionary().fingerprint, source_token=token,
         ledger_hash='synthetic', expected_parent=parent, fence=lambda: True, activate=activate)
 
 

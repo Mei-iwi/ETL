@@ -1,6 +1,6 @@
 """P02: poison event isolation and immediate fixture source-outage fencing."""
 from data_sync_etl.application.concept_scheduler import ConceptWorkerScheduler
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.indexing import digest
 from tests.unit.test_dynamic_concept_dictionary import activate, approve
 from tests.unit.test_dynamic_concept_dictionary import pipeline as pipeline
@@ -27,11 +27,11 @@ def test_loader_outage_invalidates_existing_provider_without_waiting_for_rebuild
     provider = activate(inventory, store, worker)
     try:
         with provider.pin('cache') as before:
-            assert before is not default_dictionary()
+            assert before is not empty_dictionary()
         scheduler = ConceptWorkerScheduler(worker, lambda: (_ for _ in ()).throw(OSError('synthetic outage')))
         assert scheduler.step()['status'] == 'SOURCE_OR_PRESSURE_UNAVAILABLE'
         with provider.pin('cache') as after:
-            assert after is default_dictionary()
+            assert after is empty_dictionary()
     finally:
         provider.close()
 

@@ -2,7 +2,7 @@
 import pytest
 
 from data_sync_etl.api.search_schemas import SearchResponse
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.main import create_app
 from tests.local_admin_client import TestClient
 from tests.unit.test_dynamic_concept_dictionary import (
@@ -45,7 +45,7 @@ def test_pending_does_not_change_search_and_vector_is_not_expanded(searchable, p
     provider = activate(inventory, store, worker)  # Empty approved release
     c.search.concept_resolver = provider
     baseline = c.search.search('page', 'bow')
-    assert baseline['query_expansion']['dictionary_fingerprint'] == default_dictionary().fingerprint
+    assert baseline['query_expansion']['dictionary_fingerprint'] == empty_dictionary().fingerprint
     monkeypatch.setattr(provider, 'pin', lambda *args, **kwargs: pytest.fail('Vector was expanded'))
     captured = []
     monkeypatch.setattr(c.search, '_search', lambda query, *args, **kwargs: captured.append(query) or {'query': query})

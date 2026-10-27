@@ -13,10 +13,8 @@ from data_sync_etl.application.search_runtime import (
     SearchInferenceQueue,
 )
 from data_sync_etl.domain.concepts import (
-    Dictionary,
-    Snapshot,
     concept_analysis_scope,
-    default_dictionary,
+    empty_dictionary,
     equivalent_terms,
 )
 from data_sync_etl.domain.context_ranking import CONTEXT_RANKING_VERSION, ContextRanker
@@ -82,9 +80,7 @@ class SearchService:
         self.indexing, self.settings, self.bags = indexing, settings, bags
         self.semantic = semantic
         self.metadata = metadata
-        path = settings.search_concept_snapshot
-        self.dictionary = (Dictionary(Snapshot.model_validate_json(path.read_text(encoding='utf-8')))
-                           if path is not None else default_dictionary())
+        self.dictionary = empty_dictionary()
         self.concept_resolver = concept_resolver
 
         self._http_inference = SearchInferenceQueue()

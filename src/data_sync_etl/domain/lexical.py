@@ -184,12 +184,12 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
     The strongest weighted alias contributes once per concept. Literal leftover
     surface words are unique query features. Title contributes an extra TF boost.
     """
-    from data_sync_etl.domain.concepts import ExpansionPolicy, default_dictionary
+    from data_sync_etl.domain.concepts import ExpansionPolicy, empty_dictionary
 
     if not documents:
         return {}
     policy = policy or ExpansionPolicy()
-    dictionary = dictionary or default_dictionary()
+    dictionary = dictionary or empty_dictionary()
     expansion = expansion or dictionary.expand(query, domain=domain, policy=policy, contextual=contextual)
     focus = (dictionary.expand(focus_query, domain=domain, policy=policy, contextual=contextual)
              if focus_query and focus_query != query else expansion)

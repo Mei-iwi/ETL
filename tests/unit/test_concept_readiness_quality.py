@@ -1,5 +1,5 @@
 """P06 development-only corpus examples, never independently judged qrels."""
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from tests.unit.test_dynamic_concept_dictionary import activate, approve
 from tests.unit.test_dynamic_concept_dictionary import pipeline as pipeline
 
@@ -11,7 +11,7 @@ def test_long_raw_query_can_resolve_reviewed_anchor_without_truncation(pipeline)
     query = 'Explain ' * 35 + 'cache'
     try:
         with provider.pin(query) as dictionary:
-            assert dictionary is not default_dictionary()
+            assert dictionary is not empty_dictionary()
             assert dictionary.expand(query).original == query.strip()
             assert 'bộ nhớ đệm' in {term.term for term in dictionary.expand(query).terms}
     finally:
@@ -35,6 +35,6 @@ def test_source_declared_accentless_variant_requires_separate_reviews(tmp_path):
         with provider.pin('bo nho dem') as dictionary:
             assert 'bộ nhớ đệm' in {term.term for term in dictionary.expand('bo nho dem').terms}
         with provider.pin('bo nho dam') as dictionary:
-            assert dictionary is default_dictionary()
+            assert dictionary is empty_dictionary()
     finally:
         provider.close()

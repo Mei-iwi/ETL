@@ -15,7 +15,7 @@ from data_sync_etl.adapters.concept_corpus import (
 )
 from data_sync_etl.application.concept_discovery import ConceptDiscoveryWorker, term_target
 from data_sync_etl.application.concept_resolver import ConceptDictionaryProvider
-from data_sync_etl.domain.concepts import default_dictionary
+from data_sync_etl.domain.concepts import empty_dictionary
 from data_sync_etl.domain.corpus_concepts import (
     DiscoveryLimits,
     EligibilityFence,
@@ -55,7 +55,7 @@ def approve(worker, candidate):
 def activate(inventory, store, worker):
     manifest = worker.build()
     store.activate(manifest['generation'], fence=lambda item: worker.fence.unchanged(item['source_token']))
-    provider = ConceptDictionaryProvider(default_dictionary(), store=store, enabled=True,
+    provider = ConceptDictionaryProvider(empty_dictionary(), store=store, enabled=True,
         fence=EligibilityFence(inventory), allow_offline=True, lookup_ms=100)
     assert provider.refresh()['status'] == 'OFFLINE_READY'
     return provider
@@ -152,13 +152,13 @@ def test_review_separate_term_relation_and_publish_is_explicit(pipeline):
     provider = activate(inventory, store, worker)
     with provider.pin('cache') as dictionary:
         assert 'bộ nhớ đệm' in {term.term for term in dictionary.expand('cache').terms}
-        assert dictionary.fingerprint != default_dictionary().fingerprint
+        assert dictionary.fingerprint != empty_dictionary().fingerprint
     assert provider.status()['live_accepted'] is False
     # A flag alone or an offline artifact cannot turn on shared/live serving.
-    live = ConceptDictionaryProvider(default_dictionary(), store=store, enabled=True)
+    live = ConceptDictionaryProvider(empty_dictionary(), store=store, enabled=True)
     live.refresh()
     with live.pin('cache') as dictionary:
-        assert dictionary is default_dictionary()
+        assert dictionary is empty_dictionary()
 
 
 def test_review_ledger_tamper_placeholder_and_stale_evidence(pipeline):
@@ -184,7 +184,7 @@ def test_revocation_immediately_falls_back_without_mongo_io(pipeline, change):
     provider = activate(inventory, store, worker)
     inventory.put(resource(revision=2, **change))
     with provider.pin('cache') as dictionary:
-        assert dictionary is default_dictionary()
+        assert dictionary is empty_dictionary()
     with pytest.raises(ConceptBlocked, match='ROLLBACK_PRIVACY'):
         store.rollback(store.current(), fence=worker.fence.unchanged)
 
@@ -242,7 +242,7 @@ def test_100_concurrent_pins_hot_reload_and_bounded_cache(pipeline):
     # Test hot-generation pinning, separately from cold disk/deadline fallback.
     # Under competing QA load a cold lookup may legitimately serve seed.
     with provider.pin('cache') as warmed:
-        assert warmed is not default_dictionary()
+        assert warmed is not empty_dictionary()
     def request(_):
         with provider.pin('cache') as dictionary:
             fingerprint_before = dictionary.fingerprint
@@ -264,7 +264,7 @@ def test_cold_lookup_deadline_falls_back_without_breaking_literal_search(pipelin
         raise ConceptBlocked('LOOKUP_DEADLINE')
     monkeypatch.setattr(provider._active, 'lookup', expired)
     with provider.pin('cache') as dictionary:
-        assert dictionary is default_dictionary()
+        assert dictionary is empty_dictionary()
         assert dictionary.expand('cache').terms == []
     assert provider.status()['fallbacks'] == 1
 
@@ -277,9 +277,9 @@ def test_corrupt_current_shard_seed_fallback_and_path_defense(pipeline):
     file = store.path(f"releases/{manifest['generation']}/{manifest['shards'][0]['name']}")
     with file.open('ab') as output:
         output.write(b'corruption')
-    assert provider.refresh()['status'] == 'SEED_FALLBACK'
+    assert provider.refresh()['status'] == 'RAW_QUERY_FALLBACK'
     with provider.pin('cache') as dictionary:
-        assert dictionary is default_dictionary()
+        assert dictionary is empty_dictionary()
     for path in ('../outside', '/absolute', 'releases/..\\outside'):
         with pytest.raises(ConceptBlocked):
             store.path(path)

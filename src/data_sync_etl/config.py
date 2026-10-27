@@ -136,7 +136,6 @@ class Settings(BaseSettings):
     semantic_rerank_enabled: bool = False
     semantic_rerank_top_k: int = Field(default=20, ge=1, le=50)
     search_max_bags: int = Field(default=2000, ge=1, le=10000)
-    search_concept_snapshot: Path | None = None
     # Corpus dictionary is OFF by default; a flag is never a live ACL attestation.
     concept_dynamic_enabled: bool = False
     concept_dynamic_builder_enabled: bool = False
