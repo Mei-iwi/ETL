@@ -17,11 +17,14 @@ class SearchError(DomainError):
 
 
 def normalize_query(value):
-    return unicodedata.normalize('NFC', value).strip()
+    value = unicodedata.normalize('NFC', value)
+    if any(unicodedata.category(char) in ('Cc', 'Cs') and char not in '\t\r\n' for char in value):
+        raise ValueError('Invalid search query control character')
+    return ' '.join(value.split())
 
 
-MAX_QUERY_CHARS = 2000
-MAX_QUERY_TOKENS = 256
+MAX_QUERY_CHARS = 4000
+MAX_QUERY_TOKENS = 512
 
 
 def bounded_query(value):

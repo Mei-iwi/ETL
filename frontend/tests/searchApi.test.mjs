@@ -3,6 +3,22 @@ import test from 'node:test'
 import { SearchApiError, getChunkContext, searchMaterials } from '../src/services/searchApi.ts'
 import { readSearch, writeSearch } from '../src/pages/search/searchParams.ts'
 import { searchResponse, contextResponse } from './helpers/searchResponses.mjs'
+import { normalizeSearchQuery } from '../src/services/searchQuery.ts'
+import { SEARCH_QUERY_MAX_LENGTH } from '../src/pages/search/searchParams.ts'
+
+test('query normalization and additive planner diagnostics match the API contract', async t => {
+    const query = '  C++\t và\n C# CO₂  '
+    const normalized = normalizeSearchQuery(query)
+    assert.equal(normalized, 'C++ và C# CO₂')
+    assert.equal(SEARCH_QUERY_MAX_LENGTH, 4000)
+    const request = { query, method: 'bow', filters: {}, page: 1, size: 10 }
+    const body = { ...searchResponse(request), query: normalized, query_plan: { canonical_query: normalized },
+        retrieval_diagnostics: { semantic_queries: [], fusion: 'per-bag-max-before-rrf' } }
+    t.mock.method(globalThis, 'fetch', async () => Response.json(body))
+    const result = await searchMaterials(request)
+    assert.equal(result.query, normalized)
+    assert.equal(readSearch(writeSearch(request)).query, normalized)
+})
 
 test('lexical evidence keeps real source terms and rejects malformed explanations', async () => {
     const old = globalThis.fetch

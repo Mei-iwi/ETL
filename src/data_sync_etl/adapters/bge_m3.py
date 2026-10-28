@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from threading import Lock, RLock, Thread
 from time import monotonic
+from collections.abc import Callable
+from typing import Any
 
 from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.domain.semantic import normalize_dense
@@ -167,6 +169,42 @@ class BgeM3Embedding:
 
     def embed_documents(self, texts):
         return self._encode(texts)
+
+    def embed_query_windows(self, query: str, *, max_windows: int = 3,
+                            checkpoint: Callable[[], None] = lambda: None) -> dict[str, Any]:
+        """Opt-in full-query pooling, with a hard budget and no token truncation.
+
+        Split only at whitespace; never cut identifiers or remove a trailing
+        condition. Validate ALL windows before encoding any of them.
+        """
+        if not 1 <= max_windows <= 3 or not query.strip() or len(query) > 4000:
+            raise IndexingError('SEMANTIC_QUERY_WINDOW_LIMIT', 422)
+        with self._lock:
+            self.prepare()
+            pending, windows = [query], []
+            while pending:
+                checkpoint()
+                text = pending.pop(0)
+                count = len(self._model.tokenizer.encode(text, truncation=False))
+                if count <= self.max_tokens:
+                    windows.append(text)
+                else:
+                    spaces = list(re.finditer(r'\s+', text))
+                    if not spaces:
+                        raise IndexingError('SEMANTIC_TOKEN_LIMIT', 422)
+                    split = min(spaces, key=lambda match: abs(match.start() - len(text) / 2))
+                    pending[0:0] = [text[:split.start()], text[split.end():]]
+                if len(windows) + len(pending) > max_windows:
+                    raise IndexingError('SEMANTIC_QUERY_WINDOW_LIMIT', 422)
+            outputs = []
+            for offset in range(0, len(windows), self.batch_size):
+                checkpoint()
+                outputs.extend(self._encode(windows[offset:offset + self.batch_size]))
+            checkpoint()
+            total = sum(row['token_count'] for row in outputs)
+            vector = normalize_dense([sum(row['vector'][i] * row['token_count'] for row in outputs) / total
+                                      for i in range(self.dimension)])
+            return {'vector': vector, 'token_count': total, 'truncated': False, 'query_windows': len(windows)}
 
     def embed_queries(self, queries):
         scope = QUERY_ENCODINGS.get()

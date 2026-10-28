@@ -183,6 +183,11 @@ class Settings(BaseSettings):
     # Query-only experiment: original + at most one reviewed phrase variant.
     search_approved_accent_variants_enabled: bool = False
     search_corpus_accent_candidates_enabled: bool = False
+    # Query-only experiments; no index changes or model downloads. Opt in after evaluation.
+    search_query_understanding_enabled: bool = False
+    search_query_decomposition_enabled: bool = False
+    search_query_semantic_variants_enabled: bool = False
+    search_query_long_semantic_enabled: bool = False
     search_hybrid_lexical_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
     search_hybrid_vector_weight: float = Field(default=1., gt=0, le=4, allow_inf_nan=False)
     search_evidence_strategy: Literal['current', 'version_dense', 'version_context'] = 'current'
@@ -222,6 +227,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_search_grants(self):
+        if (self.search_query_decomposition_enabled or self.search_query_semantic_variants_enabled
+                or self.search_query_long_semantic_enabled) and not self.search_query_understanding_enabled:
+            raise ValueError('Query variants require query understanding')
+        if (self.search_query_semantic_variants_enabled or self.search_query_long_semantic_enabled) and self.semantic_rerank_enabled:
+            raise ValueError('Query semantic experiments require ColBERT OFF until combined evaluation')
         if self.search_approved_accent_variants_enabled and self.semantic_rerank_enabled:
             raise ValueError('Approved accent variants require ColBERT OFF until combined evaluation')
         if self.search_evidence_strategy != 'current' and (not self.semantic_enabled or self.semantic_rerank_enabled

@@ -261,9 +261,15 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         counts, title = observed[key]
         if focus_ids and not any(cid in focus_ids and count for (cid, _), count in counts.items()):
             continue  # A qualifier cannot replace an explicitly recognized subject.
-        if anchors and not any(set(phrase) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS <= tf.keys()
-                               for phrase in anchors):
-            continue
+        has_anchor = any(set(phrase) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS <= tf.keys()
+                         for phrase in anchors) if anchors else True
+        if anchors and not has_anchor:
+            if '"' in query or '“' in query:
+                continue
+            informative_matched = (terms & tf.keys()) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS
+            if len(informative_matched) < 2:
+                continue
+            score *= 0.7
         if (len(original_terms) > 1 and not focus_ids
                 and (original_terms & tf.keys()) <= AUXILIARY_MATCH_TERMS):
             continue

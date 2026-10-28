@@ -4,6 +4,7 @@
     reused. Separate immutable semantic generations preserve all legacy vectors.
 """
 import math
+from collections.abc import Callable
 from datetime import UTC, datetime
 from time import monotonic
 
@@ -141,8 +142,11 @@ class SemanticService:
             raise IndexingError(code, 503) from None
         return {**result, 'status': 'READY', 'action': 'BUILT'}
 
-    def query(self, query):
+    def query(self, query: str, *, split_long: bool = False,
+              checkpoint: Callable[[], None] = lambda: None) -> list[float]:
         self.store.ensure_ready()
+        if split_long and hasattr(self.embedding, 'embed_query_windows'):
+            return normalize_dense(self.embedding.embed_query_windows(query, checkpoint=checkpoint)['vector'])
         return normalize_dense(self.embedding.embed_queries([query])[0]['vector'])
 
     def status(self, version_id):

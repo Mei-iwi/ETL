@@ -55,6 +55,8 @@ export type SearchResponse = {
     branch_status?: Record<string, string>
     query_expansion?: Record<string, unknown> | null
     search_fingerprint?: string | null
+    query_plan?: Record<string, unknown> | null
+    retrieval_diagnostics?: Record<string, unknown> | null
     readiness?: { lexical_ready_bags: number; dense_ready_bags: number; eligible_versions: number; ready_versions: number; reindex_required: boolean } | null
     query: string
     method: SearchMethod
