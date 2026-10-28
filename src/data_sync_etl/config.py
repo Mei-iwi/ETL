@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     reconcile_max_ratio: float = Field(default=0.1, gt=0, le=1)
     reconciliation_scheduler_enabled: bool = False
     reconciliation_max_active: int = Field(default=1, ge=1, le=2)
+    reconciliation_file_concurrency: int = Field(default=1, ge=1, le=2)
     source_file_import_max_active: int = Field(default=1, ge=1, le=2)
     ocr_max_active: int = Field(default=1, ge=1, le=2)
     reconciliation_worker_heartbeat_file: Path | None = Field(default=None, repr=False)

@@ -1,5 +1,6 @@
 """Budgeted audits; exact-ID metadata repair requires an explicit admin request."""
 import re
+from concurrent.futures import ThreadPoolExecutor
 from copy import copy
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -179,6 +180,7 @@ class ScheduledAudit:
         after = checkpoint.get('last_id')
         self._save(claim, checkpoint)
         exhausted = False
+        peak_io = 1
         while visited < settings.reconciliation_max_files_per_run and monotonic() - started < settings.reconciliation_max_seconds_per_run:
             if lost.is_set():
                 raise DomainError('AUDIT_LEASE_LOST')
@@ -190,15 +192,26 @@ class ScheduledAudit:
                     FileState, FileState.resource_version_id == ResourceVersion.id)
                 if after:
                     query = query.where(ResourceVersion.id > after)
-                rows = repo.session.execute(query.order_by(ResourceVersion.id).limit(settings.reconciliation_audit_batch_size)).all()
+                batch_size = (min(2, settings.reconciliation_audit_batch_size)
+                              if settings.reconciliation_file_concurrency > 1 else settings.reconciliation_audit_batch_size)
+                rows = repo.session.execute(query.order_by(ResourceVersion.id).limit(batch_size)).all()
                 page = [(SimpleNamespace(**dict(zip(FILE_COLUMNS, row[:len(FILE_COLUMNS)], strict=True))), row[-2],
                          {c.name: getattr(row[-1], c.name) for c in FileState.__table__.columns} if row[-1] else None)
                         for row in rows]
             if not page:
                 exhausted = True
                 break
+            prepared = self._local_pair(page, engine, claim, lost,
+                settings.reconciliation_max_bytes_per_run - used_bytes,
+                settings.reconciliation_max_files_per_run - visited,
+                started + settings.reconciliation_max_seconds_per_run)
+            if prepared:
+                peak_io = 2
             for version, origin, previous in page:
-                if visited >= settings.reconciliation_max_files_per_run or monotonic() - started >= settings.reconciliation_max_seconds_per_run:
+                if lost.is_set():
+                    raise DomainError('AUDIT_LEASE_LOST')
+                if visited >= settings.reconciliation_max_files_per_run or (version.id not in prepared
+                        and monotonic() - started >= settings.reconciliation_max_seconds_per_run):
                     break
                 observed = identity(version, origin)
                 due = (claim['audit_type'] == 'LIGHT' or checkpoint.get('mode') == 'FULL'
@@ -215,9 +228,12 @@ class ScheduledAudit:
                     break
                 engine.file_read_budget_seconds = min(settings.reconciliation_file_timeout_seconds,
                     settings.reconciliation_max_seconds_per_run - (monotonic() - started))
-                result = engine.verify_file_snapshot([version], {version.resource_id: origin}, audit_type=claim['audit_type'])[0]
+                if version.id in prepared:
+                    result, metrics = prepared[version.id]
+                else:
+                    result = engine.verify_file_snapshot([version], {version.resource_id: origin}, audit_type=claim['audit_type'])[0]
+                    metrics = engine.file_metrics
                 observe_file_result(checkpoint, result)
-                metrics = engine.file_metrics
                 used_bytes += metrics['bytes_read']
                 visited += 1
                 checkpoint['records_scanned'] += 1
@@ -284,10 +300,55 @@ class ScheduledAudit:
         if exhausted:
             checkpoint.update(last_id=None, generation=checkpoint.get('generation', 0) + 1)
         checkpoint.update(coverage_status='CYCLE_VISITED' if exhausted else 'COVERAGE_BEHIND',
-            cycle_finished=exhausted, io_concurrency=1)
+            cycle_finished=exhausted, io_concurrency=peak_io,
+            io_concurrency_limit=settings.reconciliation_file_concurrency)
         # A visited cycle is not a claim that all files have current valid SHA-256.
         self._save(claim, checkpoint, status='PARTIAL' if not exhausted or checkpoint['not_verified_count']
                    or checkpoint.get('cycle_not_verified_count') else 'COMPLETED')
+
+    def _local_pair(self, page, engine, claim, lost, remaining_bytes, remaining_files, deadline):
+        """Opt-in two-file LOCAL read wave; coordinator alone commits in ID order.
+
+        No ORM/session or provider client is passed to threads. SOURCE/Drive and
+        unknown/large sizes remain serial until their shared request budgets and
+        provider cancellation have independent contention coverage.
+        """
+        if self.settings.reconciliation_file_concurrency < 2 or len(page) != 2 or remaining_files < 2:
+            return {}
+        reservation = remaining_bytes // 2
+        for version, origin, previous in page:
+            due = (claim['audit_type'] == 'LIGHT' or claim['checkpoint'].get('mode') == 'FULL'
+                   or not previous or previous['observed_identity'] != identity(version, origin)
+                   or previous['next_due_at'] is None or utc(previous['next_due_at']) <= now())
+            size = version.source_file_size
+            if origin != 'LOCAL' or not due or size is None or size <= 0 or size > reservation:
+                return {}
+        if lost.is_set() or monotonic() >= deadline:
+            return {}
+
+        def verify(item):
+            version, origin, _ = item
+            local = copy(engine)
+            local.file_metrics = {}
+            local.file_max_bytes = reservation  # Sum of reservations never exceeds the job remainder.
+            local.file_cancelled = lost
+            local.file_read_budget_seconds = min(self.settings.reconciliation_file_timeout_seconds,
+                                                 max(0, deadline - monotonic()))
+            result = local.verify_file_snapshot([version], {version.resource_id: origin}, audit_type=claim['audit_type'])[0]
+            return version.id, (result, dict(local.file_metrics))
+
+        # Exactly two submissions, no queue proportional to repository size.
+        # Drain the read-only wave before any checkpoint write. A crash replays
+        # uncommitted reads; it cannot advance past an unfinished first file.
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix='audit-local') as pool:
+            try:
+                results = dict(pool.map(verify, page))
+            except BaseException:
+                lost.set()  # Cooperatively cancel/drain the other read before releasing the lease.
+                raise
+        if lost.is_set():
+            raise DomainError('AUDIT_LEASE_LOST')
+        return results
 
     def _metadata(self, claim):
         checkpoint = dict(claim['checkpoint'])
