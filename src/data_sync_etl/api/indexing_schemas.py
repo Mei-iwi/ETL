@@ -7,6 +7,7 @@ from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.domain.mongo_documents import BagUnitType
 
 MESSAGES = {
+    'INDEX_PAGE_CHANGED': 'Chỉ mục đã thay đổi. Tải lại trạng thái trước khi xem túi từ.',
     "BAG_STRUCTURE_UNAVAILABLE": "Chưa có root hoặc ContentUnit lá tương thích để xây ContentBag; vẫn có thể xem Chunk.",
     "BAG_STRUCTURE_INVALID": "Cấu trúc nội dung có parent thiếu, khác phiên bản hoặc vòng lặp.",
     "LEAF_KEYWORDS_UNAVAILABLE": "Chưa có từ khóa hợp lệ cho ContentUnit lá.",
@@ -93,6 +94,8 @@ class BagSummary(BaseModel):
 
 
 class IndexStatusResponse(BaseModel):
+    bag_pagination: dict[str, int] | None = None
+    bag_revision: str | None = None
     resource_version_id: str
     processing_status: str
     index_status: IndexStatus

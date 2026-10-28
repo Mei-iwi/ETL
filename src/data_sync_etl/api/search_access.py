@@ -55,9 +55,9 @@ def search_access(request):
         if principal.mode in ('db_users', 'master_users'):
             from data_sync_etl.security.authorization import authorize
             authorize(request, principal)
-            # The owner exception is independent of shared public eligibility.
-            # SearchAccess also requires live created_by and resource_ids to match;
-            # cross-owner UNREVIEWED content remains RETRIEVAL_DENIED.
+            # Authenticated readers may read published resources, including the
+            # default UNREVIEWED extraction state. Domain restrictions and live
+            # index validation still apply; management grants stay owner-scoped.
             owner_search = (principal.mode == 'master_users' and principal.role != 'ADMIN'
                             and principal.id.startswith('master:') and (
                                 (request.url.path in ('/api/v1/search', '/api/v1/search/page') and request.method == 'POST')
@@ -72,6 +72,7 @@ def search_access(request):
                                     and request.url.path.endswith('/context') and request.method == 'GET')
                                 or (request.method == 'GET' and request.url.path.startswith('/api/v1/resource-versions/')
                                     and request.url.path.rsplit('/', 1)[-1] in ('file', 'source-info')),
+                                allow_shared_unreviewed=True,
                                 allow_owned_unreviewed=owner_search or (request.method == 'GET'
                                     and request.url.path.startswith('/api/v1/resource-versions/')
                                     and request.url.path.rsplit('/', 1)[-1] in ('file', 'source-info')))

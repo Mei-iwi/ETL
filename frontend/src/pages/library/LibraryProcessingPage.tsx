@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BilingualPanel } from '../../components/BilingualPanel'
+import { startVisiblePolling } from '../system/visiblePolling'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router'
 import {
     ProcessingApiError,
@@ -95,16 +96,15 @@ export function LibraryProcessingPage() {
     useEffect(() => {
         if (!jobId || loading) return
 
-        let active = true
-        let timerId: number | undefined
-        let controller: AbortController | null = null
         let failedAttempts = 0
-
-        async function loadStatus() {
-            controller = new AbortController()
+        let pending = false
+        const timing = { busy: 4000, idle: null }
+        const polling = startVisiblePolling(async signal => {
+            await Promise.resolve()
+            if (signal.aborted) return
             try {
-                const data = await getProcessingJob(jobId, controller.signal)
-                if (!active) return
+                const data = await getProcessingJob(jobId, signal)
+                if (signal.aborted) return
 
                 failedAttempts = 0
                 setStatusError('')
@@ -117,32 +117,25 @@ export function LibraryProcessingPage() {
                     error_code: data.error_code,
                 })
 
-                if (!terminalJobStatuses.includes(data.status)) {
-                    timerId = window.setTimeout(() => void loadStatus(), 4_000)
-                }
+                pending = !terminalJobStatuses.includes(data.status)
+                timing.busy = 4000
             } catch (caughtError) {
-                if (!active || isAbortError(caughtError)) return
+                if (signal.aborted || isAbortError(caughtError)) return
                 const message = caughtError instanceof Error
                     ? caughtError.message
                     : 'Không thể tải trạng thái xử lý'
                 setStatusError(message)
                 if (isRetryableProcessingError(caughtError) && failedAttempts < statusRetryDelays.length) {
-                    const delay = statusRetryDelays[failedAttempts]
+                    timing.busy = statusRetryDelays[failedAttempts]
                     failedAttempts += 1
-                    timerId = window.setTimeout(() => void loadStatus(), delay)
+                    pending = true
                     return
                 }
-
+                pending = false
                 setStoppedJobId(jobId)
             }
-        }
-
-        void loadStatus()
-        return () => {
-            active = false
-            controller?.abort()
-            if (timerId !== undefined) window.clearTimeout(timerId)
-        }
+        }, () => pending, document, timing)
+        return () => polling.stop()
     }, [jobId, loading, statusRefreshKey])
 
     const currentResult = result?.resource_version_id === versionId ? result : null

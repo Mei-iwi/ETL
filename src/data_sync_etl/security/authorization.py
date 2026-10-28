@@ -22,7 +22,8 @@ def can_read_public_file(container, version_id):
     from data_sync_etl.domain.search_access import SearchAccess
 
     try:
-        container.search.file_version(version_id, access=SearchAccess('authenticated_user', allow_public=True))
+        container.search.file_version(version_id, access=SearchAccess(
+            'authenticated_user', allow_public=True, allow_shared_unreviewed=True))
     except SearchError:
         return False
     return True

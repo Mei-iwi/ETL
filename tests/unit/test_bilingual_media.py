@@ -25,7 +25,8 @@ def test_soft_deleted_media_routes_hide_content_and_block_processing(container):
     deletion(container)
     base = f"/api/v1/resource-versions/{version['id']}"
     with TestClient(create_app(container)) as client:
-        for path in ("/bilingual", "/exports/json", "/exports/srt", "/processing-source", "/segments/missing/frame"):
+        for path in ("/bilingual", "/bilingual?include_items=false", "/bilingual?limit=20",
+                     "/exports/json", "/exports/srt", "/processing-source", "/segments/missing/frame"):
             assert client.get(base + path).status_code == 404
         assert client.put(base + "/processing-options", json={}).status_code == 404
         assert client.post(base + "/translations/retry", json={}).status_code == 404

@@ -336,7 +336,10 @@ class BilingualService:
                     return True
         return False
 
-    def view(self, version_id):
+    def view(self, version_id, *, include_items=True, offset=0, limit=None, revision=None):
+        if type(offset) is not int or not 0 <= offset <= 1000000 or (limit is not None
+                and (type(limit) is not int or not 1 <= limit <= 100)):
+            raise DomainError('INVALID_BILINGUAL_PAGE')
         with self.uow() as repo:
             version = repo.get("resource_versions", version_id)
             if not version:
@@ -349,7 +352,7 @@ class BilingualService:
             )
             output, extraction = [], []
             for job in jobs:
-                for task in repo.find("ocr_page_tasks", {"job_id": job["id"]}, order=("page_num",)):
+                for task in repo.find("ocr_page_tasks", {"job_id": job["id"]}, order=("page_num", "id")):
                     rows = repo.find("ocr_page_results", {"page_task_id": task["id"]}, limit=1)
                     if not rows:
                         continue
@@ -386,7 +389,7 @@ class BilingualService:
             }
             for segment in output
         ]
-        return {
+        result = {
             "resource_version_id": version_id,
             "resource_id": version["resource_id"],
             "source_hash": version["source_hash"],
@@ -396,6 +399,25 @@ class BilingualService:
             "extraction": extraction,
             "items": items,
         }
+        if include_items and offset == 0 and limit is None and revision is None:
+            return result  # Legacy callers and exports retain their full contract.
+        from data_sync_etl.domain.indexing import digest
+
+        # OCR metadata is stored as paired-segment blobs. Full reads are still
+        # required; this projection reduces response bytes, not database I/O or
+        # a measured end-to-end CPU cost (the revision also hashes the snapshot).
+        current = digest([result, [job['id'] for job in jobs]])
+        if revision is not None and revision != current:
+            raise DomainError('BILINGUAL_REVISION_CHANGED')
+        timed = [item for item in items if item.get('source_type') in ('speech', 'subtitle')
+                 and item.get('start_time') is not None and item.get('end_time') is not None]
+        size = limit or 20
+        return {**result,
+                'items': items[offset:offset + size] if include_items else [],
+                'summary': {'total': len(items), 'translated_count': sum(bool(item.get('translated_text')) for item in items),
+                            'timed_count': len(timed), 'timed_translated_count': sum(bool(item.get('translated_text')) for item in timed),
+                            'revision': current},
+                'pagination': {'offset': offset, 'limit': size, 'total': len(items)}}
 
 
 def export_segments(view, format, translated=False):

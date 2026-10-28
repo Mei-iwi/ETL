@@ -185,8 +185,9 @@ class SearchRepositoryMixin:
                 stmt = stmt.join(v, v.id == ranked.c.version_id)
                 if not access.allow_public:
                     stmt = stmt.where(owned)
-                stmt = stmt.where(or_(and_(v.final_approved_at.is_not(None), v.final_approved_by.is_not(None)),
-                                      owned if access.allow_owned_unreviewed else False))
+                if not (access.allow_public and access.allow_shared_unreviewed):
+                    stmt = stmt.where(or_(and_(v.final_approved_at.is_not(None), v.final_approved_by.is_not(None)),
+                                          owned if access.allow_owned_unreviewed else False))
         if filters.get('resource_version_id'):
             stmt = stmt.where(ranked.c.version_id == filters['resource_version_id'])
         else:

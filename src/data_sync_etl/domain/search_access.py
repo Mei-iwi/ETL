@@ -23,6 +23,7 @@ class SearchAccess:
     owner_id: str | None = None
     allow_public: bool = False
     allow_owned_unreviewed: bool = False
+    allow_shared_unreviewed: bool = False
 
     @property
     def internal(self):
@@ -30,8 +31,8 @@ class SearchAccess:
 
     # Authenticated scope is created by the API's server-side session boundary,
     # never from request JSON. Public whole-file reads additionally require every
-    # unit through file_version. Only the owner can search/preview their unreviewed
-    # file; this does not publish it or expose it to other users' shared search.
+    # unit through file_version. Shared UNREVIEWED reads require a server-issued
+    # capability and a published resource; they never grant management rights.
 
     def allows(self, resource, version, unit):
         return self.evaluate(resource, version, unit) in ('ALLOW_LOCAL_DEMO', 'ALLOW_AUTHENTICATED_ADMIN', 'ALLOW_AUTHENTICATED_USER')
@@ -53,6 +54,9 @@ class SearchAccess:
                 return 'CONTENT_RESTRICTED'
         review = unit.get('review_status')
         if self.scope == 'authenticated_user':
+            if (self.allow_public and self.allow_shared_unreviewed and review == 'UNREVIEWED'
+                    and unit.get('retrieval_eligible') is False):
+                return 'ALLOW_AUTHENTICATED_USER'
             owned = (self.owner_id is not None and resource.get('created_by') == self.owner_id
                      and resource['id'] in self.resource_ids)
             if (self.allow_owned_unreviewed and owned and review == 'UNREVIEWED'

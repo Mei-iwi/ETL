@@ -14,6 +14,18 @@ test('hide only the unconfirmed-label notice without changing API warning data',
 })
 
 const id = '01M4ZXS1XJ2B4H42CFY24KJY8C'
+
+test('run summary omits observations only on explicit request and keeps the abort signal', async t => {
+    const controller = new AbortController()
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        assert.equal(url, `/api/v1/evaluations/runs/${id}?offset=0&limit=20&include_observations=false`)
+        assert.equal(options.method, 'GET')
+        controller.abort()
+        assert.equal(options.signal.aborted, true)
+        return Response.json({ observations: [], summary: { fixture: true } })
+    })
+    assert.deepEqual((await getEvaluationRun(id, 0, controller.signal, false)).observations, [])
+})
 test('Prompt05 draft imports 18 queries without inventing grades or Dev IDs', async () => {
     const file = JSON.parse(await readFile(new URL('../../fixtures/evaluation/manual-ground-truth-template.json', import.meta.url), 'utf8'))
     assert.equal(file.ground_truth_confirmed, false)

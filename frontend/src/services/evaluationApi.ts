@@ -82,8 +82,8 @@ export async function listEvaluationRuns(page = 1, signal?: AbortSignal): Promis
     return data
 }
 
-export async function getEvaluationRun(id: string, offset = 0, signal?: AbortSignal): Promise<EvaluationRun> {
-    return (await request(`/runs/${validId(id)}?offset=${offset}&limit=20`, signal)).json()
+export async function getEvaluationRun(id: string, offset = 0, signal?: AbortSignal, includeObservations = true): Promise<EvaluationRun> {
+    return (await request(`/runs/${validId(id)}?offset=${offset}&limit=20${includeObservations ? '' : '&include_observations=false'}`, signal)).json()
 }
 export async function getEvaluationReport(id: string, format: 'csv' | 'json', signal?: AbortSignal) {
     const response = await request(`/runs/${validId(id)}/report?format=${format}`, signal)

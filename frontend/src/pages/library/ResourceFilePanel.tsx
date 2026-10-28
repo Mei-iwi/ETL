@@ -12,6 +12,7 @@ import { parseSpreadsheetPreview } from './spreadsheetData'
 import type { SpreadsheetData } from './spreadsheetData'
 import { MediaPlayer } from './MediaFilePreview'
 import { mediaPreviewType } from './libraryFileFormats'
+import { startVisiblePolling } from '../system/visiblePolling'
 
 type Version = { id: string; version_number: number; created_at: string }
 
@@ -76,23 +77,31 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
     }, [selected, ready, sourceOwned, attempt])
     useEffect(() => {
         if (!valid) return
-        const controller = new AbortController()
-        let timer: number | undefined
-        async function poll() {
+        let pending = false
+        let failures = 0
+        const polling = startVisiblePolling(async signal => {
+            await Promise.resolve()
+            if (signal.aborted) return
             try {
-                const response = await fetch(`/api/v1/resource-versions/${encodeURIComponent(selected)}/index-status`, { signal: controller.signal })
+                const response = await fetch(`/api/v1/resource-versions/${encodeURIComponent(selected)}/index-status?include_bags=false`, { signal })
                 if (!response.ok) throw new Error(await fileResponseError(response))
                 const data: FileIndexStatus = await response.json()
-                if (!controller.signal.aborted) { setReadiness({ id: selected, status: data }); setStatusError(null) }
+                if (!signal.aborted) {
+                    setReadiness({ id: selected, status: data }); setStatusError(null)
+                    failures = 0
+                    pending = ['CONTENT_NOT_READY', 'PENDING', 'RUNNING'].includes(data.index_status)
+                }
             } catch (reason) {
-                if (!controller.signal.aborted) setStatusError({ id: selected, message: reason instanceof Error ? reason.message : 'Không tải được trạng thái tệp.' })
-            } finally {
-                if (!controller.signal.aborted) timer = window.setTimeout(poll, document.hidden ? 15000 : 5000)
+                if (!signal.aborted) {
+                    pending = ++failures <= 3
+                    setStatusError({ id: selected, message: reason instanceof Error ? reason.message : 'Không tải được trạng thái tệp.' })
+                }
             }
-        }
-        void poll()
-        return () => { controller.abort(); if (timer !== undefined) window.clearTimeout(timer) }
-    }, [selected, valid, attempt])
+        // An open preview still needs live readiness checks; a closed READY file
+        // is revalidated on visibility, manual retry or the next open.
+        }, () => pending || (open && failures === 0), document, { busy: 5000, idle: null })
+        return () => polling.stop()
+    }, [selected, valid, attempt, open])
     return <section className={`${styles.panel} ${styles.filePanel}`} aria-labelledby="resource-file-title">
         <div className={styles.fileHeading}>
             <h2 id="resource-file-title"><FileText size={21} aria-hidden="true" />Tệp học liệu</h2>

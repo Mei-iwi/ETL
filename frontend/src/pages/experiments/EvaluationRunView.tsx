@@ -23,7 +23,7 @@ export function EvaluationRunView() {
 function RunView({ id }: { id: string }) {
     const [data, setData] = useState<EvaluationRun | null>(null)
     const [error, setError] = useState('')
-    const [offset, setOffset] = useState(0)
+    const [detailsOpen, setDetailsOpen] = useState(false)
     const [attempt, setAttempt] = useState(0)
     const [downloading, setDownloading] = useState(false)
     const [downloadError, setDownloadError] = useState('')
@@ -34,11 +34,11 @@ function RunView({ id }: { id: string }) {
     useEffect(() => {
         if (!id) return
         const controller = new AbortController()
-        void Promise.resolve().then(() => controller.signal.aborted ? null : getEvaluationRun(id, offset, controller.signal))
+        void Promise.resolve().then(() => controller.signal.aborted ? null : getEvaluationRun(id, 0, controller.signal, false))
             .then(value => { if (value && !controller.signal.aborted) { setData(value); setError(''); recentEvaluationId('run', id) } })
             .catch(reason => { if (!controller.signal.aborted) { setData(null); setError(reason instanceof Error ? reason.message : 'Không tải được kết quả.') } })
         return () => controller.abort()
-    }, [id, offset, attempt])
+    }, [id, attempt])
     async function download(format: 'csv' | 'json') {
         if (downloadBusy.current) return
         downloadBusy.current = true
@@ -91,18 +91,48 @@ function RunView({ id }: { id: string }) {
                     </table></div>
                     <details><summary>Cách đọc chỉ số</summary><div className={styles.muted}>Chất lượng càng cao càng tốt; thời gian càng thấp càng tốt. Precision chia k kể cả thiếu kết quả; grade ≥ 1 là liên quan. n/a không phải 0. Recall/MRR/nDCG loại truy vấn không có nhãn dương khỏi trung bình. Điểm RRF không so trực tiếp với cosine.</div></details>
                 </section>
-                <details className={`${layout.card} ${styles.card} ${styles.queryDetails}`}><summary>Chi tiết theo truy vấn</summary>
-                    {data.observations.map(row => <details key={`${row.query_id}:${row.method}`} className={styles.query}>
-                        <summary>{row.query_id} · {row.method.toUpperCase()} · {row.error_code || `${number(row.latency_ms)} ms`}</summary>
-                        <div>{data.queries.find(query => query.query_id === row.query_id)?.query}</div>
-                        <div className={styles.identifier}>Nhãn: {data.queries.find(query => query.query_id === row.query_id)?.relevance.map(label => `${label.item_id}:${label.grade}`).join(', ')}</div>
-                        <ol>{row.ranked.map(item => <li className={styles.identifier} key={item.resource_id}>{item.resource_id} · {item.resource_version_id} · Điểm {number(item.score)}</li>)}</ol>
-                    </details>)}
-                    <div className={styles.row}><button className={layout.secondaryButton} disabled={offset === 0} onClick={() => setOffset(n => Math.max(0, n - 20))}>Trước</button>
-                        <span>Trang {Math.floor(offset / 20) + 1} / {Math.max(1, Math.ceil(data.pagination.total / 20))}</span>
-                        <button className={layout.primaryButton} disabled={offset + 20 >= data.pagination.total} onClick={() => setOffset(n => n + 20)}>Tiếp</button></div>
+                <details className={`${layout.card} ${styles.card} ${styles.queryDetails}`} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
+                    <summary aria-expanded={detailsOpen} aria-controls="evaluation-observations">Chi tiết theo truy vấn</summary>
+                    {detailsOpen && <RunObservations key={id} id={id} fingerprint={data.corpus_fingerprint} />}
                 </details>
             </>}
         </div>
     </>
+}
+
+function RunObservations({ id, fingerprint }: { id: string; fingerprint: string }) {
+    const [offset, setOffset] = useState(0)
+    const [attempt, setAttempt] = useState(0)
+    const [loaded, setLoaded] = useState<{ offset: number; data: EvaluationRun } | null>(null)
+    const [error, setError] = useState<{ offset: number; message: string } | null>(null)
+    useEffect(() => {
+        const controller = new AbortController()
+        void Promise.resolve().then(() => controller.signal.aborted ? null : getEvaluationRun(id, offset, controller.signal))
+            .then(data => {
+                if (data && !controller.signal.aborted) {
+                    if (data.id !== id || data.corpus_fingerprint !== fingerprint) throw new Error('Kết quả đã thay đổi. Mở lại lần chạy để cập nhật.')
+                    setLoaded({ offset, data }); setError(null)
+                }
+            })
+            .catch(reason => { if (!controller.signal.aborted) setError({ offset, message: reason instanceof Error ? reason.message : 'Không tải được chi tiết.' }) })
+        return () => controller.abort()
+    }, [id, offset, attempt, fingerprint])
+    const data = loaded?.offset === offset ? loaded.data : null
+    const message = error?.offset === offset ? error.message : ''
+    return <div id="evaluation-observations" aria-busy={!data && !message}>
+        {message ? <p role="alert">{message} <button type="button" onClick={() => { setError(null); setAttempt(value => value + 1) }}>Thử lại</button></p>
+            : !data ? <p role="status">Đang tải chi tiết…</p> : <>
+            {data.observations.map(row => <details key={`${row.query_id}:${row.method}`} className={styles.query}>
+                <summary>{row.query_id} · {row.method.toUpperCase()} · {row.error_code || `${number(row.latency_ms)} ms`}</summary>
+                <div>{data.queries.find(query => query.query_id === row.query_id)?.query}</div>
+                <div className={styles.identifier}>Nhãn: {data.queries.find(query => query.query_id === row.query_id)?.relevance.map(label => `${label.item_id}:${label.grade}`).join(', ')}</div>
+                <ol>{row.ranked.map(item => <li className={styles.identifier} key={item.resource_id}>{item.resource_id} · {item.resource_version_id} · Điểm {number(item.score)}</li>)}</ol>
+            </details>)}
+            <div className={styles.row}>
+                <button type="button" disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 20))}>Trước</button>
+                <span>Trang {Math.floor(offset / 20) + 1} / {Math.max(1, Math.ceil(data.pagination.total / 20))}</span>
+                <button type="button" disabled={offset + 20 >= data.pagination.total} onClick={() => setOffset(value => value + 20)}>Tiếp</button>
+            </div>
+        </>}
+    </div>
 }

@@ -1,6 +1,35 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { startIndex, getChunks, getIndexStatus, reindex, IndexingApiError } from '../src/services/indexingApi.ts'
+import { getBagPage, startIndex, getChunks, getIndexStatus, reindex, IndexingApiError } from '../src/services/indexingApi.ts'
+
+test('bag page requests only its offset and rejects a response from another run', async t => {
+    const calls = []
+    const revision = 'a'.repeat(64)
+    let run = 'run1'
+    t.mock.method(globalThis, 'fetch', async (path, options) => {
+        calls.push(String(path))
+        assert.equal(options.method, 'GET')
+        return Response.json({ resource_version_id: 'v1', published_run_id: run, index_status: 'READY', bags: [],
+            bag_count: 25, bag_revision: revision, bag_pagination: { offset: 10, limit: 10, total: 25 } })
+    })
+    await getBagPage('v1', 'run1', 10, undefined, revision)
+    assert.match(calls[0], new RegExp(`bag_offset=10&bag_limit=10&expected_run_id=run1&bag_revision=${revision}$`))
+    run = 'run2'
+    await assert.rejects(getBagPage('v1', 'run1', 10, undefined, revision), /Chỉ mục đã thay đổi/)
+})
+
+test('summary status is opt-in and does not change the default details request', async t => {
+    const paths = []
+    t.mock.method(globalThis, 'fetch', async (path, options) => {
+        paths.push(path)
+        assert.equal(options.method, 'GET')
+        return Response.json({ bags: [] })
+    })
+    await getIndexStatus('v1', undefined, false)
+    await getIndexStatus('v1')
+    assert.deepEqual(paths, ['/api/v1/resource-versions/v1/index-status?include_bags=false',
+        '/api/v1/resource-versions/v1/index-status'])
+})
 
 test('start index is explicit POST with encoded version and abort signal', async () => {
     const old = globalThis.fetch

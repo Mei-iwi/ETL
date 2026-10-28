@@ -409,13 +409,15 @@ def list_evaluation_runs(request: Request, response: Response,
 @router.get('/api/v1/evaluations/runs/{id}', tags=[TAG_EVALUATION], response_model=RunDetailResponse)
 def get_evaluation_run(id: str, request: Request, response: Response,
                        offset: Annotated[int, Query(ge=0, le=300)] = 0,
-                       limit: Annotated[int, Query(ge=1, le=50)] = 20):
+                       limit: Annotated[int, Query(ge=1, le=50)] = 20,
+                       include_observations: bool = True):
     response.headers['Cache-Control'] = 'private, no-store'
     try:
         service, access = evaluation_services(request)
         run = service.get_run(id, access)
         rows = run['observations']
-        return {**{key: value for key, value in run.items() if key != 'auth_user_id'}, 'observations': rows[offset:offset + limit],
+        return {**{key: value for key, value in run.items() if key != 'auth_user_id'},
+                'observations': rows[offset:offset + limit] if include_observations else [],
                 'pagination': {'offset': offset, 'limit': limit, 'total': len(rows)}}
     except Exception as exc:
         raise evaluation_error(exc) from None
@@ -1128,11 +1130,31 @@ def create_job(id: ResourceId, request: Request, body: JobInput | None = None):
 
 
 @router.get("/api/v1/resource-versions/{id}/index-status", tags=[TAG_INDEXING],
-            response_model=IndexStatusResponse, responses=ERROR_RESPONSES,
+            response_model=IndexStatusResponse, response_model_exclude_unset=True, responses=ERROR_RESPONSES,
             summary="Theo dõi trạng thái lập chỉ mục, tách biệt OCR")
-def index_status(id: ResourceId, request: Request):
+def index_status(id: ResourceId, request: Request, response: Response, include_bags: bool = True,
+                 bag_offset: Annotated[int, Query(ge=0, le=1000000)] = 0,
+                 bag_limit: Annotated[int | None, Query(ge=1, le=100)] = None,
+                 expected_run_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None,
+                 bag_revision: Annotated[str | None, Query(pattern=r'^[a-f0-9]{64}$')] = None):
+    response.headers['Cache-Control'] = 'private, no-store'
     try:
-        return request.app.state.container.indexing.status(id)
+        result = request.app.state.container.indexing.status(id)
+        # Keep the same live artifact verification; only omit optional wire details.
+        if bag_limit is not None:
+            from data_sync_etl.domain.indexing import digest, IndexingError
+
+            # Integrity requires the complete artifact. Paging reduces wire JSON,
+            # not verification or Mongo/PG I/O.
+            bags = sorted(result['bags'], key=lambda bag: bag['id'])
+            revision = digest([result['published_run_id'], result['index_status'], bags])
+            if (result['index_status'] != 'READY'
+                    or expected_run_id is not None and expected_run_id != result['published_run_id']
+                    or bag_revision is not None and bag_revision != revision):
+                raise IndexingError('INDEX_PAGE_CHANGED', 409)
+            return {**result, 'bags': bags[bag_offset:bag_offset + bag_limit] if include_bags else [],
+                    'bag_revision': revision, 'bag_pagination': {'offset': bag_offset, 'limit': bag_limit, 'total': len(bags)}}
+        return result if include_bags else {**result, 'bags': []}
     except Exception as exc:
         raise index_error(exc) from None
 
@@ -1228,8 +1250,16 @@ def retry_translation(id: ResourceId, body: ProcessingOptions, request: Request)
 
 
 @router.get('/api/v1/resource-versions/{id}/bilingual', tags=[TAG_PROCESSING])
-def bilingual_content(id: ResourceId, request: Request):
-    return bilingual_access(request, id).bilingual.view(id)
+def bilingual_content(id: ResourceId, request: Request, response: Response, include_items: bool = True,
+                      offset: Annotated[int, Query(ge=0, le=1000000)] = 0,
+                      limit: Annotated[int | None, Query(ge=1, le=100)] = None,
+                      revision: Annotated[str | None, Query(pattern=r'^[a-f0-9]{64}$')] = None):
+    response.headers['Cache-Control'] = 'private, no-store'
+    container = bilingual_access(request, id)
+    try:
+        return container.bilingual.view(id, include_items=include_items, offset=offset, limit=limit, revision=revision)
+    except DomainError as exc:
+        raise HTTPException(409, str(exc)) from None
 
 
 @router.get('/api/v1/resource-versions/{id}/exports/{format}', tags=[TAG_PROCESSING])

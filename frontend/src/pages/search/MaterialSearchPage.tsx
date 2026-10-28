@@ -29,16 +29,19 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
     const [query, setQuery] = useState(initial.query)
     const [method, setMethod] = useState<SearchMethod>(initial.method)
     const [filters, setFilters] = useState(initial.filters)
-    const [catalog, setCatalog] = useState<{ subjects: SubjectOption[]; grades: GradeLevelOption[]; types: ResourceTypeOption[] } | null>(null)
-    const [catalogError, setCatalogError] = useState('')
+    const [catalog, setCatalog] = useState<{ subjects?: SubjectOption[]; grades?: GradeLevelOption[]; types?: ResourceTypeOption[] }>({})
+    const [catalogError, setCatalogError] = useState<Record<string, string>>({})
+    const [filtersOpen, setFiltersOpen] = useState(false)
+    const [catalogAttempt, setCatalogAttempt] = useState(0)
+    const loadedCatalog = useRef(catalog)
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
     const submitting = useRef(false)
     const filterCount = Object.values(filters).filter(Boolean).length
     const selectedFilters = [
-        { key: 'grade_level_id' as const, label: catalog?.grades.find(item => item.id === filters.grade_level_id)?.grade_name_vi || 'Khối lớp đã chọn' },
-        { key: 'subject_id' as const, label: catalog?.subjects.find(item => item.id === filters.subject_id)?.name || 'Môn học đã chọn' },
-        { key: 'resource_type_code' as const, label: catalog?.types.find(item => item.code === filters.resource_type_code)?.name || filters.resource_type_code },
+        { key: 'grade_level_id' as const, label: catalog.grades?.find(item => item.id === filters.grade_level_id)?.grade_name_vi || 'Khối lớp đã chọn' },
+        { key: 'subject_id' as const, label: catalog.subjects?.find(item => item.id === filters.subject_id)?.name || 'Môn học đã chọn' },
+        { key: 'resource_type_code' as const, label: catalog.types?.find(item => item.code === filters.resource_type_code)?.name || filters.resource_type_code },
         { key: 'resource_format' as const, label: filters.resource_format?.toUpperCase() },
         { key: 'resource_id' as const, label: 'Trong học liệu đã chọn' },
         { key: 'resource_version_id' as const, label: 'Trong phiên bản đã chọn' },
@@ -46,12 +49,28 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
     const hasChanges = Boolean(initial.query) && writeSearch({ ...initial, page: 1 }).toString() !==
         writeSearch({ ...initial, query, method, filters, page: 1 }).toString()
     useEffect(() => {
+        if (!filtersOpen) return
         const controller = new AbortController()
-        void Promise.all([getSubjects(controller.signal), getGradeLevels(controller.signal), getResourceTypes(controller.signal)])
-            .then(([subjects, grades, types]) => { if (!controller.signal.aborted) setCatalog({ subjects, grades, types }) })
-            .catch(() => { if (!controller.signal.aborted) setCatalogError('Không tải được bộ lọc. Có thể tìm không lọc.') })
+        const sources = { subjects: getSubjects, grades: getGradeLevels, types: getResourceTypes }
+        for (const key of ['subjects', 'grades', 'types'] as const) {
+            if (loadedCatalog.current[key]) continue
+            void Promise.resolve().then(async () => {
+                if (controller.signal.aborted) return
+                try {
+                    const items = await sources[key](controller.signal)
+                    if (!controller.signal.aborted) {
+                        loadedCatalog.current = { ...loadedCatalog.current, [key]: items }
+                        setCatalog(loadedCatalog.current)
+                        setCatalogError(previous => ({ ...previous, [key]: '' }))
+                    }
+                } catch {
+                    if (!controller.signal.aborted) setCatalogError(previous => ({ ...previous, [key]: 'Không tải được danh mục.' }))
+                }
+            })
+        }
         return () => controller.abort()
-    }, [])
+        // Completed options belong to this authenticated form. Retry loads only missing sources.
+    }, [filtersOpen, catalogAttempt])
     function submit(event: FormEvent) {
         event.preventDefault()
         if (busy || submitting.current || (method !== 'bow' && !model.ready)) return
@@ -78,22 +97,22 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
                         disabled={item.value !== 'bow' && !model.ready}
                         onClick={() => setMethod(item.value)}>{item.label}</button>)}
                 </fieldset>
-            <details className={styles.filterPanel}><summary><SlidersHorizontal size={16} aria-hidden="true" /> Bộ lọc{filterCount > 0 && <span className={styles.filterCount}>{filterCount}</span>}</summary><div className={styles.filterBody}><div className={styles.filters}>
+            <details className={styles.filterPanel} onToggle={event => setFiltersOpen(event.currentTarget.open)}><summary aria-expanded={filtersOpen} aria-controls="search-filter-options"><SlidersHorizontal size={16} aria-hidden="true" /> Bộ lọc{filterCount > 0 && <span className={styles.filterCount}>{filterCount}</span>}</summary><div id="search-filter-options" className={styles.filterBody}><div className={styles.filters}>
                 <div className={layout.field}><label htmlFor="search-grade">Khối lớp</label>
-                    <select id="search-grade" disabled={!catalog} value={filters.grade_level_id || ''}
+                    <select id="search-grade" disabled={!catalog.grades} value={filters.grade_level_id || ''}
                         onChange={event => setFilters({ ...filters, grade_level_id: event.target.value || null, subject_id: null })}>
-                        <option value="">Tất cả khối lớp</option>{catalog?.grades.map(item => <option key={item.id} value={item.id}>{item.grade_name_vi}</option>)}
+                        <option value="">Tất cả khối lớp</option>{filters.grade_level_id && !catalog.grades?.some(item => item.id === filters.grade_level_id) && <option value={filters.grade_level_id}>Khối lớp đã chọn</option>}{catalog.grades?.map(item => <option key={item.id} value={item.id}>{item.grade_name_vi}</option>)}
                     </select></div>
                 <div className={layout.field}><label htmlFor="search-subject">Môn học</label>
-                    <select id="search-subject" disabled={!catalog} value={filters.subject_id || ''}
+                    <select id="search-subject" disabled={!catalog.subjects} value={filters.subject_id || ''}
                         onChange={event => setFilters({ ...filters, subject_id: event.target.value || null })}>
-                        <option value="">Tất cả môn học</option>{catalog?.subjects.filter(item => !filters.grade_level_id || item.grade_level_id === filters.grade_level_id)
+                        <option value="">Tất cả môn học</option>{filters.subject_id && !catalog.subjects?.some(item => item.id === filters.subject_id) && <option value={filters.subject_id}>Môn học đã chọn</option>}{catalog.subjects?.filter(item => !filters.grade_level_id || item.grade_level_id === filters.grade_level_id)
                             .map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
                     </select></div>
                 <div className={layout.field}><label htmlFor="search-type">Loại học liệu</label>
-                    <select id="search-type" disabled={!catalog} value={filters.resource_type_code || ''}
+                    <select id="search-type" disabled={!catalog.types} value={filters.resource_type_code || ''}
                         onChange={event => setFilters({ ...filters, resource_type_code: event.target.value || null })}>
-                        <option value="">Tất cả loại học liệu</option>{catalog?.types.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
+                        <option value="">Tất cả loại học liệu</option>{filters.resource_type_code && !catalog.types?.some(item => item.code === filters.resource_type_code) && <option value={filters.resource_type_code}>{filters.resource_type_code}</option>}{catalog.types?.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
                     </select></div>
                 <div className={layout.field}><label htmlFor="search-format">Định dạng</label>
                     <select id="search-format" value={filters.resource_format || ''}
@@ -105,12 +124,17 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
             <div className={layout.actions}>
                 <button type="button" className={styles.textButton} disabled={!filterCount} onClick={() => setFilters({})}><X size={14} aria-hidden="true" /> Xóa bộ lọc</button></div>
             </div>
+            {filtersOpen && <div role="status" aria-busy={['subjects', 'grades', 'types'].some(key => !catalog[key as keyof typeof catalog] && !catalogError[key])}>
+                {(['grades', 'subjects', 'types'] as const).map(key => !catalog[key] && <p key={key}>
+                    {{ grades: 'Khối lớp', subjects: 'Môn học', types: 'Loại học liệu' }[key]}: {catalogError[key] || 'Đang tải…'}
+                    {catalogError[key] && <button type="button" className={styles.textButton} onClick={() => setCatalogAttempt(value => value + 1)}>Thử lại</button>}
+                </p>)}
+            </div>}
             </details>
             </div>
             {selectedFilters.length > 0 && <div className={styles.selectedFilters} aria-label="Bộ lọc đã chọn">{selectedFilters.map(item =>
                 <button type="button" key={item.key} aria-label={`Bỏ bộ lọc: ${item.label}`} onClick={() => setFilters({ ...filters, [item.key]: null, ...(item.key === 'grade_level_id' ? { subject_id: null } : {}) })}>{item.label}<X size={13} aria-hidden="true" /></button>)}</div>}
             {hasChanges && <p role="status" className={styles.methodHelp}>Nhấn Tìm kiếm để áp dụng thay đổi.</p>}
-            {catalogError && <p role="status" className={styles.pending}>{catalogError}</p>}
             {!model.ready && <div role="status" className={model.state === 'FAILED' || model.state === 'STOPPED' ? styles.error : styles.pending}>
                 {model.error ? 'Chưa kiểm tra được trạng thái tìm kiếm. Có thể chọn BoW.' :
                     model.state === 'FAILED' || model.state === 'STOPPED' ? 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.' : 'Đang chuẩn bị tìm kiếm…'}

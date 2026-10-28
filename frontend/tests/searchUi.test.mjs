@@ -27,6 +27,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     let contextEvidence = 'lexical'
     let metadataFields = ['TITLE']
     let holdAuthConfig = true
+    let failSubjects = false
     const reconciliationBodies = []
     let reconciliationPolls = 0
     let releaseSearch
@@ -53,6 +54,10 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         }
         if (['/api/v1/subjects', '/api/v1/grade-levels', '/api/v1/resource-types'].includes(url.pathname)) {
             catalogCount++
+            if (failSubjects && url.pathname.endsWith('/subjects')) {
+                failSubjects = false
+                return json({ detail: 'Fixture catalog unavailable' }, 503)
+            }
             return json({ items: url.pathname.endsWith('subjects') ? [{ id: 's1', name: 'Toán', grade_level_id: 'g1' }] :
                 url.pathname.endsWith('grade-levels') ? [{ id: 'g1', grade_name_vi: 'Lớp 6' }] : [{ code: 'DOC', name: 'Tài liệu' }],
                 pagination: { page: 1, total_pages: 1 } })
@@ -79,7 +84,11 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             if (mode === 'empty') return json({ ...body, items: [], total: 0, total_pages: 0, message: 'NO_READY_INDEX', ranking_algorithm: 'rrf-v1' })
             if (mode === 'public') return json({ ...body, access_scope: 'public', items: [], total: 0, total_pages: 0, message: 'PUBLIC_ACCESS_UNCONFIRMED', ranking_algorithm: 'rrf-v1' })
             return json({ ...body, access_scope: 'local_demo', total: resultCount, total_pages: Math.ceil(resultCount / body.size), message: 'OK', ranking_algorithm: 'rrf-v1',
-                ...(mode === 'metadata-unready' ? { branch_status: { metadata: 'METADATA_SCHEMA_NOT_READY', content: 'OK' } } : {}),
+                ...(mode === 'metadata-unready' ? {
+                    branch_status: { metadata: 'METADATA_SCHEMA_NOT_READY', content: 'OK' },
+                    readiness: { reindex_required: true, ready_versions: 36, eligible_versions: 37,
+                        lexical_ready_bags: 36, dense_ready_bags: 36 },
+                } : {}),
                 items: Array.from({ length: Math.max(0, Math.min(body.size, resultCount - (body.page - 1) * body.size)) }, (_, offset) => ({
                 resource_id: `r${(body.page - 1) * 5 + offset + 1}`, resource_title: `Học liệu ${(body.page - 1) * 5 + offset + 1}`, resource_version_id: 'v1', version_number: 1,
                 can_view_file: canViewFile,
@@ -204,6 +213,53 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }))
         await call('Page.enable')
         await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
+        if (process.env.ETL_TEST_LAZY_CATALOG === '1') {
+            holdAuthConfig = false; modelState = 'READY'
+            await open('/search/query-methods?grade_level_id=g1&subject_id=s1&resource_type_code=DOC')
+            await waitFor(() => evaluate("!!document.querySelector('form details summary')"))
+            await delay(300)
+            const closed = catalogCount
+            assert.equal(closed, process.env.ETL_LAZY_BASELINE === '1' ? 3 : 0)
+            assert.equal(await evaluate("document.querySelector('#search-grade').value"), 'g1')
+            await evaluate("document.querySelector('form details summary').focus()")
+            await call('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+            await call('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+            await waitFor(() => evaluate("document.querySelector('#search-grade')?.disabled === false"))
+            assert.equal(catalogCount, 3)
+            await evaluate("document.querySelector('form details').open=false")
+            await delay(100)
+            await evaluate("document.querySelector('form details').open=true")
+            await delay(200)
+            assert.equal(catalogCount, 3, 'reopening does not reload completed options')
+            assert.equal(await evaluate("document.querySelector('#search-subject').value"), 's1')
+            assert.equal(postCount, 0, 'opening filters never searches or mutates')
+            console.log(JSON.stringify({ fixture: 'G1', catalog_requests_closed: closed, after_open_and_reopen: catalogCount }))
+            if (process.env.ETL_LAZY_BASELINE !== '1') {
+                failSubjects = true
+                await open('/search/query-methods')
+                await waitFor(() => evaluate("!!document.querySelector('form details')"))
+                await evaluate("document.querySelector('form details').open=true")
+                await waitFor(() => evaluate("document.body.textContent.includes('Không tải được danh mục.') && !document.querySelector('#search-grade').disabled && !document.querySelector('#search-type').disabled"))
+                const beforeRetry = catalogCount
+                await evaluate("Array.from(document.querySelectorAll('form details button')).find(el => el.textContent === 'Thử lại').click()")
+                await waitFor(() => evaluate("document.querySelector('#search-subject')?.disabled === false"))
+                assert.equal(catalogCount, beforeRetry + 1, 'retry fetches only the failed source')
+                assert.equal(postCount, 0)
+            }
+            return
+        }
+        if (process.env.ETL_TEST_SEARCH_NOTICES_ONLY === '1') {
+            holdAuthConfig = false; modelState = 'READY'; mode = 'metadata-unready'; resultCount = 1
+            for (const role of ['VIEWER', 'ADMIN']) {
+                authRole = role
+                await open('/search/query-methods?q=toan&method=bow')
+                await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 1')"))
+                assert.equal(await evaluate("document.body.textContent.includes('Chỉ mục tìm kiếm metadata chưa sẵn sàng')"), false)
+                assert.equal(await evaluate("document.body.textContent.includes('Một số học liệu chưa sẵn sàng để tìm kiếm')"), false)
+                assert.equal(await evaluate("document.querySelectorAll('article').length"), 1)
+            }
+            return
+        }
         await open('/search')
         await waitFor(() => evaluate("document.querySelector('[role=alert]')?.textContent.includes('Dịch vụ xác thực chưa khả dụng')"))
         assert.equal(await evaluate("document.body.textContent.includes('Đang kiểm tra phiên đăng nhập')"), false)
@@ -231,6 +287,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await click('Theo từ khóa')
         await waitFor(() => evaluate("document.querySelector('fieldset button[aria-pressed=\"true\"]')?.textContent === 'Theo từ khóa'"))
         assert.equal(postCount, 0)
+        await evaluate("document.querySelector('form details').open=true")
         await waitFor(() => evaluate("document.querySelector('#search-grade')?.disabled === false"))
         await evaluate("Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(document.querySelector('#search-query'), 'toán'); document.querySelector('#search-query').dispatchEvent(new Event('input', { bubbles: true }))")
         await evaluate("document.querySelector('form details').open=true")
@@ -306,7 +363,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("!!document.querySelector('article')"), true)
         await click('Cập nhật kết quả')
         await waitFor(() => postCount === beforeVisibilityChange + 1)
-        await waitFor(() => evaluate("document.querySelectorAll('article').length === 0 && document.body.textContent.includes('Chưa tìm thấy học liệu')"))
+        await waitFor(() => evaluate("document.querySelectorAll('article').length === 0 && document.body.textContent.includes('Tìm kiếm chưa đầy đủ')"))
         mode = 'results'
         await click('Cập nhật kết quả')
         await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Học liệu 1')"))
@@ -417,11 +474,11 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         assert.equal(await evaluate("getComputedStyle(document.querySelector('[role=alert]')).color"), 'rgb(185, 28, 28)')
         mode = 'empty'
         await click('Thử lại')
-        await waitFor(() => evaluate("document.body.textContent.includes('Chưa có học liệu lập chỉ mục sẵn sàng')"))
+        await waitFor(() => evaluate("document.body.textContent.includes('Tìm kiếm chưa đầy đủ')"))
         assert.equal(await evaluate("!!document.querySelector('a[href=\"/library/indexing\"]')"), false)
         mode = 'public'
         await open('/search/result?q=toán&method=bow')
-        await waitFor(() => evaluate("document.body.textContent.includes('Chưa có học liệu đủ quyền truy xuất công khai')"))
+        await waitFor(() => evaluate("document.body.textContent.includes('Chưa có kết quả trong phạm vi truy cập')"))
         assert.equal(await evaluate("document.body.textContent.includes('Tra cứu thử nghiệm nội bộ')"), false)
         mode = 'denied'
         await open('/search/result?q=toán&method=hybrid')
@@ -457,7 +514,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         // response must not replace the new route or report server cancellation.
         mode = 'empty'
         await evaluate("history.pushState({}, '', '/search/result?q=new&method=bow'); window.dispatchEvent(new PopStateEvent('popstate'))")
-        await waitFor(() => evaluate("document.body.textContent.includes('Chưa có học liệu lập chỉ mục sẵn sàng')"))
+        await waitFor(() => evaluate("document.body.textContent.includes('Tìm kiếm chưa đầy đủ')"))
         releaseSearch()
         await delay(250)
         assert.equal(await evaluate("document.querySelectorAll('article').length"), 0)
@@ -532,8 +589,9 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         // overview/library/reconciliation assertions below. Full runs are unchanged.
         mode = 'metadata-unready'; resultCount = 0
         await open('/search/query-methods?q=Van%20Lang&method=vector')
-        await waitFor(() => evaluate("document.body.textContent.includes('Chỉ mục tìm kiếm metadata chưa sẵn sàng')"))
-        assert.equal(await evaluate("document.body.textContent.includes('Kết quả hiện tại dựa trên nội dung đã lập chỉ mục')"), true)
+        await waitFor(() => evaluate("!!document.querySelector('h2') && !document.body.textContent.includes('Đang tìm kiếm…') && document.body.textContent.includes('0 kết quả')"))
+        assert.equal(await evaluate("document.body.textContent.includes('Chỉ mục tìm kiếm metadata chưa sẵn sàng')"), false)
+        assert.equal(await evaluate("document.body.textContent.includes('Một số học liệu chưa sẵn sàng để tìm kiếm')"), false)
         mode = 'results'; resultCount = 8
         if (process.env.ETL_TEST_SEARCH_ONLY === '1') return
         await call('Page.navigate', { url: origin + '/overview/summary' })
