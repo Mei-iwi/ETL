@@ -5,6 +5,32 @@
     margin-top: 20px;
 }
 
+.scheduleAdvanced {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+    gap: 16px;
+    padding: 12px 0;
+}
+
+.schedulePlan {
+    min-width: 0;
+    border: 1px solid #e5eaf1;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.schedulePlan label {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.schedulePlan input, .schedulePlan select {
+    max-width: 100%;
+}
+
 .card {
     padding: 24px 28px;
     background-color: #ffffff;

@@ -1,29 +1,80 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import styles from './DataReconciliationPage.module.css'
 import { NoticeDialog } from '../../components/NoticeDialog'
 
-type Plan = { stream: string; enabled: boolean; interval_seconds: number; mode: 'FULL' | 'INCREMENTAL'; repair: boolean }
+export type CalendarPlan = {
+    enabled: boolean; cadence: 'INTERVAL' | 'DAILY' | 'WEEKLY' | 'MONTHLY'
+    hour: number; minute: number; weekday: number; month_day: number
+    timezone: string; interval_seconds: number; repair: boolean; next_run_at?: string | null
+}
+type Plan = {
+    stream: string; enabled: boolean; interval_seconds: number; mode: 'FULL' | 'INCREMENTAL'; repair: boolean
+    calendar_configured?: boolean; fast_schedule?: CalendarPlan; thorough_schedule?: CalendarPlan
+}
 const labels: Record<string, string> = { grades: 'Khối lớp', subjects: 'Môn học', users: 'Người dùng', resources: 'Học liệu', files: 'Kho tệp' }
 const intervals = [60, 300, 600, 900, 1200, 1800, 3600]
 const intervalLabel = (seconds: number) => seconds === 3600 ? '1 tiếng' : `${seconds / 60} phút`
+
+export function calendarDefaults(stream: string, branch: 'fast' | 'thorough'): CalendarPlan {
+    return { enabled: false, cadence: branch === 'fast' ? 'DAILY' : stream === 'files' ? 'MONTHLY' : 'WEEKLY',
+        hour: branch === 'fast' ? 2 : 3, minute: 0, weekday: 6, month_day: 1,
+        timezone: 'Asia/Ho_Chi_Minh', interval_seconds: 1800, repair: false }
+}
+export function calendarPayload(value: CalendarPlan) {
+    if (!['INTERVAL', 'DAILY', 'WEEKLY', 'MONTHLY'].includes(value.cadence)) throw new Error('Chu kỳ không hợp lệ.')
+    for (const [name, number, max, min] of [
+        ['Giờ', value.hour, 23, 0], ['Phút', value.minute, 59, 0],
+        ['Thứ', value.weekday, 6, 0], ['Ngày trong tháng', value.month_day, 28, 1],
+    ] as const) {
+        if (!Number.isInteger(number) || number < min || number > max) throw new Error(`${name} phải từ ${min} đến ${max}.`)
+    }
+    if (!intervals.includes(value.interval_seconds)) throw new Error('Chu kỳ phút/giờ không hợp lệ.')
+    try { new Intl.DateTimeFormat('vi-VN', { timeZone: value.timezone }) }
+    catch { throw new Error('Múi giờ không hợp lệ. Ví dụ: Asia/Ho_Chi_Minh.') }
+    return { enabled: value.enabled, cadence: value.cadence, hour: value.hour, minute: value.minute,
+        weekday: value.weekday, month_day: value.month_day, timezone: value.timezone,
+        interval_seconds: value.interval_seconds, repair: value.repair }
+}
+export function schedulePayload(plan: Plan) {
+    if (plan.calendar_configured) return {
+        fast_schedule: calendarPayload(plan.fast_schedule ?? calendarDefaults(plan.stream, 'fast')),
+        thorough_schedule: calendarPayload(plan.thorough_schedule ?? calendarDefaults(plan.stream, 'thorough')),
+    }
+    return { enabled: plan.enabled, interval_seconds: plan.interval_seconds, mode: plan.mode, repair: plan.repair }
+}
+
+async function readPlans(signal?: AbortSignal) {
+    const response = await fetch('/api/v1/reconciliation/schedules', { signal })
+    if (!response.ok) throw new Error('Không tải được lịch đối soát')
+    return (await response.json() as { items: Plan[] }).items
+}
+async function savePlan(stream: string, payload: object) {
+    const response = await fetch(`/api/v1/reconciliation/schedules/${stream}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        const detail = Array.isArray(body?.detail) ? body.detail.map((item: { msg: string }) => item.msg).join('; ') : body?.detail
+        throw new Error(typeof detail === 'string' ? detail : `Không lưu được lịch (HTTP ${response.status})`)
+    }
+}
 
 export function ReconciliationSchedule() {
     const [plans, setPlans] = useState<Plan[]>([])
     const [common, setCommon] = useState<Omit<Plan, 'stream'>>({ enabled: false, interval_seconds: 1800, mode: 'INCREMENTAL', repair: true })
     const [busy, setBusy] = useState<string | null>(null)
     const [notice, setNotice] = useState('')
+    const saving = useRef(false)
     useEffect(() => {
         const controller = new AbortController()
-        void fetch('/api/v1/reconciliation/schedules', { signal: controller.signal }).then(async response => {
-            if (!response.ok) throw new Error('Không tải được lịch đối soát')
-            const data = await response.json() as { items: Plan[] }
+        void readPlans(controller.signal).then(items => {
             if (controller.signal.aborted) return
-            setPlans(data.items)
-            const first = data.items[0]
-            if (first) setCommon({ enabled: data.items.every(plan => plan.enabled),
-                interval_seconds: data.items.every(plan => plan.interval_seconds === first.interval_seconds) ? first.interval_seconds : 1800,
-                mode: data.items.every(plan => plan.mode === first.mode) ? first.mode : 'INCREMENTAL',
-                repair: data.items.filter(plan => plan.stream !== 'files').every(plan => plan.repair) })
+            setPlans(items)
+            const first = items[0]
+            if (first) setCommon({ enabled: items.every(plan => plan.enabled),
+                interval_seconds: items.every(plan => plan.interval_seconds === first.interval_seconds) ? first.interval_seconds : 1800,
+                mode: items.every(plan => plan.mode === first.mode) ? first.mode : 'INCREMENTAL',
+                repair: items.filter(plan => plan.stream !== 'files').every(plan => plan.repair) })
         }).catch(error => { if (!controller.signal.aborted) setNotice(String(error)) })
         return () => controller.abort()
     }, [])
@@ -31,34 +82,37 @@ export function ReconciliationSchedule() {
     function change(stream: string, values: Partial<Plan>) {
         setPlans(previous => previous.map(plan => plan.stream === stream ? { ...plan, ...values } : plan))
     }
-
-    async function submit(plan: Plan) {
-        setBusy(plan.stream)
-        try {
-            const { stream, ...values } = plan
-            const response = await fetch(`/api/v1/reconciliation/schedules/${stream}`, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(values),
-            })
-            if (!response.ok) throw new Error(`Không lưu/chạy được đối soát (HTTP ${response.status})`)
-            setNotice('Đã lưu lịch trên server. Worker đối soát thực thi cả khi đóng trình duyệt.')
-        } catch (error) { setNotice(error instanceof Error ? error.message : 'Không thực hiện được yêu cầu') }
-        finally { setBusy(null) }
+    function changeCalendar(plan: Plan, branch: 'fast' | 'thorough', values: Partial<CalendarPlan>) {
+        const key = branch === 'fast' ? 'fast_schedule' : 'thorough_schedule'
+        change(plan.stream, { calendar_configured: true,
+            [key]: { ...calendarDefaults(plan.stream, branch), ...plan[key], ...values, next_run_at: null } })
     }
 
+    async function submit(plan: Plan) {
+        if (saving.current) return
+        saving.current = true
+        setBusy(plan.stream)
+        try {
+            await savePlan(plan.stream, schedulePayload(plan))
+            const items = await readPlans()
+            // Preserve unsaved drafts in other rows.
+            setPlans(previous => previous.map(row => row.stream === plan.stream
+                ? items.find(item => item.stream === row.stream) ?? row : row))
+            setNotice('Đã lưu lịch. Worker đối soát thực thi độc lập với Auto Sync.')
+        } catch (error) { setNotice(error instanceof Error ? error.message : 'Không lưu được lịch') }
+        finally { saving.current = false; setBusy(null) }
+    }
     async function submitAll() {
+        if (saving.current) return
+        saving.current = true
         setBusy('all')
         try {
-            const response = await fetch('/api/v1/reconciliation/schedules/all', {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(common),
-            })
-            if (!response.ok) throw new Error(`Không lưu/chạy được đối soát chung (HTTP ${response.status})`)
-            setPlans(previous => previous.map(plan => ({ ...plan, ...common,
-                repair: plan.stream !== 'files' && common.repair })))
-            setNotice('Đã áp dụng cấu hình chung cho tất cả luồng. Có thể lưu cấu hình riêng ở từng dòng.')
-        } catch (error) { setNotice(error instanceof Error ? error.message : 'Không thực hiện được yêu cầu chung') }
-        finally { setBusy(null) }
+            await savePlan('all', schedulePayload({ stream: 'all', ...common }))
+            const items = await readPlans()
+            setPlans(items)
+            setNotice('Đã lưu chu kỳ phút/giờ chung. Lịch nâng cao đã cấu hình được giữ nguyên.')
+        } catch (error) { setNotice(error instanceof Error ? error.message : 'Không lưu được lịch chung') }
+        finally { saving.current = false; setBusy(null) }
     }
 
     return <section aria-label="Lịch đối soát độc lập">
@@ -70,41 +124,89 @@ export function ReconciliationSchedule() {
                     <tr className={styles.sharedSchedule} data-audit-stream="all">
                         <td><strong>Tất cả luồng</strong></td>
                         <td><input aria-label="Tự động tất cả luồng" type="checkbox" checked={common.enabled}
-                            onChange={event => setCommon(previous => ({ ...previous, enabled: event.target.checked }))} /></td>
-                        <td><select className={styles.select} aria-label="Chu kỳ chung" value={common.interval_seconds}
+                            disabled={busy !== null} onChange={event => setCommon(previous => ({ ...previous, enabled: event.target.checked }))} /></td>
+                        <td><select className={styles.select} aria-label="Chu kỳ chung" value={common.interval_seconds} disabled={busy !== null}
                             onChange={event => setCommon(previous => ({ ...previous, interval_seconds: Number(event.target.value) }))}>
                             {intervals.map(seconds => <option key={seconds} value={seconds}>{intervalLabel(seconds)}</option>)}
                         </select></td>
-                        <td><select className={styles.select} aria-label="Chế độ quét chung" value={common.mode}
+                        <td><select className={styles.select} aria-label="Chế độ quét chung" value={common.mode} disabled={busy !== null}
                             onChange={event => setCommon(previous => ({ ...previous, mode: event.target.value as Plan['mode'] }))}>
-                            <option value="INCREMENTAL">Incremental</option><option value="FULL">Full</option>
+                            <option value="INCREMENTAL">Incremental / LIGHT</option><option value="FULL">Full metadata / DEEP SHA-256</option>
                         </select></td>
-                        <td><input aria-label="Tự đồng bộ metadata khi lệch tất cả luồng" type="checkbox" checked={common.repair}
+                        <td><input aria-label="Tự đồng bộ metadata khi lệch tất cả luồng" type="checkbox" checked={common.repair} disabled={busy !== null}
                             onChange={event => setCommon(previous => ({ ...previous, repair: event.target.checked }))} /></td>
-                        <td><div className={styles.scheduleActions}>
-                            <button className={styles.primaryButton} disabled={busy !== null || plans.length !== 5} onClick={() => void submitAll()}>Lưu chung</button>
-                        </div></td>
+                        <td><button className={styles.primaryButton} disabled={busy !== null || plans.length !== 5}
+                            title="Áp dụng lịch phút/giờ cũ, giữ nguyên lịch nâng cao" onClick={() => void submitAll()}>Lưu chung</button></td>
                     </tr>
-                    {plans.map(plan => <tr key={plan.stream} data-audit-stream={plan.stream}>
-                    <td>{labels[plan.stream]}</td>
-                    <td><input aria-label={`Tự động ${labels[plan.stream]}`} type="checkbox" checked={plan.enabled}
-                        onChange={event => change(plan.stream, { enabled: event.target.checked })} /></td>
-                    <td><select className={styles.select} aria-label={`Chu kỳ ${labels[plan.stream]}`} value={plan.interval_seconds}
-                        onChange={event => change(plan.stream, { interval_seconds: Number(event.target.value) })}>
-                        {intervals.map(seconds => <option key={seconds} value={seconds}>{intervalLabel(seconds)}</option>)}
-                    </select></td>
-                    <td><select className={styles.select} aria-label={`Chế độ ${labels[plan.stream]}`} value={plan.mode}
-                        onChange={event => change(plan.stream, { mode: event.target.value as Plan['mode'] })}>
-                        <option value="INCREMENTAL">Incremental</option><option value="FULL">Full</option>
-                    </select></td>
-                    <td>{plan.stream === 'files' ? 'Chỉ kiểm tra' : <input type="checkbox" checked={plan.repair}
-                        aria-label={`Tự đồng bộ khi lệch ${labels[plan.stream]}`}
-                        onChange={event => change(plan.stream, { repair: event.target.checked })} />}</td>
-                    <td><div className={styles.scheduleActions}><button className={styles.primaryButton} disabled={busy !== null} onClick={() => void submit(plan)}>Lưu</button>
-                        </div></td>
-                </tr>)}</tbody>
+                    {plans.map(plan => <Fragment key={plan.stream}>
+                        <tr data-audit-stream={plan.stream}>
+                            <td>{labels[plan.stream]}</td>
+                            <td>{plan.calendar_configured ? 'Theo từng lịch' : <input aria-label={`Tự động ${labels[plan.stream]}`} type="checkbox"
+                                checked={plan.enabled} disabled={busy !== null} onChange={event => change(plan.stream, { enabled: event.target.checked })} />}</td>
+                            <td>{plan.calendar_configured ? 'Ngày / tuần / tháng' : <select className={styles.select} aria-label={`Chu kỳ ${labels[plan.stream]}`}
+                                value={plan.interval_seconds} disabled={busy !== null} onChange={event => change(plan.stream, { interval_seconds: Number(event.target.value) })}>
+                                {intervals.map(seconds => <option key={seconds} value={seconds}>{intervalLabel(seconds)}</option>)}
+                            </select>}</td>
+                            <td>{plan.calendar_configured ? 'FAST + THOROUGH' : <select className={styles.select} aria-label={`Chế độ ${labels[plan.stream]}`}
+                                value={plan.mode} disabled={busy !== null} onChange={event => change(plan.stream, { mode: event.target.value as Plan['mode'] })}>
+                                <option value="INCREMENTAL">Incremental / LIGHT</option><option value="FULL">Full metadata / DEEP SHA-256</option>
+                            </select>}</td>
+                            <td>{plan.stream === 'files' ? 'Chỉ kiểm tra' : plan.calendar_configured ? 'Theo từng lịch' : <input type="checkbox" checked={plan.repair}
+                                disabled={busy !== null} aria-label={`Tự đồng bộ khi lệch ${labels[plan.stream]}`}
+                                onChange={event => change(plan.stream, { repair: event.target.checked })} />}</td>
+                            <td><button className={styles.primaryButton} disabled={busy !== null} onClick={() => void submit(plan)}>Lưu</button></td>
+                        </tr>
+                        <tr><td colSpan={6}><details>
+                            <summary>Cấu hình nâng cao — {labels[plan.stream]}</summary>
+                            <div className={styles.scheduleAdvanced}>
+                                {(['fast', 'thorough'] as const).map(branch => <CalendarControls key={branch} stream={plan.stream} branch={branch}
+                                    value={plan[branch === 'fast' ? 'fast_schedule' : 'thorough_schedule'] ?? calendarDefaults(plan.stream, branch)}
+                                    disabled={busy !== null} onChange={values => changeCalendar(plan, branch, values)} />)}
+                            </div>
+                        </details></td></tr>
+                    </Fragment>)}
+                </tbody>
             </table>
         </div>
         {notice && <NoticeDialog title="Lịch đối soát" message={notice} onClose={() => setNotice('')} />}
     </section>
+}
+
+export function CalendarControls({ stream, branch, value, disabled, onChange }: {
+    stream: string; branch: 'fast' | 'thorough'; value: CalendarPlan; disabled: boolean; onChange: (values: Partial<CalendarPlan>) => void
+}) {
+    const prefix = `${labels[stream]} ${branch === 'fast' ? 'FAST' : 'THOROUGH'}`
+    const time = `${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}`
+    return <fieldset className={styles.schedulePlan} disabled={disabled}>
+        <legend>{branch === 'fast' ? 'Thường xuyên' : 'Toàn diện'} ({stream === 'files'
+            ? branch === 'fast' ? 'LIGHT — chỉ metadata/kích thước' : 'DEEP — SHA-256'
+            : branch === 'fast' ? 'Metadata Incremental' : 'Metadata Full + IDS'})</legend>
+        <label><input type="checkbox" aria-label={`Bật ${prefix}`} checked={value.enabled}
+            onChange={event => onChange({ enabled: event.target.checked })} /> Bật lịch</label>
+        <label>Chu kỳ <select className={styles.select} aria-label={`Chu kỳ ${prefix}`} value={value.cadence}
+            onChange={event => onChange({ cadence: event.target.value as CalendarPlan['cadence'] })}>
+            <option value="DAILY">Hằng ngày</option><option value="WEEKLY">Hằng tuần</option>
+            <option value="MONTHLY">Hằng tháng</option><option value="INTERVAL">Phút / giờ</option>
+        </select></label>
+        {value.cadence === 'INTERVAL' ? <label>Khoảng cách <select className={styles.select} aria-label={`Khoảng cách ${prefix}`}
+            value={value.interval_seconds} onChange={event => onChange({ interval_seconds: Number(event.target.value) })}>
+            {intervals.map(seconds => <option key={seconds} value={seconds}>{intervalLabel(seconds)}</option>)}
+        </select></label> : <>
+            {value.cadence === 'WEEKLY' && <label>Thứ <select className={styles.select} aria-label={`Thứ ${prefix}`} value={value.weekday}
+                onChange={event => onChange({ weekday: Number(event.target.value) })}>
+                {['Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy', 'Chủ nhật'].map((day, index) => <option key={day} value={index}>{day}</option>)}
+            </select></label>}
+            {value.cadence === 'MONTHLY' && <label>Ngày (1–28) <input className={styles.select} type="number" min={1} max={28}
+                aria-label={`Ngày ${prefix}`} value={value.month_day} onChange={event => onChange({ month_day: Number(event.target.value) })} /></label>}
+            <label>Giờ chạy <input className={styles.select} type="time" aria-label={`Giờ ${prefix}`} value={time}
+                onChange={event => { const [hour, minute] = event.target.value.split(':').map(Number); onChange({ hour, minute }) }} /></label>
+        </>}
+        <label>Múi giờ <input className={styles.select} aria-label={`Múi giờ ${prefix}`} value={value.timezone}
+            maxLength={64} onChange={event => onChange({ timezone: event.target.value })} /></label>
+        {stream !== 'files' && <label><input type="checkbox" aria-label={`Tự đồng bộ khi lệch ${prefix}`} checked={value.repair}
+            onChange={event => onChange({ repair: event.target.checked })} /> Tự đồng bộ ID metadata lệch</label>}
+        <small>Lần tiếp theo: {value.enabled && value.next_run_at ? new Intl.DateTimeFormat('vi-VN', {
+            dateStyle: 'short', timeStyle: 'short', timeZone: value.timezone,
+        }).format(new Date(value.next_run_at)) : 'Chưa có lịch đã lưu đang bật'}</small>
+    </fieldset>
 }

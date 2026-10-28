@@ -83,8 +83,10 @@ def configure_audit_schedule(request: Request, stream: str, body: 'AuditSchedule
     from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
     container = request.app.state.container
     try:
-        AuditSchedule(container.uow, container.settings).configure(stream, body.model_dump())
-    except ValueError:
+        AuditSchedule(container.uow, container.settings).configure(stream, body.model_dump(exclude_unset=True))
+    except ValueError as error:
+        if str(error) == 'AUDIT_SCHEDULE_BUSY':
+            raise HTTPException(409, 'Lịch đang được cập nhật; vui lòng thử lưu lại.') from None
         raise HTTPException(422, 'INVALID_AUDIT_SCOPE') from None
     return {'status': 'CONFIGURED', 'worker_required': True}
 

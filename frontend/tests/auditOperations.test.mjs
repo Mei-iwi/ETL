@@ -154,7 +154,7 @@ test('schedule checkbox persists on/off only after saving and never enqueues a s
     } }).outputText
     const calls = []
     t.mock.method(globalThis, 'fetch', async (url, options) => {
-        calls.push({ url, ...options }); return Response.json({ status: 'CONFIGURED' })
+        calls.push({ url, ...options }); return Response.json(options?.method === 'PUT' ? { status: 'CONFIGURED' } : { items: [] })
     })
     for (const enabled of [false, true]) {
         const plans = [{ stream: 'subjects', enabled: !enabled, interval_seconds: 60, mode: 'FULL', repair: false }]
@@ -163,7 +163,7 @@ test('schedule checkbox persists on/off only after saving and never enqueues a s
         const exports = {}
         vm.runInNewContext(scheduleCode, { exports, fetch: globalThis.fetch, require: name => {
             if (name.endsWith('.css')) return { default: {} }
-            if (name === 'react') return { ...React, useEffect: () => {}, useState: initial => {
+            if (name === 'react') return { ...React, useEffect: () => {}, useRef: initial => ({ current: initial }), useState: initial => {
                 const key = index++
                 return [key === 0 ? plans : initial, value => updates.set(key, value)]
             } }
@@ -185,7 +185,7 @@ test('schedule checkbox persists on/off only after saving and never enqueues a s
         Object.assign(plans[0], draft[0])
         find(tree, node => node.type === 'button' && node.props.children === 'Lưu')[0].props.onClick()
         await new Promise(resolve => setImmediate(resolve))
-        const saved = calls.at(-1)
+        const saved = calls.findLast(call => call.method === 'PUT')
         assert.equal(saved.url, '/api/v1/reconciliation/schedules/subjects')
         assert.equal(saved.method, 'PUT')
         assert.equal(JSON.parse(saved.body).enabled, enabled)

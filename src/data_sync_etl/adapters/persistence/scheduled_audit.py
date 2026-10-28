@@ -262,7 +262,8 @@ class ScheduledAudit:
         checkpoint.update(coverage_status='CYCLE_VISITED' if exhausted else 'COVERAGE_BEHIND',
             cycle_finished=exhausted, io_concurrency=1)
         # A visited cycle is not a claim that all files have current valid SHA-256.
-        self._save(claim, checkpoint, status='PARTIAL' if not exhausted or checkpoint['not_verified_count'] else 'COMPLETED')
+        self._save(claim, checkpoint, status='PARTIAL' if not exhausted or checkpoint['not_verified_count']
+                   or checkpoint.get('cycle_not_verified_count') else 'COMPLETED')
 
     def _metadata(self, claim):
         checkpoint = dict(claim['checkpoint'])
