@@ -25,6 +25,16 @@ export function calendarDefaults(stream: string, branch: 'fast' | 'thorough'): C
         hour: branch === 'fast' ? 2 : 3, minute: 0, weekday: 6, month_day: 1,
         timezone: 'Asia/Ho_Chi_Minh', interval_seconds: 1800, repair: false }
 }
+export function normalizePlan(plan: Plan): Plan {
+    if (plan.calendar_configured) return plan
+    const branch = plan.mode === 'FULL' ? 'thorough' : 'fast'
+    const converted = { ...calendarDefaults(plan.stream, branch), cadence: 'INTERVAL' as const,
+        interval_seconds: plan.interval_seconds, enabled: plan.enabled,
+        repair: plan.stream !== 'files' && plan.repair }
+    return { ...plan, calendar_configured: true,
+        fast_schedule: branch === 'fast' ? converted : calendarDefaults(plan.stream, 'fast'),
+        thorough_schedule: branch === 'thorough' ? converted : calendarDefaults(plan.stream, 'thorough') }
+}
 export function calendarPayload(value: CalendarPlan) {
     if (!['INTERVAL', 'DAILY', 'WEEKLY', 'MONTHLY'].includes(value.cadence)) throw new Error('Chu kỳ không hợp lệ.')
     for (const [name, number, max, min] of [
@@ -41,17 +51,17 @@ export function calendarPayload(value: CalendarPlan) {
         interval_seconds: value.interval_seconds, repair: value.repair }
 }
 export function schedulePayload(plan: Plan) {
-    if (plan.calendar_configured) return {
+    plan = normalizePlan(plan)
+    return {
         fast_schedule: calendarPayload(plan.fast_schedule ?? calendarDefaults(plan.stream, 'fast')),
         thorough_schedule: calendarPayload(plan.thorough_schedule ?? calendarDefaults(plan.stream, 'thorough')),
     }
-    return { enabled: plan.enabled, interval_seconds: plan.interval_seconds, mode: plan.mode, repair: plan.repair }
 }
 
 async function readPlans(signal?: AbortSignal) {
     const response = await fetch('/api/v1/reconciliation/schedules', { signal })
     if (!response.ok) throw new Error('Không tải được lịch đối soát')
-    return (await response.json() as { items: Plan[] }).items
+    return (await response.json() as { items: Plan[] }).items.map(normalizePlan)
 }
 async function savePlan(stream: string, payload: object) {
     const response = await fetch(`/api/v1/reconciliation/schedules/${stream}`, {
@@ -64,12 +74,10 @@ async function savePlan(stream: string, payload: object) {
     }
 }
 
-type Editor = { plan: Plan; branch: 'legacy' | 'fast' | 'thorough' }
+type Editor = { plan: Plan; branch: 'fast' | 'thorough' }
 
 export function scheduleSummary(plan: Plan) {
-    if (!plan.calendar_configured) return plan.enabled
-        ? [`${plan.stream === 'files' ? plan.mode === 'FULL' ? 'DEEP' : 'LIGHT' : plan.mode === 'FULL' ? 'Full metadata' : 'Incremental'} · ${intervalLabel(plan.interval_seconds)}`]
-        : ['Chưa bật']
+    plan = normalizePlan(plan)
     const summaries = (['fast', 'thorough'] as const).flatMap(branch => {
         const value = plan[branch === 'fast' ? 'fast_schedule' : 'thorough_schedule']
         if (!value?.enabled) return []
@@ -96,12 +104,9 @@ export function ReconciliationSchedule() {
         return () => controller.abort()
     }, [])
 
-    function change(values: Partial<Plan>) {
-        setEditor(previous => previous ? { ...previous, plan: { ...previous.plan, ...values } } : previous)
-    }
     function changeCalendar(values: Partial<CalendarPlan>) {
         setEditor(previous => {
-            if (!previous || previous.branch === 'legacy') return previous
+            if (!previous) return previous
             const key = previous.branch === 'fast' ? 'fast_schedule' : 'thorough_schedule'
             return { ...previous, plan: { ...previous.plan, [key]: {
                 ...calendarDefaults(previous.plan.stream, previous.branch), ...previous.plan[key], ...values, next_run_at: null,
@@ -111,7 +116,7 @@ export function ReconciliationSchedule() {
     async function submit() {
         if (!editor || saving.current) return
         saving.current = true
-        const plan = { ...editor.plan, calendar_configured: editor.branch !== 'legacy' }
+        const plan = editor.plan
         setBusy(plan.stream)
         try {
             await savePlan(plan.stream, schedulePayload(plan))
@@ -135,7 +140,11 @@ export function ReconciliationSchedule() {
                     <td><button className={styles.secondaryButton} disabled={busy !== null}
                         aria-label={`Thiết lập ${labels[plan.stream]}`}
                         aria-expanded={editor?.plan.stream === plan.stream}
-                        onClick={() => setEditor({ plan, branch: plan.calendar_configured ? 'fast' : 'legacy' })}>Thiết lập</button></td>
+                        onClick={() => {
+                            const normalized = normalizePlan(plan)
+                            setEditor({ plan: normalized, branch: normalized.thorough_schedule?.enabled
+                                && !normalized.fast_schedule?.enabled || plan.mode === 'FULL' && !plan.calendar_configured ? 'thorough' : 'fast' })
+                        }}>Thiết lập</button></td>
                 </tr>)}</tbody>
             </table>
         </div>
@@ -144,28 +153,13 @@ export function ReconciliationSchedule() {
             <label className={styles.scheduleChoice}>Chế độ quét
                 <select className={styles.select} aria-label="Chọn lịch cấu hình" value={editor.branch} disabled={busy !== null}
                     onChange={event => setEditor(previous => previous ? { ...previous, branch: event.target.value as Editor['branch'] } : previous)}>
-                    {!editor.plan.calendar_configured && <option value="legacy">Lịch phút/giờ hiện tại</option>}
                     <option value="fast">{scanModeLabel(editor.plan.stream, 'fast')} — thường xuyên</option>
                     <option value="thorough">{scanModeLabel(editor.plan.stream, 'thorough')} — toàn diện</option>
                 </select>
             </label>
-            {editor.branch === 'legacy' ? <fieldset className={styles.schedulePlan} disabled={busy !== null} aria-label="Lịch phút/giờ">
-                <label><input aria-label={`Tự động ${labels[editor.plan.stream]}`} type="checkbox" checked={editor.plan.enabled}
-                    onChange={event => change({ enabled: event.target.checked })} /> Bật lịch</label>
-                <label>Chu kỳ <select className={styles.select} aria-label="Chu kỳ" value={editor.plan.interval_seconds}
-                    onChange={event => change({ interval_seconds: Number(event.target.value) })}>
-                    {intervals.map(seconds => <option key={seconds} value={seconds}>{intervalLabel(seconds)}</option>)}
-                </select></label>
-                <label>Chế độ <select className={styles.select} aria-label="Chế độ quét" value={editor.plan.mode}
-                    onChange={event => change({ mode: event.target.value as Plan['mode'] })}>
-                    <option value="INCREMENTAL">{editor.plan.stream === 'files' ? 'LIGHT' : 'Incremental'}</option>
-                    <option value="FULL">{editor.plan.stream === 'files' ? 'DEEP — SHA-256' : 'Full metadata'}</option>
-                </select></label>
-                {editor.plan.stream !== 'files' && <label><input type="checkbox" checked={editor.plan.repair}
-                    aria-label="Tự đồng bộ khi lệch" onChange={event => change({ repair: event.target.checked })} /> Tự đồng bộ khi lệch</label>}
-            </fieldset> : <CalendarControls compact stream={editor.plan.stream} branch={editor.branch} disabled={busy !== null}
+            <CalendarControls compact stream={editor.plan.stream} branch={editor.branch} disabled={busy !== null}
                 value={editor.plan[editor.branch === 'fast' ? 'fast_schedule' : 'thorough_schedule'] ?? calendarDefaults(editor.plan.stream, editor.branch)}
-                onChange={changeCalendar} />}
+                onChange={changeCalendar} />
             <div className={styles.actionsBar}>
                 <button className={styles.primaryButton} disabled={busy !== null} onClick={() => void submit()}>Lưu</button>
                 <button className={styles.secondaryButton} disabled={busy !== null} onClick={() => setEditor(null)}>Hủy</button>

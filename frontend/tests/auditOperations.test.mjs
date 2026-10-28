@@ -161,11 +161,13 @@ test('schedule checkbox persists on/off only after saving and never enqueues a s
         let index = 0
         const updates = new Map()
         const exports = {}
+        let editor
         vm.runInNewContext(scheduleCode, { exports, fetch: globalThis.fetch, require: name => {
             if (name.endsWith('.css')) return { default: {} }
             if (name === 'react') return { ...React, useEffect: () => {}, useRef: initial => ({ current: initial }), useState: initial => {
                 const key = index++
-                return [key === 0 ? plans : key === 1 ? { plan: plans[0], branch: 'legacy' } : initial, value => updates.set(key, value)]
+                if (key === 1) editor ??= { plan: exports.normalizePlan(plans[0]), branch: 'thorough' }
+                return [key === 0 ? plans : key === 1 ? editor : initial, value => updates.set(key, value)]
             } }
             if (name.includes('NoticeDialog')) return { NoticeDialog: () => null }
             return require(name)
@@ -176,18 +178,19 @@ test('schedule checkbox persists on/off only after saving and never enqueues a s
             if (Array.isArray(node)) return node.flatMap(child => find(child, predicate))
             return (predicate(node) ? [node] : []).concat(find(node.props?.children, predicate))
         }
-        const checkbox = find(tree, node => node.type === 'input' && node.props['aria-label'] === 'Tự động Môn học')[0]
+        const controls = find(tree, node => node.type === exports.CalendarControls)[0]
+        const checkbox = find(controls.type(controls.props), node => node.type === 'input' && node.props['aria-label'] === 'Bật Môn học THOROUGH')[0]
         const before = calls.length
         checkbox.props.onChange({ target: { checked: enabled } })
         assert.equal(calls.length, before)
-        const draft = updates.get(1)({ plan: plans[0], branch: 'legacy' })
+        const draft = updates.get(1)(editor)
         // Apply the draft as React would on its next render.
-        Object.assign(plans[0], draft.plan)
+        Object.assign(editor.plan, draft.plan)
         find(tree, node => node.type === 'button' && node.props.children === 'Lưu')[0].props.onClick()
         await new Promise(resolve => setImmediate(resolve))
         const saved = calls.findLast(call => call.method === 'PUT')
         assert.equal(saved.url, '/api/v1/reconciliation/schedules/subjects')
         assert.equal(saved.method, 'PUT')
-        assert.equal(JSON.parse(saved.body).enabled, enabled)
+        assert.equal(JSON.parse(saved.body).thorough_schedule.enabled, enabled)
     }
 })

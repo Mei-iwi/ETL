@@ -24,7 +24,7 @@ function runtime(plans = [], fetcher = () => { throw new Error('Unexpected reque
             useState: initial => {
                 const key = index++
                 return [key === 0 ? plans : key === 1 ? editor === undefined
-                    ? plans[0] ? { plan: plans[0], branch: plans[0].calendar_configured ? 'fast' : 'legacy' } : null
+                    ? plans[0] ? { plan: exports.normalizePlan(plans[0]), branch: plans[0].mode === 'FULL' ? 'thorough' : 'fast' } : null
                     : editor : initial, value => updates.set(key, value)]
             },
         }
@@ -91,8 +91,12 @@ test('payload validation blocks invalid calendar values and never sends server-o
     assert.equal(advanced.thorough_schedule.cadence, 'MONTHLY')
     assert.equal('next_run_at' in advanced.thorough_schedule, false)
     assert.equal('calendar_configured' in advanced, false)
-    assert.deepEqual(plain(schedulePayload({ stream: 'subjects', enabled: true, interval_seconds: 60, mode: 'FULL', repair: true })),
-        { enabled: true, interval_seconds: 60, mode: 'FULL', repair: true })
+    const converted = schedulePayload({ stream: 'subjects', enabled: true, interval_seconds: 60, mode: 'FULL', repair: true })
+    assert.equal(converted.thorough_schedule.cadence, 'INTERVAL')
+    assert.equal(converted.thorough_schedule.interval_seconds, 60)
+    assert.equal(converted.thorough_schedule.enabled, true)
+    assert.equal(converted.thorough_schedule.repair, true)
+    assert.equal(converted.fast_schedule.enabled, false)
 })
 
 test('advanced save sends both branches once, reloads server next time and preserves other drafts', async () => {
@@ -196,7 +200,7 @@ test('shared form changes only the draft and retains both schedule branches', ()
 test('compact summary reflects only enabled schedules and preserves legacy intervals', () => {
     const api = runtime()
     assert.deepEqual(plain(api.scheduleSummary({ stream: 'users', enabled: false })), ['Chưa bật'])
-    assert.deepEqual(plain(api.scheduleSummary({ stream: 'files', enabled: true, mode: 'FULL', interval_seconds: 300 })), ['DEEP · 5 phút'])
+    assert.deepEqual(plain(api.scheduleSummary({ stream: 'files', enabled: true, mode: 'FULL', interval_seconds: 300 })), ['DEEP — SHA-256 · 5 phút'])
     const item = { stream: 'subjects', calendar_configured: true,
         fast_schedule: { ...api.calendarDefaults('subjects', 'fast'), enabled: true },
         thorough_schedule: { ...api.calendarDefaults('subjects', 'thorough'), enabled: true } }
@@ -204,4 +208,27 @@ test('compact summary reflects only enabled schedules and preserves legacy inter
     assert.equal(result.length, 2)
     assert.match(result[0], /Incremental · Hằng ngày 02:00/)
     assert.match(result[1], /Full metadata \+ IDS · Chủ nhật 03:00/)
+})
+
+test('all prior interval schedules open in one form with no old configuration option', () => {
+    const helper = runtime()
+    for (const stream of ['grades', 'subjects', 'users', 'resources', 'files']) {
+        for (const mode of ['INCREMENTAL', 'FULL']) for (const enabled of [false, true]) {
+            const stored = { stream, mode, enabled, interval_seconds: 300, repair: true }
+            const normalized = helper.normalizePlan(stored)
+            const branch = mode === 'FULL' ? 'thorough' : 'fast'
+            const value = normalized[`${branch}_schedule`]
+            assert.equal(value.cadence, 'INTERVAL')
+            assert.equal(value.interval_seconds, 300)
+            assert.equal(value.enabled, enabled)
+            assert.equal(value.repair, stream !== 'files')
+            assert.equal(normalized[branch === 'fast' ? 'thorough_schedule' : 'fast_schedule'].enabled, false)
+            assert.equal(stored.calendar_configured, undefined)
+            const api = runtime([stored], undefined, { plan: normalized, branch })
+            const tree = api.ReconciliationSchedule()
+            const select = find(tree, node => node.type === 'select' && node.props['aria-label'] === 'Chọn lịch cấu hình')[0]
+            assert.deepEqual(find(select, node => node.type === 'option').map(option => option.props.value), ['fast', 'thorough'])
+            assert.doesNotMatch(renderToStaticMarkup(tree), /Lịch phút\/giờ hiện tại|cấu hình cũ/)
+        }
+    }
 })
