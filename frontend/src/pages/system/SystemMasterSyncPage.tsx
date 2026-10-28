@@ -44,9 +44,9 @@ export function SystemMasterSyncLayout() {
     return <section className={styles.page}>
         <h1>Đồng bộ dữ liệu nguồn</h1>
         <nav className={styles.errorTabs} aria-label="Nhóm đồng bộ dữ liệu">
-            <NavLink to="/library/source-sync" end>Cấu hình đồng bộ</NavLink>
-            <NavLink to="/library/source-sync/files" end>Tệp học liệu từ nguồn</NavLink>
             {canVisit('/library/source-sync/reconciliation', principal) && <NavLink to="/library/source-sync/reconciliation" end>Đối soát toàn vẹn dữ liệu</NavLink>}
+            <NavLink to="/library/source-sync" end>Đồng bộ dữ liệu</NavLink>
+            <NavLink to="/library/source-sync/files" end>Tệp học liệu từ nguồn</NavLink>
         </nav>
         <Outlet />
     </section>
@@ -72,6 +72,7 @@ export function SystemMasterSyncPage() {
         let timer: number | undefined
 
         async function pollStatus() {
+            if (document.hidden) return
             if (timer !== undefined) window.clearTimeout(timer)
             controller?.abort()
             const requestController = new AbortController()
@@ -96,7 +97,7 @@ export function SystemMasterSyncPage() {
             } finally {
                 if (active && controller === requestController) {
                     setStatusLoading(false)
-                    timer = window.setTimeout(pollStatus, document.hidden ? 15000 : 2000)
+                    timer = window.setTimeout(pollStatus, 10000)
                 }
             }
         }
@@ -105,14 +106,12 @@ export function SystemMasterSyncPage() {
             if (!document.hidden) void pollStatus()
         }
         document.addEventListener('visibilitychange', refreshWhenVisible)
-        window.addEventListener('focus', refreshWhenVisible)
         void pollStatus()
         return () => {
             active = false
             if (timer !== undefined) window.clearTimeout(timer)
             controller?.abort()
             document.removeEventListener('visibilitychange', refreshWhenVisible)
-            window.removeEventListener('focus', refreshWhenVisible)
         }
     }, [statusRefresh])
 
@@ -233,7 +232,7 @@ export function SystemMasterSyncPage() {
                 {syncStatus && (
                     <div className={styles.autoPanel}>
                         <div className={styles.autoHeader}>
-                            <strong>Tự động đồng bộ</strong>
+                            <strong>Đối soát rồi đồng bộ lệch (lịch tương thích)</strong>
                             <span>
                                 {syncStatus.auto_supported
                                     ? 'Khả dụng'
@@ -283,7 +282,7 @@ export function SystemMasterSyncPage() {
                     </div>
                 )}
                 <details className={styles.manualSync}>
-                    <summary>Khởi tạo / đối soát</summary>
+                    <summary>Đồng bộ thủ công</summary>
                     <button className={styles.button} type="button" disabled={syncInProgress || autoPending || !syncStatus}
                         onClick={() => void handleManualSync('FULL')}>{loading && runningMode === 'FULL' ? 'Đang chạy Full...' : 'Đồng bộ Full'}</button>
                     <button className={styles.button} type="button" disabled={syncInProgress || autoPending || !syncStatus}
@@ -342,7 +341,9 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
         let active = true
         let timer: number | undefined
         let controller: AbortController | undefined
+        let nextCountAt = 0
         async function pollFiles() {
+            if (document.hidden) return
             if (timer !== undefined) window.clearTimeout(timer)
             controller?.abort()
             const requestController = new AbortController()
@@ -351,10 +352,13 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
             try {
                 const response = await getSourceSyncFiles(cursor, requestController.signal, failedOnly ? {
                     size: 7,
+                    includeTotal: Date.now() >= nextCountAt,
                     status: retryableOnly === undefined ? 'failed' : retryableOnly ? 'failed-retryable' : 'failed-blocked',
-                } : { size: 7 })
+                } : { size: 7, includeTotal: Date.now() >= nextCountAt })
                 if (active && !requestController.signal.aborted && revision === filesRevisionRef.current && !retryingRef.current) {
-                    setFiles(response)
+                    if (response.total_pages !== null && response.total_pages !== undefined) nextCountAt = Date.now() + 60000
+                    setFiles(previous => ({ ...response, total: response.total ?? previous?.total,
+                        total_pages: response.total_pages ?? previous?.total_pages }))
                     onError('')
                 }
             } catch (caughtError) {
@@ -364,7 +368,7 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
             } finally {
                 if (active && controller === requestController) {
                     setLoading(false)
-                    timer = window.setTimeout(pollFiles, document.hidden ? 15000 : 2000)
+                    timer = window.setTimeout(pollFiles, 10000)
                 }
             }
         }
@@ -372,14 +376,12 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
             if (!document.hidden) void pollFiles()
         }
         document.addEventListener('visibilitychange', refreshWhenVisible)
-        window.addEventListener('focus', refreshWhenVisible)
         void pollFiles()
         return () => {
             active = false
             controller?.abort()
             if (timer !== undefined) window.clearTimeout(timer)
             document.removeEventListener('visibilitychange', refreshWhenVisible)
-            window.removeEventListener('focus', refreshWhenVisible)
         }
     }, [cursor, refresh, onError, failedOnly, retryableOnly])
 
@@ -505,11 +507,11 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
                     </table>
                 </div>
             )}
-            {(cursors.length > 1 || files?.next_cursor) && (
+            {files && (
                 <div className={styles.pagination}>
                     <button className={styles.button} type="button" disabled={loading || cursors.length === 1}
                         onClick={() => changePage(cursors.slice(0, -1))}>Trước</button>
-                    <span>Trang {cursors.length}</span>
+                    <span>Trang {cursors.length} / {files.total_pages !== null && files.total_pages !== undefined ? Math.max(1, files.total_pages) : '…'}</span>
                     <button className={styles.button} type="button" disabled={loading || !files?.next_cursor}
                         onClick={() => { if (files?.next_cursor) changePage([...cursors, files.next_cursor]) }}>Sau</button>
                 </div>

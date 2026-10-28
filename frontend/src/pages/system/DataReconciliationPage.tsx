@@ -10,6 +10,7 @@ import type {
     ReconciliationLatestReport,
 } from '../../types/reconciliation'
 import styles from './DataReconciliationPage.module.css'
+import { ReconciliationSchedule } from './ReconciliationSchedule'
 
 function formatBytes(bytes?: number | null): string {
     if (bytes === undefined || bytes === null || bytes === 0) return '0 B'
@@ -94,7 +95,6 @@ export function DataReconciliationPage() {
     const [reconciling, setReconciling] = useState(false)
     const [error, setError] = useState('')
     const [notice, setNotice] = useState<{ title: string; message: string } | null>(null)
-    const [automatic, setAutomatic] = useState(false)
     const running = useRef(false)
     const posting = useRef(false)
     const startedRun = useRef<string | null>(null)
@@ -102,11 +102,6 @@ export function DataReconciliationPage() {
 
     // CHẾ ĐỘ CHẠY & PHẠM VI ĐỐI SOÁT
     const [reconcileMode, setReconcileMode] = useState<'INCREMENTAL' | 'FULL'>('INCREMENTAL')
-    const [isAutoRunning, setIsAutoRunning] = useState<boolean>(false)
-    const [autoInterval, setAutoInterval] = useState<number>(60)
-    const [autoHealEnabled, setAutoHealEnabled] = useState<boolean>(false)
-    const [countdown, setCountdown] = useState<number>(60)
-    const [lastAutoRunAt, setLastAutoRunAt] = useState<string | null>(null)
     const [lastExecutionTimeMs, setLastExecutionTimeMs] = useState<number | null>(null)
 
     // MODAL THÔNG BÁO GIỮA MÀN HÌNH
@@ -171,7 +166,12 @@ export function DataReconciliationPage() {
 
     useEffect(() => {
         if (!reconciling) return
-        const timer = window.setInterval(() => { void loadData() }, 2000)
+        let inFlight = false
+        const timer = window.setInterval(() => {
+            if (document.hidden || inFlight) return
+            inFlight = true
+            void loadData().finally(() => { inFlight = false })
+        }, 5000)
         return () => window.clearInterval(timer)
     }, [reconciling, loadData])
 
@@ -183,6 +183,9 @@ export function DataReconciliationPage() {
         setError('')
         try {
             const result = await triggerReconciliation(selectedStream, dryRun, reconcileMode)
+            if (!['COMPLETED', 'PARTIAL', 'RUNNING', 'BLOCKED'].includes(result.status)) {
+                throw new Error(`Đối soát chưa hoàn tất (${result.status}). Kiểm tra worker và trạng thái thử lại.`)
+            }
             if (result.execution_time_ms !== undefined) {
                 setLastExecutionTimeMs(result.execution_time_ms)
             }
@@ -192,7 +195,7 @@ export function DataReconciliationPage() {
                 await loadData()
                 return
             }
-            const modeText = reconcileMode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'
+            const modeText = result.mode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'
             const timeText = result.execution_time_ms !== undefined ? ` (${result.execution_time_ms}ms)` : ''
             setNotice({ title: 'Kết quả đối soát', message: result.status === 'BLOCKED'
                 ? `Đã quét xong đối soát (${modeText}). Có sai lệch vượt ngưỡng an toàn; dữ liệu chưa được thay đổi.`
@@ -213,66 +216,6 @@ export function DataReconciliationPage() {
             }
         }
     }, [selectedStream, reconcileMode, loadData])
-
-    const executeReconciliation = useCallback(async (dryRun: boolean, isAuto: boolean = false) => {
-        await handleRunReconcile(dryRun)
-        if (isAuto) setLastAutoRunAt(new Date().toLocaleTimeString('vi-VN'))
-    }, [handleRunReconcile])
-
-    // TIMER CHẠY TỰ ĐỘNG
-    useEffect(() => {
-        if (!isAutoRunning) {
-            return
-        }
-
-        setCountdown(autoInterval)
-
-        const timer = setInterval(() => {
-            setCountdown((prev) => {
-                if (prev <= 1) {
-                    void executeReconciliation(!autoHealEnabled, true)
-                    return autoInterval
-                }
-                return prev - 1
-            })
-        }, 1000)
-
-        return () => clearInterval(timer)
-    }, [isAutoRunning, autoInterval, autoHealEnabled, executeReconciliation])
-
-    const handleToggleAuto = (enabled: boolean) => {
-        if (enabled && autoHealEnabled) {
-            setConfirmModal({
-                title: 'Kích hoạt tự động phục hồi',
-                message: `Hệ thống sẽ đối soát VÀ tự phục hồi định kỳ mỗi ${autoInterval}s (${reconcileMode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'}). Bạn có chắc chắn muốn kích hoạt?`,
-                onConfirm: () => {
-                    setConfirmModal(null)
-                    setIsAutoRunning(true)
-                },
-            })
-        } else {
-            setIsAutoRunning(enabled)
-        }
-    }
-
-    function handleAutoHealClick() {
-        setConfirmModal({
-            title: 'Xác nhận tự phục hồi dữ liệu',
-            message:
-                'Hệ thống sẽ đối soát toàn vẹn và tự động đánh dấu xóa mềm (Tombstone) các bản ghi mồ côi bên Đích (ORPHAN_MASTER). Ngưỡng an toàn 10% sẽ tự động khóa nếu phát hiện sai lệch hàng loạt. Bạn có chắc chắn muốn thực hiện?',
-            onConfirm: () => {
-                setConfirmModal(null)
-                void executeReconciliation(false)
-            },
-        })
-    }
-    useEffect(() => {
-        if (!automatic || selectedStream !== 'files') return
-        const timer = window.setInterval(() => {
-            if (document.visibilityState === 'visible' && !running.current) void handleRunReconcile()
-        }, 300_000)
-        return () => window.clearInterval(timer)
-    }, [automatic, selectedStream, handleRunReconcile])
 
     const hasBlockedRun = report?.stream_reports?.some((r) => r.status === 'BLOCKED')
     const blockedReason = report?.stream_reports?.find((r) => r.summary_meta?.reason)?.summary_meta?.reason
@@ -299,8 +242,6 @@ export function DataReconciliationPage() {
                             disabled={reconciling || loading}
                             onChange={(e) => {
                                 setSelectedStream(e.target.value)
-                                setIsAutoRunning(false)
-                                setAutomatic(false)
                                 setPage(1)
                             }}
                             aria-label="Chọn luồng dữ liệu"
@@ -319,73 +260,17 @@ export function DataReconciliationPage() {
                             onChange={(e) => setReconcileMode(e.target.value as 'INCREMENTAL' | 'FULL')}
                             aria-label="Phạm vi đối soát"
                         >
-                            <option value="INCREMENTAL">Tăng dần (Chỉ file mới/thay đổi)</option>
-                            <option value="FULL">Toàn diện (Tất cả file)</option>
+                            <option value="INCREMENTAL">Incremental / tệp: kiểm tra nhanh</option>
+                            <option value="FULL">Full / tệp: SHA-256</option>
                         </select>
 
                         {/* 3. NÚT ĐỐI SOÁT & PHỤC HỒI THỦ CÔNG */}
-                        <button
-                            type="button"
-                            className={styles.primaryButton}
-                            disabled={reconciling || loading}
-                            onClick={() => void executeReconciliation(true)}
-                        >
-                            {reconciling ? 'Đang đối soát...' : 'Quét đối soát'}
-                        </button>
-
-                        <button
-                            type="button"
-                            className={styles.secondaryButton}
-                            disabled={reconciling || loading}
-                            onClick={handleAutoHealClick}
-                        >
-                            Tự phục hồi
-                        </button>
-
-                        {/* 4. CÔNG TẮC BẬT/TẮT TỰ ĐỘNG DUY NHẤT */}
-                        <div className={styles.autoSwitchContainer}>
-                            <label className={styles.switch}>
-                                <input
-                                    type="checkbox"
-                                    checked={isAutoRunning}
-                                    onChange={(e) => handleToggleAuto(e.target.checked)}
-                                />
-                                <span className={styles.slider} />
-                            </label>
-                            <span
-                                className={styles.switchLabel}
-                                onClick={() => handleToggleAuto(!isAutoRunning)}
-                            >
-                                {isAutoRunning ? 'Tự động: BẬT' : 'Tự động: TẮT'}
-                            </span>
-                        </div>
-
-                        {/* CẤU HÌNH INLINE KHI BẬT TỰ ĐỘNG */}
-                        {isAutoRunning && (
-                            <div className={styles.autoGroup}>
-                                <select
-                                    className={styles.select}
-                                    value={autoInterval}
-                                    onChange={(e) => setAutoInterval(Number(e.target.value))}
-                                    aria-label="Chu kỳ tự động"
-                                >
-                                    <option value={30}>Mỗi 30s</option>
-                                    <option value={60}>Mỗi 1 phút</option>
-                                    <option value={300}>Mỗi 5 phút</option>
-                                    <option value={600}>Mỗi 10 phút</option>
-                                </select>
-
-                                <label className={styles.autoActionLabel}>
-                                    <input
-                                        type="checkbox"
-                                        checked={autoHealEnabled}
-                                        onChange={(e) => setAutoHealEnabled(e.target.checked)}
-                                    />
-                                    <span>Kèm tự sửa</span>
-                                </label>
-                            </div>
-                        )}
-
+                        <button className={styles.primaryButton} disabled={reconciling || loading}
+                            onClick={() => void handleRunReconcile()}>Quét đối soát</button>
+                        {selectedStream !== 'all' && selectedStream !== 'files' && <button className={styles.secondaryButton}
+                            disabled={reconciling || loading} onClick={() => setConfirmModal({ title: 'Đồng bộ bản ghi lệch',
+                                message: 'Quét luồng đã chọn rồi chỉ đồng bộ ID metadata lệch. Không xóa bản ghi hoặc ghi đè tệp sai hash.',
+                                onConfirm: () => { setConfirmModal(null); void handleRunReconcile(false) } })}>Đồng bộ lệch</button>}
                         {/* BADGE HIỂN THỊ THỜI GIAN THỰC THI */}
                         {(lastExecutionTimeMs !== null || report?.stream_reports?.[0]?.execution_time_ms !== undefined) && (
                             <div className={styles.executionBadge} title="Thời gian thực thi đợt quét gần nhất">
@@ -395,20 +280,7 @@ export function DataReconciliationPage() {
                     </div>
                 </div>
 
-                {/* BANNER THÔNG BÁO TỰ ĐỘNG CHẠY */}
-                {isAutoRunning && (
-                    <div className={styles.autoStatusBanner}>
-                        <div>
-                            <span className={styles.pulseDot} />
-                            <strong>Đang tự động đối soát:</strong> chu kỳ {autoInterval}s • Phạm vi: {reconcileMode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'} ({autoHealEnabled ? 'Kèm tự phục hồi' : 'Chỉ kiểm tra'})
-                            {lastAutoRunAt && ` • Quét gần nhất: ${lastAutoRunAt}`}
-                            {lastExecutionTimeMs !== null && ` (${lastExecutionTimeMs}ms)`}
-                        </div>
-                        <div>
-                            Lần quét tiếp theo: <strong>{countdown}s</strong>
-                        </div>
-                    </div>
-                )}
+                <ReconciliationSchedule />
 
                 {/* THÔNG BÁO / CẢNH BÁO */}
                 {error && <div className={`${styles.alertBox} ${styles.alertWarning}`}>{error}</div>}

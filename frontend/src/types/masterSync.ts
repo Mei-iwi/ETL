@@ -19,7 +19,7 @@ export type MasterSyncResponse = Record<string, MasterSyncRunResult>
 
 export type MasterSyncRunStatus = MasterSyncRunResult & {
     stream_name: Exclude<MasterSyncStream, 'all'>
-    sync_mode: 'FULL' | 'INCREMENTAL' | null
+    sync_mode: 'FULL' | 'INCREMENTAL' | 'REPAIR' | null
     status: 'RUNNING' | 'COMPLETED' | 'FAILED'
     started_at: string
     finished_at: string | null
@@ -48,6 +48,8 @@ export type MasterSyncStatusResponse = {
 }
 
 export type SourceSyncFilesResponse = {
+    total?: number | null
+    total_pages?: number | null
     items: Array<{
         source_version_id: string
         resource_id: string

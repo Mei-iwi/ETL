@@ -254,10 +254,10 @@ function IndexWorkspace({ versionId, view }: { versionId: string; view: IndexVie
             </section>
         </div>
         <div className={styles.indexPanel} data-index-panel="chunks" hidden={view !== 'chunks'}>
-            <ChunkList key={`${status?.published_run_id ?? versionId}:${status?.processing_status}:${refresh}`} versionId={versionId} />
+            {view === 'chunks' && <ChunkList key={`${status?.published_run_id ?? versionId}:${status?.processing_status}:${refresh}`} versionId={versionId} />}
         </div>
         <div className={styles.indexPanel} data-index-panel="bags" hidden={view !== 'bags'}>
-            <BagList key={versionId} status={status} loading={!status && !statusError} error={statusError} />
+            {view === 'bags' && <BagList key={versionId} status={status} loading={!status && !statusError} error={statusError} />}
         </div>
         {confirming && <ReindexConfirmation onCancel={() => setConfirming(false)} onConfirm={() => { setConfirming(false); void build(true) }} />}
     </>

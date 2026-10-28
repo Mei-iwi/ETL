@@ -197,6 +197,18 @@
     border-radius: 8px;
 }
 
+.scheduleIntro {
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.scheduleActions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .table {
     width: 100%;
     border-collapse: collapse;

@@ -2,7 +2,7 @@ import type { MasterSyncMode, MasterSyncResponse, MasterSyncRunResult, MasterSyn
 
 export type ManualSyncResult = { response: MasterSyncResponse; mode: MasterSyncMode }
 export type DisplaySyncRun = MasterSyncRunResult & {
-    sync_mode: MasterSyncMode | null
+    sync_mode: MasterSyncRunStatus['sync_mode']
     status: MasterSyncRunStatus['status'] | 'PENDING_STATUS'
     started_at: string | null
     finished_at: string | null
