@@ -44,6 +44,16 @@ def identity(version, origin):
         version.storage_object_key, version.version_number, version.parent_version_id, origin)).encode()).hexdigest()
 
 
+def recent_file_evidence(state, version, origin, settings):
+    return bool(version and state.verification_method == 'SHA256' and state.last_observed_revision
+        and state.last_verified_at and utc(state.last_verified_at) >= now() - timedelta(
+            days=settings.reconciliation_deep_coverage_days)
+        and state.observed_identity == identity(version, origin)
+        and state.last_verified_hash == version.source_hash
+        and (state.status == 'SYNCED' or state.status == 'NOT_VERIFIED'
+             and state.reason_code == 'SHA256_NOT_CHECKED'))
+
+
 FILE_COLUMNS = ('id', 'resource_id', 'source_hash', 'source_file_size', 'storage_file_size',
                 'storage_bucket', 'storage_object_key', 'version_number', 'parent_version_id')
 
@@ -178,11 +188,14 @@ class ScheduledAudit:
                 if visited >= settings.reconciliation_max_files_per_run or monotonic() - started >= settings.reconciliation_max_seconds_per_run:
                     break
                 observed = identity(version, origin)
-                due = (claim['audit_type'] == 'LIGHT' or not previous or previous['observed_identity'] != observed
+                due = (claim['audit_type'] == 'LIGHT' or checkpoint.get('mode') == 'FULL'
+                       or not previous or previous['observed_identity'] != observed
                        or previous['next_due_at'] is None or utc(previous['next_due_at']) <= now())
                 if not due:
                     after = version.id
                     checkpoint['last_id'] = after
+                    visited += 1
+                    self._save(claim, checkpoint)
                     continue  # Explicitly skipped, never credited as freshly verified.
                 engine.file_max_bytes = settings.reconciliation_max_bytes_per_run - used_bytes
                 if engine.file_max_bytes <= 0:
@@ -208,6 +221,15 @@ class ScheduledAudit:
                 attempts = (previous or {}).get('attempts', 0) + 1
                 state = {'last_attempt_at': now(), 'status': flag, 'reason_code': reason,
                          'observed_identity': observed}
+                revision = values.get('observed_revision')
+                state['last_observed_revision'] = revision
+                if (claim['audit_type'] == 'LIGHT' and (not revision or not previous
+                        or previous['last_observed_revision'] != revision
+                        or previous['observed_identity'] != observed or reason != 'SHA256_NOT_CHECKED'
+                        or flag != 'NOT_VERIFIED')):
+                    # Without a separate verified-revision column, invalidate proof
+                    # before replacing the observation it was bound to.
+                    state.update(verification_method='STALE_SHA256', next_due_at=now())
                 if values.get('observed_revision'):
                     state['last_observed_revision'] = values['observed_revision']
                     if previous and previous['last_observed_revision'] != values['observed_revision']:
@@ -220,7 +242,7 @@ class ScheduledAudit:
                     if flag == 'SYNCED':
                         state.update(last_verified_at=now(), last_verified_hash=version.source_hash,
                             last_verified_size=values.get('verified_size', values.get('storage_file_size')),
-                            verification_method='SHA256')
+                            verification_method='SHA256' if revision else 'STALE_SHA256')
                 elif flag not in ('NOT_VERIFIED', 'SYNCED') or previous and previous['observed_identity'] != observed:
                     state['next_due_at'] = now()
                 if (claim['audit_type'] == 'LIGHT' and previous and flag == 'NOT_VERIFIED'
@@ -502,12 +524,16 @@ class ScheduledAudit:
                 for row in rows:
                     version = SimpleNamespace(**dict(zip(FILE_COLUMNS, row[:len(FILE_COLUMNS)], strict=True)))
                     state = row[-1]
-                    verified += bool(state.observed_identity == identity(version, row[-2])
-                        and state.last_verified_hash == version.source_hash
-                        and (state.status == 'SYNCED' or state.reason_code == 'SHA256_NOT_CHECKED'))
+                    verified += recent_file_evidence(state, version, row[-2], self.settings)
                 after = rows[-1][0]
+            size_checked = repo.session.scalar(select(func.count()).select_from(FileState).where(
+                FileState.reason_code == 'SHA256_NOT_CHECKED'))
+            mismatched = repo.session.scalar(select(func.count()).select_from(FileState).where(
+                FileState.status.in_(('DESYNC_CHECKSUM', 'DESYNC_BLOB_SIZE', 'MUTATED_SOURCE', 'DESYNC_METADATA'))))
             return {'scheduler_enabled': self.settings.reconciliation_scheduler_enabled,
                 'total_files': total, 'recent_sha256_evidence_count': verified,
+                'size_checked': size_checked, 'mismatched': mismatched,
+                'stale_or_unverified': max(0, total - verified),
                 'not_verified_count': max(0, total - verified), 'io_concurrency': 1,
                 'coverage_status': 'COVERAGE_BEHIND' if verified < total else 'RECENT_EVIDENCE',
                 'whole_repository_verified': False}

@@ -10,14 +10,13 @@ Các API:
 from __future__ import annotations
 
 import math
-from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 
 from data_sync_etl.adapters.persistence.audit_queue import utc
-from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit, identity
+from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit, recent_file_evidence
 from data_sync_etl.api.admin_access import require_local_admin
 from data_sync_etl.api.reconciliation_schemas import (
     AllAuditJobRequest,
@@ -117,11 +116,8 @@ def file_evidence(request: Request, version_id: str):
             return {'resource_version_id': version_id, 'status': 'NOT_VERIFIED'}
         version = repo.session.get(ResourceVersion, version_id)
         resource = repo.session.get(MasterLearningResource, version.resource_id) if version else None
-        recent = bool(version and resource and row.last_verified_at
-            and utc(row.last_verified_at) >= now() - timedelta(
-                days=request.app.state.container.settings.reconciliation_deep_coverage_days)
-            and row.observed_identity == identity(version, resource.source_origin)
-            and row.last_verified_hash == version.source_hash)
+        recent = bool(resource and recent_file_evidence(row, version, resource.source_origin,
+            request.app.state.container.settings))
         stale = row.status == 'SYNCED' and not recent
         return {'resource_version_id': version_id, 'status': 'NOT_VERIFIED' if stale else row.status,
             'reason_code': 'AUDIT_EVIDENCE_STALE' if stale else row.reason_code,
