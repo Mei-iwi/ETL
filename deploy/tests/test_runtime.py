@@ -34,7 +34,7 @@ def load_runtime(name):
 def test_compose_no_bypass_or_startup_migration():
     data = yaml.load((ROOT / 'deploy/compose.app.yml').read_text(encoding='utf-8'), Loader=UniqueLoader)
     services = data['services']
-    assert {'api', 'frontend', 'master-sync-worker', 'source-file-worker', 'ocr-worker'} <= services.keys()
+    assert {'api', 'frontend', 'master-sync-worker', 'source-file-worker', 'ocr-worker', 'reconciliation-worker'} <= services.keys()
     for name, service in services.items():
         assert not service.get('privileged')
         assert not any('docker.sock' in str(mount) for mount in service.get('volumes', []))
@@ -47,7 +47,7 @@ def test_compose_no_bypass_or_startup_migration():
         assert service['read_only'] is True and service['user'] == '10001:10001'
         assert service['image'] == services['api']['image']
         assert all(str(mount).startswith('/') for mount in service.get('tmpfs', []))
-    for name in ('master-sync-worker', 'source-file-worker'):
+    for name in ('master-sync-worker', 'source-file-worker', 'reconciliation-worker'):
         assert not any(m.get('target') == '/opt/models/minilm' for m in services[name].get('volumes', []) if isinstance(m, dict))
     assert all('migrat' not in name for name in services)
 
@@ -75,6 +75,25 @@ def test_public_mode_never_loads_database_secrets(monkeypatch):
     monkeypatch.setattr(runtime, 'load_connections', lambda: pytest.fail('Auth gate must run before DB'))
     with pytest.raises(ValueError, match='BLOCKED_AUTH_PUBLIC'):
         runtime.verify_runtime('api')
+
+
+def test_audit_entrypoint_checks_boundary_and_uses_separate_health_file(monkeypatch):
+    runtime = load_runtime('runtime')
+    roles, commands = [], []
+    class Executed(BaseException):
+        pass
+    def execute(binary, arguments):
+        commands.append((binary, arguments))
+        raise Executed()
+    monkeypatch.setattr(runtime, 'verify_runtime', roles.append)
+    monkeypatch.setattr(runtime.os, 'execvp', execute)
+    monkeypatch.setattr(runtime.sys, 'argv', ['runtime.py', 'audit-worker'])
+    monkeypatch.setenv('RECONCILIATION_WORKER_HEARTBEAT_FILE', 'fixture-old-health')
+    with pytest.raises(Executed):
+        runtime.main()
+    assert roles == ['reconciliation']
+    assert commands == [('python', ['python', '-m', 'data_sync_etl.workers.reconciliation'])]
+    assert os.environ['RECONCILIATION_WORKER_HEARTBEAT_FILE'] == '/run/etl/worker-heartbeat.json'
 
 
 @pytest.fixture
@@ -157,7 +176,7 @@ def test_unknown_database_mode_is_rejected(source_neon_connections, monkeypatch)
 
 def test_neon_overlay_mounts_only_source_ca_for_all_backend_services():
     data = yaml.load((ROOT / 'deploy/compose.source-neon.yml').read_text(encoding='utf-8'), Loader=UniqueLoader)
-    assert set(data['services']) == {'api', 'master-sync-worker', 'source-file-worker', 'ocr-worker', 'preflight'}
+    assert set(data['services']) == {'api', 'master-sync-worker', 'source-file-worker', 'ocr-worker', 'reconciliation-worker', 'preflight'}
     for service in data['services'].values():
         assert service['environment'] == {'ETL_DATABASE_MODE': 'source-neon'}
         assert service['secrets'] == [{'source': 'source-database-ca', 'target': 'source-database-ca.pem'}]

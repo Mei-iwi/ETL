@@ -82,7 +82,7 @@ switch ($Action) {
     Check { Test-Deployment }
     Start {
         Test-Deployment
-        if ($Workers) { Invoke-Docker ($composeArgs + @('--profile','workers','up','-d','--no-build','api','frontend','master-sync-worker','source-file-worker','ocr-worker')) }
+        if ($Workers) { Invoke-Docker ($composeArgs + @('--profile','workers','up','-d','--no-build','api','frontend','master-sync-worker','source-file-worker','ocr-worker','reconciliation-worker')) }
         else { Invoke-Docker ($composeArgs + @('up','-d','--no-build','api','frontend')) }
         Write-Output "Application started with profile: $AuthProfile. Inspect health and acceptance report."
     }

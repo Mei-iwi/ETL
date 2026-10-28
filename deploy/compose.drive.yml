@@ -13,6 +13,7 @@ services:
         target: drive.json
   source-file-worker: *drive
   ocr-worker: *drive
+  reconciliation-worker: *drive
 secrets:
   drive:
     file: ${DRIVE_CREDENTIALS_FILE:?Set an external readonly Drive credential file}
