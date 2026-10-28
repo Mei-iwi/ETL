@@ -1,5 +1,25 @@
 import type { DiscrepancyItem, ReconciliationLatestReport } from '../../types/reconciliation'
-import type { AuditJob } from '../../services/reconciliationApi'
+import type { AuditCoverage, AuditJob } from '../../services/reconciliationApi'
+
+export function sha256CoverageLabel(coverage: AuditCoverage | null) {
+    if (!coverage || !Number.isInteger(coverage.total_files) || coverage.total_files < 0
+        || !Number.isInteger(coverage.recent_sha256_evidence_count)
+        || coverage.recent_sha256_evidence_count < 0
+        || coverage.recent_sha256_evidence_count > coverage.total_files) return 'Chưa đủ dữ liệu xác minh SHA-256'
+    if (!coverage.total_files) return 'Chưa có tệp'
+    const verified = coverage.recent_sha256_evidence_count
+    // Never round partial coverage up to 100%.
+    const percent = Math.floor(verified / coverage.total_files * 1000) / 10
+    return `${verified}/${coverage.total_files} tệp (${percent}%)`
+}
+
+export function metadataMatchLabel(report: ReconciliationLatestReport | null) {
+    const rows = report?.stream_reports.filter(row => row.stream_name !== 'files') ?? []
+    const total = rows.reduce((sum, row) => sum + Math.max(row.source_count, row.target_count), 0)
+    const matched = rows.reduce((sum, row) => sum + row.matched_count, 0)
+    if (!total || !Number.isFinite(total) || !Number.isFinite(matched) || matched < 0 || matched > total) return '—'
+    return `${Math.floor(matched / total * 1000) / 10}%`
+}
 
 export function auditJobInProgress(job: AuditJob) {
     if (['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(job.status)) return true

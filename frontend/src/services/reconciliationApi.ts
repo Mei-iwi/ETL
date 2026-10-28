@@ -91,6 +91,9 @@ export type AuditCoverage = {
     total_files: number; recent_sha256_evidence_count: number; not_verified_count: number
     size_checked: number; mismatched: number; whole_repository_verified: boolean
     scheduler_enabled: boolean
+    coverage_status?: string
+    last_deep_verified_at?: string | null
+    evidence_window_days?: number
 }
 async function auditRequest<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(`/api/v1/reconciliation/${path}`, { cache: 'no-store', ...init })

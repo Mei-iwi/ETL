@@ -1,10 +1,29 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { auditJobInProgress, auditJobLabel, auditSummary, auditViewJobs, formatAuditBytes, pendingHash } from '../src/pages/system/reconciliationDisplay.ts'
+import { auditJobInProgress, auditJobLabel, auditSummary, auditViewJobs, formatAuditBytes, metadataMatchLabel, pendingHash, sha256CoverageLabel } from '../src/pages/system/reconciliationDisplay.ts'
 
 const pending = { discrepancy_flag: 'NOT_VERIFIED', target_value: {
     verification: 'SIZE_ONLY', reason_code: 'SHA256_NOT_CHECKED', size_status: 'SIZE_MATCHED', storage_file_size: 5525995,
 } }
+
+test('SHA coverage uses current per-file proof instead of LIGHT job counts', () => {
+    assert.equal(sha256CoverageLabel({ total_files: 38, recent_sha256_evidence_count: 38 }), '38/38 tệp (100%)')
+    assert.equal(sha256CoverageLabel({ total_files: 38, recent_sha256_evidence_count: 19 }), '19/38 tệp (50%)')
+    assert.equal(sha256CoverageLabel({ total_files: 38, recent_sha256_evidence_count: 0 }), '0/38 tệp (0%)')
+    assert.equal(sha256CoverageLabel({ total_files: 10000, recent_sha256_evidence_count: 9999 }), '9999/10000 tệp (99.9%)')
+    assert.equal(sha256CoverageLabel({ total_files: 0, recent_sha256_evidence_count: 0 }), 'Chưa có tệp')
+    for (const value of [null, {}, { total_files: 2 }, { total_files: 2, recent_sha256_evidence_count: 3 }])
+        assert.equal(sha256CoverageLabel(value), 'Chưa đủ dữ liệu xác minh SHA-256')
+})
+
+test('metadata percentage excludes files and labels only the scanned metadata scope', () => {
+    assert.equal(metadataMatchLabel({ stream_reports: [
+        { stream_name: 'files', source_count: 38, target_count: 38, matched_count: 0 },
+        { stream_name: 'subjects', source_count: 10, target_count: 10, matched_count: 9 },
+    ] }), '90%')
+    assert.equal(metadataMatchLabel(null), '—')
+    assert.equal(metadataMatchLabel({ stream_reports: [{ stream_name: 'files' }] }), '—')
+})
 function report(meta, extras = []) {
     return { overall_status: 'PARTIAL', total_mismatched_records: 0,
         stream_reports: [{ stream_name: 'files', status: 'PARTIAL', summary_meta: meta }, ...extras] }

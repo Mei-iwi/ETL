@@ -1,4 +1,5 @@
 """Budgeted audits; exact-ID metadata repair requires an explicit admin request."""
+import re
 from copy import copy
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -40,18 +41,23 @@ from data_sync_etl.workers.lifecycle import tick
 
 
 def identity(version, origin):
+    # Include ownership. Legacy fingerprints lacking this binding require DEEP
+    # confirmation; accepting them could hide a transfer to another resource.
     return sha256(str((version.source_hash, version.source_file_size, version.storage_bucket,
-        version.storage_object_key, version.version_number, version.parent_version_id, origin)).encode()).hexdigest()
+        version.storage_object_key, version.version_number, version.parent_version_id,
+        version.resource_id, origin)).encode()).hexdigest()
 
 
 def recent_file_evidence(state, version, origin, settings):
-    return bool(version and state.verification_method == 'SHA256' and state.last_observed_revision
+    return bool(version and re.fullmatch('[0-9a-fA-F]{64}', version.source_hash or '')
+        and state.verification_method == 'SHA256' and state.last_observed_revision
         and state.last_verified_at and utc(state.last_verified_at) >= now() - timedelta(
             days=settings.reconciliation_deep_coverage_days)
         and state.observed_identity == identity(version, origin)
         and state.last_verified_hash == version.source_hash
-        and (state.status == 'SYNCED' or state.status == 'NOT_VERIFIED'
-             and state.reason_code == 'SHA256_NOT_CHECKED'))
+        and state.last_verified_size is not None
+        and (version.source_file_size is None or state.last_verified_size == version.source_file_size)
+        and state.status == 'SYNCED')
 
 
 FILE_COLUMNS = ('id', 'resource_id', 'source_hash', 'source_file_size', 'storage_file_size',
@@ -237,6 +243,14 @@ class ScheduledAudit:
                     # Without a separate verified-revision column, invalidate proof
                     # before replacing the observation it was bound to.
                     state.update(verification_method='STALE_SHA256', next_due_at=now())
+                elif (claim['audit_type'] == 'LIGHT' and previous
+                        and recent_file_evidence(SimpleNamespace(**previous), version, origin, settings)
+                        and values.get('storage_file_size') == previous['last_verified_size']):
+                    # This LIGHT observation confirms the binding of existing proof;
+                    # it does not create SHA evidence or credit the LIGHT job as a hash match.
+                    state.update(status='SYNCED', reason_code=None)
+                elif claim['audit_type'] == 'LIGHT':
+                    state.update(verification_method='STALE_SHA256', next_due_at=now())
                 if values.get('observed_revision'):
                     state['last_observed_revision'] = values['observed_revision']
                     if previous and previous['last_observed_revision'] != values['observed_revision']:
@@ -250,6 +264,9 @@ class ScheduledAudit:
                         state.update(last_verified_at=now(), last_verified_hash=version.source_hash,
                             last_verified_size=values.get('verified_size', values.get('storage_file_size')),
                             verification_method='SHA256' if revision else 'STALE_SHA256')
+                    else:
+                        # Failed/unknown DEEP must never be revived by a later size-only check.
+                        state['verification_method'] = 'STALE_SHA256'
                 elif flag not in ('NOT_VERIFIED', 'SYNCED') or previous and previous['observed_identity'] != observed:
                     state['next_due_at'] = now()
                 if (claim['audit_type'] == 'LIGHT' and previous and flag == 'NOT_VERIFIED'
@@ -535,7 +552,7 @@ class ScheduledAudit:
         self._save(claim, checkpoint, status='COMPLETED' if complete and not checkpoint['not_verified_count'] else 'PARTIAL')
 
     def coverage(self):
-        verified, after = 0, None
+        verified, after, last_verified = 0, None, None
         with self.engine.uow() as repo:
             total = repo.session.scalar(select(func.count()).select_from(ResourceVersion))
             while True:
@@ -553,7 +570,10 @@ class ScheduledAudit:
                 for row in rows:
                     version = SimpleNamespace(**dict(zip(FILE_COLUMNS, row[:len(FILE_COLUMNS)], strict=True)))
                     state = row[-1]
-                    verified += recent_file_evidence(state, version, row[-2], self.settings)
+                    if recent_file_evidence(state, version, row[-2], self.settings):
+                        verified += 1
+                        stamp = utc(state.last_verified_at)
+                        last_verified = max(last_verified, stamp) if last_verified else stamp
                 after = rows[-1][0]
             size_checked = repo.session.scalar(select(func.count()).select_from(FileState).where(
                 FileState.reason_code == 'SHA256_NOT_CHECKED'))
@@ -564,5 +584,7 @@ class ScheduledAudit:
                 'size_checked': size_checked, 'mismatched': mismatched,
                 'stale_or_unverified': max(0, total - verified),
                 'not_verified_count': max(0, total - verified), 'io_concurrency': 1,
-                'coverage_status': 'COVERAGE_BEHIND' if verified < total else 'RECENT_EVIDENCE',
+                'coverage_status': 'NO_FILES' if not total else 'COVERAGE_BEHIND' if verified < total else 'RECENT_EVIDENCE',
+                'last_deep_verified_at': last_verified,
+                'evidence_window_days': self.settings.reconciliation_deep_coverage_days,
                 'whole_repository_verified': False}
