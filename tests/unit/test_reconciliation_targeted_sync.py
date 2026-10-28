@@ -193,6 +193,45 @@ def test_source_disappearing_after_repair_is_not_marked_synced(container, monkey
         assert repo.session.get(Job, job).checkpoint['repair_pending'] == [row['id']]
 
 
+def test_full_users_audit_cannot_refresh_auth_for_source_missing_users(container):
+    from tests.unit.test_sync import change
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        before = repo.count('master_users', {})
+    change(container, 'users', lambda rows: rows.pop())
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    job = audit.queue.enqueue('METADATA', 'users', mode='FULL', repair=True)
+    audit.once(job)
+    with container.uow() as repo:
+        checkpoint = repo.session.get(Job, job).checkpoint
+        assert not checkpoint.get('auth_verified', False)
+        assert checkpoint['auth_identity_complete'] is False
+        assert repo.count('master_users', {}) == before
+
+
+def test_full_users_identity_proof_resumes_across_bounded_jobs(container):
+    from tests.unit.test_sync import change
+    change(container, 'users', lambda rows: rows.append({**rows[0], 'id': 'auth-second',
+                                                       'email': 'auth-second@example.test'}))
+    container.sync.run(full=True)
+    container.settings.reconciliation_max_files_per_run = 1
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    completed = False
+    for _ in range(10):
+        job = audit.queue.enqueue('METADATA', 'users', mode='FULL', repair=True)
+        audit.once(job)
+        with container.uow() as repo:
+            row = repo.session.get(Job, job)
+            if row.status == 'COMPLETED':
+                assert row.checkpoint['auth_identity_complete'] is True
+                assert row.checkpoint['auth_verified'] is True
+                completed = True
+                break
+            assert row.status == 'PARTIAL'
+            assert not row.checkpoint.get('auth_verified', False)
+    assert completed
+
+
 def test_disable_schedule_cancels_only_its_pending_work(container):
     schedule = AuditSchedule(container.uow, container.settings)
     values = dict(enabled=True, interval_seconds=900, mode='FULL', repair=True)

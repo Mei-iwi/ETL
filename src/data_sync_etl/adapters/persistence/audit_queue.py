@@ -44,7 +44,7 @@ class AuditQueue:
             if audit_type == 'METADATA' and previous.status == 'PARTIAL' and previous.checkpoint.get('last_id'):
                 checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
                     'last_id', 'scan_started', 'since', 'watermark_next', 'generation',
-                    'auth_scope_complete')}
+                    'auth_scope_complete', 'auth_identity_digest', 'auth_identity_count')}
             elif audit_type == 'METADATA':
                 checkpoint = {}
         if mode == 'FULL' and not (previous and previous.status == 'PARTIAL'

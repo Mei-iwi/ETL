@@ -299,6 +299,12 @@ class ScheduledAudit:
                 checkpoint['source_pages_read'] += 1
                 source_rows = source_rows[:self.settings.reconciliation_max_files_per_run - visited]
                 ids = [str(row['id']) for row in source_rows]
+                if stream == 'users' and since is None:
+                    digest = checkpoint.get('auth_identity_digest', '')
+                    for record_id in ids:
+                        digest = sha256(f'{digest}:{record_id}'.encode()).hexdigest()
+                    checkpoint['auth_identity_digest'] = digest
+                    checkpoint['auth_identity_count'] = checkpoint.get('auth_identity_count', 0) + len(ids)
                 with self.engine.uow() as repo:
                     columns = [model.id, model.source_origin] + [getattr(model, key)
                         for key in (*METADATA_FIELDS[stream], *(AUTH_FIELDS if stream == 'users' else ()))]
@@ -375,10 +381,25 @@ class ScheduledAudit:
         if complete:
             checkpoint.update(last_id=None, watermark_next=checkpoint['scan_started'])
             if (stream == 'users' and since is None and checkpoint.get('repair_requested') and not checkpoint['not_verified_count']
-                    and checkpoint['auth_scope_complete']):
+                    and checkpoint['auth_scope_complete'] and self._users_identity_complete(checkpoint)):
                 checkpoint['auth_verified'] = True
         checkpoint['coverage_status'] = 'DELTA_VISITED' if complete else 'COVERAGE_BEHIND'
         self._save(claim, checkpoint, status='COMPLETED' if complete and not checkpoint['not_verified_count'] else 'PARTIAL')
+
+    def _users_identity_complete(self, checkpoint):
+        # A metadata pass over remaining SOURCE users must not refresh auth for
+        # a user missing at SOURCE but still present in MASTER. No deletion here.
+        model = MODELS[STREAM_TABLE_MAPPING['users']['target_table']]
+        with self.engine.uow() as repo:
+            ids = list(repo.session.scalars(select(model.id).where(
+                model.source_origin != 'LOCAL', model.source_missing_at.is_(None)).limit(10001)))
+        digest = ''
+        for record_id in sorted(ids):
+            digest = sha256(f'{digest}:{record_id}'.encode()).hexdigest()
+        complete = bool(ids and len(ids) <= 10000 and len(ids) == checkpoint.get('auth_identity_count')
+                        and digest == checkpoint.get('auth_identity_digest'))
+        checkpoint['auth_identity_complete'] = complete
+        return complete
 
     def _repair_pending(self, claim, checkpoint):
         ids = checkpoint.get('repair_pending', [])
