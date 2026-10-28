@@ -312,7 +312,7 @@ Mỗi dòng là **một terminal riêng** tại gốc repo. Mỗi terminal Pytho
 **Lệnh chạy liên tục cho cả 4 worker** — mỗi lệnh mở trong một terminal riêng, đã kích hoạt venv và đứng tại gốc repo:
 
 ```bash
-# Terminal worker 1: lịch đồng bộ tương thích, đối soát trước khi sửa ID lệch.
+# Terminal worker 1: đồng bộ metadata theo lịch Auto Sync, độc lập với đối soát.
 python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-1
 ```
 
@@ -694,7 +694,16 @@ bash deploy/scripts/etl-docker.sh logs
 # bash deploy/scripts/etl-docker.sh stop
 ```
 
-Start không build/migration. Bỏ `-Workers`/`--workers` chỉ chạy API/frontend. Check xác minh model, auth và DB/schema; sửa lỗi rồi mới Start. Mở **http://127.0.0.1:8080/login**, Swagger **http://127.0.0.1:8080/docs**; health: `curl -fsS http://127.0.0.1:8080/health`.
+Start tự chạy Check trước khi khởi động; Check riêng dùng để chẩn đoán cấu hình, xác thực, model và DB/schema. Start không build hoặc migration. Có `-Workers`/`--workers` sẽ khởi động **API + frontend + đủ 4 worker**, tổng cộng 6 service ứng dụng. Bỏ cờ này chỉ khởi động API/frontend, không tự dừng các worker đã chạy trước đó. Mở **http://127.0.0.1:8080/login**, Swagger **http://127.0.0.1:8080/docs**; health: `curl -fsS http://127.0.0.1:8080/health`.
+
+| Worker local | Service Docker tương ứng |
+| --- | --- |
+| `run-master-sync-worker` | `master-sync-worker` |
+| `run-source-file-worker` | `source-file-worker` |
+| `run-ocr-worker` | `ocr-worker` |
+| `data_sync_etl.workers.reconciliation` | `reconciliation-worker` |
+
+Docker Desktop có thể hiển thị nhóm database và nhóm ứng dụng riêng. Bộ `docker-compose.yml` ở gốc dùng cho database local, không khởi động 4 worker ứng dụng. Dùng launcher ở mục này để chạy nhóm ứng dụng; các job `master-migrate`, `source-migrate`, `mongo-init` không phải worker chạy liên tục.
 
 Dùng Drive: thêm **`-Drive` vào mọi lệnh launcher PowerShell**, Linux đặt `export ETL_WITH_DRIVE=true`; cấu hình ở4.2. Media tự chọn từ env, Drive cần lựa chọn launcher riêng.
 
@@ -708,11 +717,12 @@ APP=(docker compose --env-file docker.env -f deploy/compose.app.yml -f deploy/co
 # APP+=(-f deploy/compose.remote-db.yml)
 # APP+=(-f "$ETL_HOME/private/compose.translation.yml")
 "${APP[@]}" --profile workers config --quiet
+"${APP[@]}" --profile workers config --format json | "${APP[@]}" run --rm --no-deps -T --entrypoint python api /opt/etl/auth_deployment.py
 "${APP[@]}" run --rm --no-deps api check-auth
 "${APP[@]}" run --rm --no-deps --entrypoint python api /opt/etl/model.py verify
 "${APP[@]}" --profile ops run --rm --no-deps preflight
 "${APP[@]}" --profile workers up -d --no-build api frontend master-sync-worker source-file-worker ocr-worker reconciliation-worker
-"${APP[@]}" --profile workers ps
+"${APP[@]}" --profile workers ps -a
 ```
 
 **Quản lý riêng worker Docker**, dùng cùng mảng APP và các overlay đã chọn ở trên:
@@ -720,6 +730,8 @@ APP=(docker compose --env-file docker.env -f deploy/compose.app.yml -f deploy/co
 ```bash
 # Khởi động/recreate đủ 4 worker sau khi đã build image và cấu hình DB/model.
 "${APP[@]}" --profile workers up -d --no-build master-sync-worker source-file-worker ocr-worker reconciliation-worker
+# Xem cả worker đang chạy và đã thoát; kiểm tra cột State/Status của từng service.
+"${APP[@]}" --profile workers ps -a master-sync-worker source-file-worker ocr-worker reconciliation-worker
 # Chỉ khởi động worker đối soát:
 "${APP[@]}" --profile workers up -d --no-build reconciliation-worker
 # Theo dõi log; Ctrl+C chỉ thoát xem log, container vẫn chạy.
@@ -782,16 +794,40 @@ DB nguồn thật có dữ liệu thì bỏ seed. Không có danh mục thì bi�
 
 ### 3.7. Build lại và chuyển máy
 
-```bash
-# Windows Git Bash; thêm -Drive nếu dùng Drive:
+Chạy tại gốc repo, dùng cùng `docker.env` và cùng profile/overlay với lần Start trước. Build cập nhật image; Start kiểm tra cấu hình và recreate container dùng image mới, bao gồm cả 4 worker.
+
+**Windows PowerShell hoặc Git Bash:**
+
+```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Build -EnvFile docker.env
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Start -EnvFile docker.env -Workers
-# Linux:
-# bash deploy/scripts/etl-docker.sh build
-# bash deploy/scripts/etl-docker.sh start --workers
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Status -EnvFile docker.env
 ```
 
-Local sửa code không cập nhật image. Phải build đúng tag/env rồi recreate; custom APP: `"${APP[@]}" build api frontend`, tiếp theo `"${APP[@]}" --profile workers up -d --no-build`. Ctrl+F5 trình duyệt. Không xóa volume để chữa image cũ.
+**Linux/Bash:**
+
+```bash
+bash deploy/scripts/etl-docker.sh build
+bash deploy/scripts/etl-docker.sh start --workers
+bash deploy/scripts/etl-docker.sh status
+```
+
+Nếu dùng Drive, thêm `-Drive` vào cả ba lệnh PowerShell; Bash đặt `export ETL_WITH_DRIVE=true` trước khi chạy. `DATABASE_MODE=source-neon` hoặc `remote` trong `docker.env` được launcher tự chọn; media tự chọn qua `MEDIA_ENABLED=true`. Profile auth tùy chỉnh phải giữ cùng `-AuthProfile` hoặc `ETL_AUTH_PROFILE` ở mọi lệnh.
+
+Nếu dùng mảng APP tùy chỉnh ở mục 3.6, giữ nguyên các overlay và chạy:
+
+```bash
+"${APP[@]}" build api frontend
+"${APP[@]}" --profile workers config --quiet
+"${APP[@]}" --profile workers config --format json | "${APP[@]}" run --rm --no-deps -T --entrypoint python api /opt/etl/auth_deployment.py
+"${APP[@]}" run --rm --no-deps api check-auth
+"${APP[@]}" run --rm --no-deps --entrypoint python api /opt/etl/model.py verify
+"${APP[@]}" --profile ops run --rm --no-deps preflight
+"${APP[@]}" --profile workers up -d --no-build api frontend master-sync-worker source-file-worker ocr-worker reconciliation-worker
+"${APP[@]}" --profile workers ps -a
+```
+
+Sau khi API/frontend healthy, nhấn Ctrl+F5 trên trình duyệt. Sửa code local hoặc chỉ chạy `docker restart` không đưa code mới vào image. Không xóa volume để chữa image cũ.
 
 Xuất/nhập image — Windows Git Bash:
 
@@ -924,6 +960,8 @@ Docker dùng `"${APP[@]}" run --rm --no-deps api semantic-schema`/semantic-statu
 | BLOCKED_INDEX_SCHEMA / NO_READY_INDEX | Đối chiếu dimension/revision/validator và INDEX_BUILD; reindex theo quy trình được duyệt |
 | CONNECTIONS_SECRET_VALUES_INVALID | JSON đúng4 key, không placeholder, password/host/database đúng |
 | DATABASE_SCHEMA_NOT_READY | Chủ DB kiểm tra đúng database/migration/grants; không tự migrate SOURCE/production |
+| MONGO_SCHEMA_NOT_READY | Chạy Check để xác định schema không khớp. Preflight hỗ trợ đúng các schema Base, Lexical và MeaningBag, cùng số chiều model đã cấu hình. Sau khi cập nhật source phải build lại image; schema mở rộng hợp lệ không cần đổi về Base |
+| Docker operation failed tại etl-docker.ps1 | Đây là lỗi tổng quát sau khi Docker trả mã lỗi. Xem dòng lỗi hoặc JSON status/code ngay phía trên; chạy lại `-Action Check -EnvFile docker.env` với cùng profile/overlay để chẩn đoán. Start chỉ tiếp tục khi Check PASS |
 | SOURCE_READ_ONLY_ROLE_REQUIRED | Reader không superuser/owner/write grants; đúng các bảng SELECT theo script |
 | STT_RUNTIME_UNAVAILABLE | Đúng bộ CTranslate2/tokenizer/vocabulary, CPU/int8 và dependency; path local tồn tại |
 | Media timeout/OOM | Kiểm tra RAM/cgroup, FFmpeg/ffprobe, thời lượng/kích thước; không tăng đồng thời worker/timeout vô hạn |

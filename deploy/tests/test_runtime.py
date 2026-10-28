@@ -219,6 +219,50 @@ def test_schema_mismatch_reports_target_and_diff_without_connection_secret(monke
         'missing_tables': ['two'], 'unexpected_tables': ['extra']}}
 
 
+@pytest.mark.parametrize('kind', ['base', 'lexical', 'meanings', 'historical_meanings'])
+def test_mongo_preflight_accepts_supported_search_schemas_without_writes(kind):
+    from data_sync_etl.adapters.mongo.lexical_schema import lexical_contract
+    from data_sync_etl.adapters.mongo.meaning_schema import meaning_contract
+    from tests.unit.test_schema_diagnostics import catalog_database
+
+    runtime = load_runtime('runtime')
+    database, catalog, collections = catalog_database(1024)
+    historical = [384] if kind == 'historical_meanings' else []
+    for entry in catalog:
+        if entry['name'] == 'content_bags' and kind != 'base':
+            factory = lexical_contract if kind == 'lexical' else meaning_contract
+            entry['options']['validator'] = factory(1024, historical_dimensions=historical)
+    runtime.check_mongo_schema(database, dimension=1024, historical_dimensions=historical)
+    database.command.assert_not_called()
+    database.create_collection.assert_not_called()
+    for collection in collections.values():
+        collection.count_documents.assert_not_called()
+        collection.aggregate.assert_not_called()
+        collection.create_index.assert_not_called()
+
+
+@pytest.mark.parametrize('change', ['dimension', 'unknown_property', 'other_collection', 'missing_index', 'validation_warn'])
+def test_mongo_preflight_still_blocks_incompatible_schemas(change):
+    from data_sync_etl.adapters.mongo.meaning_schema import meaning_contract
+    from tests.unit.test_schema_diagnostics import catalog_database
+
+    runtime = load_runtime('runtime')
+    database, catalog, collections = catalog_database(1024)
+    bag = next(entry for entry in catalog if entry['name'] == 'content_bags')
+    bag['options']['validator'] = meaning_contract(384 if change == 'dimension' else 1024)
+    if change == 'unknown_property':
+        bag['options']['validator']['$jsonSchema']['properties']['unrecognized'] = {'bsonType': 'string'}
+    elif change == 'other_collection':
+        catalog[0]['options']['validator'] = {}
+    elif change == 'missing_index':
+        collections['content_bags'].list_indexes.return_value = []
+    elif change == 'validation_warn':
+        bag['options']['validationAction'] = 'warn'
+    with pytest.raises(ValueError, match='MONGO_SCHEMA_NOT_READY'):
+        runtime.check_mongo_schema(database, dimension=1024)
+    database.command.assert_not_called()
+
+
 @pytest.mark.parametrize(('elevated', 'write_grants', 'server_readonly', 'error'), [
     (False, False, 'on', None),
     (True, False, 'on', 'SOURCE_PRIVILEGED_ROLE_FORBIDDEN'),
