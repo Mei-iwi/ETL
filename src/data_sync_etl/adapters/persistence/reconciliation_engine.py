@@ -20,18 +20,22 @@ Kiến trúc kỹ thuật:
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from collections import Counter
-from datetime import UTC, datetime
+from copy import copy
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Lock
 from time import monotonic
 from typing import Any
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import inspect, or_, select, text
 from sqlalchemy.orm import Session
 
+from data_sync_etl.adapters.persistence.audit_io import MeteredFiles
 from data_sync_etl.db.models import (
+    MODELS,
     MasterLearningResource,
     ResourceVersion,
     SyncReconciliationDiscrepancy,
@@ -43,6 +47,7 @@ from data_sync_etl.domain.reconciliation import (
     FLAG_DESYNC_CHECKSUM,
     FLAG_DESYNC_METADATA,
     FLAG_MUTATED_DOWNSTREAM,
+    FLAG_MUTATED_SOURCE,
     FLAG_NOT_VERIFIED,
     FLAG_ORPHAN_MASTER,
     FLAG_ORPHAN_SOURCE,
@@ -96,7 +101,8 @@ class ReconciliationEngine:
         self.source_resolver = None
         self.file_read_budget_seconds = 30
         self.file_cancelled = None
-        self._file_hash_cache: dict[str, tuple[int, float, str]] = {}
+        self.file_max_bytes = 2147483648
+        self.file_metrics = {}
 
     def compute_table_summary(
         self,
@@ -187,12 +193,16 @@ class ReconciliationEngine:
         version_ids: list[str] | None = None,
         mode: str = "INCREMENTAL",
         since: datetime | None = None,
+        audit_type: str = "DEEP",
     ) -> list[dict[str, Any]]:
         """Kiểm tra toàn vẹn dung lượng file vật lý 2 cấp:
 
         Cấp 1 (Fast Check): So sánh metadata bytes source_file_size == storage_file_size qua os.stat O(1).
         Cấp 2 (Deep Check): Đọc stream SHA-256 đối chiếu source_hash O(N) khi kích thước khớp (có Smart Cache).
         """
+        if audit_type not in ('LIGHT', 'DEEP'):
+            raise DomainError('INVALID_AUDIT_TYPE')
+        self.file_metrics = {'bytes_read': 0, 'sha256_computed_count': 0, 'cache_reused_count': 0}
         root = Path(storage_root or self.storage_root)
         stmt = select(ResourceVersion).order_by(ResourceVersion.id).limit(10001)
         if version_ids is not None:
@@ -213,6 +223,12 @@ class ReconciliationEngine:
             raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
         origins = dict(db_session.execute(select(MasterLearningResource.id, MasterLearningResource.source_origin)
             .where(MasterLearningResource.id.in_({row.resource_id for row in versions}))).all())
+        return self.verify_file_snapshot(versions, origins, root, audit_type)
+
+    def verify_file_snapshot(self, versions, origins, root=None, audit_type='DEEP'):
+        """Verify detached audit metadata, allowing callers to release DB transactions."""
+        root = Path(root or self.storage_root)
+        self.file_metrics = {'bytes_read': 0, 'sha256_computed_count': 0, 'cache_reused_count': 0}
         results: list[dict[str, Any]] = []
 
         for ver in versions:
@@ -228,8 +244,6 @@ class ReconciliationEngine:
                     "discrepancy_flag": FLAG_NOT_VERIFIED,
                     "source_value": {
                         "version_number": ver.version_number,
-                        "storage_bucket": bucket,
-                        "storage_object_key": ver.storage_object_key,
                         "source_file_size": ver.source_file_size,
                     },
                     "target_value": {
@@ -246,18 +260,40 @@ class ReconciliationEngine:
                     reference = self.source_resolver.resolve(ver.id)
                     if reference.ownership != 'SOURCE_BACKED':
                         raise SourceFileError('BLOCKED_SOURCE_MAPPING')
+                    if audit_type == 'LIGHT':
+                        revision = self.source_resolver.files.revision(reference.bucket, reference.opaque_locator,
+                            cancelled=_ReadBudget(deadline, self.file_cancelled))
+                        if reference.provider not in ('local', 'google_drive') or not isinstance(revision, tuple) or len(revision) != 5:
+                            raise SourceFileError('SIZE_METADATA_UNSUPPORTED')
+                        size = int(revision[2])
+                        expected = ver.source_file_size
+                        mismatch = expected is not None and expected != size
+                        result['discrepancy_flag'] = FLAG_DESYNC_BLOB_SIZE if mismatch else FLAG_NOT_VERIFIED
+                        result['target_value'] = {'storage_file_size': size, 'verification': 'SIZE_ONLY',
+                            'observed_revision': hashlib.sha256(repr(revision).encode()).hexdigest(),
+                            'size_status': 'SIZE_MISMATCH' if mismatch else 'SIZE_MATCHED' if expected is not None else 'NOT_VERIFIED',
+                            'reason_code': 'SHA256_NOT_CHECKED'}
+                        results.append(result)
+                        continue
                     # Resolver verifies canonical ownership, source revision and SHA-256,
                     # then removes the private temporary file. Never inspect a Master copy.
-                    with self.source_resolver.temporary_path(reference, cancelled=_ReadBudget(deadline, self.file_cancelled)) as source_path:
+                    resolver = copy(self.source_resolver)
+                    if hasattr(resolver, 'files'):
+                        resolver.files = MeteredFiles(resolver.files, self.file_metrics, self.file_max_bytes,
+                                                      reference.provider)
+                    with resolver.temporary_path(reference, cancelled=_ReadBudget(deadline, self.file_cancelled)) as source_path:
                         size = source_path.stat().st_size
+                    self.file_metrics['sha256_computed_count'] += 1
                     expected = ver.source_file_size
                     flag = FLAG_DESYNC_BLOB_SIZE if expected is not None and expected != size else FLAG_SYNCED
                     result.update(discrepancy_flag=flag, message='Đã đọc và xác minh tệp từ nguồn')
                     result['target_value'] = {'verified_size': size, 'verified_sha256': ver.source_hash,
                                               'verification': 'SOURCE_STREAM_SHA256'}
                 except SourceFileError as exc:
+                    if exc.code == 'SOURCE_HASH_MISMATCH':
+                        self.file_metrics['sha256_computed_count'] += 1
                     flag = {'SOURCE_HASH_MISMATCH': FLAG_DESYNC_CHECKSUM,
-                            'SOURCE_VERSION_MUTATED': FLAG_DESYNC_METADATA}.get(exc.code, FLAG_NOT_VERIFIED)
+                            'SOURCE_VERSION_MUTATED': FLAG_MUTATED_SOURCE}.get(exc.code, FLAG_NOT_VERIFIED)
                     result.update(discrepancy_flag=flag)
                     result['target_value'] = {'verification': 'NOT_VERIFIED', 'reason_code':
                         'RECONCILIATION_READ_BUDGET' if exc.code == 'SOURCE_REQUEST_CANCELLED' else exc.code}
@@ -292,14 +328,20 @@ class ReconciliationEngine:
                     "target_value": {
                         "storage_file_size": 0,
                         "file_exists": False,
-                        "expected_path": str(blob_path),
+                        "size_status": "FILE_MISSING",
                     },
                     "message": "Physical file blob missing on disk",
                 })
                 continue
 
             # Cấp 1: Fast Check dung lượng (O(1))
-            st_size = blob_path.stat().st_size
+            try:
+                observed_stat = blob_path.stat()
+                st_size = observed_stat.st_size
+            except OSError:
+                results.append({'record_id': ver.id, 'discrepancy_flag': FLAG_NOT_VERIFIED,
+                    'source_value': None, 'target_value': {'reason_code': 'LOCAL_FILE_UNAVAILABLE'}})
+                continue
             expected_size = ver.source_file_size
 
             if expected_size is not None and expected_size != st_size:
@@ -322,23 +364,28 @@ class ReconciliationEngine:
                 continue
 
             # Cấp 2: Deep Check SHA-256 (O(N)) qua stream buffer 64KB kèm Smart Cache
-            st_mtime = blob_path.stat().st_mtime
-            cache_key = str(blob_path)
-            cached = getattr(self, "_file_hash_cache", {}).get(cache_key)
+            if audit_type == 'LIGHT':
+                results.append({'record_id': ver.id, 'discrepancy_flag': FLAG_NOT_VERIFIED,
+                    'source_value': {'source_file_size': expected_size},
+                    'target_value': {'storage_file_size': st_size, 'verification': 'SIZE_ONLY',
+                        'observed_revision': hashlib.sha256(repr((observed_stat.st_dev, observed_stat.st_ino,
+                            observed_stat.st_size, observed_stat.st_mtime_ns, observed_stat.st_ctime_ns)).encode()).hexdigest(),
+                        'size_status': 'SIZE_MATCHED' if expected_size is not None else 'NOT_VERIFIED',
+                        'reason_code': 'SHA256_NOT_CHECKED'}})
+                continue
+            if not re.fullmatch('[0-9a-fA-F]{64}', ver.source_hash or ''):
+                results.append({'record_id': ver.id, 'discrepancy_flag': FLAG_NOT_VERIFIED,
+                    'source_value': None, 'target_value': {'reason_code': 'EXPECTED_SHA256_UNAVAILABLE'}})
+                continue
+            try:
+                computed_hash = self._hash_local(blob_path, deadline)
+            except (OSError, SourceFileError) as exc:
+                results.append({'record_id': ver.id, 'discrepancy_flag': FLAG_NOT_VERIFIED,
+                    'source_value': None, 'target_value': {'verification': 'NOT_VERIFIED',
+                        'reason_code': exc.code if isinstance(exc, SourceFileError) else 'LOCAL_FILE_UNAVAILABLE'}})
+                continue
 
-            if cached and cached[0] == st_size and cached[1] == st_mtime:
-                computed_hash = cached[2]
-            else:
-                sha = hashlib.sha256()
-                with blob_path.open("rb") as f:
-                    while chunk := f.read(65536):
-                        sha.update(chunk)
-                computed_hash = sha.hexdigest()
-                if not hasattr(self, "_file_hash_cache"):
-                    self._file_hash_cache = {}
-                self._file_hash_cache[cache_key] = (st_size, st_mtime, computed_hash)
-
-            if computed_hash != ver.source_hash:
+            if computed_hash != ver.source_hash.lower():
                 # Dung lượng khớp nhưng nội dung bị hỏng / sửa đổi ngầm (Silent corruption)
                 results.append({
                     "record_id": ver.id,
@@ -373,12 +420,46 @@ class ReconciliationEngine:
 
         return results
 
+    def _hash_local(self, path, deadline):
+        import os
+
+        def revision(value):
+            return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+
+        before = path.stat()
+        if before.st_size > self.file_max_bytes - self.file_metrics['bytes_read']:
+            raise SourceFileError('RECONCILIATION_BYTE_BUDGET')
+        sha = hashlib.sha256()
+        with path.open('rb') as stream:
+            opened = os.fstat(stream.fileno())
+            # Windows stat/fstat can expose different ctime semantics. Compare
+            # each ctime against the same API, and identity across both APIs.
+            if revision(before)[:4] != revision(opened)[:4]:
+                raise SourceFileError('LOCAL_FILE_CHANGED')
+            while True:
+                if _ReadBudget(deadline, self.file_cancelled).is_set():
+                    raise SourceFileError('RECONCILIATION_READ_BUDGET')
+                remaining = self.file_max_bytes - self.file_metrics['bytes_read']
+                if remaining <= 0:
+                    if stream.tell() == before.st_size and revision(before) == revision(path.stat()):
+                        break
+                    raise SourceFileError('RECONCILIATION_BYTE_BUDGET')
+                block = stream.read(min(65536, remaining))
+                self.file_metrics['bytes_read'] += len(block)
+                if not block:
+                    break
+                sha.update(block)
+            if revision(opened) != revision(os.fstat(stream.fileno())) or revision(before) != revision(path.stat()):
+                raise SourceFileError('LOCAL_FILE_CHANGED')
+        self.file_metrics['sha256_computed_count'] += 1
+        return sha.hexdigest()
+
     def _fetch_source_records(
         self, stream_name: str, mode: str = "INCREMENTAL", since: datetime | None = None
     ) -> dict[str, dict[str, Any]]:
         """Lấy snapshot bản ghi từ Source theo stream. Hỗ trợ INCREMENTAL."""
         if self.source_adapter is None:
-            return {}
+            raise DomainError('SOURCE_UNAVAILABLE')
 
         source_records: dict[str, dict[str, Any]] = {}
         # Nếu là PostgreSQLSourceAdapter có engine
@@ -391,14 +472,34 @@ class ReconciliationEngine:
                 params["since"] = since
 
             with self.source_adapter.engine.connect() as conn:
-                try:
-                    rows = conn.execute(text(f"SELECT * FROM {tbl}{where_sql} LIMIT 10001"), params).mappings().all()
-                except Exception:
-                    rows = conn.execute(text(f"SELECT * FROM {tbl} LIMIT 10001")).mappings().all()
-                if len(rows) > 10000:
-                    raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
-                for r in rows:
-                    source_records[str(r["id"])] = dict(r)
+                if conn.dialect.name == 'postgresql':
+                    conn.exec_driver_sql('SET TRANSACTION READ ONLY')
+                    conn.exec_driver_sql("SET LOCAL statement_timeout = '5000'")
+                aliases = ({'code': 'grade_code', 'name_vi': 'grade_name_vi',
+                            'updated_at': 'grade_updated_at',
+                            'is_active': 'grade_is_active', 'deleted_at': 'grade_deleted_at'}
+                           if stream_name == 'grades' else {})
+                available = {c['name'] for c in inspect(conn).get_columns(tbl)}
+                columns = ['id', 'updated_at'] + [c for c in available
+                    if aliases.get(c, c) in METADATA_FIELDS.get(stream_name, ())]
+                projection = ', '.join(f'{c} AS {aliases[c]}' if c in aliases else c
+                                       for c in dict.fromkeys(columns))
+                key = 'id COLLATE "C"' if conn.dialect.name == 'postgresql' else 'id'
+                after = None
+                while True:
+                    conditions = (['updated_at >= :since'] if where_sql else [])
+                    if after is not None:
+                        conditions.append(f'{key} > :after')
+                    where = ' WHERE ' + ' AND '.join(conditions) if conditions else ''
+                    rows = conn.execute(text(f'SELECT {projection} FROM {tbl}{where} ORDER BY {key} LIMIT :size'),
+                        {**params, 'after': after, 'size': self.batch_size}).mappings().all()
+                    if not rows:
+                        break
+                    for r in rows:
+                        source_records[str(r['id'])] = dict(r)
+                    if len(source_records) > 10000:
+                        raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
+                    after = rows[-1]['id']
             return source_records
 
         # Nếu là adapter hỗ trợ snapshot context manager (ReconciliationSource)
@@ -421,7 +522,8 @@ class ReconciliationEngine:
             for batch in self.source_adapter.batches(stream_name, cursor=None, batch_size=self.batch_size):
                 for agg in batch:
                     r_id = getattr(agg, "id", None) or agg.values.get("id")
-                    source_records[str(r_id)] = dict(agg.values)
+                    if since is None or agg.cursor.updated_at >= since:
+                        source_records[str(r_id)] = dict(agg.values)
                     if len(source_records) > 10000:
                         raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
             return source_records
@@ -452,6 +554,8 @@ class ReconciliationEngine:
         - Ghi kết quả vào sync_reconciliation_runs và sync_reconciliation_discrepancies.
         """
         t_start_total = time.perf_counter()
+        if not dry_run:
+            raise DomainError('RECONCILIATION_READ_ONLY')
         streams_to_run = (
             ["grades", "subjects", "users", "resources", "files"]
             if stream_name == "all"
@@ -477,14 +581,15 @@ class ReconciliationEngine:
                 stream_start = time.perf_counter()
 
                 # 1. Tính toán đối soát vĩ mô cho Đích (Master)
-                target_summary = self.compute_table_summary(session, target_tbl, stream)
+                target_summary = (self.compute_table_summary(session, target_tbl, stream)
+                                  if mode == 'FULL' else {})
 
                 # 2. Tính toán đối soát vĩ mô cho Nguồn (Source)
                 source_summary: dict[str, Any] = {"count": 0, "table_fingerprint": None, "total_bytes": 0}
-                if hasattr(self.source_adapter, "engine"):
+                if mode == 'FULL' and hasattr(self.source_adapter, "engine"):
                     with self.source_adapter.engine.connect() as s_conn:
                         source_summary = self.compute_table_summary(s_conn, source_tbl, stream)
-                elif hasattr(self.source_adapter, "snapshot"):
+                elif mode == 'FULL' and hasattr(self.source_adapter, "snapshot"):
                     with self.source_adapter.snapshot() as reader:
                         s_meta = reader.reconciliation_summary(stream)
                         source_summary = {
@@ -502,13 +607,13 @@ class ReconciliationEngine:
                         select(SyncReconciliationRun)
                         .where(
                             SyncReconciliationRun.stream_name == stream,
-                            SyncReconciliationRun.status.in_(("COMPLETED", "PARTIAL")),
+                            SyncReconciliationRun.status == "COMPLETED",
                         )
                         .order_by(SyncReconciliationRun.started_at.desc())
                         .limit(1)
                     )
                     if last_run and last_run.started_at:
-                        since = last_run.started_at
+                        since = last_run.started_at - timedelta(seconds=300)
 
                 # 3. Quét chi tiết từng bản ghi để so sánh song song
                 discrepancies: list[dict[str, Any]] = []
@@ -528,7 +633,19 @@ class ReconciliationEngine:
                 else:
                     # Luồng metadata: lấy dữ liệu 2 bên
                     source_dict = self._fetch_source_records(stream, mode=mode, since=since)
-                    target_rows = repo.find(target_tbl, limit=10001)
+                    if mode == 'INCREMENTAL' and since is not None:
+                        model = MODELS[target_tbl]
+                        target_rows = []
+                        ids = list(source_dict)
+                        columns = [c for c in model.__table__.columns if not c.info.get('sensitive')]
+                        for start in range(0, len(ids), self.batch_size):
+                            target_rows.extend({key: value.replace(tzinfo=UTC)
+                                if isinstance(value, datetime) and value.tzinfo is None else value
+                                for key, value in row.items()} for row in session.execute(
+                                select(*columns).where(model.id.in_(ids[start:start + self.batch_size]))
+                            ).mappings())
+                    else:
+                        target_rows = repo.find(target_tbl, limit=10001)
                     if len(target_rows) > 10000:
                         raise DomainError('RECONCILIATION_LIMIT_EXCEEDED')
                     target_dict = {str(r["id"]): r for r in target_rows}
@@ -553,7 +670,16 @@ class ReconciliationEngine:
                         elif t_val and not s_val:
                             # Bản ghi có ở Master nhưng không còn ở Nguồn
                             origin = t_val.get("source_origin", "POSTGRESQL")
-                            flag = FLAG_MUTATED_DOWNSTREAM if origin == "LOCAL" else FLAG_ORPHAN_MASTER
+                            # Absence requires authoritative coverage, never a delta or unknown ownership.
+                            flag = FLAG_NOT_VERIFIED
+                            if origin == 'POSTGRESQL' and (mode == 'FULL' or since is None):
+                                adapter = self.source_adapter
+                                if hasattr(adapter, 'snapshot'):
+                                    with adapter.snapshot() as reader:
+                                        reader.reconciliation_summary(stream)
+                                        if rec_id not in reader.reconciliation_present(stream, [rec_id]):
+                                            flag = FLAG_ORPHAN_MASTER
+                            unverified_metadata += flag == FLAG_NOT_VERIFIED
                             discrepancies.append({
                                 "record_id": rec_id,
                                 "stream_name": stream,
@@ -578,21 +704,34 @@ class ReconciliationEngine:
                                 })
                             else:
                                 compared = [key for key in METADATA_FIELDS.get(stream, ()) if key in s_val and key in t_val]
-                                unverified_metadata += not bool(compared)
+                                missing = set(METADATA_FIELDS.get(stream, ())) - set(compared)
+                                unverified_metadata += bool(missing)
                                 different = metadata_differences(stream, s_val, t_val)
                                 if different:
                                     discrepancies.append({'record_id': rec_id, 'stream_name': stream,
                                         'discrepancy_flag': FLAG_DESYNC_METADATA,
                                         'source_value': {**{key: s_val[key] for key in different}, 'different_fields': different},
                                         'target_value': {**{key: t_val[key] for key in different}, 'different_fields': different}})
-                                elif compared:
+                                elif compared and not missing:
                                     matched_metadata += 1
+                                elif missing:
+                                    discrepancies.append({'record_id': rec_id, 'stream_name': stream,
+                                        'discrepancy_flag': FLAG_NOT_VERIFIED, 'source_value': None,
+                                        'target_value': {'reason_code': 'METADATA_UNSUPPORTED',
+                                                         'missing_fields': sorted(missing)}})
 
                 # 4. Đánh giá ngưỡng an toàn tự phục hồi (Safety bounds check)
                 s_count = source_summary.get("count", len(source_dict))
                 t_count = target_summary.get("count", len(target_rows))
                 if stream != 'files':
-                    t_count = max(0, t_count - sum(row.get('source_origin') == 'LOCAL' for row in target_rows))
+                    s_count = len(source_dict) - sum(row.get('source_origin') == 'LOCAL'
+                        and str(row['id']) in source_dict for row in target_rows)
+                    t_count = sum(row.get('source_origin') != 'LOCAL' for row in target_rows)
+                else:
+                    s_count, t_count = 0, len(file_results)
+                if mode == 'INCREMENTAL':
+                    source_summary = {'count': s_count, 'scope': 'SOURCE_DELTA' if since else 'INITIAL_AUDIT'}
+                    target_summary = {'count': t_count, 'scope': 'INSPECTED_RECORDS'}
                 mismatched_count = sum(row['discrepancy_flag'] != FLAG_NOT_VERIFIED for row in discrepancies)
                 skipped_files = sum(row['discrepancy_flag'] == FLAG_NOT_VERIFIED for row in file_results)
                 max_population = max(1, max(s_count, t_count))
@@ -604,6 +743,10 @@ class ReconciliationEngine:
                     "source_summary": source_summary,
                     "target_summary": target_summary,
                     "dry_run": dry_run,
+                    "verification_scope": ('MASTER_REFERENCED_VERSIONS' if stream == 'files'
+                        else 'SOURCE_DELTA' if since is not None else 'FULL_METADATA'),
+                    "whole_repository_verified": False,
+                    "watermark_since": since.isoformat() if since else None,
                     "mismatch_ratio": round(mismatch_ratio, 4),
                     "max_allowed_ratio": self.max_ratio,
                     "unverified_source_files": skipped_files,
@@ -623,16 +766,6 @@ class ReconciliationEngine:
                     )
                 else:
                     run_status = "PARTIAL" if skipped_files or unverified_metadata else "COMPLETED"
-                    # Nếu không phải dry_run và là ORPHAN_MASTER, có thể tiến hành Auto-Heal (tombstone) an toàn
-                    if not dry_run:
-                        for d in discrepancies:
-                            if d["discrepancy_flag"] == FLAG_ORPHAN_MASTER:
-                                repo.update(target_tbl, d["record_id"], {
-                                    "is_active": False,
-                                    "source_missing_at": now(),
-                                    "deleted_at": now(),
-                                })
-                                d["resolution_status"] = "AUTO_HEALED"
 
                 finished = now()
                 stream_elapsed_ms = round((time.perf_counter() - stream_start) * 1000, 2)

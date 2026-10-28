@@ -30,7 +30,7 @@ def test_legacy_0017_media_upgrade_adds_missing_soft_delete_without_losing_data(
     assert "resource_deletion_events" in schema.get_table_names()
     assert "source_locator" in {c["name"] for c in schema.get_columns("content_units")}
     with container.engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0018"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0019"
     migrate(container.engine)  # A repeated upgrade must be a no-op.
 
 

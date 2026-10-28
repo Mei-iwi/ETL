@@ -51,6 +51,19 @@ class Settings(BaseSettings):
     source_replay_seconds: int = Field(default=300, ge=0)
     reconcile_max_affected: int = Field(default=100, ge=1, le=1000)
     reconcile_max_ratio: float = Field(default=0.1, gt=0, le=1)
+    reconciliation_scheduler_enabled: bool = False
+    reconciliation_worker_heartbeat_file: Path | None = Field(default=None, repr=False)
+    reconciliation_light_interval_seconds: int = Field(default=3600, ge=60, le=86400)
+    reconciliation_id_sweep_interval_seconds: int = Field(default=604800, ge=3600, le=2592000)
+    reconciliation_deep_coverage_days: int = Field(default=30, ge=1, le=365)
+    reconciliation_audit_batch_size: int = Field(default=100, ge=1, le=1000)
+    reconciliation_max_files_per_run: int = Field(default=100, ge=1, le=10000)
+    reconciliation_max_bytes_per_run: int = Field(default=2147483648, ge=1, le=1099511627776)
+    reconciliation_max_seconds_per_run: int = Field(default=1800, ge=1, le=86400)
+    reconciliation_file_timeout_seconds: int = Field(default=120, ge=1, le=600)
+    reconciliation_lease_seconds: int = Field(default=60, ge=10, le=3600)
+    reconciliation_retry_max_attempts: int = Field(default=3, ge=1, le=10)
+    reconciliation_retry_seconds: int = Field(default=30, ge=1, le=3600)
     source_file_storage_root: Path | None = Field(default=None, repr=False)
     # Policy gates: disabling SOURCE access never restores the historical copier.
     source_reference_enabled: bool = False

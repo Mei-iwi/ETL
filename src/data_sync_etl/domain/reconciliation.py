@@ -1,5 +1,6 @@
 """Pure reconciliation flags, comparisons and safe audit serialization."""
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 FLAG_SYNCED = "SYNCED"
@@ -21,15 +22,25 @@ FLAG_MUTATED_DOWNSTREAM = "MUTATED_DOWNSTREAM"
 FLAG_NOT_VERIFIED = "NOT_VERIFIED"
 
 METADATA_FIELDS = {
-    'resources': ('title', 'publication_status', 'provider_id', 'resource_type_id', 'is_active', 'deleted_at'),
-    'users': ('email', 'full_name', 'role_id', 'is_active', 'email_verified_at', 'deleted_at'),
-    'subjects': ('subject_code', 'name', 'grade_level_id', 'is_active', 'deleted_at'),
-    'grades': ('grade_code', 'grade_name_vi', 'education_level_id', 'is_active', 'deleted_at'),
+    'resources': ('title', 'publication_status', 'provider_id', 'resource_type_id', 'is_active', 'deleted_at', 'updated_at'),
+    'users': ('email', 'full_name', 'role_id', 'is_active', 'email_verified_at', 'deleted_at', 'updated_at'),
+    'subjects': ('subject_name', 'subject_slug', 'grade_id', 'is_active', 'deleted_at', 'updated_at'),
+    'grades': ('grade_code', 'grade_name_vi', 'education_level_id', 'grade_is_active', 'grade_deleted_at', 'grade_updated_at'),
 }
 
 def metadata_differences(stream, source, target):
     return [key for key in METADATA_FIELDS.get(stream, ()) if key in source and key in target
-            and serialize_json_value(source[key]) != serialize_json_value(target[key])]
+            and _comparable(key, source[key]) != _comparable(key, target[key])]
+
+
+def _comparable(key, value):
+    if key.endswith('_at') and value is not None:
+        try:
+            stamp = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+            return (stamp.replace(tzinfo=UTC) if stamp.tzinfo is None else stamp.astimezone(UTC)).isoformat()
+        except ValueError:
+            pass
+    return serialize_json_value(value)
 
 def serialize_json_value(value: Any) -> Any:
     """Đảm bảo mọi đối tượng datetime, UUID hoặc custom object đều được serialize an toàn trước khi lưu JSON."""
