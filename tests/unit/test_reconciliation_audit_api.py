@@ -81,3 +81,29 @@ def test_latest_counts_examined_file_versions_on_both_sides_without_inventing_pr
         file_report = next(row for row in data['stream_reports'] if row['stream_name'] == 'files')
         assert file_report['source_count'] == file_report['target_count'] == 19
         assert file_report['summary_meta']['whole_repository_verified'] is False
+
+
+def test_pending_deep_report_does_not_fall_back_to_previous_light_result(container):
+    from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
+    container.settings.admin_enabled = True
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings)
+    light = audit.queue.enqueue('LIGHT', 'files', mode='INCREMENTAL')
+    claim = audit.queue.claim(light)
+    audit._save(claim, {'records_scanned': 38, 'not_verified_count': 38,
+        'sha256_not_checked_count': 38}, [{'record_id': 'old-light', 'discrepancy_flag': 'NOT_VERIFIED'}], status='PARTIAL')
+    deep = audit.queue.enqueue('DEEP', 'files', mode='FULL')
+    with TestClient(create_app(container)) as client:
+        before = client.get('/api/v1/reconciliation/runs/latest', params={'stream': 'files'}).json()
+        assert before['stream_reports'][0]['summary_meta']['audit_type'] == 'LIGHT'
+        pending = client.get('/api/v1/reconciliation/runs/latest', params={'stream': 'files', 'run_ids': deep}).json()
+        assert pending['stream_reports'] == [] and pending['total_target_records'] == 0
+        job = client.get('/api/v1/reconciliation/audit-jobs', params={'job_ids': deep}).json()['items']
+        assert len(job) == 1 and job[0]['audit_type'] == 'DEEP' and job[0]['status'] == 'PENDING'
+        assert client.get('/api/v1/reconciliation/discrepancies', params={'run_ids': deep}).json()['items'] == []
+        claim = audit.queue.claim(deep)
+        audit._save(claim, {'manual_full_scan': True, 'mode': 'FULL', 'records_scanned': 1,
+            'matched_count': 1}, status='COMPLETED')
+        result = client.get('/api/v1/reconciliation/runs/latest', params={'stream': 'files', 'run_ids': deep}).json()
+        assert result['stream_reports'][0]['run_id'] == deep
+        assert result['stream_reports'][0]['summary_meta']['audit_type'] == 'DEEP'
+        assert client.get('/api/v1/reconciliation/discrepancies', params={'run_ids': light}).json()['total'] == 1

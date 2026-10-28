@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { auditJobInProgress, auditSummary, formatAuditBytes, pendingHash } from '../src/pages/system/reconciliationDisplay.ts'
+import { auditJobInProgress, auditJobLabel, auditSummary, auditViewJobs, formatAuditBytes, pendingHash } from '../src/pages/system/reconciliationDisplay.ts'
 
 const pending = { discrepancy_flag: 'NOT_VERIFIED', target_value: {
     verification: 'SIZE_ONLY', reason_code: 'SHA256_NOT_CHECKED', size_status: 'SIZE_MATCHED', storage_file_size: 5525995,
@@ -68,4 +68,15 @@ test('full scan totals retain unverified files and measured observations from pr
     assert.equal(result.observedBytes, 32)
     assert.equal(result.observedFiles, 2)
     assert.equal(result.onlyHashPending, false)
+})
+
+test('view selection follows requested IDs or the newest job per stream', () => {
+    const deep = { job_id: 'deep', stream: 'files', audit_type: 'DEEP', status: 'PENDING', progress: {} }
+    const light = { job_id: 'light', stream: 'files', audit_type: 'LIGHT', status: 'PARTIAL', progress: {} }
+    const metadata = { job_id: 'metadata', stream: 'subjects', audit_type: 'METADATA', status: 'COMPLETED', progress: {} }
+    assert.deepEqual(auditViewJobs([deep, light, metadata]), [deep, metadata])
+    assert.deepEqual(auditViewJobs([deep, light, metadata], ['deep']), [deep])
+    assert.deepEqual(auditViewJobs([light], ['deep']), [])
+    assert.equal(auditJobLabel(deep), 'DEEP SHA-256 · Đang chờ')
+    assert.match(auditJobLabel(light), /LIGHT \(quét nhanh\)/)
 })

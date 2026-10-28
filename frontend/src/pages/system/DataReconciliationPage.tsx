@@ -10,9 +10,10 @@ import type {
     DiscrepancyItem,
     ReconciliationLatestReport,
 } from '../../types/reconciliation'
+import type { AuditJob } from '../../services/reconciliationApi'
 import styles from './DataReconciliationPage.module.css'
 import { ReconciliationSchedule } from './ReconciliationSchedule'
-import { auditJobInProgress, auditSummary, formatAuditBytes as formatBytes, pendingHash } from './reconciliationDisplay'
+import { auditJobInProgress, auditJobLabel, auditSummary, auditViewJobs, formatAuditBytes as formatBytes, pendingHash } from './reconciliationDisplay'
 import { startVisiblePolling } from './visiblePolling'
 
 function formatDate(dateStr?: string | null): string {
@@ -89,6 +90,7 @@ export function DataReconciliationPage() {
     const running = useRef(false)
     const posting = useRef(false)
     const startedRun = useRef<string[]>([])
+    const viewedRunIds = useRef<string[]>([])
     const loadRevision = useRef(0)
 
     // CHẾ ĐỘ CHẠY & PHẠM VI ĐỐI SOÁT
@@ -101,19 +103,22 @@ export function DataReconciliationPage() {
         message: string
         onConfirm: () => void
     } | null>(null)
+    const [displayJob, setDisplayJob] = useState<AuditJob | null>(null)
 
     const loadData = useCallback(async (signal?: AbortSignal) => {
         const revision = ++loadRevision.current
         setLoading(true)
         setError('')
         try {
-            // Lấy báo cáo mới nhất trước để lấy run_id của từng stream
-            const [latest, queued] = await Promise.all([
-                getLatestReconciliationReport(selectedStream, signal), getAuditJobs(selectedStream, signal),
-            ])
+            const queued = await getAuditJobs(selectedStream, signal, null, viewedRunIds.current)
+            const jobs = auditViewJobs(queued.items, viewedRunIds.current)
+            const runIds = viewedRunIds.current.length ? viewedRunIds.current : jobs.map(job => job.job_id)
+            // Pending DEEP has no Run yet. Never substitute a historical LIGHT run.
+            const latest = await getLatestReconciliationReport(selectedStream, signal, runIds)
             if (signal?.aborted || revision !== loadRevision.current) return
             setReport(latest)
-            const active = queued.items.some(auditJobInProgress)
+            setDisplayJob(jobs.find(auditJobInProgress) ?? jobs[0] ?? null)
+            const active = jobs.some(auditJobInProgress)
                 || latest.stream_reports.some(row => row.status === 'RUNNING')
             running.current = active || posting.current
             setReconciling(active || posting.current)
@@ -132,7 +137,7 @@ export function DataReconciliationPage() {
 
             // Chỉ lấy discrepancies thuộc các lần chạy mới nhất (lọc theo run_id)
             if (latestRunIds && latestRunIds.length > 0) {
-                const result = await getDiscrepancies({ latestOnly: true, stream: selectedStream,
+                const result = await getDiscrepancies({ runIds: latestRunIds, stream: selectedStream,
                     flag: selectedFlag, page, pageSize }, signal)
                 if (signal?.aborted || revision !== loadRevision.current) return
                 setDiscrepancies(result.items)
@@ -164,6 +169,12 @@ export function DataReconciliationPage() {
         try {
             const result = await queueAudit(selectedStream, reconcileMode, !dryRun)
             startedRun.current = result.items?.map(row => row.job_id) ?? (result.job_id ? [result.job_id] : [])
+            viewedRunIds.current = [...startedRun.current]
+            loadRevision.current++
+            setReport(null)
+            setDisplayJob(null)
+            setDiscrepancies([])
+            setTotal(0)
             setLastExecutionTimeMs(null)
             setNotice({ title: 'Đối soát', message: 'Đã xếp hàng đối soát. Worker sẽ xử lý nền theo hạn mức.' })
             setPage(1)
@@ -204,6 +215,8 @@ export function DataReconciliationPage() {
                             disabled={reconciling || loading}
                             onChange={(e) => {
                                 setSelectedStream(e.target.value)
+                                viewedRunIds.current = []
+                                startedRun.current = []
                                 setPage(1)
                             }}
                             aria-label="Chọn luồng dữ liệu"
@@ -269,7 +282,8 @@ export function DataReconciliationPage() {
                             {scanInProgress ? 'Đang kiểm tra' : onlyHashPending ? 'Chưa kiểm tra SHA-256' : onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
                         </span>
                         <span className={styles.statusSub}>
-                            Trạng thái: <strong>{onlyHashPending && report?.overall_status === 'PARTIAL' ? 'Quét nhanh' : report?.overall_status ?? 'CHƯA CHẠY'}</strong>
+                            Trạng thái: <strong>{displayJob ? auditJobLabel(displayJob)
+                                : onlyHashPending && report?.overall_status === 'PARTIAL' ? 'Quét nhanh' : report?.overall_status ?? 'CHƯA CHẠY'}</strong>
                         </span>
                     </div>
 

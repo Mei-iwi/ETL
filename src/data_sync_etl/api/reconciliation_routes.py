@@ -93,11 +93,14 @@ def configure_audit_schedule(request: Request, stream: str, body: 'AuditSchedule
 
 @router.get('/audit-jobs')
 def audit_jobs(request: Request, after: str | None = None, size: int = Query(20, ge=1, le=100),
-               stream: str | None = None, newest: bool = False):
+               stream: str | None = None, newest: bool = False,
+               job_ids: list[str] | None = Query(None, max_length=5)):
     with request.app.state.container.uow() as repo:
         query = select(ReconciliationAuditJob).where(ReconciliationAuditJob.status != 'CONFIGURED')
         if stream:
             query = query.where(ReconciliationAuditJob.stream_name == stream)
+        if job_ids:
+            query = query.where(ReconciliationAuditJob.id.in_(job_ids))
         query = query.order_by(ReconciliationAuditJob.id.desc() if newest else ReconciliationAuditJob.id).limit(size + 1)
         if after:
             query = query.where(ReconciliationAuditJob.id < after if newest else ReconciliationAuditJob.id > after)
@@ -179,6 +182,7 @@ def trigger_reconciliation(
 def get_latest_reconciliation_report(
     request: Request,
     stream: str | None = Query(None, description="Lọc theo luồng dữ liệu cụ thể"),
+    run_ids: list[str] | None = Query(None, max_length=5),
 ) -> dict[str, Any]:
     """Lấy báo cáo tổng hợp và Dashboard KPI của đợt đối soát mới nhất."""
     container = request.app.state.container
@@ -190,10 +194,12 @@ def get_latest_reconciliation_report(
         latest_runs: list[SyncReconciliationRun] = []
 
         for st in streams:
+            query = select(SyncReconciliationRun).where(SyncReconciliationRun.stream_name == st)
+            if run_ids:
+                query = query.where(SyncReconciliationRun.run_id.in_(run_ids))
             run = (
                 session.scalars(
-                    select(SyncReconciliationRun)
-                    .where(SyncReconciliationRun.stream_name == st)
+                    query
                     .order_by(SyncReconciliationRun.started_at.desc())
                     .limit(1)
                 )
@@ -295,6 +301,7 @@ def get_latest_reconciliation_report(
 def list_discrepancies(
     request: Request,
     run_id: str | None = Query(None, description="Lọc theo mã đợt đối soát cụ thể"),
+    run_ids: list[str] | None = Query(None, max_length=5),
     latest_only: bool = Query(False, description="Chỉ lấy đợt mới nhất của từng luồng"),
     stream: str | None = Query(None, description="Lọc theo luồng dữ liệu (resources, files, subjects...)"),
     discrepancy_flag: str | None = Query(None, description="Lọc theo cờ hiệu (DESYNC_BLOB_SIZE, DESYNC_CHECKSUM, ORPHAN_SOURCE...)"),
@@ -316,6 +323,8 @@ def list_discrepancies(
                 select(ranked.c.run_id).where(ranked.c.ordinal == 1)))
         if run_id:
             query = query.where(SyncReconciliationDiscrepancy.run_id == run_id)
+        if run_ids:
+            query = query.where(SyncReconciliationDiscrepancy.run_id.in_(run_ids))
         if stream:
             query = query.where(SyncReconciliationDiscrepancy.stream_name == stream)
         if discrepancy_flag:

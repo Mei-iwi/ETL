@@ -3,7 +3,8 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import vm from 'node:vm'
-import { queueAudit, getAuditJobs, getFileEvidence } from '../src/services/reconciliationApi.ts'
+import { queueAudit, getAuditJobs, getDiscrepancies, getLatestReconciliationReport, getFileEvidence } from '../src/services/reconciliationApi.ts'
+import { auditJobLabel, auditViewJobs } from '../src/pages/system/reconciliationDisplay.ts'
 import { startVisiblePolling } from '../src/pages/system/visiblePolling.ts'
 
 test('all audit actions use queue endpoints with exact scope and no file repair', async t => {
@@ -71,18 +72,19 @@ const compiled = ts.transpileModule(page, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX,
 } }).outputText
 
-function render(overrides = {}) {
+function render(overrides = {}, apiOverrides = {}) {
     let index = 0
     const updates = new Map()
     const queued = []
     const exports = {}
+    const callbacks = []
     vm.runInNewContext(compiled, { exports, require: name => {
         if (name.endsWith('.css')) return { default: {} }
         if (name === 'react') return { ...React,
             useState: initial => {
                 const key = index++
                 return [Object.hasOwn(overrides, key) ? overrides[key] : initial, value => updates.set(key, value)]
-            }, useEffect: () => {}, useRef: initial => ({ current: initial }), useCallback: fn => fn,
+            }, useEffect: () => {}, useRef: initial => ({ current: initial }), useCallback: fn => { callbacks.push(fn); return fn },
         }
         if (name.includes('reconciliationApi')) return {
             queueAudit: async (...args) => {
@@ -91,9 +93,11 @@ function render(overrides = {}) {
             getLatestReconciliationReport: async () => ({ stream_reports: [] }),
             getAuditJobs: async () => ({ items: [{ job_id: 'new-job', status: 'PENDING' }] }),
             getDiscrepancies: async () => ({ items: [], total: 0, total_pages: 0 }),
+            ...apiOverrides,
         }
         if (name.includes('reconciliationDisplay')) return {
             auditJobInProgress: job => ['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(job.status),
+            auditJobLabel, auditViewJobs,
             auditSummary: () => ({ unverified: 0, hashPending: 0, onlyHashPending: false, observedBytes: null, observedFiles: 0 }),
             formatAuditBytes: () => '—', pendingHash: () => false,
         }
@@ -108,7 +112,7 @@ function render(overrides = {}) {
         if (Array.isArray(node)) return node.flatMap(child => elements(child, match))
         return (match(node) ? [node] : []).concat(elements(node.props?.children, match))
     }
-    return { tree, updates, queued, button: label => elements(tree, node =>
+    return { tree, updates, queued, callbacks, button: label => elements(tree, node =>
         node.type === 'button' && node.props.children === label)[0] }
 }
 
@@ -148,6 +152,39 @@ test('running audit does not display a finished percentage or label counts as sc
     assert.match(html, /Bản ghi SOURCE \/ MASTER/)
     assert.doesNotMatch(html, /100%/)
     assert.match(html, /không phải tiến độ hoàn thành/)
+})
+
+test('pending DEEP is shown by its own job and report, not the previous quick scan', async () => {
+    const deep = { job_id: 'deep-pending', stream: 'files', audit_type: 'DEEP', status: 'PENDING', progress: {} }
+    const calls = []
+    const view = render({ 6: 'files' }, {
+        getAuditJobs: async () => ({ items: [deep] }),
+        getLatestReconciliationReport: async (stream, signal, ids) => {
+            calls.push({ stream, ids })
+            return { overall_status: 'NO_RUNS_YET', stream_reports: [] }
+        },
+        getDiscrepancies: async () => { throw new Error('Must not fetch old LIGHT discrepancies') },
+    })
+    await view.callbacks[0]()
+    assert.equal(calls[0].stream, 'files')
+    assert.deepEqual(Array.from(calls[0].ids), ['deep-pending'])
+    assert.equal(view.updates.get(15), deep)
+    assert.equal(view.updates.get(0).stream_reports.length, 0)
+    const html = renderToStaticMarkup(render({ 15: deep, 9: true }).tree)
+    assert.match(html, /DEEP SHA-256 · Đang chờ/)
+    assert.doesNotMatch(html, /Trạng thái: <strong>Quét nhanh/)
+})
+
+test('job, run and discrepancy reads use explicit IDs', async t => {
+    const urls = []
+    t.mock.method(globalThis, 'fetch', async url => { urls.push(String(url)); return Response.json({ items: [] }) })
+    await getAuditJobs('files', undefined, null, ['deep-id'])
+    await getLatestReconciliationReport('files', undefined, ['deep-id'])
+    await getDiscrepancies({ runIds: ['deep-id'] })
+    assert.match(urls[0], /job_ids=deep-id/)
+    assert.match(urls[1], /run_ids=deep-id/)
+    assert.match(urls[2], /run_ids=deep-id/)
+    assert.doesNotMatch(urls[2], /latest_only/)
 })
 
 test('schedule has no duplicate scan buttons and original error routes remain available', () => {

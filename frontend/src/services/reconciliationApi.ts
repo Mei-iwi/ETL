@@ -36,9 +36,11 @@ export async function triggerReconciliation(
 export async function getLatestReconciliationReport(
     stream?: string,
     signal?: AbortSignal,
+    runIds: string[] = [],
 ): Promise<ReconciliationLatestReport> {
     const params = new URLSearchParams()
     if (stream && stream !== 'all') params.set('stream', stream)
+    for (const id of runIds) params.append('run_ids', id)
     const response = await fetch(`/api/v1/reconciliation/runs/latest?${params}`, {
         signal,
         cache: 'no-store',
@@ -51,6 +53,7 @@ export async function getLatestReconciliationReport(
 export async function getDiscrepancies(
     params: {
         runId?: string
+        runIds?: string[]
         stream?: string
         flag?: string
         page?: number
@@ -64,6 +67,7 @@ export async function getDiscrepancies(
         page_size: String(params.pageSize ?? 10),
     })
     if (params.runId) query.set('run_id', params.runId)
+    for (const id of params.runIds ?? []) query.append('run_ids', id)
     if (params.latestOnly) query.set('latest_only', 'true')
     if (params.stream && params.stream !== 'all') query.set('stream', params.stream)
     if (params.flag && params.flag !== 'ALL') query.set('discrepancy_flag', params.flag)
@@ -93,10 +97,11 @@ async function auditRequest<T>(path: string, init?: RequestInit): Promise<T> {
     if (!response.ok) throw new Error(await getErrorMessage(response))
     return response.json()
 }
-export function getAuditJobs(stream: string, signal?: AbortSignal, after?: string | null) {
+export function getAuditJobs(stream: string, signal?: AbortSignal, after?: string | null, jobIds: string[] = []) {
     const query = new URLSearchParams({ size: '20', newest: 'true' })
     if (stream !== 'all') query.set('stream', stream)
     if (after) query.set('after', after)
+    for (const id of jobIds) query.append('job_ids', id)
     return auditRequest<{ items: AuditJob[]; next_cursor: string | null }>(`audit-jobs?${query}`, { signal })
 }
 export function getAuditCoverage(signal?: AbortSignal) {

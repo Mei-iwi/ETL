@@ -9,6 +9,24 @@ export function auditJobInProgress(job: AuditJob) {
         && typeof progress.last_id === 'string' && progress.last_id !== progress.manual_batch_start
 }
 
+export function auditViewJobs(jobs: AuditJob[], requested: string[] = []) {
+    if (requested.length) return jobs.filter(job => requested.includes(job.job_id))
+    const seen = new Set<string>()
+    return jobs.filter(job => {
+        if (seen.has(job.stream)) return false
+        seen.add(job.stream)
+        return true
+    })
+}
+
+export function auditJobLabel(job: AuditJob) {
+    const labels: Record<string, string> = { PENDING: 'Đang chờ', RUNNING: 'Đang chạy', RETRY_WAIT: 'Chờ thử lại',
+        COMPLETED: 'Hoàn tất', FAILED: 'Lỗi', BLOCKED: 'Bị chặn', CANCELLED: 'Đã hủy' }
+    const status = job.status === 'PARTIAL' ? auditJobInProgress(job) ? 'Chờ batch tiếp' : 'Chưa xác minh hết'
+        : labels[job.status] ?? job.status
+    return `${job.audit_type === 'DEEP' ? 'DEEP SHA-256' : job.audit_type === 'LIGHT' ? 'LIGHT (quét nhanh)' : job.audit_type} · ${status}`
+}
+
 export function formatAuditBytes(bytes?: number | null): string {
     if (bytes === undefined || bytes === null) return 'Chưa có số liệu'
     if (bytes === 0) return '0 B'
