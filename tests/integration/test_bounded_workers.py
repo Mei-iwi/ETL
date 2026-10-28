@@ -305,3 +305,20 @@ def test_readonly_queue_metrics_snapshot(container):
     assert result['postgres']['max_connections'] > 0
     with container.uow() as repo:
         assert repo.count('source_file_imports', {'status': 'PENDING'}) == 2
+
+
+@pytest.mark.parametrize('capacity', [1, 2])
+def test_ocr_admission_across_independent_postgres_sessions(container, capacity):
+    from conftest import ingest
+    version = ingest(container)
+    container.ocr.create_job(version['id'])
+    container.ocr.max_active = capacity
+    barrier = Barrier(2)
+    def claim(worker):
+        barrier.wait(timeout=5)
+        return container.ocr.claim(worker)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claims = list(pool.map(claim, ('pg-a', 'pg-b')))
+    selected = [row for row in claims if row]
+    assert len(selected) == capacity
+    assert len({row['id'] for row in selected}) == capacity

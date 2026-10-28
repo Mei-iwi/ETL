@@ -192,22 +192,24 @@ class ScheduledAudit:
                     FileState, FileState.resource_version_id == ResourceVersion.id)
                 if after:
                     query = query.where(ResourceVersion.id > after)
-                batch_size = (min(2, settings.reconciliation_audit_batch_size)
-                              if settings.reconciliation_file_concurrency > 1 else settings.reconciliation_audit_batch_size)
-                rows = repo.session.execute(query.order_by(ResourceVersion.id).limit(batch_size)).all()
+                rows = repo.session.execute(query.order_by(ResourceVersion.id).limit(settings.reconciliation_audit_batch_size)).all()
                 page = [(SimpleNamespace(**dict(zip(FILE_COLUMNS, row[:len(FILE_COLUMNS)], strict=True))), row[-2],
                          {c.name: getattr(row[-1], c.name) for c in FileState.__table__.columns} if row[-1] else None)
                         for row in rows]
             if not page:
                 exhausted = True
                 break
-            prepared = self._local_pair(page, engine, claim, lost,
-                settings.reconciliation_max_bytes_per_run - used_bytes,
-                settings.reconciliation_max_files_per_run - visited,
-                started + settings.reconciliation_max_seconds_per_run)
-            if prepared:
-                peak_io = 2
-            for version, origin, previous in page:
+            prepared = {}
+            for position, (version, origin, previous) in enumerate(page):
+                # Keep the existing DB page size for SOURCE/Drive. Only a pair
+                # within that detached page is ever submitted to the executor.
+                if position % 2 == 0:
+                    prepared = self._local_pair(page[position:position + 2], engine, claim, lost,
+                        settings.reconciliation_max_bytes_per_run - used_bytes,
+                        settings.reconciliation_max_files_per_run - visited,
+                        started + settings.reconciliation_max_seconds_per_run)
+                    if prepared:
+                        peak_io = 2
                 if lost.is_set():
                     raise DomainError('AUDIT_LEASE_LOST')
                 if visited >= settings.reconciliation_max_files_per_run or (version.id not in prepared

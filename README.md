@@ -977,6 +977,53 @@ Chạy nhiều worker có giới hạn (mặc định 1, tối đa 2 claim impor
 resource/stream. Chưa coi triển khai là ACCEPT khi còn
 baseline failure hoặc thiếu benchmark toàn pipeline; không tự tăng số worker mặc định.
 
+### Chạy song song có giới hạn
+
+| Cấu hình | Mặc định / tối đa | Phạm vi |
+|---|---|---|
+| `SOURCE_FILE_IMPORT_MAX_ACTIVE` | 1 / 2 | Tổng job nhập tệp đang giữ lease trong cùng DB; cùng resource vẫn tuần tự |
+| `OCR_MAX_ACTIVE` | 1 / 2 | Tổng task OCR đang giữ heartbeat trong cùng DB |
+| `MEDIA_MAX_CONCURRENCY` | Giữ 1 cho Whisper | Slot model dùng advisory lock PostgreSQL; không phải số process |
+| `RECONCILIATION_MAX_ACTIVE` | 1 / 2 | Tổng job audit; cùng stream vẫn độc quyền |
+| `RECONCILIATION_FILE_CONCURRENCY` | 1 / 2 | Một job LIGHT/DEEP: tối đa 2 tệp LOCAL trong một đợt đọc; SOURCE/Drive vẫn 1 |
+
+Opt-in sau khi kiểm tra PostgreSQL contention và đủ RAM/CPU: đặt các cap cần dùng
+thành `2` nhất quán ở các process, giữ `MEDIA_MAX_CONCURRENCY=1`, rồi khởi động thêm
+worker với ID riêng. Mỗi lệnh sau chạy trong **một terminal riêng**, cùng venv và
+môi trường DB test/local đã xác minh:
+
+```bash
+python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-a
+python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-b
+python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-a
+python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-b
+python -m data_sync_etl.workers.reconciliation
+python -m data_sync_etl.workers.reconciliation
+```
+
+Hai audit process không cần worker ID CLI; nếu cấu hình health file local thì dùng
+`RECONCILIATION_WORKER_HEARTBEAT_FILE` khác nhau. Source/OCR cũng cần
+`ETL_WORKER_HEARTBEAT_FILE` riêng nếu dùng health file. Trường health/checkpoint
+hiện có không phải registry đếm process; không suy ra số worker khỏe từ một marker.
+Không chạy đồng thời các terminal này và bản Docker của cùng worker nếu chưa tính
+tổng tải. Hai process với cap 2 vẫn chỉ nhận tối đa 2 job toàn cụm, không thành 4.
+
+Trong một audit, coordinator cấp đúng 2 phần ngân sách byte và đọc kết quả theo thứ
+tự ID; chỉ coordinator ghi proof/checkpoint sau khi cả đợt đọc kết thúc. File SOURCE,
+kích thước chưa biết hoặc vượt phần ngân sách vẫn xử lý tuần tự. LOCAL không tạo
+tệp tạm; không nhân ngân sách byte theo số thread. Không bật mức 3: hiện hard cap là 2.
+ASR chờ slot hết thời gian sẽ về PENDING, không tiêu hao retry lỗi trích xuất.
+
+Compose chỉ nhận thêm biến cấu hình với mặc định 1; không tự scale replica. Trước
+khi tự scale, giữ đủ overlay, worker ID/health path riêng, RAM/CPU, quota Drive và
+temp-disk mỗi container. Giới hạn temp không phải quota đĩa toàn cluster. Benchmark
+fixture không thay thế kiểm thử PostgreSQL thật hoặc đo OCR/Whisper thực tế.
+
+Rollback: dừng worker phụ, đặt mọi cap trên về `1`, restart các process còn lại.
+Task đang giữ lease hoàn tất hoặc được thu hồi theo cơ chế cũ; không xóa queue,
+checkpoint, proof và không đổi lịch đồng bộ/đối soát. MASTER vẫn giữ sync lock và
+thứ tự stream; targeted repair không đẩy global checkpoint.
+
 Đối soát dùng các bảng audit có từ migration `0019`; không tự migrate DB đang có dữ liệu. Local mở terminal thứ sáu, kích hoạt venv rồi chạy:
 
 ```bash

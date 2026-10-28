@@ -10,7 +10,8 @@ import pytest
 from sqlalchemy import func, select
 
 from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
-from data_sync_etl.db.models import ReconciliationAuditJob as Job, ReconciliationFileState as State
+from data_sync_etl.db.models import ReconciliationAuditJob as Job
+from data_sync_etl.db.models import ReconciliationFileState as State
 from data_sync_etl.domain.core import DomainError, now
 from tests.unit.test_reconciliation_light_deep import local_file as local_file
 
@@ -136,9 +137,34 @@ def test_parallel_opt_in_does_not_multiply_byte_budget(local_file):
     assert audit.coverage()['recent_sha256_evidence_count'] == 1
 
 
+def test_multiple_pairs_share_one_detached_db_page_and_one_budget(local_file, monkeypatch):
+    c, first, _ = pair(local_file)
+    with c.uow() as repo:
+        values = repo.get('resource_versions', first)
+        for number in (3, 4):
+            name = f'file-{number}.pdf'
+            local_file[1].with_name(name).write_bytes(b'original')
+            repo.insert('resource_versions', {**values, 'id': f'zz-{number}', 'version_number': number,
+                'storage_object_key': name})
+    original = type(c.reconciliation_engine)._hash_local
+    barrier = Barrier(2)
+    def read(engine, path, deadline):
+        barrier.wait(timeout=3)
+        return original(engine, path, deadline)
+    monkeypatch.setattr(type(c.reconciliation_engine), '_hash_local', read)
+    audit = ScheduledAudit(c.reconciliation_engine, c.settings)
+    key = audit.queue.enqueue('DEEP', 'files', mode='FULL')
+    assert audit.once(key)
+    assert audit.coverage()['recent_sha256_evidence_count'] == 4
+    with c.uow() as repo:
+        assert repo.session.get(Job, key).checkpoint['bytes_read'] == 32
+
+
 def test_source_provider_is_not_fanned_out_and_invalid_limit_is_rejected(local_file):
-    from pydantic import ValidationError
     from types import SimpleNamespace
+
+    from pydantic import ValidationError
+
     from data_sync_etl.config import Settings
     c, first, second = pair(local_file)
     audit = ScheduledAudit(c.reconciliation_engine, c.settings)
@@ -160,7 +186,8 @@ def test_local_deep_fixture_benchmark(local_file, monkeypatch, capsys):
     def read(engine, path, deadline):
         nonlocal active, peak
         with meter:
-            active += 1; peak = max(peak, active)
+            active += 1
+            peak = max(peak, active)
         try:
             sleep(.02)  # deterministic fake I/O latency, actual SHA checks follow
             return original(engine, path, deadline)

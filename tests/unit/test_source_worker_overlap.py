@@ -56,7 +56,7 @@ def test_source_worker_bounded_fixture_benchmark(capsys):
     reports = []
     for concurrency in (1, 2):
         queue = Queue(8, concurrency)
-        def work(worker):
+        def work(worker, queue=queue):
             instance = SourceFileImportWorker(queue)
             while instance.once(worker):
                 pass

@@ -42,7 +42,9 @@ def test_two_ocr_tasks_overlap_with_global_cap_two(container, monkeypatch):
     def recognize(task):
         nonlocal active, peak
         with meter:
-            active += 1; peak = max(peak, active); task_ids.append(task['id'])
+            active += 1
+            peak = max(peak, active)
+            task_ids.append(task['id'])
         barrier.wait(timeout=3)
         with meter:
             active -= 1
