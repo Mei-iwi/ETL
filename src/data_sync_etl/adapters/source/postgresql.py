@@ -213,6 +213,19 @@ class PostgreSQLSourceAdapter:
                 yield batch
                 stamp, last_id = rows[-1]["effective_updated_at"], rows[-1]["id"]
 
+    def selected_batches(self, stream, record_ids, batch_size=100):
+        if stream not in QUERIES or not 1 <= batch_size <= 1000:
+            raise DomainError('INVALID_REPAIR_SCOPE')
+        ids = sorted(set(record_ids))
+        with self.snapshot() as reader:
+            for start in range(0, len(ids), batch_size):
+                query = text(f'SELECT * FROM ({QUERIES[stream]}) source_rows '
+                             'WHERE id IN :ids ORDER BY effective_updated_at,id COLLATE "C"').bindparams(
+                                 bindparam('ids', expanding=True))
+                rows = reader.connection.execute(query, {'ids': ids[start:start + batch_size]}).mappings().all()
+                if rows:
+                    yield [build_aggregate(reader, stream, reader.record(stream, row)) for row in rows]
+
     def iter_learning_resources(self, cursor=None, batch_size=100):
         return self.batches("resources", cursor, batch_size)
 
@@ -279,6 +292,10 @@ class PostgreSQLSourceAdapter:
                   "source_lifecycle_status", "updated_at", "resource_title"}
         return {"items": [{k: v for k, v in row.items() if k in public} for row in page["items"]],
                 "next_cursor": page["next_cursor"]}
+
+    def version_count(self):
+        with self.snapshot() as reader:
+            return reader.connection.scalar(text('SELECT count(*) FROM resource_versions'))
 
     def version_page(self, after: str | None = None, size: int = 20) -> SourceVersionPage:
         """Private worker metadata. Storage references must never be serialized to HTTP."""

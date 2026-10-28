@@ -4,6 +4,7 @@ import random
 import re
 from datetime import timedelta
 from hashlib import sha256
+from time import monotonic
 
 from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import (
@@ -41,6 +42,7 @@ class SourceFileImportService:
         self.formats = formats or FormatValidatorRegistry()
         self.validator = self.formats.find_validator('source.pdf')
         self._media_policy_scan_started = False
+        self._file_count_cache = {}
 
     def _media_processing_enabled(self):
         return (not self.settings.source_metadata_media_enabled
@@ -485,7 +487,7 @@ class SourceFileImportService:
             return row["manual_retries"] < self.settings.processing_manual_retry_limit
         return row["status"] == "PROCESSING" and self._processing(repo, row)[1]
 
-    def list_files(self, after=None, size=20, failed_only=False, retry_eligible=None):
+    def list_files(self, after=None, size=20, failed_only=False, retry_eligible=None, include_total=False):
         availability = self.availability()
         with self.uow() as repo:
             if retry_eligible is None:
@@ -507,7 +509,27 @@ class SourceFileImportService:
                     if len(rows) > size or len(batch) < 100:
                         break
                     scan_after = batch[-1]["source_version_id"]
-            undiscovered = repo.count("source_file_imports", {}) == 0
+            undiscovered = not rows and not repo.find('source_file_imports', limit=1)
+            total = None
+            if include_total and not undiscovered:
+                key = (failed_only, retry_eligible, availability['file_sync_supported'])
+                cached = self._file_count_cache.get(key)
+                if cached and monotonic() - cached[0] < 30:
+                    total = cached[1]
+                elif retry_eligible is None:
+                    total = repo.source_import_page(failed_only=failed_only, count_only=True)
+                else:
+                    # Exact filtered count, bounded keyset pages; requested only on
+                    # navigation/filter changes, never by background polling.
+                    total, count_after = 0, None
+                    while True:
+                        group = repo.source_import_page(count_after, 100, failed_only=True)
+                        total += sum(bool((availability['file_sync_supported'] or r['target_version_id'] is not None)
+                            and self._eligible(repo, r)) == retry_eligible for r in group)
+                        if len(group) < 100:
+                            break
+                        count_after = group[-1]['source_version_id']
+                self._file_count_cache[key] = (monotonic(), total)
             items = []
             for row in rows[:size]:
                 state, _ = self._processing(repo, row)
@@ -526,9 +548,11 @@ class SourceFileImportService:
                 })
         if not failed_only and undiscovered and hasattr(self.source, "list_versions"):
             # Preserve the initial metadata view before the worker has discovered any jobs.
-            return {**self.source.list_versions(after=after, size=size), **availability}
+            total = self.source.version_count() if include_total and hasattr(self.source, 'version_count') else None
+            return {**self.source.list_versions(after=after, size=size), 'total': total,
+                    'total_pages': (total + size - 1) // size if total is not None else None, **availability}
         return {"items": items, "next_cursor": rows[size - 1]["source_version_id"] if len(rows) > size else None,
-                **availability}
+                'total': total, 'total_pages': (total + size - 1) // size if total is not None else None, **availability}
 
     def retry(self, file_id):
         available = self.availability()["file_sync_supported"]
@@ -546,6 +570,7 @@ class SourceFileImportService:
                 "attempts": 0, "manual_retries": row["manual_retries"] + 1,
                 "next_retry_at": None, "last_error_code": None, "updated_at": now(),
             })
+        self._file_count_cache.clear()
         return {"import_job_id": file_id, "action": "QUEUED"}
 
     def retry_failed(self, after=None, size=100):

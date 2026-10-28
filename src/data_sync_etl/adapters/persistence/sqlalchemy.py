@@ -307,7 +307,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             .on_conflict_do_nothing(index_elements=["stream_name"])
         )
 
-    def source_import_page(self, after=None, size=20, retry_candidates=False, failed_only=False):
+    def source_import_page(self, after=None, size=20, retry_candidates=False, failed_only=False, count_only=False):
         model = SourceFileImport
         key = model.source_version_id
         if self.session.bind.dialect.name == "postgresql":
@@ -344,6 +344,8 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             )
             stmt = stmt.where(or_(model.status.in_(["FAILED", "RETRY_EXHAUSTED"]),
                                   and_(model.status == "PROCESSING", processing_failed)))
+        if count_only:
+            return self.session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         return [self._dict(row) for row in self.session.scalars(stmt.order_by(key).limit(size))]
 
     def claim_source_import(self, stamp, token, expires_at):

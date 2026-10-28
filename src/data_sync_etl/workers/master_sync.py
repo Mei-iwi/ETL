@@ -27,6 +27,8 @@ class MasterSyncWorker:
             refresh_users = self.auth_freshness_seconds is not None and 'users' in streams
             if refresh_users:
                 streams = ['users', *(stream for stream in streams if stream != 'users')]
+            else:
+                streams = sorted(streams, key=lambda name: ('grades', 'subjects', 'users', 'resources').index(name))
 
             stop = Event()
             heartbeat_seconds = max(
@@ -52,7 +54,9 @@ class MasterSyncWorker:
                 for stream in streams:
                     try:
                         started = monotonic()
-                        self.sync.run(stream, full=self.coordinator.mode(stream) == "FULL")
+                        result = self.sync.run(stream, full=self.coordinator.mode(stream) == "FULL")
+                        if isinstance(result, dict) and result.get('status') in ('FAILED', 'RETRY_WAIT', 'BLOCKED'):
+                            error_code, action = 'SYNC_FAILED', 'FAILED'
                         if stream == 'users':
                             users_started = started
                         elif (refresh_users and not extra_users_refresh and users_started is not None

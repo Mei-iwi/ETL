@@ -58,6 +58,16 @@ def discover_and_import(container):
         return repo.get("source_file_imports", claimed["id"])
 
 
+def test_file_totals_are_requested_separately_from_polling(importing):
+    c, _, _ = importing
+    c.source_file_import.discover_once()
+    first = c.source_file_import.list_files(size=7, include_total=True)
+    assert first['total'] == 1 and first['total_pages'] == 1
+    polled = c.source_file_import.list_files(size=7)
+    assert polled['total'] is None and polled['total_pages'] is None
+    assert len(polled['items']) == 1
+
+
 @pytest.mark.parametrize("bucket,key", [
     ("", "test.pdf"), ("books", ""), ("books", "../test.pdf"), ("..", "test.pdf"),
     ("books", "/absolute.pdf"), ("books", "D:/test.pdf"), ("books", "\\\\server\\file.pdf"),

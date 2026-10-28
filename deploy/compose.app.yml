@@ -34,6 +34,10 @@ x-backend: &backend
     SEARCH_INTERNAL_DEV_ENABLED: "false"
     SOURCE_ADAPTER: postgresql
     SOURCE_REFERENCE_ENABLED: ${SOURCE_REFERENCE_ENABLED:-false}
+    RECONCILIATION_MAX_FILES_PER_RUN: ${RECONCILIATION_MAX_FILES_PER_RUN:-100}
+    RECONCILIATION_MAX_BYTES_PER_RUN: ${RECONCILIATION_MAX_BYTES_PER_RUN:-2147483648}
+    RECONCILIATION_MAX_SECONDS_PER_RUN: ${RECONCILIATION_MAX_SECONDS_PER_RUN:-1800}
+    RECONCILIATION_FILE_TIMEOUT_SECONDS: ${RECONCILIATION_FILE_TIMEOUT_SECONDS:-120}
     SOURCE_TEMPORARY_FILES_ENABLED: ${SOURCE_TEMPORARY_FILES_ENABLED:-false}
     SOURCE_FILE_STORAGE_ROOT: /mnt/source
     SOURCE_TEMP_ROOT: /run/etl/source
@@ -195,6 +199,24 @@ services:
         target: /opt/model-manifest.json
         read_only: true
         bind: {create_host_path: false}
+      - type: bind
+        source: ${SOURCE_LOCAL_DIR:?Set SOURCE_LOCAL_DIR}
+        target: /mnt/source
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck: *worker-health
+  reconciliation-worker:
+    <<: *backend
+    profiles: [workers]
+    command: [audit-worker]
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      <<: *environment
+      ETL_SERVICE_ROLE: reconciliation
+      RECONCILIATION_SCHEDULER_ENABLED: ${RECONCILIATION_SCHEDULER_ENABLED:-false}
+    volumes:
+      - local-storage:/var/lib/etl/local
       - type: bind
         source: ${SOURCE_LOCAL_DIR:?Set SOURCE_LOCAL_DIR}
         target: /mnt/source

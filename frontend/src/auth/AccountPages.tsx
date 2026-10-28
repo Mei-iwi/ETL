@@ -100,7 +100,7 @@ export function AccountManagementPage() {
                     <button disabled={busy} onClick={() => void action(() => api(`/${item.id}`, 'PATCH', { is_locked: !item.is_locked }))}>{item.is_locked ? 'Mở khóa' : 'Khóa'}</button>
                     <button disabled={busy} onClick={() => void action(() => api(`/${item.id}`, 'PATCH', { is_active: !item.is_active }))}>{item.is_active ? 'Vô hiệu hóa' : 'Kích hoạt'}</button>
                     <button disabled={busy} onClick={() => { setResetting(item); setEditing(undefined); setPassword('') }}>Đặt lại mật khẩu</button></div></td></tr>)}</tbody></table></div>
-        <div className="account-actions"><button disabled={busy || page <= 1} onClick={() => setPage(page - 1)}>Trước</button><span>Trang {page} · {total} tài khoản</span>
+        <div className="account-actions"><button disabled={busy || page <= 1} onClick={() => setPage(page - 1)}>Trước</button><span>Trang {page} / {Math.max(1, Math.ceil(total / 20))} · {total} tài khoản</span>
             <button disabled={busy || page * 20 >= total} onClick={() => setPage(page + 1)}>Sau</button><button disabled={busy} onClick={() => void load()}>Tải lại</button></div>
     </section>
 }

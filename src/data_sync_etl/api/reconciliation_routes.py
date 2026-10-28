@@ -20,7 +20,9 @@ from data_sync_etl.adapters.persistence.audit_queue import utc
 from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit, identity
 from data_sync_etl.api.admin_access import require_local_admin
 from data_sync_etl.api.reconciliation_schemas import (
+    AllAuditJobRequest,
     AuditJobRequest,
+    AuditScheduleRequest,
     DiscrepancyItemResponse,
     DiscrepancyListResponse,
     ReconcileTriggerRequest,
@@ -53,11 +55,39 @@ def enqueue_audit(request: Request, body: AuditJobRequest):
     container = request.app.state.container
     audit = ScheduledAudit(container.reconciliation_engine, container.settings)
     try:
-        job_id = audit.queue.enqueue(body.audit_type, body.stream)
+        if body.repair and body.stream == 'files':
+            raise DomainError('INVALID_AUDIT_SCOPE')
+        job_id = audit.queue.enqueue(body.audit_type, body.stream, mode=body.mode, repair=body.repair)
     except DomainError:
         raise HTTPException(422, 'INVALID_AUDIT_SCOPE') from None
     return {'job_id': job_id, 'status': 'PENDING', 'audit_type': body.audit_type,
             'stream': body.stream, 'worker_required': True}
+
+
+@router.get('/schedules')
+def audit_schedules(request: Request):
+    from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
+    container = request.app.state.container
+    return {'items': AuditSchedule(container.uow, container.settings).list(), 'worker_required': True}
+
+
+@router.post('/audit-jobs/all', status_code=202)
+def enqueue_all_audits(request: Request, body: AllAuditJobRequest):
+    container = request.app.state.container
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings)
+    jobs = audit.queue.enqueue_all(mode=body.mode, repair=body.repair)
+    return {'status': 'PENDING', 'items': jobs, 'worker_required': True}
+
+
+@router.put('/schedules/{stream}')
+def configure_audit_schedule(request: Request, stream: str, body: 'AuditScheduleRequest'):
+    from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
+    container = request.app.state.container
+    try:
+        AuditSchedule(container.uow, container.settings).configure(stream, body.model_dump())
+    except ValueError:
+        raise HTTPException(422, 'INVALID_AUDIT_SCOPE') from None
+    return {'status': 'CONFIGURED', 'worker_required': True}
 
 
 @router.get('/audit-jobs')
@@ -117,7 +147,11 @@ def trigger_reconciliation(
     body = body or ReconcileTriggerRequest()
     engine = request.app.state.container.reconciliation_engine
     if not body.dry_run:
-        raise HTTPException(409, 'Đối soát chỉ phát hiện sai lệch. Dùng chức năng đồng bộ để cập nhật dữ liệu.')
+        if body.stream in ('files', 'all'):
+            raise HTTPException(409, 'Chọn riêng một luồng metadata để đồng bộ bản ghi lệch; tệp sai hash cần xử lý tại nguồn.')
+        from data_sync_etl.application.reconciled_sync import ReconciledSync
+        container = request.app.state.container
+        return ReconciledSync(engine, container.sync, container.settings).run(body.stream, full=body.mode == 'FULL')
     try:
         if body.stream in ('files', 'all'):
             result = request.app.state.container.reconciliation_jobs.start(body.stream, mode=body.mode)

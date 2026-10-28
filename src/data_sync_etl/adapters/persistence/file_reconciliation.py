@@ -2,6 +2,8 @@
 from bisect import bisect_right
 from collections import Counter
 from threading import Event, Thread
+from time import monotonic
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
@@ -11,6 +13,7 @@ from data_sync_etl.db.models import (
     SyncReconciliationRun,
 )
 from data_sync_etl.domain.core import DomainError, new_id, now
+from data_sync_etl.domain.reconciliation import observe_file_result
 
 
 class FileReconciliationJobs:
@@ -51,6 +54,8 @@ class FileReconciliationJobs:
 
     def _run(self, stream, ready, state, mode='INCREMENTAL'):
         run_id = None
+        started = monotonic()
+        previous_seconds, previous_bytes = self.engine.file_read_budget_seconds, self.engine.file_max_bytes
         try:
             # Same UoW fence used for processing: one audit owner across API processes.
             with self.engine.uow.processing_lock('reconciliation-files') as acquired:
@@ -114,13 +119,31 @@ class FileReconciliationJobs:
                     source = {'count': 0, 'error_code': 'SOURCE_SUMMARY_UNAVAILABLE'}
                 self.engine.file_cancelled = self.cancelled
                 counts, reasons, verified_bytes = Counter(), Counter(), 0
+                observations = {}
+                settings = getattr(self.engine, 'audit_settings', None)
+                deadline = monotonic() + getattr(settings, 'reconciliation_max_seconds_per_run', 1800)
+                maximum = getattr(settings, 'reconciliation_max_bytes_per_run', previous_bytes)
+                maximum_files = getattr(settings, 'reconciliation_max_files_per_run', 100)
+                io_bytes, budget_exhausted = 0, False
                 for ordinal, version_id in enumerate(versions, 1):
                     if self.cancelled.is_set():
                         break
+                    if ordinal > maximum_files or monotonic() >= deadline or io_bytes >= maximum:
+                        budget_exhausted = True
+                        break
+                    self.engine.file_read_budget_seconds = min(previous_seconds, deadline - monotonic())
+                    self.engine.file_max_bytes = maximum - io_bytes
+                    # Detach a single metadata record before SOURCE/network/hash I/O.
                     with self.engine.uow() as repo:
-                        rows = self.engine.verify_file_blobs(repo.session, version_ids=[version_id])
+                        metadata = repo.get('resource_versions', version_id)
+                        resource = repo.get('master_learning_resources', metadata['resource_id']) if metadata else None
+                    rows = self.engine.verify_file_snapshot([SimpleNamespace(**metadata)],
+                        {metadata['resource_id']: resource['source_origin'] if resource else None},
+                        audit_type='LIGHT' if mode == 'INCREMENTAL' else 'DEEP') if metadata else []
+                    io_bytes += self.engine.file_metrics.get('bytes_read', 0)
                     result = rows[0] if rows else {'discrepancy_flag': 'NOT_VERIFIED', 'source_value': None,
                         'target_value': {'reason_code': 'FILE_VERSION_MISSING'}}
+                    observe_file_result(observations, result)
                     flag = result['discrepancy_flag']
                     counts[flag] += 1
                     if flag == 'SYNCED':
@@ -137,9 +160,12 @@ class FileReconciliationJobs:
                         record.matched_count = counts['SYNCED']
                         record.mismatched_count = sum(n for key, n in counts.items() if key not in ('SYNCED', 'NOT_VERIFIED'))
                         record.summary_meta = {**record.summary_meta, 'processed_files': ordinal,
+                            **observations,
+                            'execution_time_ms': round((monotonic() - started) * 1000, 2),
                             'last_processed_id': version_id, 'unverified_source_files': counts['NOT_VERIFIED'],
                             'verified_file_count': counts['SYNCED'], 'verification_reason_counts': dict(reasons),
                             'source_summary': source, 'metadata_failed': metadata_failed, 'verified_bytes': verified_bytes,
+                            'bytes_read': io_bytes,
                             'file_verification_scope': 'MASTER_REFERENCED_VERSIONS'}
                         if flag != 'SYNCED':
                             repo.session.add(SyncReconciliationDiscrepancy(id=new_id(), run_id=run_id,
@@ -150,12 +176,14 @@ class FileReconciliationJobs:
                     record = repo.session.get(SyncReconciliationRun, run_id)
                     if record.status == 'RUNNING':
                         record.source_count = source['count']
-                        incomplete = self.cancelled.is_set() or counts['NOT_VERIFIED'] or metadata_failed or source.get('error_code')
+                        incomplete = budget_exhausted or self.cancelled.is_set() or counts['NOT_VERIFIED'] or metadata_failed or source.get('error_code')
                         ratio = record.mismatched_count / max(1, record.source_count, record.target_count)
                         record.status = 'BLOCKED' if ratio > self.engine.max_ratio else 'PARTIAL' if incomplete else 'COMPLETED'
                         record.finished_at = now()
                         record.summary_meta = {**record.summary_meta, 'mismatch_ratio': ratio,
+                            'execution_time_ms': round((monotonic() - started) * 1000, 2),
                             'max_allowed_ratio': self.engine.max_ratio,
+                            **({'reason': 'RECONCILIATION_BUDGET'} if budget_exhausted else {}),
                             **({'reason': 'RECONCILIATION_INTERRUPTED'} if self.cancelled.is_set() else {})}
         except Exception:
             state['error'] = 'RECONCILIATION_FAILED'
@@ -168,4 +196,5 @@ class FileReconciliationJobs:
         finally:
             ready.set()
             self.engine.file_cancelled = None
+            self.engine.file_read_budget_seconds, self.engine.file_max_bytes = previous_seconds, previous_bytes
             self.engine._run_lock.release()

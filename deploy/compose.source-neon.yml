@@ -9,6 +9,7 @@ services:
   master-sync-worker: *source-neon
   source-file-worker: *source-neon
   ocr-worker: *source-neon
+  reconciliation-worker: *source-neon
   preflight: *source-neon
 secrets:
   source-database-ca:

@@ -68,7 +68,21 @@ class MasterSync:
             return Cursor(updated_at=checkpoint["last_updated_at"], id=checkpoint["last_id"])
         return None
 
-    def _stream(self, stream, full):
+    def run_selected(self, stream, record_ids, *, fence=None):
+        """Repair exact identities without moving the global incremental cursor."""
+        ids = sorted(set(record_ids))
+        if stream not in STREAMS or len(ids) > 10000:
+            raise DomainError('INVALID_REPAIR_SCOPE')
+        if not ids:
+            return {}
+        if not hasattr(self.source, 'selected_batches'):
+            raise DomainError('TARGETED_SOURCE_UNSUPPORTED')
+        with self.uow.sync_lock() as acquired:
+            if not acquired:
+                raise SyncAlreadyRunning('Master data sync is already running')
+            return self._stream(stream, False, record_ids=ids, fence=fence)
+
+    def _stream(self, stream, full, record_ids=None, fence=None):
         run_id, started = new_id(), monotonic()
         with self.uow() as repo:
             repo.ensure_checkpoint(stream)
@@ -78,7 +92,7 @@ class MasterSync:
                 dict(
                     id=run_id,
                     stream_name=stream,
-                    sync_mode="FULL" if full else "INCREMENTAL",
+                    sync_mode="REPAIR" if record_ids is not None else "FULL" if full else "INCREMENTAL",
                     started_at=now(),
                     status="RUNNING",
                     records_read=0,
@@ -93,12 +107,22 @@ class MasterSync:
         cursor = None if full else before
         totals = dict(records_read=0, inserted=0, updated=0, skipped=0, failed=0)
         try:
-            for batch in self.source.batches(stream, cursor, self.batch_size):
+            batches = (self.source.selected_batches(stream, record_ids, self.batch_size)
+                       if record_ids is not None else self.source.batches(stream, cursor, self.batch_size))
+            seen = set()
+            wanted = set(record_ids) if record_ids is not None else None
+            for batch in batches:
                 counts = dict(records_read=0, inserted=0, updated=0, skipped=0, failed=0)
                 actions = []
                 with self.uow() as repo:
+                    if fence is not None:
+                        fence(repo.session)
                     checkpoint = repo.get("sync_checkpoints", stream, lock=True)
                     for aggregate in batch:
+                        if wanted is not None:
+                            if aggregate.cursor.id not in wanted:
+                                raise DomainError('INVALID_REPAIR_SCOPE')
+                            seen.add(aggregate.cursor.id)
                         if getattr(self.source, 'source_origin', None) == 'POSTGRESQL':
                             action = repo.sync_upsert(STREAMS[stream], aggregate.values, source_origin='POSTGRESQL')
                         else:
@@ -112,7 +136,7 @@ class MasterSync:
                         actions.append(action)
                     next_cursor = batch[-1].cursor
                     existing = self.cursor(checkpoint)
-                    if existing is None or next_cursor.key() > existing.key():
+                    if record_ids is None and (existing is None or next_cursor.key() > existing.key()):
                         repo.update(
                             "sync_checkpoints",
                             stream,
@@ -143,6 +167,8 @@ class MasterSync:
                         stage="sync",
                         duration_ms=int((monotonic() - started) * 1000),
                     )
+            if wanted is not None and seen != wanted:
+                raise DomainError('REPAIR_SOURCE_CHANGED')
             with self.uow() as repo:
                 repo.update("sync_runs", run_id, dict(status="COMPLETED", finished_at=now()))
         except Exception as exc:

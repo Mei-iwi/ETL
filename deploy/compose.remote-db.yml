@@ -8,6 +8,7 @@ services:
   master-sync-worker: *tls
   source-file-worker: *tls
   ocr-worker: *tls
+  reconciliation-worker: *tls
   preflight: *tls
 secrets:
   database-ca:

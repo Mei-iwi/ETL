@@ -201,6 +201,10 @@ def main():
             # Runtime secrets still pass through the existing network/TLS checks.
             load_connections()
             os.execvp('python', ['python', '-m', 'data_sync_etl.cli.main', *sys.argv[1:]])
+        if action == 'audit-worker':
+            verify_runtime('reconciliation')
+            os.environ['RECONCILIATION_WORKER_HEARTBEAT_FILE'] = '/run/etl/worker-heartbeat.json'
+            os.execvp('python', ['python', '-m', 'data_sync_etl.workers.reconciliation'])
         if action == 'worker' and len(sys.argv) == 3 and sys.argv[2] in WORKERS:
             command = sys.argv[2]
             role = WORKERS[command]

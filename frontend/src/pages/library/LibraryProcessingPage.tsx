@@ -328,7 +328,7 @@ export function LibraryProcessingPage() {
                         {contentExpanded && contentResult && contentResult.total > contentPageSize && (
                             <div className={styles.contentPagination}>
                                 <button className={styles.primaryButton} type="button" disabled={contentLoading || contentOffset === 0} onClick={() => setContentOffsets((current) => ({ ...current, [versionId]: Math.max(0, contentOffset - contentPageSize) }))}>Trước</button>
-                                <span>{contentResult.offset + 1}–{Math.min(contentResult.offset + contentResult.items.length, contentResult.total)} / {contentResult.total}</span>
+                                <span>Trang {Math.floor(contentResult.offset / contentPageSize) + 1} / {Math.max(1, Math.ceil(contentResult.total / contentPageSize))}</span>
                                 <button className={styles.primaryButton} type="button" disabled={contentLoading || contentOffset + contentPageSize >= contentResult.total} onClick={() => setContentOffsets((current) => ({ ...current, [versionId]: contentOffset + contentPageSize }))}>Tiếp</button>
                             </div>
                         )}

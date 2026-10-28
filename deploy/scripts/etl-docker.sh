@@ -72,7 +72,7 @@ case "$action" in
   start)
     bash "$0" check
     if [[ "${1:-}" == --workers ]]; then
-      "${compose[@]}" --profile workers up -d --no-build api frontend master-sync-worker source-file-worker ocr-worker
+      "${compose[@]}" --profile workers up -d --no-build api frontend master-sync-worker source-file-worker ocr-worker reconciliation-worker
     else
       "${compose[@]}" up -d --no-build api frontend
     fi

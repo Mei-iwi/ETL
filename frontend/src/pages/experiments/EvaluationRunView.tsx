@@ -99,7 +99,7 @@ function RunView({ id }: { id: string }) {
                         <ol>{row.ranked.map(item => <li className={styles.identifier} key={item.resource_id}>{item.resource_id} · {item.resource_version_id} · Điểm {number(item.score)}</li>)}</ol>
                     </details>)}
                     <div className={styles.row}><button className={layout.secondaryButton} disabled={offset === 0} onClick={() => setOffset(n => Math.max(0, n - 20))}>Trước</button>
-                        <span>{Math.min(offset + 1, data.pagination.total)}–{Math.min(offset + 20, data.pagination.total)}/{data.pagination.total}</span>
+                        <span>Trang {Math.floor(offset / 20) + 1} / {Math.max(1, Math.ceil(data.pagination.total / 20))}</span>
                         <button className={layout.primaryButton} disabled={offset + 20 >= data.pagination.total} onClick={() => setOffset(n => n + 20)}>Tiếp</button></div>
                 </details>
             </>}

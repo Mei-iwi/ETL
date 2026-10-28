@@ -137,6 +137,18 @@ class JsonFixtureSourceAdapter:
             yield batch
             cursor = batch[-1].cursor
 
+    def selected_batches(self, stream, record_ids, batch_size=100):
+        wanted = set(record_ids)
+        batch = []
+        for row in self.records(stream):
+            if row.id in wanted:
+                batch.append(self.aggregate(stream, row))
+                if len(batch) == batch_size:
+                    yield batch
+                    batch = []
+        if batch:
+            yield batch
+
     def iter_learning_resources(self, cursor=None, batch_size=100):
         return self.batches("resources", cursor, batch_size)
 

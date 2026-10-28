@@ -2,6 +2,7 @@
 import argparse
 import os
 
+from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
 from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
 from data_sync_etl.composition import Container
 from data_sync_etl.config import Settings
@@ -14,7 +15,7 @@ def main():
     parser.add_argument('--once', action='store_true')
     args = parser.parse_args()
     container = Container(Settings())
-    audit = ScheduledAudit(container.reconciliation_engine, container.settings)
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, getattr(container, 'sync', None))
     # The common lifecycle owns its heartbeat file. Never let an audit process
     # overwrite/unlink a heartbeat inherited from a Sync worker launch profile.
     previous_heartbeat = os.environ.pop('ETL_WORKER_HEARTBEAT_FILE', None)
@@ -25,6 +26,8 @@ def main():
             while not stop.is_set():
                 tick()
                 try:
+                    if hasattr(container, 'uow'):
+                        AuditSchedule(container.uow, container.settings).tick()
                     audit.schedule()
                     worked = audit.once()
                 except Exception:

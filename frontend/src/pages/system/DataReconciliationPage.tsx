@@ -10,18 +10,8 @@ import type {
     ReconciliationLatestReport,
 } from '../../types/reconciliation'
 import styles from './DataReconciliationPage.module.css'
-
-function formatBytes(bytes?: number | null): string {
-    if (bytes === undefined || bytes === null || bytes === 0) return '0 B'
-    const units = ['B', 'KB', 'MB', 'GB', 'TB']
-    let size = bytes
-    let unitIndex = 0
-    while (Math.abs(size) >= 1024 && unitIndex < units.length - 1) {
-        size /= 1024
-        unitIndex++
-    }
-    return `${size.toFixed(2)} ${units[unitIndex]}`
-}
+import { ReconciliationSchedule } from './ReconciliationSchedule'
+import { auditSummary, formatAuditBytes as formatBytes, pendingHash } from './reconciliationDisplay'
 
 function formatDate(dateStr?: string | null): string {
     if (!dateStr) return '—'
@@ -94,7 +84,6 @@ export function DataReconciliationPage() {
     const [reconciling, setReconciling] = useState(false)
     const [error, setError] = useState('')
     const [notice, setNotice] = useState<{ title: string; message: string } | null>(null)
-    const [automatic, setAutomatic] = useState(false)
     const running = useRef(false)
     const posting = useRef(false)
     const startedRun = useRef<string | null>(null)
@@ -102,11 +91,6 @@ export function DataReconciliationPage() {
 
     // CHẾ ĐỘ CHẠY & PHẠM VI ĐỐI SOÁT
     const [reconcileMode, setReconcileMode] = useState<'INCREMENTAL' | 'FULL'>('INCREMENTAL')
-    const [isAutoRunning, setIsAutoRunning] = useState<boolean>(false)
-    const [autoInterval, setAutoInterval] = useState<number>(60)
-    const [autoHealEnabled, setAutoHealEnabled] = useState<boolean>(false)
-    const [countdown, setCountdown] = useState<number>(60)
-    const [lastAutoRunAt, setLastAutoRunAt] = useState<string | null>(null)
     const [lastExecutionTimeMs, setLastExecutionTimeMs] = useState<number | null>(null)
 
     // MODAL THÔNG BÁO GIỮA MÀN HÌNH
@@ -171,7 +155,12 @@ export function DataReconciliationPage() {
 
     useEffect(() => {
         if (!reconciling) return
-        const timer = window.setInterval(() => { void loadData() }, 2000)
+        let inFlight = false
+        const timer = window.setInterval(() => {
+            if (document.hidden || inFlight) return
+            inFlight = true
+            void loadData().finally(() => { inFlight = false })
+        }, 5000)
         return () => window.clearInterval(timer)
     }, [reconciling, loadData])
 
@@ -183,6 +172,9 @@ export function DataReconciliationPage() {
         setError('')
         try {
             const result = await triggerReconciliation(selectedStream, dryRun, reconcileMode)
+            if (!['COMPLETED', 'PARTIAL', 'RUNNING', 'BLOCKED'].includes(result.status)) {
+                throw new Error(`Đối soát chưa hoàn tất (${result.status}). Kiểm tra worker và trạng thái thử lại.`)
+            }
             if (result.execution_time_ms !== undefined) {
                 setLastExecutionTimeMs(result.execution_time_ms)
             }
@@ -192,7 +184,7 @@ export function DataReconciliationPage() {
                 await loadData()
                 return
             }
-            const modeText = reconcileMode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'
+            const modeText = result.mode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'
             const timeText = result.execution_time_ms !== undefined ? ` (${result.execution_time_ms}ms)` : ''
             setNotice({ title: 'Kết quả đối soát', message: result.status === 'BLOCKED'
                 ? `Đã quét xong đối soát (${modeText}). Có sai lệch vượt ngưỡng an toàn; dữ liệu chưa được thay đổi.`
@@ -214,70 +206,9 @@ export function DataReconciliationPage() {
         }
     }, [selectedStream, reconcileMode, loadData])
 
-    const executeReconciliation = useCallback(async (dryRun: boolean, isAuto: boolean = false) => {
-        await handleRunReconcile(dryRun)
-        if (isAuto) setLastAutoRunAt(new Date().toLocaleTimeString('vi-VN'))
-    }, [handleRunReconcile])
-
-    // TIMER CHẠY TỰ ĐỘNG
-    useEffect(() => {
-        if (!isAutoRunning) {
-            return
-        }
-
-        setCountdown(autoInterval)
-
-        const timer = setInterval(() => {
-            setCountdown((prev) => {
-                if (prev <= 1) {
-                    void executeReconciliation(!autoHealEnabled, true)
-                    return autoInterval
-                }
-                return prev - 1
-            })
-        }, 1000)
-
-        return () => clearInterval(timer)
-    }, [isAutoRunning, autoInterval, autoHealEnabled, executeReconciliation])
-
-    const handleToggleAuto = (enabled: boolean) => {
-        if (enabled && autoHealEnabled) {
-            setConfirmModal({
-                title: 'Kích hoạt tự động phục hồi',
-                message: `Hệ thống sẽ đối soát VÀ tự phục hồi định kỳ mỗi ${autoInterval}s (${reconcileMode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'}). Bạn có chắc chắn muốn kích hoạt?`,
-                onConfirm: () => {
-                    setConfirmModal(null)
-                    setIsAutoRunning(true)
-                },
-            })
-        } else {
-            setIsAutoRunning(enabled)
-        }
-    }
-
-    function handleAutoHealClick() {
-        setConfirmModal({
-            title: 'Xác nhận tự phục hồi dữ liệu',
-            message:
-                'Hệ thống sẽ đối soát toàn vẹn và tự động đánh dấu xóa mềm (Tombstone) các bản ghi mồ côi bên Đích (ORPHAN_MASTER). Ngưỡng an toàn 10% sẽ tự động khóa nếu phát hiện sai lệch hàng loạt. Bạn có chắc chắn muốn thực hiện?',
-            onConfirm: () => {
-                setConfirmModal(null)
-                void executeReconciliation(false)
-            },
-        })
-    }
-    useEffect(() => {
-        if (!automatic || selectedStream !== 'files') return
-        const timer = window.setInterval(() => {
-            if (document.visibilityState === 'visible' && !running.current) void handleRunReconcile()
-        }, 300_000)
-        return () => window.clearInterval(timer)
-    }, [automatic, selectedStream, handleRunReconcile])
-
     const hasBlockedRun = report?.stream_reports?.some((r) => r.status === 'BLOCKED')
     const blockedReason = report?.stream_reports?.find((r) => r.summary_meta?.reason)?.summary_meta?.reason
-    const unverified = report?.stream_reports.reduce((total, row) => total +
-        (row.summary_meta?.unverified_source_files ?? 0) + (row.summary_meta?.unverified_metadata_records ?? 0), 0) ?? 0
+    const { unverified, hashPending, onlyHashPending, observedBytes, observedFiles } = auditSummary(report)
     const onlyUnverified = unverified > 0 && report?.total_matched_records === 0 && report.total_mismatched_records === 0
     const fileProgress = report?.stream_reports.find(row => row.stream_name === 'files')?.summary_meta
 
@@ -299,8 +230,6 @@ export function DataReconciliationPage() {
                             disabled={reconciling || loading}
                             onChange={(e) => {
                                 setSelectedStream(e.target.value)
-                                setIsAutoRunning(false)
-                                setAutomatic(false)
                                 setPage(1)
                             }}
                             aria-label="Chọn luồng dữ liệu"
@@ -319,75 +248,19 @@ export function DataReconciliationPage() {
                             onChange={(e) => setReconcileMode(e.target.value as 'INCREMENTAL' | 'FULL')}
                             aria-label="Phạm vi đối soát"
                         >
-                            <option value="INCREMENTAL">Tăng dần (Chỉ file mới/thay đổi)</option>
-                            <option value="FULL">Toàn diện (Tất cả file)</option>
+                            <option value="INCREMENTAL">Incremental / tệp: kiểm tra nhanh</option>
+                            <option value="FULL">Full / tệp: SHA-256</option>
                         </select>
 
                         {/* 3. NÚT ĐỐI SOÁT & PHỤC HỒI THỦ CÔNG */}
-                        <button
-                            type="button"
-                            className={styles.primaryButton}
-                            disabled={reconciling || loading}
-                            onClick={() => void executeReconciliation(true)}
-                        >
-                            {reconciling ? 'Đang đối soát...' : 'Quét đối soát'}
-                        </button>
-
-                        <button
-                            type="button"
-                            className={styles.secondaryButton}
-                            disabled={reconciling || loading}
-                            onClick={handleAutoHealClick}
-                        >
-                            Tự phục hồi
-                        </button>
-
-                        {/* 4. CÔNG TẮC BẬT/TẮT TỰ ĐỘNG DUY NHẤT */}
-                        <div className={styles.autoSwitchContainer}>
-                            <label className={styles.switch}>
-                                <input
-                                    type="checkbox"
-                                    checked={isAutoRunning}
-                                    onChange={(e) => handleToggleAuto(e.target.checked)}
-                                />
-                                <span className={styles.slider} />
-                            </label>
-                            <span
-                                className={styles.switchLabel}
-                                onClick={() => handleToggleAuto(!isAutoRunning)}
-                            >
-                                {isAutoRunning ? 'Tự động: BẬT' : 'Tự động: TẮT'}
-                            </span>
-                        </div>
-
-                        {/* CẤU HÌNH INLINE KHI BẬT TỰ ĐỘNG */}
-                        {isAutoRunning && (
-                            <div className={styles.autoGroup}>
-                                <select
-                                    className={styles.select}
-                                    value={autoInterval}
-                                    onChange={(e) => setAutoInterval(Number(e.target.value))}
-                                    aria-label="Chu kỳ tự động"
-                                >
-                                    <option value={30}>Mỗi 30s</option>
-                                    <option value={60}>Mỗi 1 phút</option>
-                                    <option value={300}>Mỗi 5 phút</option>
-                                    <option value={600}>Mỗi 10 phút</option>
-                                </select>
-
-                                <label className={styles.autoActionLabel}>
-                                    <input
-                                        type="checkbox"
-                                        checked={autoHealEnabled}
-                                        onChange={(e) => setAutoHealEnabled(e.target.checked)}
-                                    />
-                                    <span>Kèm tự sửa</span>
-                                </label>
-                            </div>
-                        )}
-
+                        <button className={styles.primaryButton} disabled={reconciling || loading}
+                            onClick={() => void handleRunReconcile()}>Quét đối soát</button>
+                        {selectedStream !== 'all' && selectedStream !== 'files' && <button className={styles.secondaryButton}
+                            disabled={reconciling || loading} onClick={() => setConfirmModal({ title: 'Đồng bộ bản ghi lệch',
+                                message: 'Quét luồng đã chọn rồi chỉ đồng bộ ID metadata lệch. Không xóa bản ghi hoặc ghi đè tệp sai hash.',
+                                onConfirm: () => { setConfirmModal(null); void handleRunReconcile(false) } })}>Đồng bộ lệch</button>}
                         {/* BADGE HIỂN THỊ THỜI GIAN THỰC THI */}
-                        {(lastExecutionTimeMs !== null || report?.stream_reports?.[0]?.execution_time_ms !== undefined) && (
+                        {(lastExecutionTimeMs ?? report?.stream_reports?.[0]?.execution_time_ms ?? 0) > 0 && (
                             <div className={styles.executionBadge} title="Thời gian thực thi đợt quét gần nhất">
                                 {lastExecutionTimeMs ?? report?.stream_reports?.[0]?.execution_time_ms} ms
                             </div>
@@ -395,20 +268,7 @@ export function DataReconciliationPage() {
                     </div>
                 </div>
 
-                {/* BANNER THÔNG BÁO TỰ ĐỘNG CHẠY */}
-                {isAutoRunning && (
-                    <div className={styles.autoStatusBanner}>
-                        <div>
-                            <span className={styles.pulseDot} />
-                            <strong>Đang tự động đối soát:</strong> chu kỳ {autoInterval}s • Phạm vi: {reconcileMode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'} ({autoHealEnabled ? 'Kèm tự phục hồi' : 'Chỉ kiểm tra'})
-                            {lastAutoRunAt && ` • Quét gần nhất: ${lastAutoRunAt}`}
-                            {lastExecutionTimeMs !== null && ` (${lastExecutionTimeMs}ms)`}
-                        </div>
-                        <div>
-                            Lần quét tiếp theo: <strong>{countdown}s</strong>
-                        </div>
-                    </div>
-                )}
+                <ReconciliationSchedule />
 
                 {/* THÔNG BÁO / CẢNH BÁO */}
                 {error && <div className={`${styles.alertBox} ${styles.alertWarning}`}>{error}</div>}
@@ -428,11 +288,11 @@ export function DataReconciliationPage() {
                 <div className={styles.statusGrid}>
                     <div className={styles.statusItem}>
                         <span className={styles.statusLabel}>Tỷ lệ đồng nhất</span>
-                        <span className={styles.statusValue} style={{ color: (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
-                            {onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
+                        <span className={styles.statusValue} style={{ color: onlyHashPending ? '#475569' : (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
+                            {onlyHashPending ? 'Chưa kiểm tra SHA-256' : onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
                         </span>
                         <span className={styles.statusSub}>
-                            Trạng thái: <strong>{report?.overall_status ?? 'CHƯA CHẠY'}</strong>
+                            Trạng thái: <strong>{onlyHashPending && report?.overall_status === 'PARTIAL' ? 'Quét nhanh' : report?.overall_status ?? 'CHƯA CHẠY'}</strong>
                         </span>
                     </div>
 
@@ -443,17 +303,18 @@ export function DataReconciliationPage() {
                         </span>
                         <span className={styles.statusSub}>
                             Khớp: <strong style={{ color: '#166534' }}>{report?.total_matched_records ?? 0}</strong> | Lệch: <strong style={{ color: '#991b1b' }}>{report?.total_mismatched_records ?? 0}</strong>
-                            {unverified > 0 && <> | Chưa xác minh: <strong>{unverified}</strong></>}
+                            {hashPending > 0 && <> | Chờ SHA-256: <strong>{hashPending}</strong></>}
+                            {unverified > hashPending && <> | Chưa xác minh: <strong>{unverified - hashPending}</strong></>}
                         </span>
                     </div>
 
                     <div className={styles.statusItem}>
-                        <span className={styles.statusLabel}>Dung lượng tệp</span>
+                        <span className={styles.statusLabel}>Dung lượng quan sát</span>
                         <span className={styles.statusValue}>
-                            {formatBytes(report?.total_target_bytes)}
+                            {observedFiles > 0 ? formatBytes(observedBytes) : 'Chưa có số liệu'}
                         </span>
                         <span className={styles.statusSub}>
-                            Nguồn: {formatBytes(report?.total_source_bytes)} | Đích: {formatBytes(report?.total_target_bytes)}
+                            {observedFiles > 0 ? `Đọc được metadata ${observedFiles} tệp` : 'Chưa có thống kê dung lượng tệp'}
                         </span>
                     </div>
 
@@ -464,8 +325,8 @@ export function DataReconciliationPage() {
                         </span>
                         <span className={styles.statusSub}>
                             Lần chạy: {formatDate(report?.last_reconciled_at)}
-                            {report?.stream_reports?.[0]?.execution_time_ms !== undefined && (
-                                <> • {report.stream_reports[0].execution_time_ms}ms</>
+                            {(report?.stream_reports?.[0]?.execution_time_ms ?? 0) > 0 && (
+                                <> • {report?.stream_reports[0]?.execution_time_ms}ms</>
                             )}
                         </span>
                     </div>
@@ -476,7 +337,7 @@ export function DataReconciliationPage() {
             <div className={styles.card}>
                 <div className={styles.sectionHeader}>
                     <div>
-                        <h3 className={styles.sectionTitle}>Chi tiết sai lệch</h3>
+                        <h3 className={styles.sectionTitle}>Chi tiết đối soát</h3>
                     </div>
                 </div>
 
@@ -527,7 +388,9 @@ export function DataReconciliationPage() {
                             </thead>
                             <tbody>
                                 {discrepancies.map((item) => {
-                                    const flagInfo = FLAG_LABELS[item.discrepancy_flag] || {
+                                    const hashPendingOnly = pendingHash(item)
+                                    const flagInfo = hashPendingOnly ? { label: 'Chưa kiểm tra hash', badgeClass: styles.badgeInfo,
+                                        desc: 'Quét nhanh đã đọc metadata; chưa xác minh SHA-256' } : FLAG_LABELS[item.discrepancy_flag] || {
                                         label: item.discrepancy_flag,
                                         badgeClass: styles.badgeGray,
                                         desc: item.discrepancy_flag,
@@ -564,7 +427,7 @@ export function DataReconciliationPage() {
                                                         {sVal.email && <div className={styles.cellMeta}>Email: {sVal.email}</div>}
                                                     </div>
                                                 ) : (
-                                                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>[Không có ở nguồn]</span>
+                                                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>{item.discrepancy_flag === 'ORPHAN_MASTER' ? '[Không có ở nguồn]' : '[Chưa có metadata đối chiếu]'}</span>
                                                 )}
                                             </td>
 
@@ -584,11 +447,12 @@ export function DataReconciliationPage() {
                                                                 BLOCKED_SOURCE_MAPPING: 'Chưa xác minh được tham chiếu nguồn',
                                                                 BLOCKED_SOURCE_POLICY: 'Nguồn chưa cho phép truy xuất',
                                                                 RECONCILIATION_READ_BUDGET: 'Tệp vượt thời gian xử lý; các tệp khác vẫn được quét',
+                                                                SHA256_NOT_CHECKED: 'Quét nhanh chưa tính SHA-256; chọn Full để xác minh hash',
                                                             } as Record<string, string>)[tVal.reason_code] ?? tVal.reason_code}</strong>
                                                         </div>}
                                                         {tVal.storage_file_size !== undefined && (
                                                             <div className={styles.cellMeta}>
-                                                                Dung lượng đĩa: <strong>{formatBytes(tVal.storage_file_size)}</strong>
+                                                                Dung lượng quan sát: <strong>{formatBytes(tVal.storage_file_size)}</strong>
                                                                 {tVal.size_delta_bytes !== undefined && (
                                                                     <span style={{ color: '#991b1b', marginLeft: '6px' }}>
                                                                         ({tVal.size_delta_bytes > 0 ? `+${formatBytes(tVal.size_delta_bytes)}` : `-${formatBytes(Math.abs(tVal.size_delta_bytes))}`})
@@ -621,7 +485,7 @@ export function DataReconciliationPage() {
 
                                             <td>
                                                 <span style={{ fontSize: '12px', fontWeight: 500, color: item.resolution_status === 'AUTO_HEALED' ? '#166534' : '#64748b' }}>
-                                                    {item.resolution_status === 'AUTO_HEALED' ? 'Đã tự sửa' : 'Chưa xử lý'}
+                                                    {hashPendingOnly ? 'Chờ kiểm tra hash' : item.resolution_status === 'AUTO_HEALED' ? 'Đã tự sửa' : 'Chưa xử lý'}
                                                 </span>
                                             </td>
                                         </tr>
