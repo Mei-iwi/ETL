@@ -203,6 +203,10 @@
     line-height: 1.6;
 }
 
+.sharedSchedule {
+    background: #eff6ff;
+}
+
 .scheduleActions {
     display: flex;
     gap: 8px;

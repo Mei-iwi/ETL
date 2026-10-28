@@ -21,18 +21,21 @@ class ReconcileTriggerRequest(BaseModel):
     )
 
 
-class AuditJobRequest(BaseModel):
+class AllAuditJobRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    audit_type: Literal['LIGHT', 'DEEP', 'METADATA', 'IDS'] = 'DEEP'
-    stream: Literal['files', 'resources', 'subjects', 'grades', 'users'] = 'files'
     mode: Literal['INCREMENTAL', 'FULL'] = 'INCREMENTAL'
     repair: bool = False
+
+
+class AuditJobRequest(AllAuditJobRequest):
+    audit_type: Literal['LIGHT', 'DEEP', 'METADATA', 'IDS'] = 'DEEP'
+    stream: Literal['files', 'resources', 'subjects', 'grades', 'users'] = 'files'
 
 
 class AuditScheduleRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: bool = False
-    interval_seconds: Literal[900, 1200, 1800, 3600] = 1800
+    interval_seconds: Literal[60, 300, 600, 900, 1200, 1800, 3600] = 1800
     mode: Literal['INCREMENTAL', 'FULL'] = 'INCREMENTAL'
     repair: bool = False
 

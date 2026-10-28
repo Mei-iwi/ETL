@@ -6,7 +6,7 @@ from data_sync_etl.db.models import ReconciliationAuditJob as Job
 from data_sync_etl.domain.core import new_id, now
 
 SCOPES = ('grades', 'subjects', 'users', 'resources', 'files')
-INTERVALS = (900, 1200, 1800, 3600)
+INTERVALS = (60, 300, 600, 900, 1200, 1800, 3600)
 
 
 class AuditSchedule:
@@ -21,19 +21,20 @@ class AuditSchedule:
                  'mode': 'INCREMENTAL', 'repair': stream != 'files', **rows.get(stream, {})} for stream in SCOPES]
 
     def configure(self, stream, values):
-        if stream not in SCOPES or values['interval_seconds'] not in INTERVALS:
+        if stream not in (*SCOPES, 'all') or values['interval_seconds'] not in INTERVALS:
             raise ValueError('INVALID_AUDIT_SCHEDULE')
         with self.uow() as repo:
-            row = repo.session.scalar(select(Job).where(Job.job_key == f'schedule:{stream}').with_for_update())
-            if row is None:
-                row = Job(id=new_id(), job_key=f'schedule:{stream}', audit_type='LIGHT' if stream == 'files' else 'METADATA',
-                          stream_name=stream, status='CONFIGURED', checkpoint={})
-                repo.session.add(row)
-            row.checkpoint = {**values, 'repair': values['repair'] and stream != 'files'}
-            if not values['enabled']:
-                repo.session.execute(update(Job).where(Job.stream_name == stream,
-                    Job.job_key.startswith(f'configured:{stream}:'), Job.status.in_(('PENDING', 'RETRY_WAIT')))
-                    .values(status='CANCELLED', finished_at=now(), error_code='CANCELLED_BY_ADMIN'))
+            for target in SCOPES if stream == 'all' else (stream,):
+                row = repo.session.scalar(select(Job).where(Job.job_key == f'schedule:{target}').with_for_update())
+                if row is None:
+                    row = Job(id=new_id(), job_key=f'schedule:{target}', audit_type='LIGHT' if target == 'files' else 'METADATA',
+                              stream_name=target, status='CONFIGURED', checkpoint={})
+                    repo.session.add(row)
+                row.checkpoint = {**values, 'repair': values['repair'] and target != 'files'}
+                if not values['enabled']:
+                    repo.session.execute(update(Job).where(Job.stream_name == target,
+                        Job.job_key.startswith(f'configured:{target}:'), Job.status.in_(('PENDING', 'RETRY_WAIT')))
+                        .values(status='CANCELLED', finished_at=now(), error_code='CANCELLED_BY_ADMIN'))
 
     def tick(self):
         queue = AuditQueue(self.uow, self.settings)

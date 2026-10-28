@@ -20,6 +20,7 @@ from data_sync_etl.adapters.persistence.audit_queue import utc
 from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit, identity
 from data_sync_etl.api.admin_access import require_local_admin
 from data_sync_etl.api.reconciliation_schemas import (
+    AllAuditJobRequest,
     AuditJobRequest,
     AuditScheduleRequest,
     DiscrepancyItemResponse,
@@ -68,6 +69,14 @@ def audit_schedules(request: Request):
     from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
     container = request.app.state.container
     return {'items': AuditSchedule(container.uow, container.settings).list(), 'worker_required': True}
+
+
+@router.post('/audit-jobs/all', status_code=202)
+def enqueue_all_audits(request: Request, body: AllAuditJobRequest):
+    container = request.app.state.container
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings)
+    jobs = audit.queue.enqueue_all(mode=body.mode, repair=body.repair)
+    return {'status': 'PENDING', 'items': jobs, 'worker_required': True}
 
 
 @router.put('/schedules/{stream}')

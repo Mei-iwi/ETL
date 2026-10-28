@@ -950,13 +950,13 @@ Giới hạn mặc định ở `.env.example` và `deploy/docker.env.example`: `
 Trong **Đối soát toàn vẹn dữ liệu → Lịch đối soát theo từng luồng**:
 
 1. Chọn riêng Khối lớp, Môn học, Người dùng, Học liệu hoặc Kho tệp; mặc định lịch đều tắt.
-2. Chọn 15/20/30 phút hoặc 1 tiếng, chế độ Incremental hoặc Full, bật lịch rồi **Lưu**. Lịch lưu trên server, không phụ thuộc tab trình duyệt. **Quét luồng này** xếp hàng một lượt độc lập.
+2. Chọn 1/5/10/15/20/30 phút hoặc 1 tiếng, chế độ Incremental hoặc Full, bật lịch rồi **Lưu**. Dòng **Tất cả luồng → Lưu chung** áp dụng cùng cấu hình cho cả 5 luồng; mỗi dòng bên dưới vẫn có thể lưu cấu hình riêng. Lịch lưu trên server, không phụ thuộc tab trình duyệt. **Quét tất cả** xếp hàng riêng 5 tác vụ theo chế độ chung; **Quét luồng này** chỉ xếp hàng luồng đã chọn. Các nút quét thủ công không thay đổi lịch đã lưu.
 3. Với metadata, bật **Đồng bộ lệch** để chỉ cập nhật các ID thiếu/lệch sau khi đối soát; tắt để chỉ đọc/báo cáo. Không tự xóa bản ghi mồ côi, không ghi đè học liệu LOCAL hoặc vượt kiểm tra ownership.
 4. Kho tệp Incremental chỉ kiểm tra metadata/kích thước nhanh, không tải bytes hoặc ghi nhận là đã xác minh SHA-256. Full kiểm tra bytes/hash theo lô, giới hạn thời gian/I/O và tiếp tục bằng checkpoint. Sai hash hoặc nguồn chưa truy xuất được vẫn phải xử lý tại nguồn; không tự sửa hash hay ghi đè phiên bản.
 
 Hai nút **Đồng bộ Full** và **Chạy Incremental** thủ công vẫn ở trang Đồng bộ dữ liệu. Lịch tương thích cũ ở trang này nay cũng đối soát trước, chỉ gọi đồng bộ cho ID lệch. Tránh bật đồng thời lịch cũ và lịch mới cho cùng một luồng. `RECONCILIATION_SCHEDULER_ENABLED=false` chỉ tắt bộ lịch nền định sẵn cũ; lịch do admin lưu trên giao diện vẫn được worker riêng thực thi.
 
-`AUTH_MODE=master_users` vẫn kiểm tra độ mới. Một lần sửa vài user không làm mới bằng chứng cho toàn bộ users; chỉ audit users hoàn tất, so sánh cả hash/role riêng tư và sửa hết ID lệch mới được sử dụng làm bằng chứng. Lịch users 15 phút không đáp ứng `AUTH_MASTER_FRESHNESS_SECONDS=120`: cần giữ lịch tương thích users ngắn để audit thường xuyên, hoặc chủ hệ thống phê duyệt chính sách freshness phù hợp; không tự nới cờ để bỏ kiểm tra.
+`AUTH_MODE=master_users` vẫn kiểm tra độ mới. Một lần sửa vài user không làm mới bằng chứng cho toàn bộ users; chỉ audit users hoàn tất, so sánh cả hash/role riêng tư và sửa hết ID lệch mới được sử dụng làm bằng chứng. Lịch users 15 phút không đáp ứng `AUTH_MASTER_FRESHNESS_SECONDS=120`: chọn 1 phút cho luồng users và bảo đảm audit hoàn thành đúng hạn, giữ lịch tương thích users ngắn nếu queue audit còn chậm, hoặc chủ hệ thống phê duyệt chính sách freshness phù hợp; không tự nới cờ để bỏ kiểm tra.
 
 Các bảng tải dữ liệu theo trang; tổng số trang tệp được yêu cầu khi chuyển trang/bộ lọc, không đếm lại ở mỗi lần polling. Polling quản trị dừng khi tab ẩn. Các báo cáo [RECONCILIATION_TEST_RESULTS.json](RECONCILIATION_TEST_RESULTS.json) và [RECONCILIATION_BENCHMARK.json](RECONCILIATION_BENCHMARK.json) là bằng chứng của phiên bản trước; không dùng để kết luận hiệu năng live của thay đổi mới.
 

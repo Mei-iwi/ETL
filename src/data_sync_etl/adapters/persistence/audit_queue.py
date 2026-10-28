@@ -25,37 +25,51 @@ class AuditQueue:
         key = job_key or new_id()
         try:
             with self.uow() as repo:
-                existing = repo.session.scalar(select(Job).where(Job.job_key == key))
-                if existing:
-                    return existing.id
-                previous = repo.session.scalar(select(Job).where(Job.audit_type == audit_type,
-                    Job.stream_name == stream).order_by(Job.created_at.desc()).limit(1))
-                # File scans continue by keyset across independent budgeted jobs.
-                checkpoint = {}
-                if previous and previous.checkpoint and previous.status != 'FAILED':
-                    checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
-                        'last_id', 'phase', 'generation', 'source_seen', 'source_summary')}
-                    if audit_type == 'METADATA' and previous.status == 'PARTIAL' and previous.checkpoint.get('last_id'):
-                        checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
-                            'last_id', 'scan_started', 'since', 'watermark_next', 'generation',
-                            'auth_scope_complete')}
-                    elif audit_type == 'METADATA':
-                        checkpoint = {}
-                if mode == 'FULL' and not (previous and previous.status == 'PARTIAL'
-                                           and (previous.checkpoint or {}).get('mode') == 'FULL'):
-                    checkpoint = {}
-                if previous and bool((previous.checkpoint or {}).get('repair_requested')) != repair:
-                    checkpoint = {}
-                if mode is not None:
-                    checkpoint.update(mode=mode, repair_requested=repair)
-                row = Job(id=new_id(), job_key=key, audit_type=audit_type, stream_name=stream,
-                          status='PENDING', checkpoint=checkpoint)
-                repo.session.add(row)
-                repo.session.flush()
-                return row.id
+                return self._enqueue_in(repo, audit_type, stream, key, mode, repair)
         except IntegrityError:
             with self.uow() as repo:
                 return repo.session.scalar(select(Job.id).where(Job.job_key == key))
+
+    def _enqueue_in(self, repo, audit_type, stream, key, mode, repair):
+        existing = repo.session.scalar(select(Job).where(Job.job_key == key))
+        if existing:
+            return existing.id
+        previous = repo.session.scalar(select(Job).where(Job.audit_type == audit_type,
+            Job.stream_name == stream).order_by(Job.created_at.desc()).limit(1))
+        # File scans continue by keyset across independent budgeted jobs.
+        checkpoint = {}
+        if previous and previous.checkpoint and previous.status != 'FAILED':
+            checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
+                'last_id', 'phase', 'generation', 'source_seen', 'source_summary')}
+            if audit_type == 'METADATA' and previous.status == 'PARTIAL' and previous.checkpoint.get('last_id'):
+                checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
+                    'last_id', 'scan_started', 'since', 'watermark_next', 'generation',
+                    'auth_scope_complete')}
+            elif audit_type == 'METADATA':
+                checkpoint = {}
+        if mode == 'FULL' and not (previous and previous.status == 'PARTIAL'
+                                   and (previous.checkpoint or {}).get('mode') == 'FULL'):
+            checkpoint = {}
+        if previous and bool((previous.checkpoint or {}).get('repair_requested')) != repair:
+            checkpoint = {}
+        if mode is not None:
+            checkpoint.update(mode=mode, repair_requested=repair)
+        row = Job(id=new_id(), job_key=key, audit_type=audit_type, stream_name=stream,
+                  status='PENDING', checkpoint=checkpoint)
+        repo.session.add(row)
+        repo.session.flush()
+        return row.id
+
+    def enqueue_all(self, *, mode='INCREMENTAL', repair=False):
+        if mode not in ('INCREMENTAL', 'FULL'):
+            raise DomainError('INVALID_AUDIT_SCOPE')
+        jobs = []
+        with self.uow() as repo:
+            for stream in ('grades', 'subjects', 'users', 'resources', 'files'):
+                kind = ('DEEP' if mode == 'FULL' else 'LIGHT') if stream == 'files' else 'METADATA'
+                job_id = self._enqueue_in(repo, kind, stream, new_id(), mode, repair and stream != 'files')
+                jobs.append({'job_id': job_id, 'stream': stream, 'audit_type': kind})
+        return jobs
 
     def claim(self, job_id=None):
         stamp = now()
