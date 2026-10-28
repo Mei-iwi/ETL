@@ -184,6 +184,7 @@ export function DataReconciliationPage() {
     const { unverified, hashPending, onlyHashPending, observedBytes, observedFiles } = auditSummary(report)
     const onlyUnverified = unverified > 0 && report?.total_matched_records === 0 && report.total_mismatched_records === 0
     const fileProgress = report?.stream_reports.find(row => row.stream_name === 'files')?.summary_meta
+    const scanInProgress = reconciling || report?.overall_status === 'RUNNING'
 
     return (
         <div className={styles.container}>
@@ -264,8 +265,8 @@ export function DataReconciliationPage() {
                 <div className={styles.statusGrid}>
                     <div className={styles.statusItem}>
                         <span className={styles.statusLabel}>Tỷ lệ đồng nhất</span>
-                        <span className={styles.statusValue} style={{ color: onlyHashPending ? '#475569' : (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
-                            {onlyHashPending ? 'Chưa kiểm tra SHA-256' : onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
+                        <span className={styles.statusValue} style={{ color: scanInProgress || onlyHashPending ? '#475569' : (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
+                            {scanInProgress ? 'Đang kiểm tra' : onlyHashPending ? 'Chưa kiểm tra SHA-256' : onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
                         </span>
                         <span className={styles.statusSub}>
                             Trạng thái: <strong>{onlyHashPending && report?.overall_status === 'PARTIAL' ? 'Quét nhanh' : report?.overall_status ?? 'CHƯA CHẠY'}</strong>
@@ -273,7 +274,7 @@ export function DataReconciliationPage() {
                     </div>
 
                     <div className={styles.statusItem}>
-                        <span className={styles.statusLabel}>Tổng bản ghi</span>
+                        <span className={styles.statusLabel} title="Số liệu của các lượt đối soát, không phải tiến độ hoàn thành">Bản ghi SOURCE / MASTER</span>
                         <span className={styles.statusValue}>
                             {report?.total_source_records ?? 0} / {report?.total_target_records ?? 0}
                         </span>

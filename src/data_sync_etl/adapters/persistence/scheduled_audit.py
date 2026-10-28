@@ -124,7 +124,8 @@ class ScheduledAudit:
                 'dry_run': not checkpoint.get('repair_requested', False),
                 'mode': checkpoint.get('mode', 'INCREMENTAL'), 'whole_repository_verified': False,
                 'verification_scope': 'AUDIT_JOB', 'cache_reused_count': 0}
-            run.source_count = checkpoint.get('source_count', 0)
+            run.source_count = (checkpoint.get('records_scanned', 0) if claim['audit_type'] in ('LIGHT', 'DEEP')
+                                else checkpoint.get('source_count', 0))
             run.target_count = checkpoint.get('records_scanned', 0)
             run.matched_count = checkpoint.get('matched_count', 0)
             run.mismatched_count = checkpoint.get('mismatched_count', 0)

@@ -138,6 +138,17 @@ test('manual deep and metadata repair require confirmation and use queued action
     assert.equal(render({ 6: 'all' }).button('Đồng bộ lệch'), undefined)
 })
 
+test('running audit does not display a finished percentage or label counts as scan progress', () => {
+    const view = render({ 0: { latest_run_id: 'in-flight', overall_status: 'RUNNING',
+        overall_match_rate_percent: 100, total_source_records: 57, total_target_records: 76,
+        total_matched_records: 76, total_mismatched_records: 0, stream_reports: [] } })
+    const html = renderToStaticMarkup(view.tree)
+    assert.match(html, /Đang kiểm tra/)
+    assert.match(html, /Bản ghi SOURCE \/ MASTER/)
+    assert.doesNotMatch(html, /100%/)
+    assert.match(html, /không phải tiến độ hoàn thành/)
+})
+
 test('schedule has no duplicate scan buttons and original error routes remain available', () => {
     const schedules = readFileSync(new URL('../src/pages/system/ReconciliationSchedule.tsx', import.meta.url), 'utf8')
     const routes = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')

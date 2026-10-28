@@ -217,7 +217,14 @@ def get_latest_reconciliation_report(
                 "stream_reports": [],
             }
 
-        total_source = sum(r.source_count for r in latest_runs)
+        def source_count(run):
+            meta = run.summary_meta or {}
+            scanned = meta.get('records_scanned')
+            if run.stream_name == 'files' and meta.get('audit_type') in ('LIGHT', 'DEEP') and type(scanned) is int and scanned >= 0:
+                return scanned  # Expected file versions examined, also for earlier queued runs.
+            return run.source_count
+
+        total_source = sum(source_count(r) for r in latest_runs)
         total_target = sum(r.target_count for r in latest_runs)
         total_matched = sum(r.matched_count for r in latest_runs)
         total_mismatched = sum(r.mismatched_count for r in latest_runs)
@@ -241,7 +248,7 @@ def get_latest_reconciliation_report(
 
         stream_reports = []
         for r in latest_runs:
-            pop = max(1, max(r.source_count, r.target_count))
+            pop = max(1, max(source_count(r), r.target_count))
             match_pct = round((r.matched_count / pop) * 100, 2)
             meta = r.summary_meta or {}
             run_mode = meta.get("mode", "INCREMENTAL")
@@ -255,7 +262,7 @@ def get_latest_reconciliation_report(
                     execution_time_ms=run_exec_ms,
                     started_at=r.started_at.isoformat(),
                     finished_at=r.finished_at.isoformat() if r.finished_at else None,
-                    source_count=r.source_count,
+                    source_count=source_count(r),
                     target_count=r.target_count,
                     matched_count=r.matched_count,
                     mismatched_count=r.mismatched_count,
