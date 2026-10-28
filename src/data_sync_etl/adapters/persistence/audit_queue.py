@@ -1,9 +1,11 @@
 """Durable audit-only queue. Every write is fenced by token AND unexpired lease."""
 from datetime import UTC, timedelta
 
-from sqlalchemy import and_, case, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 
+from data_sync_etl.adapters.persistence.queue_admission import admission_lock, processing_available
 from data_sync_etl.db.models import ReconciliationAuditJob as Job
 from data_sync_etl.db.models import SyncReconciliationRun
 from data_sync_etl.domain.core import DomainError, new_id, now
@@ -94,8 +96,15 @@ class AuditQueue:
         return jobs
 
     def claim(self, job_id=None):
-        stamp = now()
         with self.uow() as repo:
+            admission_lock(repo.session, 'audit')
+            stamp = now()
+            active = and_(Job.status == 'RUNNING', Job.lease_expires_at > stamp)
+            if repo.session.scalar(select(func.count()).select_from(Job).where(active)) >= self.settings.reconciliation_max_active:
+                return None
+            other = aliased(Job)
+            busy_stream = select(other.id).where(other.stream_name == Job.stream_name,
+                other.id != Job.id, other.status == 'RUNNING', other.lease_expires_at > stamp).exists()
             eligible = or_(and_(Job.status.in_(('PENDING', 'RETRY_WAIT')),
                                 or_(Job.next_retry_at.is_(None), Job.next_retry_at <= stamp)),
                            and_(Job.status == 'RUNNING', Job.lease_expires_at <= stamp))
@@ -105,14 +114,22 @@ class AuditQueue:
                 # Scheduled slot keys contain ':'; manual API keys are UUID/ULID.
                 # Disabling the scheduler also pauses unclaimed scheduled work.
                 eligible = and_(eligible, or_(~Job.job_key.contains(':'), Job.job_key.startswith('configured:')))
-            row = repo.session.scalar(select(Job).where(eligible).order_by(
-                case((~Job.job_key.contains(':'), 0), else_=1), Job.created_at, Job.id)
-                .with_for_update(skip_locked=True).limit(1))
-            if row is None:
-                return None
-            if row.attempts >= self.settings.reconciliation_retry_max_attempts:
-                row.status, row.error_code, row.finished_at = 'FAILED', 'AUDIT_RETRY_EXHAUSTED', stamp
-                return None
+            excluded = []
+            while True:
+                row = repo.session.scalar(select(Job).where(eligible, ~busy_stream,
+                    Job.stream_name.not_in(excluded)).order_by(
+                    case((~Job.job_key.contains(':'), 0), else_=1), Job.created_at, Job.id)
+                    .with_for_update(skip_locked=True).limit(1))
+                if row is None:
+                    return None
+                if not processing_available(repo.session, f'reconciliation-{row.stream_name}'):
+                    excluded.append(row.stream_name)
+                    continue  # A live execution lock must not spend another retry.
+                if row.attempts >= self.settings.reconciliation_retry_max_attempts:
+                    row.status, row.error_code, row.finished_at = 'FAILED', 'AUDIT_RETRY_EXHAUSTED', stamp
+                    repo.session.flush()
+                    continue
+                break
             token = new_id()
             attempts = row.attempts + 1
             changed = repo.session.execute(update(Job).where(Job.id == row.id, eligible).values(

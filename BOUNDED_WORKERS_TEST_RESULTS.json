@@ -1,0 +1,963 @@
+{
+  "status": "PARTIAL",
+  "client_date": "2026-10-28",
+  "timezone": "Asia/Saigon",
+  "baseline_branch": "main",
+  "branch": "feat/sync/bounded-parallel-workers",
+  "baseline_commit": "9af41d889453f924bc3675c905f41498f2cd293c",
+  "pull_request_reviewed": "https://github.com/Mei-iwi/ETL/pull/111",
+  "dirty_tree": true,
+  "source_digest_sha256": "be2504551b4990973748a97b842f071c7f999703d28e8eaf30a89dad5d5185ab",
+  "groups": {
+    "baseline_full_unit": {
+      "total": 2225,
+      "passed": 2209,
+      "failed": 7,
+      "errors": 0,
+      "skipped_including_xfail": 9,
+      "failure_ids": [
+        "tests.unit.test_api_migrations::test_architecture_dependencies",
+        "tests.unit.test_auth_users_sync_priority::test_users_refresh_does_not_wait_for_the_whole_slow_cycle[None-streams1-expected1]",
+        "tests.unit.test_auth_users_sync_priority::test_users_refresh_does_not_wait_for_the_whole_slow_cycle[120-streams2-expected2]",
+        "tests.unit.test_concept_corpus_audit::test_offline_audit_does_not_connect_or_change_seed",
+        "tests.unit.test_http_cache_acceptance::test_invalid_requests_and_untrusted_scope_do_not_consult_cache",
+        "tests.unit.test_master_mongo_references::test_nullable_unique_references_and_other_ten_tables_unchanged",
+        "tests.unit.test_migration_governance::test_read_only_governance_is_repeatable_and_preserves_contract"
+      ],
+      "error_ids": [],
+      "skips": [
+        {
+          "id": "tests.unit.test_file_preview::test_real_libreoffice_pdf[.docx]",
+          "reason": "Explicit isolated LibreOffice runtime not configured",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_file_preview::test_real_libreoffice_pdf[.pptx]",
+          "reason": "Explicit isolated LibreOffice runtime not configured",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_multiformat::test_real_tesseract_image_runtime_if_installed[.png]",
+          "reason": "Real Tesseract with vie+eng is not installed/configured; OCR quality NOT VERIFIED",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_multiformat::test_real_tesseract_image_runtime_if_installed[.jpg]",
+          "reason": "Real Tesseract with vie+eng is not installed/configured; OCR quality NOT VERIFIED",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_multiformat::test_real_tesseract_image_runtime_if_installed[.jpeg]",
+          "reason": "Real Tesseract with vie+eng is not installed/configured; OCR quality NOT VERIFIED",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_search_read_path_metrics::test_actual_db_counts_match_source_n_plus_one",
+          "reason": "Explicit physical audit artifacts required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_search_read_path_metrics::test_public_denied_and_cache_off",
+          "reason": "Explicit physical audit artifacts required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_search_read_path_metrics::test_paging_retains_global_reads_and_privacy",
+          "reason": "Explicit physical audit artifacts required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_source_file_import::test_source_reader_symlink",
+          "reason": "Symlink creation unavailable",
+          "type": "pytest.skip"
+        }
+      ],
+      "evidence": "artifacts/bounded-workers/baseline-unit.xml"
+    },
+    "baseline_focused_unit": {
+      "total": 62,
+      "passed": 61,
+      "failed": 0,
+      "errors": 0,
+      "skipped_including_xfail": 1,
+      "failure_ids": [],
+      "error_ids": [],
+      "skips": [
+        {
+          "id": "tests.unit.test_source_file_import::test_source_reader_symlink",
+          "reason": "Symlink creation unavailable",
+          "type": "pytest.skip"
+        }
+      ],
+      "evidence": "artifacts/bounded-workers/baseline-relevant.xml"
+    },
+    "baseline_postgres": {
+      "total": 17,
+      "passed": 17,
+      "failed": 0,
+      "errors": 0,
+      "skipped_including_xfail": 0,
+      "failure_ids": [],
+      "error_ids": [],
+      "skips": [],
+      "evidence": "artifacts/bounded-workers/baseline-postgres.xml"
+    },
+    "baseline_integration_collection": {
+      "total": 1,
+      "passed": 0,
+      "failed": 0,
+      "errors": 1,
+      "skipped_including_xfail": 0,
+      "failure_ids": [],
+      "error_ids": [
+        "::tests.integration.test_source_lineage_pg"
+      ],
+      "skips": [],
+      "evidence": "artifacts/bounded-workers/baseline-integration-collection.xml"
+    },
+    "baseline_additional_integration_failures": {
+      "total": 19,
+      "passed": 0,
+      "failed": 19,
+      "errors": 0,
+      "skipped_including_xfail": 0,
+      "failure_ids": [
+        "tests.integration.source_postgres.test_drive_file_flow::test_postgres_local_and_drive_same_batch_same_snapshot",
+        "tests.integration.source_postgres.test_file_import_flow::test_source_media_excluded_from_import_queue[.mp3]",
+        "tests.integration.source_postgres.test_file_import_flow::test_source_media_excluded_from_import_queue[.mp4]",
+        "tests.integration.source_postgres.test_file_import_flow::test_source_file_to_index_with_existing_workers[False]",
+        "tests.integration.source_postgres.test_file_import_flow::test_source_file_to_index_with_existing_workers[True]",
+        "tests.integration.source_postgres.test_integrity::test_master_timestamp_revision_and_cross_migration_guards",
+        "tests.integration.source_postgres.test_master_metadata_projection::test_real_master_ten_table_columns_match_orm_and_reference_constraints",
+        "tests.integration.source_postgres.test_runtime::test_source_sync_worker_mongo_and_runtime_preservation",
+        "tests.integration.source_postgres.test_runtime::test_master_content_parent_and_local_timestamp",
+        "tests.integration.test_cli_stage_flow::test_cli_manual_stages_and_demo_rerun",
+        "tests.integration.test_indexing_integration::test_real_index_api_worker_consistency",
+        "tests.integration.test_indexing_integration::test_real_lock_restart_and_failed_rebuild",
+        "tests.integration.test_indexing_integration::test_schema_block_both_posts_and_readonly_status_then_operator_test_fix",
+        "tests.integration.test_indexing_integration::test_worker_schema_error_never_repairs_database",
+        "tests.integration.test_indexing_integration::test_auto_and_unstructured_content_ready[False]",
+        "tests.integration.test_indexing_integration::test_auto_and_unstructured_content_ready[True]",
+        "tests.integration.test_migration_governance::test_all_eighteen_master_tables_match_orm_after_migration",
+        "tests.integration.test_migration_governance::test_upgrade_from_0013_and_idempotent_head_preserves_catalog",
+        "tests.integration.test_source_catalogs_pg::test_schema_counts_are_preserved_in_isolated_databases"
+      ],
+      "error_ids": [],
+      "skips": [],
+      "evidence": "artifacts/bounded-workers/baseline-integration-selected.xml"
+    },
+    "full_unit_before_final_guard_correction": {
+      "total": 2235,
+      "passed": 2218,
+      "failed": 8,
+      "errors": 0,
+      "skipped_including_xfail": 9,
+      "failure_ids": [
+        "tests.unit.test_api_migrations::test_architecture_dependencies",
+        "tests.unit.test_auth_users_sync_priority::test_users_refresh_does_not_wait_for_the_whole_slow_cycle[None-streams1-expected1]",
+        "tests.unit.test_auth_users_sync_priority::test_users_refresh_does_not_wait_for_the_whole_slow_cycle[120-streams2-expected2]",
+        "tests.unit.test_concept_corpus_audit::test_offline_audit_does_not_connect_or_change_seed",
+        "tests.unit.test_http_cache_acceptance::test_invalid_requests_and_untrusted_scope_do_not_consult_cache",
+        "tests.unit.test_master_mongo_references::test_nullable_unique_references_and_other_ten_tables_unchanged",
+        "tests.unit.test_migration_governance::test_read_only_governance_is_repeatable_and_preserves_contract",
+        "tests.unit.test_source_lineage::test_mapping_must_be_committed_same_origin_resource[pending-PARENT_PENDING]"
+      ],
+      "error_ids": [],
+      "skips": [
+        {
+          "id": "tests.unit.test_file_preview::test_real_libreoffice_pdf[.docx]",
+          "reason": "Explicit isolated LibreOffice runtime not configured",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_file_preview::test_real_libreoffice_pdf[.pptx]",
+          "reason": "Explicit isolated LibreOffice runtime not configured",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_multiformat::test_real_tesseract_image_runtime_if_installed[.png]",
+          "reason": "Real Tesseract with vie+eng is not installed/configured; OCR quality NOT VERIFIED",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_multiformat::test_real_tesseract_image_runtime_if_installed[.jpg]",
+          "reason": "Real Tesseract with vie+eng is not installed/configured; OCR quality NOT VERIFIED",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_multiformat::test_real_tesseract_image_runtime_if_installed[.jpeg]",
+          "reason": "Real Tesseract with vie+eng is not installed/configured; OCR quality NOT VERIFIED",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_search_read_path_metrics::test_actual_db_counts_match_source_n_plus_one",
+          "reason": "Explicit physical audit artifacts required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_search_read_path_metrics::test_public_denied_and_cache_off",
+          "reason": "Explicit physical audit artifacts required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_search_read_path_metrics::test_paging_retains_global_reads_and_privacy",
+          "reason": "Explicit physical audit artifacts required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.unit.test_source_file_import::test_source_reader_symlink",
+          "reason": "Symlink creation unavailable",
+          "type": "pytest.skip"
+        }
+      ],
+      "evidence": "artifacts/bounded-workers/final-unit.xml"
+    },
+    "full_integration_snapshot": {
+      "total": 352,
+      "passed": 222,
+      "failed": 40,
+      "errors": 4,
+      "skipped_including_xfail": 86,
+      "failure_ids": [
+        "tests.integration.source_postgres.test_drive_file_flow::test_postgres_local_and_drive_same_batch_same_snapshot",
+        "tests.integration.source_postgres.test_file_import_flow::test_source_media_excluded_from_import_queue[.mp3]",
+        "tests.integration.source_postgres.test_file_import_flow::test_source_media_excluded_from_import_queue[.mp4]",
+        "tests.integration.source_postgres.test_file_import_flow::test_source_file_to_index_with_existing_workers[False]",
+        "tests.integration.source_postgres.test_file_import_flow::test_source_file_to_index_with_existing_workers[True]",
+        "tests.integration.source_postgres.test_integrity::test_master_timestamp_revision_and_cross_migration_guards",
+        "tests.integration.source_postgres.test_master_metadata_projection::test_real_master_ten_table_columns_match_orm_and_reference_constraints",
+        "tests.integration.source_postgres.test_runtime::test_source_sync_worker_mongo_and_runtime_preservation",
+        "tests.integration.source_postgres.test_runtime::test_master_content_parent_and_local_timestamp",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_copied_version_retry_cannot_bypass_updated_policy[source_rejected]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_copied_version_retry_cannot_bypass_updated_policy[source_inactive]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_copied_version_retry_cannot_bypass_updated_policy[master_inactive]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.pdf]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.docx]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.xlsx]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.txt]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.csv]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.png]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.jpg]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.jpeg]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.pptx]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.pdf]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.docx]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.xlsx]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.txt]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.csv]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.png]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.jpg]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.jpeg]",
+        "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.pptx]",
+        "tests.integration.test_cli_stage_flow::test_cli_manual_stages_and_demo_rerun",
+        "tests.integration.test_indexing_integration::test_real_index_api_worker_consistency",
+        "tests.integration.test_indexing_integration::test_real_lock_restart_and_failed_rebuild",
+        "tests.integration.test_indexing_integration::test_schema_block_both_posts_and_readonly_status_then_operator_test_fix",
+        "tests.integration.test_indexing_integration::test_worker_schema_error_never_repairs_database",
+        "tests.integration.test_indexing_integration::test_auto_and_unstructured_content_ready[False]",
+        "tests.integration.test_indexing_integration::test_auto_and_unstructured_content_ready[True]",
+        "tests.integration.test_migration_governance::test_all_eighteen_master_tables_match_orm_after_migration",
+        "tests.integration.test_migration_governance::test_upgrade_from_0013_and_idempotent_head_preserves_catalog",
+        "tests.integration.test_source_catalogs_pg::test_schema_counts_are_preserved_in_isolated_databases"
+      ],
+      "error_ids": [
+        "::tests.integration.test_source_lineage_pg",
+        "tests.integration.test_file_reconciliation_jobs::test_accepted_response_and_durable_progress_do_not_wait_for_source",
+        "tests.integration.test_lineage_diagnostic::test_source_branch_is_preserved",
+        "tests.integration.test_metadata_refresh_postgres::test_large_registry_sweep_wraparound_and_late_smaller_key[2000]"
+      ],
+      "skips": [
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.pdf-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.pdf-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.docx-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.docx-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.xlsx-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.xlsx-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.txt-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.txt-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.csv-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.csv-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.png-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.png-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.jpg-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.jpg-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.jpeg-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.jpeg-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.pptx-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.pptx-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.scan.pdf-local]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_content_pipeline_acceptance::test_real_content_to_bags_search_and_evaluation[.scan.pdf-google_drive]",
+          "reason": "Requires explicitly provisioned real local embedding/OCR runtime",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_docker_portable::test_source_pipeline_real_databases_model_and_ocr[.pdf]",
+          "reason": "Explicit Docker fixture run required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_docker_portable::test_source_pipeline_real_databases_model_and_ocr[.docx]",
+          "reason": "Explicit Docker fixture run required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_docker_portable::test_source_pipeline_real_databases_model_and_ocr[.xlsx]",
+          "reason": "Explicit Docker fixture run required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_docker_portable::test_source_pipeline_real_databases_model_and_ocr[.pptx]",
+          "reason": "Explicit Docker fixture run required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_docker_portable::test_source_pipeline_real_databases_model_and_ocr[.txt]",
+          "reason": "Explicit Docker fixture run required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_docker_portable::test_source_pipeline_real_databases_model_and_ocr[.csv]",
+          "reason": "Explicit Docker fixture run required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_docker_portable::test_source_pipeline_real_databases_model_and_ocr[.png]",
+          "reason": "Explicit Docker fixture run required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_docker_portable::test_source_pipeline_real_databases_model_and_ocr[.jpg]",
+          "reason": "Explicit Docker fixture run required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_docker_portable::test_source_pipeline_real_databases_model_and_ocr[.jpeg]",
+          "reason": "Explicit Docker fixture run required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_local_embedding_runtime::test_manual_real_model_index_and_reindex[structured]",
+          "reason": "Opt-in local model acceptance: ETL_TEST_REAL_EMBEDDING=1 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_local_embedding_runtime::test_manual_real_model_index_and_reindex[fallback]",
+          "reason": "Opt-in local model acceptance: ETL_TEST_REAL_EMBEDDING=1 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_local_embedding_runtime::test_manual_real_model_index_and_reindex[mixed]",
+          "reason": "Opt-in local model acceptance: ETL_TEST_REAL_EMBEDDING=1 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_local_embedding_runtime::test_auto_real_model_source_to_index_no_backfill[structured]",
+          "reason": "Opt-in local model acceptance: ETL_TEST_REAL_EMBEDDING=1 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_local_embedding_runtime::test_auto_real_model_source_to_index_no_backfill[fallback]",
+          "reason": "Opt-in local model acceptance: ETL_TEST_REAL_EMBEDDING=1 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_local_embedding_runtime::test_auto_real_model_source_to_index_no_backfill[mixed]",
+          "reason": "Opt-in local model acceptance: ETL_TEST_REAL_EMBEDDING=1 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_local_embedding_runtime::test_react_ui_against_real_model_and_isolated_backend[structured]",
+          "reason": "Real browser acceptance is opt-in",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_local_embedding_runtime::test_react_ui_against_real_model_and_isolated_backend[fallback]",
+          "reason": "Real browser acceptance is opt-in",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.source_postgres.test_local_embedding_runtime::test_react_ui_against_real_model_and_isolated_backend[mixed]",
+          "reason": "Real browser acceptance is opt-in",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_cache_recovery_workloads::test_recovery_workloads",
+          "reason": "Explicit owned physical recovery benchmark only",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_evaluation_integration::test_evaluation_ui_with_real_isolated_application",
+          "reason": "Opt-in Edge/real isolated API acceptance",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_google_drive_readonly::test_live_drive_readonly_sha256",
+          "reason": "NOT_RUN: explicit Dev Drive test credential/root/blob/SHA-256 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_http_query_cache_pg::test_real_pg_mongo_paired_query_cache_and_live_changes",
+          "reason": "Explicit owned PG/Mongo/model benchmark required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_mp4_invalid_tracks_fall_back_to_container_streams",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_silent_video_ocr_upload_export_and_search",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_video_text_subtitles_without_audio",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_empty_video_and_silent_audio_have_explicit_status",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_multilingual_mp3_and_mp4_speech[vi-vi_vn.wav]",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_multilingual_mp3_and_mp4_speech[en-en.flac]",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_translation_preserves_both_sentences_and_identifiers",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_invalid_container_and_duration_limits",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_language_switch_preserves_original_timeline",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_media_local::test_real_delayed_audio_track_keeps_video_timestamps",
+          "reason": "Set ETL_MEDIA_REAL_TESTS=1 with local FFmpeg, models and audio fixtures",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_metadata_search_model::test_offline_metadata_bge_m3_actual_checkpoint",
+          "reason": "Explicit offline checkpoint probe only",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_migration_governance::test_historical_0005_downgrade_removes_the_created_index",
+          "reason": "B13: frozen 0005 downgrade uses the wrong grade index name; no approval to rewrite history",
+          "type": "pytest.xfail"
+        },
+        {
+          "id": "tests.integration.test_phase3_semantic_http::test_real_semantic_index_authenticated_http_and_context[1-semantic_chunk]",
+          "reason": "Explicit isolated PG/Mongo and real BGE-M3 1024D required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase3_semantic_http::test_real_semantic_index_authenticated_http_and_context[1-meaning_bag]",
+          "reason": "Explicit isolated PG/Mongo and real BGE-M3 1024D required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase3_semantic_http::test_real_semantic_index_authenticated_http_and_context[2-semantic_chunk]",
+          "reason": "Explicit isolated PG/Mongo and real BGE-M3 1024D required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase3_semantic_http::test_real_semantic_index_authenticated_http_and_context[2-meaning_bag]",
+          "reason": "Explicit isolated PG/Mongo and real BGE-M3 1024D required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase4_authenticated_semantic::test_accentless_real_authenticated_http[before-1-meaning_bag-searchable0]",
+          "reason": "Explicit isolated PostgreSQL/MongoDB and offline BGE-M3 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase4_authenticated_semantic::test_accentless_real_authenticated_http[before-1-semantic_chunk-searchable0]",
+          "reason": "Explicit isolated PostgreSQL/MongoDB and offline BGE-M3 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase4_authenticated_semantic::test_accentless_real_authenticated_http[before-2-meaning_bag-searchable0]",
+          "reason": "Explicit isolated PostgreSQL/MongoDB and offline BGE-M3 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase4_authenticated_semantic::test_accentless_real_authenticated_http[before-2-semantic_chunk-searchable0]",
+          "reason": "Explicit isolated PostgreSQL/MongoDB and offline BGE-M3 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase4_authenticated_semantic::test_accentless_real_authenticated_http[after-1-meaning_bag-searchable0]",
+          "reason": "Explicit isolated PostgreSQL/MongoDB and offline BGE-M3 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase4_authenticated_semantic::test_accentless_real_authenticated_http[after-1-semantic_chunk-searchable0]",
+          "reason": "Explicit isolated PostgreSQL/MongoDB and offline BGE-M3 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase4_authenticated_semantic::test_accentless_real_authenticated_http[after-2-meaning_bag-searchable0]",
+          "reason": "Explicit isolated PostgreSQL/MongoDB and offline BGE-M3 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_phase4_authenticated_semantic::test_accentless_real_authenticated_http[after-2-semantic_chunk-searchable0]",
+          "reason": "Explicit isolated PostgreSQL/MongoDB and offline BGE-M3 required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_integration::test_real_local_model_search_and_context",
+          "reason": "Real local model test is opt-in",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_model_cold::test_cold_start_and_resident_search",
+          "reason": "Owned isolation runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_read_path::test_physical_read_path",
+          "reason": "Owned read-path runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_runtime_pg::test_search_three_methods_real_pg_mongo_model_and_revocation",
+          "reason": "Explicit provisioned local384D model required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t1_physical::test_t5_baseline_preflight",
+          "reason": "Explicit owned T1 runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t1_physical::test_t1_acceptance",
+          "reason": "Explicit owned T1 runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t1_recovery::test_race_semantics_recovery",
+          "reason": "Owned T1 runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t1_recovery::test_concurrency_and_access_recovery",
+          "reason": "Owned T1 runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t1_recovery::test_benchmark_recovery",
+          "reason": "Owned T1 runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t1_recovery::test_postgres_invariants_recovery",
+          "reason": "Owned T1 runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t1_recovery::test_timeout_diagnosis",
+          "reason": "Owned T1 runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t1_recovery::test_http_activation_verification",
+          "reason": "Owned T1 runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t2_physical::test_t2_targeted",
+          "reason": "Owned isolated runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t2_physical::test_t2_concurrency",
+          "reason": "Owned isolated runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t2_physical::test_t2_benchmark",
+          "reason": "Owned isolated runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t3_physical::test_t3_targeted",
+          "reason": "Owned isolation runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_search_t3_physical::test_t3_benchmark",
+          "reason": "Owned isolation runner required",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_semantic_model::test_real_dense_contextual_multilingual_and_colbert",
+          "reason": "Opt-in real offline model path/revision not configured",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_semantic_mongo::test_real_mongo_unique_lease_validator_and_no_legacy_writes",
+          "reason": "Existing isolated Mongo test DB not configured; no live database writes",
+          "type": "pytest.skip"
+        },
+        {
+          "id": "tests.integration.test_semantic_mongo::test_real_chunk_bge_mongo_retrieval_and_idempotent_reindex",
+          "reason": "Opt-in real offline model path/revision not configured",
+          "type": "pytest.skip"
+        }
+      ],
+      "evidence": "artifacts/bounded-workers/final-integration.xml"
+    },
+    "affected_before_guard_correction": {
+      "total": 672,
+      "passed": 667,
+      "failed": 4,
+      "errors": 0,
+      "skipped_including_xfail": 1,
+      "failure_ids": [
+        "tests.unit.test_auth_users_sync_priority::test_users_refresh_does_not_wait_for_the_whole_slow_cycle[None-streams1-expected1]",
+        "tests.unit.test_auth_users_sync_priority::test_users_refresh_does_not_wait_for_the_whole_slow_cycle[120-streams2-expected2]",
+        "tests.unit.test_master_mongo_references::test_nullable_unique_references_and_other_ten_tables_unchanged",
+        "tests.unit.test_source_lineage::test_mapping_must_be_committed_same_origin_resource[pending-PARENT_PENDING]"
+      ],
+      "error_ids": [],
+      "skips": [
+        {
+          "id": "tests.unit.test_source_file_import::test_source_reader_symlink",
+          "reason": "Symlink creation unavailable",
+          "type": "pytest.skip"
+        }
+      ],
+      "evidence": "artifacts/bounded-workers/final-affected.xml"
+    },
+    "source_after_guard_correction": {
+      "total": 81,
+      "passed": 80,
+      "failed": 0,
+      "errors": 0,
+      "skipped_including_xfail": 1,
+      "failure_ids": [],
+      "error_ids": [],
+      "skips": [
+        {
+          "id": "tests.unit.test_source_file_import::test_source_reader_symlink",
+          "reason": "Symlink creation unavailable",
+          "type": "pytest.skip"
+        }
+      ],
+      "evidence": "artifacts/bounded-workers/final-source-verification.xml"
+    },
+    "postgres_after_fencing_and_autocommit": {
+      "total": 48,
+      "passed": 48,
+      "failed": 0,
+      "errors": 0,
+      "skipped_including_xfail": 0,
+      "failure_ids": [],
+      "error_ids": [],
+      "skips": [],
+      "evidence": "artifacts/bounded-workers/final-postgres.xml"
+    },
+    "postgres_additional_overlap_and_metrics": {
+      "total": 2,
+      "passed": 2,
+      "failed": 0,
+      "errors": 0,
+      "skipped_including_xfail": 0,
+      "failure_ids": [],
+      "error_ids": [],
+      "skips": [],
+      "evidence": "artifacts/bounded-workers/final-postgres-additional.xml"
+    },
+    "postgres_after_guard_correction": {
+      "total": 34,
+      "passed": 34,
+      "failed": 0,
+      "errors": 0,
+      "skipped_including_xfail": 0,
+      "failure_ids": [],
+      "error_ids": [],
+      "skips": [],
+      "evidence": "artifacts/bounded-workers/final-postgres-current.xml"
+    },
+    "source_after_admission_aggregation": {
+      "total": 81,
+      "passed": 80,
+      "failed": 0,
+      "errors": 0,
+      "skipped_including_xfail": 1,
+      "failure_ids": [],
+      "error_ids": [],
+      "skips": [
+        {
+          "id": "tests.unit.test_source_file_import::test_source_reader_symlink",
+          "reason": "Symlink creation unavailable",
+          "type": "pytest.skip"
+        }
+      ],
+      "evidence": "artifacts/bounded-workers/final-source-optimized.xml"
+    },
+    "postgres_after_admission_aggregation": {
+      "total": 34,
+      "passed": 34,
+      "failed": 0,
+      "errors": 0,
+      "skipped_including_xfail": 0,
+      "failure_ids": [],
+      "error_ids": [],
+      "skips": [],
+      "evidence": "artifacts/bounded-workers/final-postgres-optimized.xml"
+    }
+  },
+  "comparison": {
+    "baseline_unit_failures": [
+      "tests.unit.test_api_migrations::test_architecture_dependencies",
+      "tests.unit.test_auth_users_sync_priority::test_users_refresh_does_not_wait_for_the_whole_slow_cycle[120-streams2-expected2]",
+      "tests.unit.test_auth_users_sync_priority::test_users_refresh_does_not_wait_for_the_whole_slow_cycle[None-streams1-expected1]",
+      "tests.unit.test_concept_corpus_audit::test_offline_audit_does_not_connect_or_change_seed",
+      "tests.unit.test_http_cache_acceptance::test_invalid_requests_and_untrusted_scope_do_not_consult_cache",
+      "tests.unit.test_master_mongo_references::test_nullable_unique_references_and_other_ten_tables_unchanged",
+      "tests.unit.test_migration_governance::test_read_only_governance_is_repeatable_and_preserves_contract"
+    ],
+    "full_unit_new_failure_before_last_correction": [
+      "tests.unit.test_source_lineage::test_mapping_must_be_committed_same_origin_resource[pending-PARENT_PENDING]"
+    ],
+    "correction": "Committed parent RETRY_WAIT preserves original PARENT_PENDING path; original test unchanged.",
+    "latest_source_tests": "80 passed, 1 symlink/environment skip",
+    "latest_postgres_tests": "34 passed",
+    "unique_postgres_passed_across_focused_runs": 55,
+    "unique_postgres_passed_ids": [
+      "tests.integration.test_bounded_pipeline::test_crash_after_registration_resumes_without_recopy",
+      "tests.integration.test_bounded_pipeline::test_expired_import_cannot_create_processing_job",
+      "tests.integration.test_bounded_pipeline::test_expired_lease_fences_old_worker",
+      "tests.integration.test_bounded_pipeline::test_import_native_pdf_runs_existing_pipeline_without_duplicates",
+      "tests.integration.test_bounded_pipeline::test_manual_version_collision_is_blocked",
+      "tests.integration.test_bounded_pipeline::test_mapping_must_be_committed_same_origin_resource[failed-PARENT_MAPPING_FAILED]",
+      "tests.integration.test_bounded_pipeline::test_mapping_must_be_committed_same_origin_resource[origin-PARENT_PENDING]",
+      "tests.integration.test_bounded_pipeline::test_mapping_must_be_committed_same_origin_resource[pending-PARENT_PENDING]",
+      "tests.integration.test_bounded_pipeline::test_mapping_must_be_committed_same_origin_resource[resource-PARENT_MAPPING_INVALID]",
+      "tests.integration.test_bounded_pipeline::test_mapping_must_be_committed_same_origin_resource[target-PARENT_MAPPING_INVALID]",
+      "tests.integration.test_bounded_pipeline::test_multiple_versions_same_bytes_keep_identity",
+      "tests.integration.test_bounded_pipeline::test_permanent_fault_does_not_register_or_hot_retry[empty-INVALID_PDF]",
+      "tests.integration.test_bounded_pipeline::test_permanent_fault_does_not_register_or_hot_retry[hash-SOURCE_HASH_MISMATCH]",
+      "tests.integration.test_bounded_pipeline::test_permanent_fault_does_not_register_or_hot_retry[malformed-INVALID_PDF]",
+      "tests.integration.test_bounded_pipeline::test_permanent_fault_does_not_register_or_hot_retry[missing-FILE_NOT_FOUND]",
+      "tests.integration.test_bounded_pipeline::test_permanent_fault_does_not_register_or_hot_retry[policy-BLOCKED_SOURCE_POLICY]",
+      "tests.integration.test_bounded_pipeline::test_source_mutation_is_not_overwritten",
+      "tests.integration.test_bounded_pipeline::test_two_file_services_import_independent_resources_with_overlap",
+      "tests.integration.test_bounded_pipeline::test_two_ocr_workers_native_pdfs_real_mongo",
+      "tests.integration.test_bounded_workers::test_audit_stream_exclusion_and_capacity",
+      "tests.integration.test_bounded_workers::test_cross_stream_execution_overlaps_and_matches_serial",
+      "tests.integration.test_bounded_workers::test_expired_audit_with_live_processing_lock_does_not_spend_retry",
+      "tests.integration.test_bounded_workers::test_import_resource_order_capacity_and_recovery",
+      "tests.integration.test_bounded_workers::test_import_retry_wait_does_not_spend_child_attempts",
+      "tests.integration.test_bounded_workers::test_ocr_expired_owner_cannot_renew_succeed_or_fail",
+      "tests.integration.test_bounded_workers::test_process_audit_admission[streams0-1]",
+      "tests.integration.test_bounded_workers::test_process_audit_admission[streams1-2]",
+      "tests.integration.test_bounded_workers::test_process_crash_import_recovers_after_lease",
+      "tests.integration.test_bounded_workers::test_processing_fence_rolls_back_transaction[create]",
+      "tests.integration.test_bounded_workers::test_processing_fence_rolls_back_transaction[retry]",
+      "tests.integration.test_bounded_workers::test_processing_lock_holds_no_open_transaction",
+      "tests.integration.test_bounded_workers::test_readonly_queue_metrics_snapshot",
+      "tests.integration.test_bounded_workers::test_targeted_repair_waits_for_master_lock_and_preserves_checkpoint",
+      "tests.integration.test_bounded_workers::test_two_processes_claim_100_imports_without_duplicate",
+      "tests.integration.test_file_reconciliation_jobs::test_accepted_response_and_durable_progress_do_not_wait_for_source",
+      "tests.integration.test_file_reconciliation_jobs::test_database_fence_prevents_second_api_owner",
+      "tests.integration.test_file_reconciliation_jobs::test_each_file_has_its_own_deadline",
+      "tests.integration.test_file_reconciliation_jobs::test_interrupted_run_resumes_unprocessed_versions_first",
+      "tests.integration.test_postgres::test_concurrent_ingestion",
+      "tests.integration.test_postgres::test_concurrent_job_creation",
+      "tests.integration.test_postgres::test_concurrent_master_sync",
+      "tests.integration.test_postgres::test_concurrent_postprocess_and_rollback",
+      "tests.integration.test_postgres::test_concurrent_stale_recovery_counter",
+      "tests.integration.test_postgres::test_finalization_database_lock_and_recovery",
+      "tests.integration.test_postgres::test_postgres_abandoned_projection_recovers",
+      "tests.integration.test_postgres::test_postgres_manual_postprocess_respects_finalizer_lock",
+      "tests.integration.test_postgres::test_postgres_migrations",
+      "tests.integration.test_postgres::test_postgres_recovery_fencing",
+      "tests.integration.test_postgres::test_postgres_sync_rollback_and_checkpoint",
+      "tests.integration.test_postgres::test_skip_locked_claim_and_atomic_counters",
+      "tests.integration.test_reconciliation_audit_queue::test_claim_crash_recovery_and_obsolete_worker_is_fenced",
+      "tests.integration.test_reconciliation_audit_queue::test_deep_runs_release_database_and_do_not_rehash_fresh_evidence",
+      "tests.integration.test_reconciliation_audit_queue::test_schedule_keys_are_idempotent_and_sync_checkpoints_untouched",
+      "tests.integration.test_reconciliation_audit_queue::test_scheduler_off_pauses_old_scheduled_jobs_but_allows_manual_jobs",
+      "tests.integration.test_reconciliation_audit_queue::test_two_postgres_workers_race_for_same_job"
+    ],
+    "integration_failures_confirmed_by_historical_report": [
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_copied_version_retry_cannot_bypass_updated_policy[master_inactive]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_copied_version_retry_cannot_bypass_updated_policy[source_inactive]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_copied_version_retry_cannot_bypass_updated_policy[source_rejected]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.csv]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.docx]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.jpeg]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.jpg]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.pdf]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.png]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.pptx]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.txt]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[google_drive-.xlsx]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.csv]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.docx]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.jpeg]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.jpg]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.pdf]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.png]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.pptx]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.txt]",
+      "tests.integration.source_postgres.test_sync_local_drive_reconciliation::test_real_pg_mongo_import_bytes_and_readiness[local-.xlsx]"
+    ],
+    "integration_failures_reproduced_on_clean_HEAD_this_session": [
+      "tests.integration.source_postgres.test_drive_file_flow::test_postgres_local_and_drive_same_batch_same_snapshot",
+      "tests.integration.source_postgres.test_file_import_flow::test_source_file_to_index_with_existing_workers[False]",
+      "tests.integration.source_postgres.test_file_import_flow::test_source_file_to_index_with_existing_workers[True]",
+      "tests.integration.source_postgres.test_file_import_flow::test_source_media_excluded_from_import_queue[.mp3]",
+      "tests.integration.source_postgres.test_file_import_flow::test_source_media_excluded_from_import_queue[.mp4]",
+      "tests.integration.source_postgres.test_integrity::test_master_timestamp_revision_and_cross_migration_guards",
+      "tests.integration.source_postgres.test_master_metadata_projection::test_real_master_ten_table_columns_match_orm_and_reference_constraints",
+      "tests.integration.source_postgres.test_runtime::test_master_content_parent_and_local_timestamp",
+      "tests.integration.source_postgres.test_runtime::test_source_sync_worker_mongo_and_runtime_preservation",
+      "tests.integration.test_cli_stage_flow::test_cli_manual_stages_and_demo_rerun",
+      "tests.integration.test_indexing_integration::test_auto_and_unstructured_content_ready[False]",
+      "tests.integration.test_indexing_integration::test_auto_and_unstructured_content_ready[True]",
+      "tests.integration.test_indexing_integration::test_real_index_api_worker_consistency",
+      "tests.integration.test_indexing_integration::test_real_lock_restart_and_failed_rebuild",
+      "tests.integration.test_indexing_integration::test_schema_block_both_posts_and_readonly_status_then_operator_test_fix",
+      "tests.integration.test_indexing_integration::test_worker_schema_error_never_repairs_database",
+      "tests.integration.test_migration_governance::test_all_eighteen_master_tables_match_orm_after_migration",
+      "tests.integration.test_migration_governance::test_upgrade_from_0013_and_idempotent_head_preserves_catalog",
+      "tests.integration.test_source_catalogs_pg::test_schema_counts_are_preserved_in_isolated_databases"
+    ],
+    "integration_assertion_failures_without_baseline_evidence": [],
+    "integration_collection_error": "Confirmed on unchanged root checkout; missing imported lineage test name.",
+    "integration_setup_errors_unclassified": [
+      "tests.integration.test_file_reconciliation_jobs::test_accepted_response_and_durable_progress_do_not_wait_for_source",
+      "tests.integration.test_lineage_diagnostic::test_source_branch_is_preserved",
+      "tests.integration.test_metadata_refresh_postgres::test_large_registry_sweep_wraparound_and_late_smaller_key[2000]"
+    ],
+    "full_suite_snapshot_note": "Broad suites started before final handoff fences/claim correction. Current affected code was reverified separately; no whole-suite PASS claim."
+  },
+  "checks": {
+    "changed_file_ruff": "PASS",
+    "git_diff_check": "PASS",
+    "compose_config_quiet": "PASS",
+    "rebuilt_image_runtime_smoke": "NOT_RUN"
+  },
+  "benchmark": {
+    "artifact": "BOUNDED_WORKERS_BENCHMARK.json",
+    "scope": "synthetic queue only; not mixed-file/metadata end-to-end",
+    "pre_aggregation_10000_jobs_one_worker": "Timed out waiting for worker result at 300 seconds; processes terminated and isolated schema cleaned.",
+    "controlled_end_to_end": "NOT_RUN",
+    "latest_status": "COMPLETED_6_SYNTHETIC_QUEUE_CONFIGURATIONS",
+    "duplicate_error_retry_count": 0
+  },
+  "not_verified": [
+    "Full passing regression suite (baseline failures and three unclassified setup errors remain).",
+    "Representative 2 File + 2 Audit end-to-end benchmark with mixed/large files.",
+    "10000 metadata-record benchmark (synthetic import queue is a different workload).",
+    "Scanned-page Tesseract/production model, Mongo search-index races across container replicas.",
+    "Rebuilt Docker image runtime smoke and container kill/restart tests.",
+    "Automatic adaptive controller, persistent fleet metrics, distributed download permits."
+  ],
+  "defaults": {
+    "master_workers": 1,
+    "source_import_max_active": 1,
+    "audit_max_active": 1,
+    "ocr_workers_recommended": 1,
+    "validated_capacity_maximum": 2
+  },
+  "production_application_data_modified": false,
+  "original_env_modified": false,
+  "pushed_or_merged": false
+}
