@@ -160,6 +160,26 @@ def test_multiple_pairs_share_one_detached_db_page_and_one_budget(local_file, mo
         assert repo.session.get(Job, key).checkpoint['bytes_read'] == 32
 
 
+def test_file_changed_while_waiting_for_prefix_commit_cannot_publish_sha(local_file, monkeypatch):
+    c, first, second = pair(local_file)
+    audit = ScheduledAudit(c.reconciliation_engine, c.settings)
+    key = audit.queue.enqueue('DEEP', 'files', mode='FULL')
+    original = audit._save
+    def save(claim, checkpoint, results=(), file_state=None, status=None):
+        result = original(claim, checkpoint, results, file_state, status)
+        if file_state and file_state[0] == first:
+            local_file[1].with_name('second.pdf').write_bytes(b'corrupt!')
+        return result
+    monkeypatch.setattr(audit, '_save', save)
+    assert audit.once(key)
+    with c.uow() as repo:
+        state = repo.session.get(State, second)
+        assert state.status == 'NOT_VERIFIED' and state.reason_code == 'LOCAL_FILE_CHANGED'
+        assert state.last_verified_at is None
+        assert repo.session.get(Job, key).checkpoint['bytes_read'] == 16
+    assert audit.coverage()['recent_sha256_evidence_count'] == 1
+
+
 def test_source_provider_is_not_fanned_out_and_invalid_limit_is_rejected(local_file):
     from types import SimpleNamespace
 

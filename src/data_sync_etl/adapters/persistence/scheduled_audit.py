@@ -232,6 +232,16 @@ class ScheduledAudit:
                     settings.reconciliation_max_seconds_per_run - (monotonic() - started))
                 if version.id in prepared:
                     result, metrics = prepared[version.id]
+                    if claim['audit_type'] == 'DEEP' and result['discrepancy_flag'] == 'SYNCED':
+                        # A completed second read may wait for the first prefix
+                        # commit. Recheck its LOCAL revision without reading bytes.
+                        probe = copy(engine).verify_file_snapshot([version],
+                            {version.resource_id: origin}, audit_type='LIGHT')[0]
+                        revision = (result.get('target_value') or {}).get('observed_revision')
+                        if not revision or revision != (probe.get('target_value') or {}).get('observed_revision'):
+                            result = {'record_id': version.id, 'discrepancy_flag': 'NOT_VERIFIED',
+                                'source_value': None, 'target_value': {'reason_code': 'LOCAL_FILE_CHANGED',
+                                                                      'verification': 'NOT_VERIFIED'}}
                 else:
                     result = engine.verify_file_snapshot([version], {version.resource_id: origin}, audit_type=claim['audit_type'])[0]
                     metrics = engine.file_metrics
