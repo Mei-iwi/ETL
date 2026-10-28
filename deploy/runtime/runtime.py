@@ -151,12 +151,22 @@ def check_postgres_connection(connection, target, expected):
                     raise ValueError('SOURCE_WRITE_PRIVILEGES_FORBIDDEN')
 
 
+def check_mongo_schema(database, *, dimension, historical_dimensions=()):
+    """Use the application's exact supported Base/Lexical/MeaningBag contracts."""
+    from data_sync_etl.adapters.mongo.foundation_store import MongoBagStore
+    from data_sync_etl.domain.indexing import IndexingError
+
+    try:
+        MongoBagStore(database, dimension, historical_dimensions=historical_dimensions).ensure_ready()
+    except IndexingError:
+        raise ValueError('MONGO_SCHEMA_NOT_READY') from None
+
+
 def check_database():
     load_connections()
     import psycopg
     from pymongo import MongoClient
 
-    from data_sync_etl.adapters.mongo.schema import check_schema
     from data_sync_etl.db.models import Base
     for key in ('DATABASE_URL', 'SOURCE_DATABASE_URL'):
         with psycopg.connect(os.environ[key].replace('postgresql+psycopg://', 'postgresql://'), connect_timeout=5) as connection:
@@ -164,10 +174,9 @@ def check_database():
             check_postgres_connection(connection, 'MASTER' if key == 'DATABASE_URL' else 'SOURCE', expected)
     with MongoClient(os.environ['MONGO_URI'], serverSelectionTimeoutMS=5000) as client:
         client.admin.command('ping')
-        if not check_schema(client[os.environ['MONGO_DATABASE']],
-                            dimension=int(os.environ.get('INDEX_EMBEDDING_DIMENSION', '384')),
-                            historical_dimensions=json.loads(os.environ.get('INDEX_HISTORICAL_EMBEDDING_DIMENSIONS', '[]')))['schema_ready']:
-            raise ValueError('MONGO_SCHEMA_NOT_READY')
+        check_mongo_schema(client[os.environ['MONGO_DATABASE']],
+                           dimension=int(os.environ.get('INDEX_EMBEDDING_DIMENSION', '384')),
+                           historical_dimensions=json.loads(os.environ.get('INDEX_HISTORICAL_EMBEDDING_DIMENSIONS', '[]')))
 
 
 def main():
