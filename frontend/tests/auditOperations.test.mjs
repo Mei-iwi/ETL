@@ -84,9 +84,18 @@ function render(overrides = {}) {
                 return [Object.hasOwn(overrides, key) ? overrides[key] : initial, value => updates.set(key, value)]
             }, useEffect: () => {}, useRef: initial => ({ current: initial }), useCallback: fn => fn,
         }
-        if (name.includes('reconciliationApi')) return { queueAudit: async (...args) => {
-            queued.push(args); return { job_id: 'new-job', status: 'PENDING' }
-        } }
+        if (name.includes('reconciliationApi')) return {
+            queueAudit: async (...args) => {
+                queued.push(args); return { job_id: 'new-job', status: 'PENDING' }
+            },
+            getLatestReconciliationReport: async () => ({ stream_reports: [] }),
+            getAuditJobs: async () => ({ items: [{ job_id: 'new-job', status: 'PENDING' }] }),
+            getDiscrepancies: async () => ({ items: [], total: 0, total_pages: 0 }),
+        }
+        if (name.includes('reconciliationDisplay')) return {
+            auditSummary: () => ({ unverified: 0, hashPending: 0, onlyHashPending: false, observedBytes: null, observedFiles: 0 }),
+            formatAuditBytes: () => '—', pendingHash: () => false,
+        }
         if (name.includes('ReconciliationSchedule')) return { ReconciliationSchedule: () => null }
         if (name.includes('visiblePolling')) return {}
         if (name.includes('NoticeDialog')) return { NoticeDialog: () => null }
@@ -102,38 +111,40 @@ function render(overrides = {}) {
         node.type === 'button' && node.props.children === label)[0] }
 }
 
-test('page renders actual pending/running/partial/failed jobs without claiming worker online', () => {
-    for (const status of ['PENDING', 'RUNNING', 'RETRY_WAIT', 'PARTIAL', 'COMPLETED', 'FAILED', 'BLOCKED']) {
-        const job = { job_id: 'job-1', stream: 'files', audit_type: 'LIGHT', status, progress: {}, error_code: null }
-        const view = render({ 3: [job] })
+test('restored dashboard keeps report states and removes the extra job and worker panels', () => {
+    for (const status of ['RUNNING', 'PARTIAL', 'COMPLETED', 'FAILED', 'BLOCKED']) {
+        const view = render({ 0: { overall_status: status, stream_reports: [] } })
         const html = renderToStaticMarkup(view.tree)
         assert.match(html, new RegExp(status))
-        assert.match(html, /LIGHT/)
-        assert.match(html, /chưa có bằng chứng heartbeat/)
-        assert.doesNotMatch(html, /ACTIVE|100%|SHA-256 verified/)
+        assert.match(html, /Đối soát dữ liệu/)
+        assert.match(html, /Chi tiết đối soát/)
+        assert.doesNotMatch(html, /Job đối soát gần nhất|Tổng quan worker|chưa có bằng chứng heartbeat/)
     }
 })
 
 test('manual deep and metadata repair require confirmation and use queued actions', async () => {
-    const deep = render({ 0: 'files', 1: 'FULL' })
-    deep.button('Xếp hàng quét ngay').props.onClick()
+    const deep = render({ 6: 'files', 12: 'FULL' })
+    deep.button('Quét đối soát').props.onClick()
     assert.equal(deep.queued.length, 0)
-    assert.equal(deep.updates.get(13).repair, false)
-    const confirmed = render({ 0: 'subjects', 13: { repair: true } })
+    assert.equal(deep.updates.get(14).title, 'Xác nhận quét toàn diện')
+    const repair = render({ 6: 'subjects' })
+    repair.button('Đồng bộ lệch').props.onClick()
+    assert.equal(repair.queued.length, 0)
+    const confirmed = render({ 6: 'subjects', 14: repair.updates.get(14) })
     confirmed.button('Xác nhận').props.onClick()
     await new Promise(resolve => setImmediate(resolve))
-    assert.deepEqual(Array.from(confirmed.queued[0]), ['subjects', 'INCREMENTAL', true, 'METADATA'])
-    assert.equal(render({ 0: 'files' }).button('Đồng bộ ID lệch'), undefined)
-    assert.equal(render({ 0: 'subjects', 2: 'IDS' }).button('Đồng bộ ID lệch'), undefined)
+    assert.deepEqual(Array.from(repair.queued[0]), ['subjects', 'INCREMENTAL', true])
+    assert.equal(render({ 6: 'files' }).button('Đồng bộ lệch'), undefined)
+    assert.equal(render({ 6: 'all' }).button('Đồng bộ lệch'), undefined)
 })
 
-test('schedule editing has no second scan engine and old error bookmarks target common filters', () => {
+test('schedule has no duplicate scan buttons and original error routes remain available', () => {
     const schedules = readFileSync(new URL('../src/pages/system/ReconciliationSchedule.tsx', import.meta.url), 'utf8')
     const routes = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
     assert.doesNotMatch(page, /triggerReconciliation/)
     assert.doesNotMatch(schedules, /audit-jobs|submitAll\(true\)|submit\(plan, true\)/)
-    assert.match(routes, /source-sync\/files\?filter=retry/)
-    assert.match(routes, /source-sync\/files\?filter=blocked/)
+    assert.match(routes, /path='retry' element={<LibrarySyncErrorsPage/)
+    assert.match(routes, /path='blocked' element={<LibrarySyncErrorsPage/)
 })
 
 test('schedule checkbox persists on/off only after saving and never enqueues a scan', async t => {

@@ -63,7 +63,6 @@ export function ReconciliationSchedule() {
 
     return <section aria-label="Lịch đối soát độc lập">
         <h3>Lịch đối soát theo từng luồng</h3>
-        <p>Lịch chưa bật sẽ không tự chạy theo cấu hình này. Dùng “Thao tác quét thủ công” để quét ngay một hoặc tất cả luồng.</p>
         <div className={styles.tableWrap}>
             <table className={styles.table}>
                 <thead><tr><th>Luồng</th><th>Tự động</th><th>Chu kỳ</th><th>Chế độ quét</th><th>Đồng bộ lệch</th><th>Thao tác</th></tr></thead>

@@ -18,6 +18,7 @@ const PersonalProfilePage = lazy(() => import('./auth/PersonalProfilePage').then
 const OverviewSummary = lazy(() => import('./pages/overview/OverviewSummary').then(module => ({ default: module.OverviewSummary })))
 const OverviewProcess = lazy(() => import('./pages/overview/OverviewProcess').then(module => ({ default: module.OverviewProcess })))
 const LibraryListPage = lazy(() => import('./pages/library/LibraryListPage').then(module => ({ default: module.LibraryListPage })))
+const LibrarySyncErrorsPage = lazy(() => import('./pages/library/LibrarySyncErrorsPage').then(module => ({ default: module.LibrarySyncErrorsPage })))
 const LibrarySourceFilesPage = lazy(() => import('./pages/library/LibrarySourceFilesPage').then(module => ({ default: module.LibrarySourceFilesPage })))
 const LibraryCreatePage = lazy(() => import('./pages/library/LibraryCreatePage').then(module => ({ default: module.LibraryCreatePage })))
 const LibraryProcessingPage = lazy(() => import('./pages/library/LibraryProcessingPage').then(module => ({ default: module.LibraryProcessingPage })))
@@ -70,8 +71,8 @@ export default function App() {
             <Route path='source-files' element={<Navigate to='/library/source-sync/files' replace />} />
             <Route path='source-sync-errors'>
               <Route index element={<Navigate to='retry' replace />} />
-              <Route path='retry' element={<Navigate to='/library/source-sync/files?filter=retry' replace />} />
-              <Route path='blocked' element={<Navigate to='/library/source-sync/files?filter=blocked' replace />} />
+              <Route path='retry' element={<LibrarySyncErrorsPage key='retry' />} />
+              <Route path='blocked' element={<LibrarySyncErrorsPage key='blocked' retryable={false} />} />
             </Route>
             <Route path='source-sync-blocked' element={<Navigate to='/library/source-sync-errors/blocked' replace />} />
             <Route path=":resourceId" element={<LibraryResourceDetailPage />}/>

@@ -18,8 +18,6 @@ import styles from './SystemMasterSyncPage.module.css'
 import { acceptStatusPoll, configuredModeLabel, selectSyncResults } from './masterSyncResults'
 import { canVisit, useAuth } from '../../auth/AuthProvider'
 import type { ManualSyncResult } from './masterSyncResults'
-import { getFileEvidence } from '../../services/reconciliationApi'
-import type { FileEvidence } from '../../services/reconciliationApi'
 
 const streamLabels: Record<string, string> = {
     resources: 'Học liệu',
@@ -46,9 +44,9 @@ export function SystemMasterSyncLayout() {
     return <section className={styles.page}>
         <h1>Đồng bộ dữ liệu nguồn</h1>
         <nav className={styles.errorTabs} aria-label="Nhóm đồng bộ dữ liệu">
-            <NavLink to="/library/source-sync" end>Tổng quan &amp; Đồng bộ</NavLink>
-            {canVisit('/library/source-sync/reconciliation', principal) && <NavLink to="/library/source-sync/reconciliation" end>Đối soát &amp; Lịch</NavLink>}
-            <NavLink to="/library/source-sync/files" end>Kho tệp &amp; Lỗi</NavLink>
+            {canVisit('/library/source-sync/reconciliation', principal) && <NavLink to="/library/source-sync/reconciliation" end>Đối soát toàn vẹn dữ liệu</NavLink>}
+            <NavLink to="/library/source-sync" end>Đồng bộ dữ liệu</NavLink>
+            <NavLink to="/library/source-sync/files" end>Tệp học liệu từ nguồn</NavLink>
         </nav>
         <Outlet />
     </section>
@@ -72,7 +70,6 @@ export function SystemMasterSyncPage() {
         let active = true
         let controller: AbortController | null = null
         let timer: number | undefined
-        let statusDelay = 45000
 
         async function pollStatus() {
             if (document.hidden) return
@@ -83,7 +80,6 @@ export function SystemMasterSyncPage() {
             const revision = statusRevisionRef.current
             try {
                 const response = await getMasterSyncStatus(requestController.signal)
-                statusDelay = response.auto_running || response.runs.some(run => run.status === 'RUNNING') ? 5000 : 45000
                 if (acceptStatusPoll(active, requestController.signal.aborted, revision, statusRevisionRef.current, submittingRef.current)) {
                     setSyncStatus(response)
                     setResult((manual) => manual && Object.entries(manual.response).every(([stream, data]) =>
@@ -99,18 +95,15 @@ export function SystemMasterSyncPage() {
                     )
                 }
             } finally {
-                if (active && controller === requestController && !document.hidden) {
+                if (active && controller === requestController) {
                     setStatusLoading(false)
-                    timer = window.setTimeout(pollStatus, statusDelay)
+                    timer = window.setTimeout(pollStatus, 10000)
                 }
             }
         }
 
         function refreshWhenVisible() {
-            if (document.hidden) {
-                controller?.abort()
-                if (timer !== undefined) window.clearTimeout(timer)
-            } else void pollStatus()
+            if (!document.hidden) void pollStatus()
         }
         document.addEventListener('visibilitychange', refreshWhenVisible)
         void pollStatus()
@@ -212,13 +205,6 @@ export function SystemMasterSyncPage() {
     return (
         <div>
             {fileNotice && <p className={styles.notice} role="status">{fileNotice}</p>}
-            <div className={styles.card} aria-label="Trạng thái 4 worker">
-                <h2>Tổng quan worker</h2>
-                <p>Master Sync: {syncStatus ? syncStatus.worker_healthy ? 'Có heartbeat còn hiệu lực' : 'Chưa có heartbeat còn hiệu lực' : 'Chưa xác minh'}</p>
-                <p>Source File: {syncStatus ? syncStatus.file_worker_healthy ? 'Có heartbeat còn hiệu lực' : 'Chưa có heartbeat còn hiệu lực' : 'Chưa xác minh'}</p>
-                <p>OCR/ASR: chưa có dữ liệu heartbeat trong API trạng thái đồng bộ.</p>
-                <p>Đối soát: chưa có dữ liệu heartbeat trong API trạng thái đồng bộ.</p>
-            </div>
             {(actionError || statusError) && <p className={styles.error} role="alert">{actionError || statusError}</p>}
             <div className={`${styles.card} ${styles.statusCard}`}>
                 <div>
@@ -335,15 +321,12 @@ export function SystemMasterSyncPage() {
     )
 }
 
-export function SourceSyncFilesSection({ onError, failedOnly = false, retryableOnly, integrityOnly = false }: {
+export function SourceSyncFilesSection({ onError, failedOnly = false, retryableOnly }: {
     onError: (message: string) => void
     failedOnly?: boolean
     retryableOnly?: boolean
-    integrityOnly?: boolean
 }) {
     const { confirm, dialog } = useConfirmation()
-    const { principal } = useAuth()
-    const canReadEvidence = canVisit('/library/source-sync/reconciliation', principal)
     const [cursors, setCursors] = useState<Array<string | null>>([null])
     const [files, setFiles] = useState<SourceSyncFilesResponse | null>(null)
     const [loading, setLoading] = useState(true)
@@ -359,7 +342,6 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
         let timer: number | undefined
         let controller: AbortController | undefined
         let nextCountAt = 0
-        let pollDelay = 45000
         async function pollFiles() {
             if (document.hidden) return
             if (timer !== undefined) window.clearTimeout(timer)
@@ -372,12 +354,8 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
                     size: 7,
                     includeTotal: Date.now() >= nextCountAt,
                     status: retryableOnly === undefined ? 'failed' : retryableOnly ? 'failed-retryable' : 'failed-blocked',
-                } : { size: 7, includeTotal: !integrityOnly && Date.now() >= nextCountAt,
-                    ...(integrityOnly ? { status: 'integrity-unverified' as const } : {}) })
+                } : { size: 7, includeTotal: Date.now() >= nextCountAt })
                 if (active && !requestController.signal.aborted && revision === filesRevisionRef.current && !retryingRef.current) {
-                    pollDelay = response.items.some(file =>
-                        ['PENDING', 'FETCHING', 'RETRY_WAIT', 'RETRY_PROCESSING'].includes(file.import_status)
-                        || ['OCR_PENDING', 'OCR_RUNNING', 'FINALIZATION_PENDING', 'FINALIZING'].includes(file.etl_status ?? '')) ? 5000 : 45000
                     if (response.total_pages !== null && response.total_pages !== undefined) nextCountAt = Date.now() + 60000
                     setFiles(previous => ({ ...response, total: response.total ?? previous?.total,
                         total_pages: response.total_pages ?? previous?.total_pages }))
@@ -388,17 +366,14 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
                     onError(caughtError instanceof Error ? caughtError.message : 'Không thể tải tệp nguồn')
                 }
             } finally {
-                if (active && controller === requestController && !document.hidden) {
+                if (active && controller === requestController) {
                     setLoading(false)
-                    timer = window.setTimeout(pollFiles, pollDelay)
+                    timer = window.setTimeout(pollFiles, 10000)
                 }
             }
         }
         function refreshWhenVisible() {
-            if (document.hidden) {
-                controller?.abort()
-                if (timer !== undefined) window.clearTimeout(timer)
-            } else void pollFiles()
+            if (!document.hidden) void pollFiles()
         }
         document.addEventListener('visibilitychange', refreshWhenVisible)
         void pollFiles()
@@ -408,7 +383,7 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
             if (timer !== undefined) window.clearTimeout(timer)
             document.removeEventListener('visibilitychange', refreshWhenVisible)
         }
-    }, [cursor, refresh, onError, failedOnly, retryableOnly, integrityOnly])
+    }, [cursor, refresh, onError, failedOnly, retryableOnly])
 
     async function retry(fileId?: string) {
         if (retryingRef.current) return
@@ -493,12 +468,20 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
             {files?.file_sync_supported && !files.file_worker_healthy && <p className={styles.notice}>Worker nhập tệp chưa hoạt động.</p>}
             {retryMessage && <p className={styles.statusLabel} role="status">{retryMessage}</p>}
             {loading && <p className={styles.statusLabel}>Đang tải...</p>}
-            {files && files.items.length === 0 && <p className={styles.statusLabel}>{integrityOnly ? 'Không có tệp chưa xác minh trong phần đã quét.'
-                : failedOnly ? 'Không có tệp đồng bộ lỗi.' : 'Chưa có phiên bản nguồn.'}</p>}
+            {files && files.items.length === 0 && <p className={styles.statusLabel}>{failedOnly ? 'Không có tệp đồng bộ lỗi.' : 'Chưa có phiên bản nguồn.'}</p>}
             {files && files.items.length > 0 && (
                 <div className={styles.tableWrap}>
                     <table className={`${styles.fileTable} ${styles.importTable}`}>
-                        <thead><tr><th>Học liệu</th><th>Phiên bản</th><th>Toàn vẹn LIGHT/DEEP</th><th>Nhập tệp</th><th>OCR/ASR/index</th><th>Lần thử</th><th>Lỗi</th><th>Thao tác</th></tr></thead>
+                        <colgroup>
+                            <col style={{ width: '27%' }} />
+                            <col style={{ width: '9%' }} />
+                            <col style={{ width: '11%' }} />
+                            <col style={{ width: '12%' }} />
+                            <col style={{ width: '7%' }} />
+                            <col style={{ width: '22%' }} />
+                            <col style={{ width: '12%' }} />
+                        </colgroup>
+                        <thead><tr><th>Học liệu</th><th>Phiên bản</th><th>Nhập tệp</th><th>OCR/ETL</th><th>Lần thử</th><th>Lỗi</th><th>Thao tác</th></tr></thead>
                         <tbody>
                             {files.items.map((file) => (
                                 <tr key={file.source_version_id}>
@@ -512,17 +495,12 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
                                         </details>
                                     </td>
                                     <td>{file.source_version_number}</td>
-                                    <td>{file.integrity?.recent_sha256_evidence ? 'SHA-256 có bằng chứng còn hiệu lực'
-                                        : file.integrity?.reason_code === 'SHA256_NOT_CHECKED' ? 'Đã kiểm kích thước; chưa xác minh SHA-256'
-                                        : file.integrity?.status && file.integrity.status !== 'SYNCED' ? file.integrity.status : 'Chưa xác minh'}
-                                        {canReadEvidence && file.target_version_id && <FileEvidenceDetails version={file.target_version_id} />}</td>
                                     <td>{importLabels[file.import_status] ?? file.import_status}</td>
                                     <td>{file.etl_status ? etlLabels[file.etl_status] ?? file.etl_status : '—'}</td>
                                     <td>{file.retry_count ?? '—'}</td>
                                     <td>{file.last_error_code ? errorLabels[file.last_error_code] ?? 'Lỗi xử lý, cần kiểm tra' : '—'}</td>
                                     <td>{file.retry_eligible && file.import_job_id ? <button className={`${styles.button} ${styles.fileAction}`}
-                                        type="button" disabled={retryPending} onClick={() => void retry(file.import_job_id!)}>
-                                        {file.import_status === 'PROCESSING' ? 'Thử lại xử lý' : 'Thử lại nhập tệp'}</button> : '—'}</td>
+                                        type="button" disabled={retryPending} onClick={() => void retry(file.import_job_id!)}>Thử lại</button> : '—'}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -540,32 +518,6 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
             )}
         </section>
     )
-}
-
-function FileEvidenceDetails({ version }: { version: string }) {
-    const [open, setOpen] = useState(false)
-    const [evidence, setEvidence] = useState<FileEvidence | null>(null)
-    const [error, setError] = useState('')
-    useEffect(() => {
-        if (!open) return
-        const controller = new AbortController()
-        setEvidence(null)
-        setError('')
-        void getFileEvidence(version, controller.signal).then(value => {
-            if (!controller.signal.aborted) setEvidence(value)
-        }).catch(caught => {
-            if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : 'Không tải được bằng chứng')
-        })
-        return () => controller.abort()
-    }, [open, version])
-    return <details onToggle={event => setOpen(event.currentTarget.open)}>
-        <summary>Bằng chứng toàn vẹn</summary>
-        {error ? <p role="alert">{error}</p> : evidence ? <>
-            <p>{evidence.recent_sha256_evidence ? 'SHA-256 có bằng chứng còn hiệu lực' : 'Chưa có bằng chứng SHA-256 còn hiệu lực'}</p>
-            <p>{evidence.reason_code}</p>
-            <details><summary>Chi tiết kỹ thuật</summary><pre>{JSON.stringify(evidence, null, 2)}</pre></details>
-        </> : <p>Đang tải bằng chứng…</p>}
-    </details>
 }
 
 type ConfirmationRequest = {
