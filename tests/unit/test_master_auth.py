@@ -292,6 +292,8 @@ def test_public_viewer_gets_only_readable_versions_and_no_management_rights(sour
         resource_url = f'/api/v1/resources/{version["resource_id"]}'
         url = f'/api/v1/resource-versions/{version["id"]}/file'
         assert api.get(url).status_code == 401
+        assert api.get(url.replace('/file', '/bilingual?include_items=false')).status_code == 401
+        assert api.get(url.replace('/file', '/index-status?bag_limit=10')).status_code == 401
         assert login(api, master_auth).status_code == 200
         assert api.get(resource_url).status_code == 200
         rows = api.get(resource_url + '/versions')
@@ -300,6 +302,8 @@ def test_public_viewer_gets_only_readable_versions_and_no_management_rights(sour
         assert api.get(url + '?download=true').content == source_path.read_bytes()
         assert api.get(url.replace('/file', '/source-info')).status_code == 200
         assert api.get(url.replace('/file', '/index-status')).status_code == 200
+        assert api.get(url.replace('/file', '/index-status?bag_limit=10')).status_code == 200
+        assert api.get(url.replace('/file', '/bilingual?include_items=false')).status_code == 403
         for suffix in ['chunks', 'content-units', 'etl-status']:
             assert api.get(url.replace('/file', '/' + suffix)).status_code == 403
         for suffix in ['process', 'postprocess', 'index', 'reindex', 'ocr-jobs']:

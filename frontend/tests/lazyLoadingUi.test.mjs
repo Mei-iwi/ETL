@@ -11,8 +11,10 @@ import { extname, join, resolve, sep } from 'node:path'
 const root = resolve(process.env.ETL_LAZY_DIST || '.test-tmp/lazy-loading-review/after-dist')
 const executable = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const baseline = process.env.ETL_LAZY_BASELINE === '1'
+const prior = process.env.ETL_LAZY_PRIOR === '1'
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 const runId = '01M4ZXS1XJ2B4H42CFY24KJY8C'
+const otherRunId = '01M4ZXS1XJ2B4H42CFY24KJY8D'
 
 test('lazy panels keep metadata, defer DOM/details, stop hidden polling and retain read-only behavior', {
     skip: !existsSync(executable) || !existsSync(join(root, 'index.html')), timeout: 90000,
@@ -20,6 +22,10 @@ test('lazy panels keep metadata, defer DOM/details, stop hidden polling and reta
     const requests = [], responses = []
     let pendingTranslation = true
     let generation = 'run-1'
+    let identity = null
+    let failPage = false
+    let forceRevision = false
+    let slowRun = false
     const bags = Array.from({ length: 100 }, (_, n) => ({ id: 'b' + n, title: 'Bag ' + n,
         unit_type: 'PAGE_TEXT', representation_mode: 'fallback', keywords: ['fixture'], vector_ready: true,
         embedding_dimension: 384, embedding_model: 'fixture', embedding_text: 'fixture '.repeat(100) }))
@@ -27,40 +33,70 @@ test('lazy panels keep metadata, defer DOM/details, stop hidden polling and reta
         error_code: null, ranked: [{ resource_id: 'r1', resource_version_id: 'v1', score: 1 }] }))
     const server = createServer(async (req, res) => {
         const url = new URL(req.url, 'http://fixture')
-        if (url.pathname.startsWith('/api/')) requests.push({ path: url.pathname, query: url.search, method: req.method })
-        const json = value => {
+        if (url.pathname.startsWith('/api/')) requests.push({ path: url.pathname, query: url.search, method: req.method, actor: identity })
+        const json = (value, status = 200) => {
+            if (res.destroyed) return
             const body = JSON.stringify(value)
             responses.push({ path: url.pathname, query: url.search, bytes: Buffer.byteLength(body) })
-            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(body)
+            res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(body)
         }
-        if (url.pathname === '/api/v1/auth/config') return json({ mode: 'legacy_local' })
+        if (url.pathname === '/api/v1/auth/config') return json({ mode: identity ? 'db_users' : 'legacy_local' })
+        if (url.pathname === '/api/v1/auth/me') return json({ id: identity, role: 'ADMIN', roles: ['admin'],
+            mode: 'db_users', resource_ids: [], permissions: ['process', 'index', 'evaluation', 'sync'] })
         if (url.pathname === '/api/v1/evaluations/runs') return json({ items: [], total: 0, total_pages: 1, page: 1, size: 7 })
-        if (url.pathname === '/api/v1/evaluations/runs/' + runId) {
+        if ([runId, otherRunId].some(id => url.pathname === '/api/v1/evaluations/runs/' + id)) {
             const offset = Number(url.searchParams.get('offset') || 0)
-            return json({ id: runId, dataset_id: runId, dataset_name: 'Fixture evaluation', status: 'COMPLETED',
+            const id = url.pathname.split('/').at(-1)
+            const body = { id, dataset_id: runId, dataset_name: id === runId ? 'Fixture evaluation' : 'Fixture evaluation second', status: 'COMPLETED',
                 dataset_hash: 'fixture', corpus_fingerprint: 'fixture', warnings: [], relevance_threshold: 1,
                 created_at: '2026-10-28T00:00:00Z', queries: observations.map(row => ({ query_id: row.query_id, query: row.query_id, relevance: [] })),
                 snapshot: { model: { id: 'fixture', version: 'fixture', dimension: 384 } }, summary: {},
                 observations: url.searchParams.get('include_observations') === 'false' ? [] : observations.slice(offset, offset + 20),
-                pagination: { total: observations.length, offset, limit: 20 } })
+                pagination: { total: observations.length, offset, limit: 20 } }
+            if (slowRun && id === runId) return setTimeout(() => json(body), 500)
+            return json(body)
         }
-        if (url.pathname.endsWith('/bilingual')) return json({ original_file_url: '/api/v1/resource-versions/v1/processing-source',
-            original_filename: 'fixture.mp4', options: { translation_pending: pendingTranslation }, extraction: [],
-            items: Array.from({ length: 500 }, (_, n) => ({ segment_id: 's' + n, source_type: 'speech', source_language: 'vi',
-                target_language: 'en', original_text: 'Original ' + n, translated_text: 'Translated ' + n, translation_status: 'completed',
-                start_time: n, end_time: n + 1, generated: false })) })
+        if (url.pathname.endsWith('/bilingual')) {
+            const version = url.pathname.split('/')[4]
+            const actor = identity
+            const current = (actor === 'reader-b' ? 'e' : forceRevision ? 'f' : pendingTranslation ? 'b' : 'c').repeat(64)
+            if (failPage && url.searchParams.get('include_items') === 'true') { failPage = false; return json({ detail: 'Fixture unavailable' }, 503) }
+            if (url.searchParams.get('revision') && url.searchParams.get('revision') !== current) return json({ detail: 'BILINGUAL_REVISION_CHANGED' }, 409)
+            const items = Array.from({ length: 500 }, (_, n) => ({ segment_id: 's' + n, source_type: 'speech', source_language: 'vi',
+                target_language: 'en', original_text: `Original ${actor || (version === 'v1' ? '' : version + ' ')}${actor ? ' ' : ''}${n}`, translated_text: 'Translated ' + n, translation_status: 'completed',
+                start_time: n, end_time: n + 1, generated: false }))
+            const offset = Number(url.searchParams.get('offset') || 0)
+            const limit = Number(url.searchParams.get('limit') || 20)
+            const body = { resource_version_id: version, original_file_url: `/api/v1/resource-versions/${version}/processing-source`,
+            original_filename: 'fixture.mp4', options: { translation_pending: pendingTranslation, target_language: actor === 'reader-a' ? 'fr' : 'en' }, extraction: [],
+            items: url.searchParams.get('include_items') === 'false' ? [] : url.searchParams.has('limit') ? items.slice(offset, offset + limit) : items,
+            ...(url.searchParams.has('limit') || url.searchParams.has('include_items') ? {
+                summary: { total: 500, translated_count: 500, timed_count: 500, timed_translated_count: 500, revision: current },
+                pagination: { total: 500, offset, limit },
+            } : {}) }
+            if (version === 'slow' || actor === 'reader-a') return setTimeout(() => json(body), 500)
+            return json(body)
+        }
         if (url.pathname === '/api/v1/resources') return json({ items: [{ id: 'r1', title: 'Fixture resource' }], pagination: { total: 1 } })
         if (url.pathname === '/api/v1/resources/r1/versions') return json([{ id: 'v1', resource_id: 'r1', version_number: 1, created_at: '2026-10-28' }])
         if (url.pathname === '/api/v1/resources/r1') return json({ id: 'r1', title: 'Fixture resource', provider_name: 'Fixture',
             resource_type_code: 'DOC', resource_type_name_vi: 'Document', source_origin: 'LOCAL', subjects: [], grade_levels: [],
             publication_status: 'PUBLISHED', is_active: true, updated_at: '2026-10-28', created_at: '2026-10-28' })
         if (url.pathname.endsWith('/description')) return json({ description: '', tags: [], can_edit: false })
-        if (url.pathname.endsWith('/index-status')) return json({ resource_version_id: 'v1', processing_status: 'CONTENT_READY',
+        if (url.pathname.endsWith('/index-status')) {
+            if (url.searchParams.get('expected_run_id') && url.searchParams.get('expected_run_id') !== generation)
+                return json({ detail: { code: 'INDEX_PAGE_CHANGED', message: 'Chỉ mục đã thay đổi. Tải lại trạng thái trước khi xem túi từ.' } }, 409)
+            const offset = Number(url.searchParams.get('bag_offset') || 0)
+            const limit = Number(url.searchParams.get('bag_limit') || 10)
+            return json({ resource_version_id: 'v1', processing_status: 'CONTENT_READY',
             index_status: 'READY', auto_enabled: false, latest_run_id: generation, published_run_id: generation,
             chunk_count: 100, chunk_preview_count: 100, bag_count: 100, representation_mode: 'fallback',
             representation_unit: 'content_bag', chunk_storage: 'transient', bow_ready: true, vector_ready: true,
             algorithm: 'fixture', chunk_size_words: 20, chunk_overlap_words: 5, embedding_model: 'fixture',
-            embedding_dimension: 384, message: '', bags: url.searchParams.get('include_bags') === 'false' ? [] : bags })
+            embedding_dimension: 384, message: '', bags: url.searchParams.get('include_bags') === 'false' ? [] :
+                url.searchParams.has('bag_limit') ? [...bags].sort((a, b) => a.id.localeCompare(b.id)).slice(offset, offset + limit) : bags,
+            ...(url.searchParams.has('bag_limit') ? { bag_pagination: { offset, limit, total: 100 }, bag_revision: 'd'.repeat(64) } : {}) })
+        }
         if (url.pathname.endsWith('/file')) { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('Preview fixture') }
         if (url.pathname.startsWith('/api/')) { res.writeHead(404); return res.end() }
         try {
@@ -118,6 +154,7 @@ test('lazy panels keep metadata, defer DOM/details, stop hidden polling and reta
         await open('/library/processing?versionId=v1')
         await waitFor(() => evaluate("document.body.textContent.includes('TXT bản dịch')"))
         metrics.bilingual_closed_rows = await evaluate("document.querySelectorAll('article').length")
+        metrics.bilingual_initial_bytes = responses.filter(row => row.path.endsWith('/bilingual')).at(-1).bytes
         assert.equal(metrics.bilingual_closed_rows, baseline ? 500 : 0)
         if (!baseline) {
             await evaluate(`const language = document.querySelector('input[aria-label="Ngôn ngữ bản dịch"]');
@@ -125,8 +162,19 @@ test('lazy panels keep metadata, defer DOM/details, stop hidden polling and reta
                 language.dispatchEvent(new Event('input',{bubbles:true}))`)
             await evaluate("document.querySelector('summary[aria-controls=bilingual-segments]').click()")
             await waitFor(() => evaluate("document.querySelectorAll('article').length === 20"))
+            metrics.bilingual_page_bytes = responses.filter(row => row.query.includes('include_items=true')).at(-1)?.bytes
+            if (!prior) assert.equal(requests.filter(row => row.query.includes('include_items=true')).length, 1, 'one open reads one segment page')
             await evaluate("Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Tiếp').click()")
             await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Original 20')"))
+            if (!prior) assert.equal(requests.filter(row => row.query.includes('include_items=true')).length, 2, 'next reads only its segment page')
+            if (!prior) {
+                forceRevision = true
+                await evaluate("Array.from(document.querySelectorAll('#bilingual-segments button')).find(button => button.textContent === 'Tiếp').click()")
+                await waitFor(() => evaluate("document.querySelector('#bilingual-segments [role=alert]')?.textContent.includes('Nội dung đã thay đổi')"))
+                assert.equal(await evaluate("document.querySelectorAll('article').length"), 0)
+                await evaluate("document.querySelector('#bilingual-segments [role=alert] button').click()")
+                await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Original 40')"))
+            }
             await evaluate("document.querySelector('summary[aria-controls=bilingual-segments]').click()")
             await waitFor(() => evaluate("document.querySelectorAll('article').length === 0"))
         }
@@ -142,6 +190,10 @@ test('lazy panels keep metadata, defer DOM/details, stop hidden polling and reta
             await delay(4300)
             assert.equal(count('/bilingual'), beforeHidden + 1, 'terminal translation does not poll')
             assert.equal(await evaluate("document.querySelector('input[aria-label=\"Ngôn ngữ bản dịch\"]').value"), 'de', 'unsaved options survive collapse and background refresh')
+            // Closed rapid toggles do not leave an item request active or render hidden rows.
+            await evaluate("const panel=document.querySelector('summary[aria-controls=bilingual-segments]').parentElement; panel.open=true; panel.open=false")
+            await delay(100)
+            assert.equal(await evaluate("document.querySelectorAll('article').length"), 0)
         }
         await open('/experiments/results?run_id=' + runId)
         await waitFor(() => evaluate("document.body.textContent.includes('Fixture evaluation')"))
@@ -162,13 +214,26 @@ test('lazy panels keep metadata, defer DOM/details, stop hidden polling and reta
         if (!baseline) assert.ok(requests.filter(row => row.path.endsWith('/index-status')).every(row => row.query.includes('include_bags=false')))
         await evaluate("Array.from(document.querySelectorAll('a')).find(el => el.getAttribute('href')?.includes('view=bags')).click()")
         await waitFor(() => evaluate("document.body.textContent.includes('Bag 0')"))
+        metrics.index_detail_bytes = responses.filter(row => row.path.endsWith('/index-status')).at(-1).bytes
         assert.equal(await evaluate("document.querySelector('[data-index-panel=bags] tbody').children.length"), 10)
+        if (!baseline && !prior) {
+            assert.equal(requests.filter(row => row.query.includes('bag_limit=10')).length, 1)
+            await evaluate("Array.from(document.querySelectorAll('[data-index-panel=bags] button')).find(el => el.textContent === 'Tiếp').click()")
+            await waitFor(() => evaluate("document.querySelector('[data-index-panel=bags] tbody td')?.textContent === '11'"))
+            assert.equal(requests.filter(row => row.query.includes('bag_limit=10')).length, 2)
+            assert.ok(requests.some(row => row.query.includes('bag_offset=10') && row.query.includes('bag_revision=')))
+        }
         if (!baseline) {
             generation = 'run-2'
             await evaluate("Array.from(document.querySelectorAll('a')).find(el => el.getAttribute('href')?.includes('view=index')).click()")
             await evaluate("Array.from(document.querySelectorAll('a')).find(el => el.getAttribute('href')?.includes('view=bags')).click()")
             await waitFor(() => evaluate("document.body.textContent.includes('Chỉ mục đã thay đổi')"))
             assert.equal(await evaluate("document.querySelector('[data-index-panel=bags] tbody') === null"), true)
+            if (!prior) {
+                await evaluate("document.querySelector('[data-index-panel=bags] [role=alert] button').click()")
+                await waitFor(() => evaluate("document.querySelector('[data-index-panel=bags] tbody')?.textContent.includes('Bag 0')"))
+                assert.ok(requests.some(row => row.query.includes('expected_run_id=run-2')))
+            }
         }
         await open('/library/r1?versionId=v1')
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(el => el.textContent === 'Xem tệp' && !el.disabled)"))
@@ -185,6 +250,39 @@ test('lazy panels keep metadata, defer DOM/details, stop hidden polling and reta
         await evaluate("Array.from(document.querySelectorAll('button')).find(el => el.textContent === 'Đóng tệp').click()")
         await waitFor(() => evaluate("window.fixtureURLs.revoked === 1"))
         assert.equal(await evaluate("window.fixtureURLs.created"), 1)
+        if (!baseline && !prior) {
+            await open('/library/processing?versionId=slow')
+            await waitFor(() => requests.some(row => row.path.includes('/slow/bilingual')))
+            await open('/library/processing?versionId=v2')
+            await waitFor(() => evaluate("document.body.textContent.includes('TXT bản dịch')"))
+            await evaluate("document.querySelector('summary[aria-controls=bilingual-segments]').click()")
+            await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Original v2 0')"))
+            await delay(600)
+            assert.equal(await evaluate("document.querySelector('article')?.textContent.includes('Original slow')"), false)
+            identity = 'reader-a'
+            await open('/library/processing?versionId=v1')
+            await waitFor(() => requests.some(row => row.path.endsWith('/v1/bilingual') && row.actor === 'reader-a'))
+            identity = 'reader-b'
+            await evaluate("window.dispatchEvent(new Event('focus'))")
+            await waitFor(() => requests.some(row => row.path.endsWith('/v1/bilingual') && row.actor === 'reader-b'))
+            await waitFor(() => evaluate("document.querySelector('input[aria-label=\"Ngôn ngữ bản dịch\"]')?.value === 'en'"))
+            failPage = true
+            await evaluate("document.querySelector('summary[aria-controls=bilingual-segments]').click()")
+            await waitFor(() => evaluate("document.querySelector('#bilingual-segments [role=alert]')?.textContent.includes('Không thể tải')"))
+            await evaluate("document.querySelector('#bilingual-segments [role=alert] button').click()")
+            await waitFor(() => evaluate("document.querySelector('article')?.textContent.includes('Original reader-b 0')"))
+            await delay(600)
+            assert.equal(await evaluate("document.body.textContent.includes('Original reader-a')"), false)
+            slowRun = true
+            const beforeRun = count('/' + runId)
+            await open('/experiments/results?run_id=' + runId)
+            await waitFor(() => count('/' + runId) > beforeRun)
+            await open('/experiments/results?run_id=' + otherRunId)
+            await waitFor(() => evaluate("document.body.textContent.includes('Fixture evaluation second')"))
+            await delay(600)
+            assert.equal(await evaluate("document.body.textContent.includes('Fixture evaluation second')"), true)
+            assert.equal(await evaluate("Array.from(document.querySelectorAll('h2')).some(el => el.textContent === 'Fixture evaluation')"), false)
+        }
         assert.ok(requests.every(row => row.method === 'GET'), 'opening panels never mutates')
         console.log(JSON.stringify({ baseline, fixture: 'G2-G5', ...metrics }))
     } finally {

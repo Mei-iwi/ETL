@@ -37,6 +37,8 @@ export type ChunksResult = {
 }
 
 export type IndexStatusResult = {
+    bag_pagination?: { offset: number; limit: number; total: number }
+    bag_revision?: string
     resource_version_id: string
     processing_status: string
     index_status: 'CONTENT_NOT_READY' | 'NOT_STARTED' | 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'STALE' | 'BLOCKED_RUNTIME' | 'BLOCKED_STRUCTURE'

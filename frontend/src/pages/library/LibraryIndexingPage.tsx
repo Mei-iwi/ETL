@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { getChunks, getIndexResources, getIndexStatus, getIndexVersions, IndexingApiError, reindex, startIndex } from '../../services/indexingApi'
+import { getBagPage, getChunks, getIndexResources, getIndexStatus, getIndexVersions, IndexingApiError, reindex, startIndex } from '../../services/indexingApi'
 import type { ChunksResult, IndexRequestResult, IndexStatusResult, ResourceOption, VersionOption } from '../../types/indexing'
 import styles from './LibraryPages.module.css'
 
@@ -257,43 +257,47 @@ function IndexWorkspace({ versionId, view }: { versionId: string; view: IndexVie
             {view === 'chunks' && <ChunkList key={`${status?.published_run_id ?? versionId}:${status?.processing_status}:${refresh}`} versionId={versionId} />}
         </div>
         <div className={styles.indexPanel} data-index-panel="bags" hidden={view !== 'bags'}>
-            {view === 'bags' && <BagList key={`${versionId}:${status?.published_run_id ?? ''}`} versionId={versionId} status={status} loading={!status && !statusError} error={statusError} />}
+            {view === 'bags' && <BagList key={`${versionId}:${status?.published_run_id ?? ''}:${refresh}`} versionId={versionId} status={status} loading={!status && !statusError} error={statusError} onRefresh={() => setRefresh(value => value + 1)} />}
         </div>
         {confirming && <ReindexConfirmation onCancel={() => setConfirming(false)} onConfirm={() => { setConfirming(false); void build(true) }} />}
     </>
 }
 
-function BagList({ versionId, status, loading, error }: { versionId: string; status: IndexStatusResult | null; loading: boolean; error: string }) {
+function BagList({ versionId, status, loading, error, onRefresh }: { versionId: string; status: IndexStatusResult | null; loading: boolean; error: string; onRefresh: () => void }) {
     const [offset, setOffset] = useState(0)
-    const [details, setDetails] = useState<IndexStatusResult | null>(null)
-    const [detailError, setDetailError] = useState('')
+    const [details, setDetails] = useState<{ key: string; value: IndexStatusResult } | null>(null)
+    const [detailError, setDetailError] = useState<{ key: string; message: string; changed: boolean } | null>(null)
     const [attempt, setAttempt] = useState(0)
+    const revision = useRef<string | undefined>(undefined)
     const publishedRun = status?.published_run_id
+    const pageKey = JSON.stringify([versionId, publishedRun, offset])
     useEffect(() => {
         if (!publishedRun) return
         const controller = new AbortController()
-        void Promise.resolve().then(() => controller.signal.aborted ? null : getIndexStatus(versionId, controller.signal))
+        void Promise.resolve().then(() => controller.signal.aborted ? null : getBagPage(versionId, publishedRun, offset, controller.signal, revision.current))
             .then(value => {
                 if (!value || controller.signal.aborted) return
-                if (value.published_run_id !== publishedRun || value.index_status !== 'READY') {
-                    setDetails(null)
-                    setDetailError('Chỉ mục đã thay đổi. Tải lại trạng thái trước khi xem túi từ.')
-                    return
-                }
-                setDetails(value); setDetailError('')
-            }).catch(reason => { if (!controller.signal.aborted) { setDetails(null); setDetailError(errorNotice(reason, 'Không tải được túi từ.')) } })
+                revision.current = value.bag_revision
+                setDetails({ key: pageKey, value }); setDetailError(null)
+            }).catch(reason => { if (!controller.signal.aborted) { setDetails(null); setDetailError({ key: pageKey,
+                message: errorNotice(reason, 'Không tải được túi từ.'), changed: reason instanceof IndexingApiError && reason.status === 409 }) } })
         return () => controller.abort()
-    }, [versionId, publishedRun, attempt])
-    const bags = details?.published_run_id === publishedRun ? details?.bags ?? [] : []
-    const pending = loading || Boolean(publishedRun && !details && !detailError)
+    }, [versionId, publishedRun, offset, pageKey, attempt])
+    const value = details?.key === pageKey ? details.value : null
+    const message = detailError?.key === pageKey ? detailError.message : ''
+    const bags = value?.bags ?? []
+    const pending = loading || Boolean(publishedRun && !value && !message)
     const pageSize = 10
-    const currentOffset = offset < bags.length ? offset : 0
+    const total = value?.bag_pagination?.total ?? status?.bag_count ?? 0
     return <section className={styles.resultCard}>
         <h2>ContentBag ({status?.bag_count ?? 0})</h2>
         {pending && <p className={styles.statusNote} role="status">Đang tải ContentBag...</p>}
-        {detailError && <p role="alert">{detailError} <button type="button" onClick={() => { setDetailError(''); setAttempt(value => value + 1) }}>Thử lại</button></p>}
+        {message && <p role="alert">{message} <button type="button" onClick={() => {
+            if (detailError?.changed) onRefresh()
+            else { setDetailError(null); setAttempt(value => value + 1) }
+        }}>Thử lại</button></p>}
         {error && <p className={styles.statusNote} role="alert">{error}</p>}
-        {!pending && !error && !detailError && bags.length === 0 && <p className={styles.statusNote}>Chưa có ContentBag.</p>}
+        {!pending && !error && !message && bags.length === 0 && <p className={styles.statusNote}>Chưa có ContentBag.</p>}
         {!error && bags.length > 0 && <div className={styles.tableWrapper}>
             <table className={styles.simpleTable}>
                 <thead>
@@ -307,10 +311,10 @@ function BagList({ versionId, status, loading, error }: { versionId: string; sta
                     </tr>
                 </thead>
                 <tbody>
-                    {bags.slice(currentOffset, currentOffset + pageSize).map((bag, index) => <tr key={bag.id}>
-                        <td>{currentOffset + index + 1}</td>
+                    {bags.map((bag, index) => <tr key={bag.id}>
+                        <td>{offset + index + 1}</td>
                         <td>
-                            <strong>{bag.title ?? `ContentBag ${currentOffset + index + 1}`}</strong>
+                            <strong>{bag.title ?? `ContentBag ${offset + index + 1}`}</strong>
                             <div style={{ color: '#64748b', fontSize: '12px' }}>{bag.unit_type}</div>
                         </td>
                         <td>{bag.keywords.join(', ') || '—'}</td>
@@ -321,10 +325,10 @@ function BagList({ versionId, status, loading, error }: { versionId: string; sta
                 </tbody>
             </table>
         </div>}
-        {bags.length > pageSize && <div className={styles.contentPagination} aria-label="Phân trang ContentBag">
-            <button className={styles.primaryButton} disabled={currentOffset === 0} onClick={() => setOffset(Math.max(0, currentOffset - pageSize))}>Trước</button>
-            <span>Trang {Math.floor(currentOffset / pageSize) + 1}/{Math.ceil(bags.length / pageSize)}</span>
-            <button className={styles.primaryButton} disabled={currentOffset + pageSize >= bags.length} onClick={() => setOffset(currentOffset + pageSize)}>Tiếp</button>
+        {total > pageSize && <div className={styles.contentPagination} aria-label="Phân trang ContentBag">
+            <button className={styles.primaryButton} disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - pageSize))}>Trước</button>
+            <span>Trang {Math.floor(offset / pageSize) + 1}/{Math.ceil(total / pageSize)}</span>
+            <button className={styles.primaryButton} disabled={offset + pageSize >= total} onClick={() => setOffset(offset + pageSize)}>Tiếp</button>
         </div>}
     </section>
 }
