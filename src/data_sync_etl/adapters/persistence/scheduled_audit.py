@@ -32,6 +32,7 @@ from data_sync_etl.domain.reconciliation import (
     METADATA_FIELDS,
     STREAM_TABLE_MAPPING,
     metadata_differences,
+    observe_file_result,
     serialize_json_value,
 )
 from data_sync_etl.workers.lifecycle import tick
@@ -196,6 +197,7 @@ class ScheduledAudit:
                 engine.file_read_budget_seconds = min(settings.reconciliation_file_timeout_seconds,
                     settings.reconciliation_max_seconds_per_run - (monotonic() - started))
                 result = engine.verify_file_snapshot([version], {version.resource_id: origin}, audit_type=claim['audit_type'])[0]
+                observe_file_result(checkpoint, result)
                 metrics = engine.file_metrics
                 used_bytes += metrics['bytes_read']
                 visited += 1

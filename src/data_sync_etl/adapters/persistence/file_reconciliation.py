@@ -13,6 +13,7 @@ from data_sync_etl.db.models import (
     SyncReconciliationRun,
 )
 from data_sync_etl.domain.core import DomainError, new_id, now
+from data_sync_etl.domain.reconciliation import observe_file_result
 
 
 class FileReconciliationJobs:
@@ -53,6 +54,7 @@ class FileReconciliationJobs:
 
     def _run(self, stream, ready, state, mode='INCREMENTAL'):
         run_id = None
+        started = monotonic()
         previous_seconds, previous_bytes = self.engine.file_read_budget_seconds, self.engine.file_max_bytes
         try:
             # Same UoW fence used for processing: one audit owner across API processes.
@@ -117,6 +119,7 @@ class FileReconciliationJobs:
                     source = {'count': 0, 'error_code': 'SOURCE_SUMMARY_UNAVAILABLE'}
                 self.engine.file_cancelled = self.cancelled
                 counts, reasons, verified_bytes = Counter(), Counter(), 0
+                observations = {}
                 settings = getattr(self.engine, 'audit_settings', None)
                 deadline = monotonic() + getattr(settings, 'reconciliation_max_seconds_per_run', 1800)
                 maximum = getattr(settings, 'reconciliation_max_bytes_per_run', previous_bytes)
@@ -140,6 +143,7 @@ class FileReconciliationJobs:
                     io_bytes += self.engine.file_metrics.get('bytes_read', 0)
                     result = rows[0] if rows else {'discrepancy_flag': 'NOT_VERIFIED', 'source_value': None,
                         'target_value': {'reason_code': 'FILE_VERSION_MISSING'}}
+                    observe_file_result(observations, result)
                     flag = result['discrepancy_flag']
                     counts[flag] += 1
                     if flag == 'SYNCED':
@@ -156,6 +160,8 @@ class FileReconciliationJobs:
                         record.matched_count = counts['SYNCED']
                         record.mismatched_count = sum(n for key, n in counts.items() if key not in ('SYNCED', 'NOT_VERIFIED'))
                         record.summary_meta = {**record.summary_meta, 'processed_files': ordinal,
+                            **observations,
+                            'execution_time_ms': round((monotonic() - started) * 1000, 2),
                             'last_processed_id': version_id, 'unverified_source_files': counts['NOT_VERIFIED'],
                             'verified_file_count': counts['SYNCED'], 'verification_reason_counts': dict(reasons),
                             'source_summary': source, 'metadata_failed': metadata_failed, 'verified_bytes': verified_bytes,
@@ -175,6 +181,7 @@ class FileReconciliationJobs:
                         record.status = 'BLOCKED' if ratio > self.engine.max_ratio else 'PARTIAL' if incomplete else 'COMPLETED'
                         record.finished_at = now()
                         record.summary_meta = {**record.summary_meta, 'mismatch_ratio': ratio,
+                            'execution_time_ms': round((monotonic() - started) * 1000, 2),
                             'max_allowed_ratio': self.engine.max_ratio,
                             **({'reason': 'RECONCILIATION_BUDGET'} if budget_exhausted else {}),
                             **({'reason': 'RECONCILIATION_INTERRUPTED'} if self.cancelled.is_set() else {})}

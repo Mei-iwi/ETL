@@ -11,18 +11,7 @@ import type {
 } from '../../types/reconciliation'
 import styles from './DataReconciliationPage.module.css'
 import { ReconciliationSchedule } from './ReconciliationSchedule'
-
-function formatBytes(bytes?: number | null): string {
-    if (bytes === undefined || bytes === null || bytes === 0) return '0 B'
-    const units = ['B', 'KB', 'MB', 'GB', 'TB']
-    let size = bytes
-    let unitIndex = 0
-    while (Math.abs(size) >= 1024 && unitIndex < units.length - 1) {
-        size /= 1024
-        unitIndex++
-    }
-    return `${size.toFixed(2)} ${units[unitIndex]}`
-}
+import { auditSummary, formatAuditBytes as formatBytes, pendingHash } from './reconciliationDisplay'
 
 function formatDate(dateStr?: string | null): string {
     if (!dateStr) return '—'
@@ -219,8 +208,7 @@ export function DataReconciliationPage() {
 
     const hasBlockedRun = report?.stream_reports?.some((r) => r.status === 'BLOCKED')
     const blockedReason = report?.stream_reports?.find((r) => r.summary_meta?.reason)?.summary_meta?.reason
-    const unverified = report?.stream_reports.reduce((total, row) => total +
-        (row.summary_meta?.unverified_source_files ?? 0) + (row.summary_meta?.unverified_metadata_records ?? 0), 0) ?? 0
+    const { unverified, hashPending, onlyHashPending, observedBytes, observedFiles } = auditSummary(report)
     const onlyUnverified = unverified > 0 && report?.total_matched_records === 0 && report.total_mismatched_records === 0
     const fileProgress = report?.stream_reports.find(row => row.stream_name === 'files')?.summary_meta
 
@@ -272,7 +260,7 @@ export function DataReconciliationPage() {
                                 message: 'Quét luồng đã chọn rồi chỉ đồng bộ ID metadata lệch. Không xóa bản ghi hoặc ghi đè tệp sai hash.',
                                 onConfirm: () => { setConfirmModal(null); void handleRunReconcile(false) } })}>Đồng bộ lệch</button>}
                         {/* BADGE HIỂN THỊ THỜI GIAN THỰC THI */}
-                        {(lastExecutionTimeMs !== null || report?.stream_reports?.[0]?.execution_time_ms !== undefined) && (
+                        {(lastExecutionTimeMs ?? report?.stream_reports?.[0]?.execution_time_ms ?? 0) > 0 && (
                             <div className={styles.executionBadge} title="Thời gian thực thi đợt quét gần nhất">
                                 {lastExecutionTimeMs ?? report?.stream_reports?.[0]?.execution_time_ms} ms
                             </div>
@@ -300,11 +288,11 @@ export function DataReconciliationPage() {
                 <div className={styles.statusGrid}>
                     <div className={styles.statusItem}>
                         <span className={styles.statusLabel}>Tỷ lệ đồng nhất</span>
-                        <span className={styles.statusValue} style={{ color: (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
-                            {onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
+                        <span className={styles.statusValue} style={{ color: onlyHashPending ? '#475569' : (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
+                            {onlyHashPending ? 'Chưa kiểm tra SHA-256' : onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
                         </span>
                         <span className={styles.statusSub}>
-                            Trạng thái: <strong>{report?.overall_status ?? 'CHƯA CHẠY'}</strong>
+                            Trạng thái: <strong>{onlyHashPending && report?.overall_status === 'PARTIAL' ? 'Quét nhanh' : report?.overall_status ?? 'CHƯA CHẠY'}</strong>
                         </span>
                     </div>
 
@@ -315,17 +303,18 @@ export function DataReconciliationPage() {
                         </span>
                         <span className={styles.statusSub}>
                             Khớp: <strong style={{ color: '#166534' }}>{report?.total_matched_records ?? 0}</strong> | Lệch: <strong style={{ color: '#991b1b' }}>{report?.total_mismatched_records ?? 0}</strong>
-                            {unverified > 0 && <> | Chưa xác minh: <strong>{unverified}</strong></>}
+                            {hashPending > 0 && <> | Chờ SHA-256: <strong>{hashPending}</strong></>}
+                            {unverified > hashPending && <> | Chưa xác minh: <strong>{unverified - hashPending}</strong></>}
                         </span>
                     </div>
 
                     <div className={styles.statusItem}>
-                        <span className={styles.statusLabel}>Dung lượng tệp</span>
+                        <span className={styles.statusLabel}>Dung lượng quan sát</span>
                         <span className={styles.statusValue}>
-                            {formatBytes(report?.total_target_bytes)}
+                            {observedFiles > 0 ? formatBytes(observedBytes) : 'Chưa có số liệu'}
                         </span>
                         <span className={styles.statusSub}>
-                            Nguồn: {formatBytes(report?.total_source_bytes)} | Đích: {formatBytes(report?.total_target_bytes)}
+                            {observedFiles > 0 ? `Đọc được metadata ${observedFiles} tệp` : 'Chưa có thống kê dung lượng tệp'}
                         </span>
                     </div>
 
@@ -336,8 +325,8 @@ export function DataReconciliationPage() {
                         </span>
                         <span className={styles.statusSub}>
                             Lần chạy: {formatDate(report?.last_reconciled_at)}
-                            {report?.stream_reports?.[0]?.execution_time_ms !== undefined && (
-                                <> • {report.stream_reports[0].execution_time_ms}ms</>
+                            {(report?.stream_reports?.[0]?.execution_time_ms ?? 0) > 0 && (
+                                <> • {report?.stream_reports[0]?.execution_time_ms}ms</>
                             )}
                         </span>
                     </div>
@@ -348,7 +337,7 @@ export function DataReconciliationPage() {
             <div className={styles.card}>
                 <div className={styles.sectionHeader}>
                     <div>
-                        <h3 className={styles.sectionTitle}>Chi tiết sai lệch</h3>
+                        <h3 className={styles.sectionTitle}>Chi tiết đối soát</h3>
                     </div>
                 </div>
 
@@ -399,7 +388,9 @@ export function DataReconciliationPage() {
                             </thead>
                             <tbody>
                                 {discrepancies.map((item) => {
-                                    const flagInfo = FLAG_LABELS[item.discrepancy_flag] || {
+                                    const hashPendingOnly = pendingHash(item)
+                                    const flagInfo = hashPendingOnly ? { label: 'Chưa kiểm tra hash', badgeClass: styles.badgeInfo,
+                                        desc: 'Quét nhanh đã đọc metadata; chưa xác minh SHA-256' } : FLAG_LABELS[item.discrepancy_flag] || {
                                         label: item.discrepancy_flag,
                                         badgeClass: styles.badgeGray,
                                         desc: item.discrepancy_flag,
@@ -436,7 +427,7 @@ export function DataReconciliationPage() {
                                                         {sVal.email && <div className={styles.cellMeta}>Email: {sVal.email}</div>}
                                                     </div>
                                                 ) : (
-                                                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>[Không có ở nguồn]</span>
+                                                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>{item.discrepancy_flag === 'ORPHAN_MASTER' ? '[Không có ở nguồn]' : '[Chưa có metadata đối chiếu]'}</span>
                                                 )}
                                             </td>
 
@@ -456,11 +447,12 @@ export function DataReconciliationPage() {
                                                                 BLOCKED_SOURCE_MAPPING: 'Chưa xác minh được tham chiếu nguồn',
                                                                 BLOCKED_SOURCE_POLICY: 'Nguồn chưa cho phép truy xuất',
                                                                 RECONCILIATION_READ_BUDGET: 'Tệp vượt thời gian xử lý; các tệp khác vẫn được quét',
+                                                                SHA256_NOT_CHECKED: 'Quét nhanh chưa tính SHA-256; chọn Full để xác minh hash',
                                                             } as Record<string, string>)[tVal.reason_code] ?? tVal.reason_code}</strong>
                                                         </div>}
                                                         {tVal.storage_file_size !== undefined && (
                                                             <div className={styles.cellMeta}>
-                                                                Dung lượng đĩa: <strong>{formatBytes(tVal.storage_file_size)}</strong>
+                                                                Dung lượng quan sát: <strong>{formatBytes(tVal.storage_file_size)}</strong>
                                                                 {tVal.size_delta_bytes !== undefined && (
                                                                     <span style={{ color: '#991b1b', marginLeft: '6px' }}>
                                                                         ({tVal.size_delta_bytes > 0 ? `+${formatBytes(tVal.size_delta_bytes)}` : `-${formatBytes(Math.abs(tVal.size_delta_bytes))}`})
@@ -493,7 +485,7 @@ export function DataReconciliationPage() {
 
                                             <td>
                                                 <span style={{ fontSize: '12px', fontWeight: 500, color: item.resolution_status === 'AUTO_HEALED' ? '#166534' : '#64748b' }}>
-                                                    {item.resolution_status === 'AUTO_HEALED' ? 'Đã tự sửa' : 'Chưa xử lý'}
+                                                    {hashPendingOnly ? 'Chờ kiểm tra hash' : item.resolution_status === 'AUTO_HEALED' ? 'Đã tự sửa' : 'Chưa xử lý'}
                                                 </span>
                                             </td>
                                         </tr>

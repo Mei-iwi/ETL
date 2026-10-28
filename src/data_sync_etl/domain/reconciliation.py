@@ -28,6 +28,18 @@ METADATA_FIELDS = {
     'grades': ('grade_code', 'grade_name_vi', 'education_level_id', 'grade_is_active', 'grade_deleted_at', 'grade_updated_at'),
 }
 
+
+def observe_file_result(metrics, result):
+    """Count observed metadata bytes separately from I/O and hash verification."""
+    value = result.get('target_value') or {}
+    size = value.get('verified_size', value.get('storage_file_size'))
+    if type(size) is int and size >= 0:
+        metrics['observed_file_bytes'] = metrics.get('observed_file_bytes', 0) + size
+        metrics['observed_file_count'] = metrics.get('observed_file_count', 0) + 1
+    if (result.get('discrepancy_flag') == FLAG_NOT_VERIFIED and value.get('verification') == 'SIZE_ONLY'
+            and value.get('reason_code') == 'SHA256_NOT_CHECKED' and value.get('size_status') != 'SIZE_MISMATCH'):
+        metrics['sha256_not_checked_count'] = metrics.get('sha256_not_checked_count', 0) + 1
+
 def metadata_differences(stream, source, target):
     return [key for key in METADATA_FIELDS.get(stream, ()) if key in source and key in target
             and _comparable(key, source[key]) != _comparable(key, target[key])]

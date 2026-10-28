@@ -24,6 +24,11 @@ export interface ReconciliationRunReport {
         reason?: string
         dry_run?: boolean
         unverified_source_files?: number
+        not_verified_count?: number
+        sha256_not_checked_count?: number
+        observed_file_bytes?: number
+        observed_file_count?: number
+        coverage_status?: string
         unverified_metadata_records?: number
         verified_file_count?: number
         verification_reason_counts?: Record<string, number>
