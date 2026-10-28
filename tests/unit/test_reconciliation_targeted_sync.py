@@ -1,4 +1,5 @@
 from sqlalchemy import select
+import pytest
 
 from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
 from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
@@ -62,6 +63,39 @@ def test_bounded_metadata_job_repairs_only_mismatch(container, monkeypatch):
     with container.uow() as repo:
         assert repo.session.get(Job, job).status == 'COMPLETED'
         assert repo.get('subjects', row['id'])['subject_name'] != 'stale'
+
+
+@pytest.mark.parametrize('repair_enabled', [False, True])
+@pytest.mark.parametrize('has_drift', [False, True])
+def test_scheduled_audit_repairs_only_drift_when_policy_allows(container, monkeypatch, repair_enabled, has_drift):
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        before = repo.get('sync_checkpoints', 'subjects')
+        subject = repo.find('subjects', limit=1)[0]
+        if has_drift:
+            repo.update('subjects', subject['id'], {'subject_name': '__audit_drift__'})
+    repaired = []
+    original = container.sync.run_selected
+    def repair(stream, ids, **kwargs):
+        assert stream == 'subjects'
+        repaired.extend(ids)
+        return original(stream, ids, **kwargs)
+    monkeypatch.setattr(container.sync, 'run_selected', repair)
+    schedule = AuditSchedule(container.uow, container.settings)
+    schedule.configure('subjects', dict(enabled=True, interval_seconds=60, mode='FULL', repair=repair_enabled))
+    jobs = schedule.tick()
+    assert schedule.tick() == jobs
+    assert len(jobs) == 1
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    assert audit.once(jobs[0])
+    assert repaired == ([subject['id']] if has_drift and repair_enabled else [])
+    with container.uow() as repo:
+        job = repo.session.get(Job, jobs[0])
+        assert job.status == 'COMPLETED'
+        assert job.checkpoint.get('repaired_count', 0) == int(has_drift and repair_enabled)
+        assert repo.get('sync_checkpoints', 'subjects') == before
+        assert repo.get('subjects', subject['id'])['subject_name'] == (
+            '__audit_drift__' if has_drift and not repair_enabled else subject['subject_name'])
 
 
 def test_repair_cannot_claim_success_when_target_changes_after_write(container, monkeypatch):

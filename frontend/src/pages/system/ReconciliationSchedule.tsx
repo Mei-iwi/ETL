@@ -65,7 +65,7 @@ export function ReconciliationSchedule() {
         <h3>Lịch đối soát theo từng luồng</h3>
         <div className={styles.tableWrap}>
             <table className={styles.table}>
-                <thead><tr><th>Luồng</th><th>Tự động</th><th>Chu kỳ</th><th>Chế độ quét</th><th>Đồng bộ lệch</th><th>Thao tác</th></tr></thead>
+                <thead><tr><th>Luồng</th><th>Tự động</th><th>Chu kỳ</th><th>Chế độ quét</th><th title="Chỉ sửa ID metadata đủ điều kiện; không ghi đè tệp sai hash">Tự đồng bộ khi lệch</th><th>Thao tác</th></tr></thead>
                 <tbody>
                     <tr className={styles.sharedSchedule} data-audit-stream="all">
                         <td><strong>Tất cả luồng</strong></td>
@@ -79,7 +79,7 @@ export function ReconciliationSchedule() {
                             onChange={event => setCommon(previous => ({ ...previous, mode: event.target.value as Plan['mode'] }))}>
                             <option value="INCREMENTAL">Incremental</option><option value="FULL">Full</option>
                         </select></td>
-                        <td><input aria-label="Đồng bộ metadata lệch tất cả luồng" type="checkbox" checked={common.repair}
+                        <td><input aria-label="Tự đồng bộ metadata khi lệch tất cả luồng" type="checkbox" checked={common.repair}
                             onChange={event => setCommon(previous => ({ ...previous, repair: event.target.checked }))} /></td>
                         <td><div className={styles.scheduleActions}>
                             <button className={styles.primaryButton} disabled={busy !== null || plans.length !== 5} onClick={() => void submitAll()}>Lưu chung</button>
@@ -97,8 +97,8 @@ export function ReconciliationSchedule() {
                         onChange={event => change(plan.stream, { mode: event.target.value as Plan['mode'] })}>
                         <option value="INCREMENTAL">Incremental</option><option value="FULL">Full</option>
                     </select></td>
-                    <td>{plan.stream === 'files' ? 'Chỉ xác minh' : <input type="checkbox" checked={plan.repair}
-                        aria-label={`Đồng bộ lệch ${labels[plan.stream]}`}
+                    <td>{plan.stream === 'files' ? 'Chỉ kiểm tra' : <input type="checkbox" checked={plan.repair}
+                        aria-label={`Tự đồng bộ khi lệch ${labels[plan.stream]}`}
                         onChange={event => change(plan.stream, { repair: event.target.checked })} />}</td>
                     <td><div className={styles.scheduleActions}><button className={styles.primaryButton} disabled={busy !== null} onClick={() => void submit(plan)}>Lưu</button>
                         </div></td>
