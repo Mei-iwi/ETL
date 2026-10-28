@@ -9,7 +9,7 @@ class ProcessResourceVersion:
         self.uow = uow
         self.ocr = ocr
 
-    def run(self, version_id: str) -> dict:
+    def run(self, version_id: str, *, fence=None) -> dict:
         with self.uow() as repo:
             version = repo.get("resource_versions", version_id)
             if version is None:
@@ -22,7 +22,8 @@ class ProcessResourceVersion:
             if resource is None or not resource["is_active"] or resource_deleted(resource):
                 raise DomainError("Learning resource is unavailable")
 
-        job = self.ocr.create_job(version_id)
+        job = (self.ocr.create_job(version_id, fence=fence) if fence is not None
+               else self.ocr.create_job(version_id))
 
         with self.uow() as repo:
             state = processing_state(repo, job)

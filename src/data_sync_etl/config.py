@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     reconcile_max_affected: int = Field(default=100, ge=1, le=1000)
     reconcile_max_ratio: float = Field(default=0.1, gt=0, le=1)
     reconciliation_scheduler_enabled: bool = False
+    reconciliation_max_active: int = Field(default=1, ge=1, le=2)
+    source_file_import_max_active: int = Field(default=1, ge=1, le=2)
     reconciliation_worker_heartbeat_file: Path | None = Field(default=None, repr=False)
     reconciliation_light_interval_seconds: int = Field(default=3600, ge=60, le=86400)
     reconciliation_id_sweep_interval_seconds: int = Field(default=604800, ge=3600, le=2592000)

@@ -7,8 +7,10 @@ from sqlalchemy import and_, delete, exists, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 
 from data_sync_etl.adapters.persistence.catalog_reader import CatalogQueryMixin
+from data_sync_etl.adapters.persistence.queue_admission import admission_lock
 from data_sync_etl.adapters.persistence.resource_metadata import ResourceMetadataRepositoryMixin
 from data_sync_etl.adapters.persistence.search_reader import SearchRepositoryMixin
 from data_sync_etl.db.models import (
@@ -348,14 +350,39 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             return self.session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         return [self._dict(row) for row in self.session.scalars(stmt.order_by(key).limit(size))]
 
-    def claim_source_import(self, stamp, token, expires_at):
+    def claim_source_import(self, stamp, token, expires_at, max_active=1):
+        admission_lock(self.session, 'source-import')
+        duration = expires_at - stamp
+        stamp = now()
+        expires_at = stamp + duration
         model = SourceFileImport
-        stmt = select(model).where(~exists().where(
+        active = and_(model.status == 'FETCHING', model.lease_expires_at > stamp)
+        if self.session.scalar(select(func.count()).select_from(model).where(active)) >= max_active:
+            return None
+        other = aliased(model)
+        # Serialize imports for a resource, including an older version waiting
+        # for retry/recovery. PROCESSING is a committed mapping, not CONTENT_READY:
+        # downstream work is version-scoped and retains its own finalization lock.
+        # A committed mapping in RETRY_WAIT retains the existing _parent rejection
+        # (PARENT_PENDING); it cannot publish a descendant while that parent retries.
+        # Aggregate once instead of a correlated predecessor scan for every
+        # candidate. This matters when a large queue has many independent resources.
+        predecessor = select(other.resource_id,
+            func.min(other.source_version_number).label('first_version')).where(or_(
+                other.status.in_(('PENDING', 'FETCHING', 'IMPORTED', 'RETRY_PROCESSING')),
+                and_(other.status == 'RETRY_WAIT', other.target_version_id.is_(None))
+            )).group_by(other.resource_id).subquery()
+        busy_resources = select(other.resource_id).where(
+            other.status == 'FETCHING', other.lease_expires_at > stamp)
+        stmt = select(model).outerjoin(predecessor, predecessor.c.resource_id == model.resource_id).where(
+            model.resource_id.not_in(busy_resources),
+            or_(predecessor.c.first_version.is_(None), model.source_version_number <= predecessor.c.first_version),
+            ~exists().where(
             MasterLearningResource.id == model.resource_id, MasterLearningResource.master_deleted_at.is_not(None)), or_(
             and_(model.status.in_(["PENDING", "IMPORTED", "RETRY_PROCESSING", "RETRY_WAIT"]),
                  or_(model.next_retry_at.is_(None), model.next_retry_at <= stamp)),
             and_(model.status == "FETCHING", model.lease_expires_at <= stamp),
-        )).order_by(model.resource_id, model.source_version_number, model.id).limit(1).with_for_update(skip_locked=True)
+        )).order_by(model.resource_id, model.source_version_number, model.id).limit(1).with_for_update(skip_locked=True, of=model)
         row = self.session.scalar(stmt)
         if row is None:
             return None
@@ -669,12 +696,16 @@ class SQLAlchemyUnitOfWork:
         with self.sessions() as session:
             dialect = session.get_bind().dialect.name
             if dialect == 'postgresql':
-                # Held across all finalization work; transaction/connection loss releases it.
-                with session.begin():
-                    acquired = session.scalar(
-                        text('SELECT pg_try_advisory_xact_lock(:key)'), {'key': key}
-                    )
-                    yield bool(acquired)
+                # Same lock key and cross-process exclusion, without an idle
+                # transaction throughout file hashing, OCR finalization or Mongo RPC.
+                # A disconnected owner loses its session lock just as before.
+                with session.get_bind().connect().execution_options(isolation_level='AUTOCOMMIT') as connection:
+                    acquired = bool(connection.scalar(text('SELECT pg_try_advisory_lock(:key)'), {'key': key}))
+                    try:
+                        yield acquired
+                    finally:
+                        if acquired:
+                            connection.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': key})
             elif dialect == 'sqlite':
                 lock = _PROCESSING_LOCKS[key % len(_PROCESSING_LOCKS)]
                 acquired = lock.acquire(blocking=False)

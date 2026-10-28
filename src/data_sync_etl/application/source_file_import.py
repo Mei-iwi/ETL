@@ -186,7 +186,8 @@ class SourceFileImportService:
             marker = sha256(worker_id.encode()).hexdigest()[:30] if worker_id else None
             repo.update("sync_checkpoints", "source-file-worker", {"updated_at": stamp, "last_id": marker})
             return repo.claim_source_import(stamp, new_id(), stamp + timedelta(
-                seconds=self.settings.source_file_import_lease_seconds))
+                seconds=self.settings.source_file_import_lease_seconds),
+                max_active=self.settings.source_file_import_max_active)
 
     def worker_stopped(self, worker_id):
         with self.uow() as repo:
@@ -253,10 +254,12 @@ class SourceFileImportService:
                     return
             if row["processing_job_id"]:
                 if row["processing_retry_requested"]:
-                    self.retry_processing.run(row["processing_job_id"])
+                    self.retry_processing.run(row["processing_job_id"],
+                        fence=lambda repo: self._owned(repo, claimed))
                 job_id = row["processing_job_id"]
             else:
-                job_id = self.process.run(row["target_version_id"])["job_id"]
+                job_id = self.process.run(row["target_version_id"],
+                    fence=lambda repo: self._owned(repo, claimed))["job_id"]
             with self.uow() as repo:
                 row = self._owned(repo, claimed)
                 repo.update("source_file_imports", row["id"], {

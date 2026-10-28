@@ -23,7 +23,7 @@ class RetryProcessingJob:
             "status_url": f"/api/v1/resource-versions/{version_id}/etl-status",
         }
 
-    def run(self, job_id: str) -> dict:
+    def run(self, job_id: str, *, fence=None) -> dict:
         with self.uow() as repo:
             job = repo.get("ocr_jobs", job_id)
         if job is None:
@@ -34,6 +34,8 @@ class RetryProcessingJob:
             if not acquired:
                 raise ProcessingRetryConflict("Processing job is busy")
             with self.uow() as repo:
+                if fence is not None:
+                    fence(repo)
                 job = repo.get("ocr_jobs", job_id)
                 if job is None:
                     raise ProcessingJobNotFound("Processing job not found")
@@ -57,9 +59,15 @@ class RetryProcessingJob:
                 if state in ("CONTENT_READY", "NO_EXTRACTABLE_CONTENT"):
                     return self._result(job, "ALREADY_COMPLETED", state)
                 if job["status"] in ("FAILED", "COMPLETED_WITH_ERRORS"):
-                    return self._retry_ocr(repo, job)
+                    result = self._retry_ocr(repo, job)
+                    if fence is not None:
+                        fence(repo)
+                    return result
                 if job["status"] == "COMPLETED":
-                    return self._retry_finalization(repo, job, state)
+                    result = self._retry_finalization(repo, job, state)
+                    if fence is not None:
+                        fence(repo)
+                    return result
                 raise ProcessingRetryConflict("Processing job cannot be retried")
 
     def _check_manual_limit(self, repo, version_id: str) -> None:
