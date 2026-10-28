@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from threading import Lock
 
@@ -395,7 +395,13 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         self.session.flush()
         return {**self._dict(row), "previous_status": previous_status}
 
-    def pending_live_ocr_tasks(self):
+    def pending_live_ocr_tasks(self, max_active=1, heartbeat_timeout=120):
+        admission_lock(self.session, 'ocr')
+        stamp = now()
+        active = and_(OcrPageTask.status == 'RUNNING',
+                      OcrPageTask.heartbeat_at > stamp - timedelta(seconds=heartbeat_timeout))
+        if self.session.scalar(select(func.count()).select_from(OcrPageTask).where(active)) >= max_active:
+            return []
         live = exists().where(OcrJob.id == OcrPageTask.job_id,
             ResourceVersion.id == OcrJob.resource_version_id,
             MasterLearningResource.id == ResourceVersion.resource_id,

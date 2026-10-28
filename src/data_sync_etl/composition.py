@@ -205,6 +205,7 @@ class Container:
             formats=self.format_registry,
             media=MediaExtractor(self.settings, self.storage, create_ocr_engine(self.settings)),
             default_target_language=self.settings.translation_target_language,
+            max_active=self.settings.ocr_max_active,
         )
         self.postprocess = Postprocessor(self.uow)
         self.orchestrator = EtlOrchestrator(

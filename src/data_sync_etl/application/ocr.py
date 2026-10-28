@@ -35,6 +35,7 @@ class OCRPipeline:
         formats=None,
         media=None,
         default_target_language='vi',
+        max_active=1,
     ):
         self.uow, self.storage, self.pdf, self.engine = uow, storage, pdf, engine
         self.max_retries, self.heartbeat_timeout = max_retries, heartbeat_timeout
@@ -42,6 +43,7 @@ class OCRPipeline:
         self.native_documents = documents
         self.media = media
         self.default_target_language = default_target_language
+        self.max_active = max_active
 
     def create_job(self, version_id, triggered_by=None, *, fence=None):
         reference = self.resolver.resolve(version_id)
@@ -123,7 +125,7 @@ class OCRPipeline:
         if not worker_id or len(worker_id) > 100:
             raise DomainError("Worker ID must have 1 to 100 characters")
         with self.uow() as repo:
-            rows = repo.pending_live_ocr_tasks()
+            rows = repo.pending_live_ocr_tasks(max_active=self.max_active, heartbeat_timeout=self.heartbeat_timeout)
             if not rows:
                 return None
             task = rows[0]
@@ -326,6 +328,12 @@ class OCRPipeline:
                     'claim_token': None, 'heartbeat_at': None, 'error_message': 'RESOURCE_SOFT_DELETED'})
                 return True
             code = str(error).split(':', 1)[0] if isinstance(error, DomainError) else ''
+            if code == 'MEDIA_CAPACITY_TIMEOUT':
+                # Waiting for a cluster-wide model slot is backpressure, not an
+                # extraction failure. Keep the task pending without spending retries.
+                repo.update('ocr_page_tasks', task['id'], {'status': 'PENDING', 'worker_id': None,
+                    'claim_token': None, 'heartbeat_at': None, 'error_message': 'MEDIA_CAPACITY_WAIT'})
+                return True
             permanent_codes = {'INVALID_DOCUMENT_CONTENT', 'EMPTY_EXTRACTED_CONTENT',
                                'EXTRACTION_LIMIT_EXCEEDED', 'INVALID_CSV', 'UNSUPPORTED_TEXT_ENCODING',
                                'INVALID_IMAGE', 'INVALID_OPENXML_CONTAINER', 'OPENXML_LIMIT_EXCEEDED'}
