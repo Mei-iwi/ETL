@@ -138,9 +138,10 @@ test('invalid save is shown without a PUT and file controls never offer metadata
     assert.match(renderToStaticMarkup(controls), /DEEP — SHA-256/)
 })
 
-test('subject and file names use simple bold emphasis and configured modes remain dropdowns', () => {
+test('every stream uses neutral bold emphasis and a scan mode dropdown with or without calendar schedules', () => {
     const helper = runtime()
-    const plans = ['subjects', 'files', 'users'].map(stream => ({ stream, calendar_configured: true,
+    const plans = ['grades', 'subjects', 'users', 'resources', 'files'].map(stream => ({ stream, calendar_configured: true,
+        mode: 'INCREMENTAL', enabled: false, interval_seconds: 1800, repair: false,
         fast_schedule: { ...helper.calendarDefaults(stream, 'fast'), enabled: true },
         thorough_schedule: helper.calendarDefaults(stream, 'thorough') }))
     const api = runtime(plans)
@@ -156,16 +157,24 @@ test('subject and file names use simple bold emphasis and configured modes remai
     assert.match(subjectHtml, /Full metadata \+ IDS/)
     assert.match(subjectHtml, /<strong>Môn học<\/strong>/)
     assert.match(renderToStaticMarkup(files), /<strong>Kho tệp<\/strong>/)
-    for (const row of [subject, files]) {
-        const select = find(row, node => node.type === 'select')[0]
-        assert.equal(select.props.value, 'INCREMENTAL')
-        assert.equal(select.props.disabled, false)
+    const labels = { all: 'Tất cả luồng', grades: 'Khối lớp', subjects: 'Môn học', users: 'Người dùng', resources: 'Học liệu', files: 'Kho tệp' }
+    for (const calendar of [true, false]) {
+        const view = runtime(plans.map(plan => ({ ...plan, calendar_configured: calendar })))
+        const allRows = find(view.ReconciliationSchedule(), node => node.type === 'tr' && node.props['data-audit-stream'])
+        assert.equal(allRows.length, 6)
+        for (const row of allRows) {
+            assert.equal(row.props.className, undefined)
+            assert.ok(find(row, node => node.type === 'strong' && node.props.children === labels[row.props['data-audit-stream']]).length)
+            const select = find(row, node => node.type === 'select' && node.props['aria-label']?.startsWith('Chế độ'))[0]
+            assert.equal(select.props.value, 'INCREMENTAL')
+            assert.equal(select.props.disabled, false)
+        }
     }
     assert.match(renderToStaticMarkup(files), /LIGHT/)
     assert.match(renderToStaticMarkup(files), /DEEP — SHA-256/)
     for (const branch of ['fast', 'thorough']) {
         const controls = helper.CalendarControls({ stream: 'subjects', branch,
-            value: plans[0][`${branch}_schedule`], disabled: false, onChange: () => {} })
+            value: plans.find(plan => plan.stream === 'subjects')[`${branch}_schedule`], disabled: false, onChange: () => {} })
         assert.match(renderToStaticMarkup(controls), /Chế độ quét/)
     }
 })

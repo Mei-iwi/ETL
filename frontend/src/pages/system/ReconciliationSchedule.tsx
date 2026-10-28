@@ -139,7 +139,7 @@ export function ReconciliationSchedule() {
             <table className={styles.table}>
                 <thead><tr><th>Luồng</th><th>Tự động</th><th>Chu kỳ</th><th>Chế độ quét</th><th title="Chỉ sửa ID metadata đủ điều kiện; không ghi đè tệp sai hash">Tự đồng bộ khi lệch</th><th>Thao tác</th></tr></thead>
                 <tbody>
-                    <tr className={styles.sharedSchedule} data-audit-stream="all">
+                    <tr data-audit-stream="all">
                         <td><strong>Tất cả luồng</strong></td>
                         <td><input aria-label="Tự động tất cả luồng" type="checkbox" checked={common.enabled}
                             disabled={busy !== null} onChange={event => setCommon(previous => ({ ...previous, enabled: event.target.checked }))} /></td>
@@ -158,8 +158,7 @@ export function ReconciliationSchedule() {
                     </tr>
                     {plans.map(plan => <Fragment key={plan.stream}>
                         <tr data-audit-stream={plan.stream}>
-                            <td>{plan.stream === 'subjects' || plan.stream === 'files'
-                                ? <strong>{labels[plan.stream]}</strong> : labels[plan.stream]}</td>
+                            <td><strong>{labels[plan.stream]}</strong></td>
                             <td>{plan.calendar_configured ? 'Theo từng lịch' : <input aria-label={`Tự động ${labels[plan.stream]}`} type="checkbox"
                                 checked={plan.enabled} disabled={busy !== null} onChange={event => change(plan.stream, { enabled: event.target.checked })} />}</td>
                             <td>{plan.calendar_configured ? 'Ngày / tuần / tháng' : <select className={styles.select} aria-label={`Chu kỳ ${labels[plan.stream]}`}
@@ -175,7 +174,8 @@ export function ReconciliationSchedule() {
                                 <option value="BOTH">{plan.stream === 'files' ? 'LIGHT + DEEP' : 'Incremental + Full metadata'}</option>
                             </select> : <select className={styles.select} aria-label={`Chế độ ${labels[plan.stream]}`}
                                 value={plan.mode} disabled={busy !== null} onChange={event => change(plan.stream, { mode: event.target.value as Plan['mode'] })}>
-                                <option value="INCREMENTAL">Incremental / LIGHT</option><option value="FULL">Full metadata / DEEP SHA-256</option>
+                                <option value="INCREMENTAL">{plan.stream === 'files' ? 'LIGHT' : 'Incremental'}</option>
+                                <option value="FULL">{plan.stream === 'files' ? 'DEEP — SHA-256' : 'Full metadata'}</option>
                             </select>}</td>
                             <td>{plan.stream === 'files' ? 'Chỉ kiểm tra' : plan.calendar_configured ? 'Theo từng lịch' : <input type="checkbox" checked={plan.repair}
                                 disabled={busy !== null} aria-label={`Tự đồng bộ khi lệch ${labels[plan.stream]}`}
@@ -184,7 +184,7 @@ export function ReconciliationSchedule() {
                         </tr>
                         <tr>
                             <td colSpan={6}><details>
-                            <summary>Cấu hình nâng cao — {labels[plan.stream]}</summary>
+                            <summary><strong>Cấu hình nâng cao — {labels[plan.stream]}</strong></summary>
                             <div className={styles.scheduleAdvanced}>
                                 {(['fast', 'thorough'] as const).map(branch => <CalendarControls key={branch} stream={plan.stream} branch={branch}
                                     value={plan[branch === 'fast' ? 'fast_schedule' : 'thorough_schedule'] ?? calendarDefaults(plan.stream, branch)}
