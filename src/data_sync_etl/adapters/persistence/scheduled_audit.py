@@ -56,16 +56,8 @@ class ScheduledAudit:
     def schedule(self):
         if not self.settings.reconciliation_scheduler_enabled:
             return []  # No DB read or SOURCE activity while disabled.
-        stamp = now().timestamp()
-        jobs = []
-        for kind, interval in [('METADATA', self.settings.reconciliation_light_interval_seconds),
-                               ('IDS', self.settings.reconciliation_id_sweep_interval_seconds),
-                               ('LIGHT', self.settings.reconciliation_light_interval_seconds),
-                               ('DEEP', 86400)]:
-            streams = ['files'] if kind in ('DEEP', 'LIGHT') else ['grades', 'subjects', 'users', 'resources']
-            for stream in streams:
-                jobs.append(self.queue.enqueue(kind, stream, f'{kind}:{stream}:{int(stamp // interval)}'))
-        return jobs
+        from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
+        return AuditSchedule(self.engine.uow, self.settings).tick()
 
     def once(self, job_id=None):
         claim = self.queue.claim(job_id)

@@ -37,16 +37,40 @@ class AuditSchedule:
                         .values(status='CANCELLED', finished_at=now(), error_code='CANCELLED_BY_ADMIN'))
 
     def tick(self):
+        # One lock covers both configured and fallback decisions across workers.
+        with self.uow.processing_lock('reconciliation-scheduler') as acquired:
+            return self._tick() if acquired else []
+
+    def _tick(self):
         queue = AuditQueue(self.uow, self.settings)
-        for plan in self.list():
+        with self.uow() as repo:
+            configured = {row.stream_name: dict(row.checkpoint or {}) for row in repo.session.scalars(
+                select(Job).where(Job.status == 'CONFIGURED', Job.job_key.startswith('schedule:')))}
+        decisions = []
+        for stream, plan in configured.items():
             if not plan['enabled']:
                 continue
-            kind = ('DEEP' if plan['mode'] == 'FULL' else 'LIGHT') if plan['stream'] == 'files' else 'METADATA'
+            kind = ('DEEP' if plan['mode'] == 'FULL' else 'LIGHT') if stream == 'files' else 'METADATA'
+            decisions.append((kind, stream, plan['interval_seconds'], plan['mode'], plan['repair'], 'configured'))
+        if self.settings.reconciliation_scheduler_enabled:
+            for kind, interval in [('METADATA', self.settings.reconciliation_light_interval_seconds),
+                                   ('IDS', self.settings.reconciliation_id_sweep_interval_seconds),
+                                   ('LIGHT', self.settings.reconciliation_light_interval_seconds), ('DEEP', 86400)]:
+                for stream in ('files',) if kind in ('LIGHT', 'DEEP') else SCOPES[:-1]:
+                    plan = configured.get(stream)
+                    if plan and kind != 'IDS':
+                        selected = ('DEEP' if plan['mode'] == 'FULL' else 'LIGHT') if stream == 'files' else 'METADATA'
+                        if not plan['enabled'] or kind == selected:
+                            continue
+                    decisions.append((kind, stream, interval, None, False, kind))
+        jobs = []
+        for kind, stream, interval, mode, repair, prefix in decisions:
             with self.uow() as repo:
-                active = repo.session.scalar(select(Job.id).where(Job.stream_name == plan['stream'],
+                active = repo.session.scalar(select(Job.id).where(Job.stream_name == stream, Job.audit_type == kind,
                     Job.status.in_(('PENDING', 'RUNNING', 'RETRY_WAIT'))).limit(1))
             if active:
+                jobs.append(active)
                 continue
-            slot = int(now().timestamp() // plan['interval_seconds'])
-            queue.enqueue(kind, plan['stream'], f"configured:{plan['stream']}:{plan['interval_seconds']}:{slot}",
-                          mode=plan['mode'], repair=plan['repair'])
+            slot = int(now().timestamp() // interval)
+            jobs.append(queue.enqueue(kind, stream, f'{prefix}:{stream}:{interval}:{slot}', mode=mode, repair=repair))
+        return jobs

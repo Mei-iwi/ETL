@@ -133,6 +133,25 @@ def test_disable_schedule_cancels_only_its_pending_work(container):
         assert scheduled.status == 'CANCELLED'
 
 
+def test_configured_and_fallback_share_decisions_across_slots(container, monkeypatch):
+    from datetime import timedelta
+    from data_sync_etl.domain.core import now
+    container.settings.reconciliation_scheduler_enabled = True
+    schedule = AuditSchedule(container.uow, container.settings)
+    schedule.configure('subjects', dict(enabled=True, interval_seconds=60, mode='FULL', repair=True))
+    first = set(schedule.tick())
+    monkeypatch.setattr('data_sync_etl.adapters.persistence.audit_schedule.now', lambda: stamp)
+    stamp = now() + timedelta(days=2)
+    assert set(schedule.tick()) == first
+    with container.uow() as repo:
+        jobs = list(repo.session.scalars(select(Job).where(Job.status == 'PENDING')))
+        assert len(jobs) == 10
+        subject = [row for row in jobs if row.stream_name == 'subjects']
+        assert {row.audit_type for row in subject} == {'METADATA', 'IDS'}
+        assert next(row for row in subject if row.audit_type == 'METADATA').checkpoint['repair_requested']
+        assert {row.audit_type for row in jobs if row.stream_name == 'files'} == {'LIGHT', 'DEEP'}
+
+
 def test_legacy_ticks_reuse_retrying_audit_instead_of_flooding_queue(container, monkeypatch):
     from datetime import timedelta
 
