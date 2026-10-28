@@ -17,6 +17,7 @@ export function ReconciliationSchedule() {
         void fetch('/api/v1/reconciliation/schedules', { signal: controller.signal }).then(async response => {
             if (!response.ok) throw new Error('Không tải được lịch đối soát')
             const data = await response.json() as { items: Plan[] }
+            if (controller.signal.aborted) return
             setPlans(data.items)
             const first = data.items[0]
             if (first) setCommon({ enabled: data.items.every(plan => plan.enabled),
@@ -31,42 +32,38 @@ export function ReconciliationSchedule() {
         setPlans(previous => previous.map(plan => plan.stream === stream ? { ...plan, ...values } : plan))
     }
 
-    async function submit(plan: Plan, runNow = false) {
+    async function submit(plan: Plan) {
         setBusy(plan.stream)
         try {
             const { stream, ...values } = plan
-            const response = await fetch(runNow ? '/api/v1/reconciliation/audit-jobs'
-                : `/api/v1/reconciliation/schedules/${stream}`, {
-                method: runNow ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(runNow ? { stream, mode: plan.mode, repair: plan.repair,
-                    audit_type: stream === 'files' ? plan.mode === 'FULL' ? 'DEEP' : 'LIGHT' : 'METADATA' } : values),
+            const response = await fetch(`/api/v1/reconciliation/schedules/${stream}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(values),
             })
             if (!response.ok) throw new Error(`Không lưu/chạy được đối soát (HTTP ${response.status})`)
-            setNotice(runNow ? 'Đã xếp hàng. Worker đối soát sẽ xử lý riêng luồng đã chọn.'
-                : 'Đã lưu lịch trên server. Worker đối soát thực thi cả khi đóng trình duyệt.')
+            setNotice('Đã lưu lịch trên server. Worker đối soát thực thi cả khi đóng trình duyệt.')
         } catch (error) { setNotice(error instanceof Error ? error.message : 'Không thực hiện được yêu cầu') }
         finally { setBusy(null) }
     }
 
-    async function submitAll(runNow = false) {
+    async function submitAll() {
         setBusy('all')
         try {
-            const response = await fetch(runNow ? '/api/v1/reconciliation/audit-jobs/all'
-                : '/api/v1/reconciliation/schedules/all', {
-                method: runNow ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(runNow ? { mode: common.mode, repair: common.repair } : common),
+            const response = await fetch('/api/v1/reconciliation/schedules/all', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(common),
             })
             if (!response.ok) throw new Error(`Không lưu/chạy được đối soát chung (HTTP ${response.status})`)
-            if (!runNow) setPlans(previous => previous.map(plan => ({ ...plan, ...common,
+            setPlans(previous => previous.map(plan => ({ ...plan, ...common,
                 repair: plan.stream !== 'files' && common.repair })))
-            setNotice(runNow ? 'Đã xếp hàng đối soát tất cả 5 luồng. Mỗi luồng có tác vụ và tiến độ riêng.'
-                : 'Đã áp dụng cấu hình chung cho tất cả luồng. Có thể lưu cấu hình riêng ở từng dòng.')
+            setNotice('Đã áp dụng cấu hình chung cho tất cả luồng. Có thể lưu cấu hình riêng ở từng dòng.')
         } catch (error) { setNotice(error instanceof Error ? error.message : 'Không thực hiện được yêu cầu chung') }
         finally { setBusy(null) }
     }
 
     return <section aria-label="Lịch đối soát độc lập">
         <h3>Lịch đối soát theo từng luồng</h3>
+        <p>Lịch chưa bật sẽ không tự chạy theo cấu hình này. Dùng “Thao tác quét thủ công” để quét ngay một hoặc tất cả luồng.</p>
         <div className={styles.tableWrap}>
             <table className={styles.table}>
                 <thead><tr><th>Luồng</th><th>Tự động</th><th>Chu kỳ</th><th>Chế độ quét</th><th>Đồng bộ lệch</th><th>Thao tác</th></tr></thead>
@@ -87,7 +84,6 @@ export function ReconciliationSchedule() {
                             onChange={event => setCommon(previous => ({ ...previous, repair: event.target.checked }))} /></td>
                         <td><div className={styles.scheduleActions}>
                             <button className={styles.primaryButton} disabled={busy !== null || plans.length !== 5} onClick={() => void submitAll()}>Lưu chung</button>
-                            <button className={styles.secondaryButton} disabled={busy !== null || plans.length !== 5} onClick={() => void submitAll(true)}>Quét tất cả</button>
                         </div></td>
                     </tr>
                     {plans.map(plan => <tr key={plan.stream} data-audit-stream={plan.stream}>
@@ -106,7 +102,7 @@ export function ReconciliationSchedule() {
                         aria-label={`Đồng bộ lệch ${labels[plan.stream]}`}
                         onChange={event => change(plan.stream, { repair: event.target.checked })} />}</td>
                     <td><div className={styles.scheduleActions}><button className={styles.primaryButton} disabled={busy !== null} onClick={() => void submit(plan)}>Lưu</button>
-                        <button className={styles.secondaryButton} disabled={busy !== null} onClick={() => void submit(plan, true)}>Quét luồng này</button></div></td>
+                        </div></td>
                 </tr>)}</tbody>
             </table>
         </div>

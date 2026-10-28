@@ -76,3 +76,46 @@ export async function getDiscrepancies(
     if (!response.ok) throw new Error(await getErrorMessage(response))
     return response.json()
 }
+
+export type AuditKind = 'METADATA' | 'IDS' | 'LIGHT' | 'DEEP'
+export type AuditJob = {
+    job_id: string; stream: string; audit_type: AuditKind; status: string
+    error_code: string | null; created_at: string; next_retry_at: string | null
+    progress: Record<string, unknown>
+}
+export type AuditCoverage = {
+    total_files: number; recent_sha256_evidence_count: number; not_verified_count: number
+    size_checked: number; mismatched: number; whole_repository_verified: boolean
+    scheduler_enabled: boolean
+}
+async function auditRequest<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(`/api/v1/reconciliation/${path}`, { cache: 'no-store', ...init })
+    if (!response.ok) throw new Error(await getErrorMessage(response))
+    return response.json()
+}
+export function getAuditJobs(stream: string, signal?: AbortSignal, after?: string | null) {
+    const query = new URLSearchParams({ size: '20', newest: 'true' })
+    if (stream !== 'all') query.set('stream', stream)
+    if (after) query.set('after', after)
+    return auditRequest<{ items: AuditJob[]; next_cursor: string | null }>(`audit-jobs?${query}`, { signal })
+}
+export function getAuditCoverage(signal?: AbortSignal) {
+    return auditRequest<AuditCoverage>('coverage', { signal })
+}
+export function queueAudit(stream: string, mode: 'INCREMENTAL' | 'FULL', repair = false, kind?: AuditKind) {
+    const all = stream === 'all'
+    return auditRequest<{ job_id?: string; status: string; items?: Array<{ job_id: string }> }>(
+        all ? 'audit-jobs/all' : 'audit-jobs', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(all ? { mode, repair } : { stream, mode, repair: stream !== 'files' && repair,
+                audit_type: kind ?? (stream === 'files' ? mode === 'FULL' ? 'DEEP' : 'LIGHT' : 'METADATA') }),
+        })
+}
+export type FileEvidence = {
+    resource_version_id: string; status: string; reason_code?: string | null
+    recent_sha256_evidence?: boolean; last_verified_at?: string | null
+    verification_method?: string | null; next_due_at?: string | null
+}
+export function getFileEvidence(version: string, signal?: AbortSignal) {
+    return auditRequest<FileEvidence>(`file-evidence/${encodeURIComponent(version)}`, { signal })
+}

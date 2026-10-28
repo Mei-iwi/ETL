@@ -90,11 +90,15 @@ def configure_audit_schedule(request: Request, stream: str, body: 'AuditSchedule
 
 
 @router.get('/audit-jobs')
-def audit_jobs(request: Request, after: str | None = None, size: int = Query(20, ge=1, le=100)):
+def audit_jobs(request: Request, after: str | None = None, size: int = Query(20, ge=1, le=100),
+               stream: str | None = None, newest: bool = False):
     with request.app.state.container.uow() as repo:
-        query = select(ReconciliationAuditJob).order_by(ReconciliationAuditJob.id).limit(size + 1)
+        query = select(ReconciliationAuditJob).where(ReconciliationAuditJob.status != 'CONFIGURED')
+        if stream:
+            query = query.where(ReconciliationAuditJob.stream_name == stream)
+        query = query.order_by(ReconciliationAuditJob.id.desc() if newest else ReconciliationAuditJob.id).limit(size + 1)
         if after:
-            query = query.where(ReconciliationAuditJob.id > after)
+            query = query.where(ReconciliationAuditJob.id < after if newest else ReconciliationAuditJob.id > after)
         rows = list(repo.session.scalars(query))
         return {'items': [{'job_id': r.id, 'audit_type': r.audit_type, 'stream': r.stream_name,
             'status': r.status, 'error_code': r.error_code, 'progress': r.checkpoint,

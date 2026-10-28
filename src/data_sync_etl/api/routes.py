@@ -1022,15 +1022,29 @@ def source_sync_files(
     request: Request,
     after: Annotated[str | None, Query(min_length=1, max_length=30)] = None,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
-    status: Literal["failed", "failed-retryable", "failed-blocked"] | None = None,
+    status: Literal["failed", "failed-retryable", "failed-blocked", "integrity-unverified"] | None = None,
     include_total: bool = False,
 ):
     container = source_file_admin(request)
+    from data_sync_etl.adapters.persistence.scheduled_audit import recent_file_evidence
+    from data_sync_etl.db.models import MasterLearningResource, ReconciliationFileState, ResourceVersion
+    evidence_cache = {}
+    def evidence_reader(repo, item):
+        version_id = item['target_version_id']
+        if version_id not in evidence_cache:
+            state = repo.session.get(ReconciliationFileState, version_id) if version_id else None
+            version = repo.session.get(ResourceVersion, version_id) if state else None
+            resource = repo.session.get(MasterLearningResource, version.resource_id) if version else None
+            recent = bool(resource and recent_file_evidence(state, version, resource.source_origin, container.settings))
+            evidence_cache[version_id] = {'status': state.status if state else 'NOT_VERIFIED',
+                'reason_code': state.reason_code if state else None, 'recent_sha256_evidence': recent}
+        return evidence_cache[version_id]
     try:
         result = container.source_file_import.list_files(
-            after=after, size=size, failed_only=status is not None,
+            after=after, size=size, failed_only=status in ('failed', 'failed-retryable', 'failed-blocked'),
             retry_eligible=True if status == "failed-retryable" else False if status == "failed-blocked" else None,
             include_total=include_total,
+            integrity_only=status == 'integrity-unverified', evidence_reader=evidence_reader,
         )
     except DomainError:
         raise HTTPException(503, "Không thể đọc phiên bản nguồn; kiểm tra kết nối và quyền đọc") from None

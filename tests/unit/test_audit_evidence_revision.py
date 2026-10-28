@@ -75,3 +75,31 @@ def test_source_provider_revision_binds_deep_evidence(source_viewer, monkeypatch
     audit.queue.enqueue('LIGHT', 'files')
     audit.once()
     assert audit.coverage()['recent_sha256_evidence_count'] == int(not changed)
+
+
+def test_file_inventory_integrity_filter_uses_current_proof_without_processing(source_viewer):
+    from data_sync_etl.main import create_app
+    from tests.local_admin_client import TestClient
+    c, version, _, path = source_viewer
+    c.settings.admin_enabled = True
+    audit = ScheduledAudit(c.reconciliation_engine, c.settings)
+    with c.uow() as repo:
+        jobs_before = repo.count('ocr_jobs', {})
+    with TestClient(create_app(c)) as client:
+        endpoint = '/api/v1/master-data/sync/files?status=integrity-unverified'
+        assert len(client.get(endpoint).json()['items']) == 1
+        audit.queue.enqueue()
+        audit.once()
+        assert client.get(endpoint).json()['items'] == []
+        inventory = client.get('/api/v1/master-data/sync/files').json()
+        assert inventory['items'][0]['integrity']['recent_sha256_evidence'] is True
+        stamp = path.stat()
+        os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 10000000))
+        audit.queue.enqueue('LIGHT', 'files')
+        audit.once()
+        changed = client.get(endpoint).json()
+        assert len(changed['items']) == 1
+        assert changed['items'][0]['integrity']['recent_sha256_evidence'] is False
+        assert 'storage_object_key' not in str(changed) and str(path) not in str(changed)
+    with c.uow() as repo:
+        assert repo.count('ocr_jobs', {}) == jobs_before

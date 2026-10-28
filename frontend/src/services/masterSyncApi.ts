@@ -22,7 +22,7 @@ async function getErrorMessage(response: Response) {
 export async function getSourceSyncFiles(
     after: string | null,
     signal?: AbortSignal,
-    options: { size?: number; status?: 'failed' | 'failed-retryable' | 'failed-blocked'; includeTotal?: boolean } = {},
+    options: { size?: number; status?: 'failed' | 'failed-retryable' | 'failed-blocked' | 'integrity-unverified'; includeTotal?: boolean } = {},
 ): Promise<SourceSyncFilesResponse> {
     const params = new URLSearchParams({ size: String(options.size ?? 20) })
     if (options.status) params.set('status', options.status)

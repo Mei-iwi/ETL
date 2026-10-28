@@ -37,3 +37,22 @@ def test_latest_does_not_mark_active_durable_lease_as_interrupted(container):
         assert report['run_id'] == key
         assert report['status'] == 'RUNNING'
         assert report['summary_meta'].get('reason') != 'RECONCILIATION_INTERRUPTED'
+
+
+def test_job_list_filters_scope_and_pages_newest_without_schedule_rows(container):
+    from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
+    from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
+    container.settings.admin_enabled = True
+    AuditSchedule(container.uow, container.settings).configure('subjects',
+        dict(enabled=False, interval_seconds=60, mode='FULL', repair=False))
+    queue = ScheduledAudit(container.reconciliation_engine, container.settings).queue
+    first = queue.enqueue('METADATA', 'subjects')
+    second = queue.enqueue('IDS', 'subjects')
+    queue.enqueue('METADATA', 'users')
+    with TestClient(create_app(container)) as client:
+        response = client.get('/api/v1/reconciliation/audit-jobs?newest=true&stream=subjects&size=1').json()
+        assert [row['job_id'] for row in response['items']] == [second]
+        assert response['next_cursor'] == second
+        older = client.get('/api/v1/reconciliation/audit-jobs', params={
+            'newest': True, 'stream': 'subjects', 'after': second}).json()
+        assert [row['job_id'] for row in older['items']] == [first]

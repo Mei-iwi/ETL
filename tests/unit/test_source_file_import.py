@@ -58,6 +58,32 @@ def discover_and_import(container):
         return repo.get("source_file_imports", claimed["id"])
 
 
+def test_integrity_filter_bounds_work_and_resumes_even_with_no_matches():
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from data_sync_etl.application.source_file_import import SourceFileImportService
+    reads = []
+    def page(after, size):
+        start = int(after) + 1 if after is not None else 0
+        reads.append(start)
+        return [{'source_version_id': f'{number:04d}'} for number in range(start, min(start + size, 1005))]
+    repo = SimpleNamespace(source_import_page=page, find=lambda *args, **kwargs: [True])
+    @contextmanager
+    def uow():
+        yield repo
+    service = object.__new__(SourceFileImportService)
+    service.uow, service.source = uow, SimpleNamespace()
+    service.availability = lambda: {}
+    first = service.list_files(size=7, integrity_only=True,
+        evidence_reader=lambda *args: {'recent_sha256_evidence': True})
+    assert first['items'] == [] and first['next_cursor'] == '0999'
+    assert len(reads) == 10 and first['total'] is None
+    second = service.list_files(after=first['next_cursor'], size=7, integrity_only=True,
+        evidence_reader=lambda *args: {'recent_sha256_evidence': True})
+    assert second['items'] == [] and second['next_cursor'] is None
+    assert reads[-1] == 1000
+
+
 def test_file_totals_are_requested_separately_from_polling(importing):
     c, _, _ = importing
     c.source_file_import.discover_once()

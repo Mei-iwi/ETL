@@ -1,565 +1,164 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { NoticeDialog } from '../../components/NoticeDialog'
-import {
-    getDiscrepancies,
-    getLatestReconciliationReport,
-    triggerReconciliation,
-} from '../../services/reconciliationApi'
-import type {
-    DiscrepancyItem,
-    ReconciliationLatestReport,
-} from '../../types/reconciliation'
-import styles from './DataReconciliationPage.module.css'
+import { getAuditCoverage, getAuditJobs, getDiscrepancies, getLatestReconciliationReport, queueAudit } from '../../services/reconciliationApi'
+import type { AuditCoverage, AuditJob } from '../../services/reconciliationApi'
+import type { DiscrepancyItem, ReconciliationLatestReport } from '../../types/reconciliation'
 import { ReconciliationSchedule } from './ReconciliationSchedule'
-import { auditSummary, formatAuditBytes as formatBytes, pendingHash } from './reconciliationDisplay'
+import { startVisiblePolling } from './visiblePolling'
+import styles from './DataReconciliationPage.module.css'
 
-function formatDate(dateStr?: string | null): string {
-    if (!dateStr) return '—'
-    try {
-        const d = new Date(dateStr)
-        return d.toLocaleString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-        })
-    } catch {
-        return dateStr
-    }
-}
-
-const FLAG_LABELS: Record<string, { label: string; badgeClass: string; desc: string }> = {
-    NOT_VERIFIED: { label: 'NOT_VERIFIED', badgeClass: styles.badgeWarning, desc: 'Chưa xác minh' },
-    SYNCED: {
-        label: 'SYNCED',
-        badgeClass: styles.badgeSuccess,
-        desc: 'Đồng nhất',
-    },
-    DESYNC_BLOB_SIZE: {
-        label: 'DESYNC_BLOB_SIZE',
-        badgeClass: styles.badgeWarning,
-        desc: 'Lệch dung lượng',
-    },
-    DESYNC_CHECKSUM: {
-        label: 'DESYNC_CHECKSUM',
-        badgeClass: styles.badgeDanger,
-        desc: 'Lệch SHA-256',
-    },
-    ORPHAN_SOURCE: {
-        label: 'ORPHAN_SOURCE',
-        badgeClass: styles.badgeInfo,
-        desc: 'Mới ở Nguồn',
-    },
-    ORPHAN_MASTER: {
-        label: 'ORPHAN_MASTER',
-        badgeClass: styles.badgePurple,
-        desc: 'Đã xóa ở Nguồn',
-    },
-    DESYNC_METADATA: {
-        label: 'DESYNC_METADATA',
-        badgeClass: styles.badgeGray,
-        desc: 'Lệch Metadata',
-    },
-    MUTATED_DOWNSTREAM: {
-        label: 'MUTATED_DOWNSTREAM',
-        badgeClass: styles.badgeWarning,
-        desc: 'Sửa ở Đích',
-    },
-}
+const activeStatuses = new Set(['PENDING', 'RUNNING', 'RETRY_WAIT'])
+const scopes: Record<string, string> = { all: 'Tất cả luồng', grades: 'Khối lớp', subjects: 'Môn học',
+    users: 'Người dùng', resources: 'Học liệu', files: 'Kho tệp' }
 
 export function DataReconciliationPage() {
+    const [stream, setStream] = useState('all')
+    const [mode, setMode] = useState<'INCREMENTAL' | 'FULL'>('INCREMENTAL')
+    const [kind, setKind] = useState<'METADATA' | 'IDS'>('METADATA')
+    const [jobs, setJobs] = useState<AuditJob[]>([])
+    const [coverage, setCoverage] = useState<AuditCoverage | null>(null)
     const [report, setReport] = useState<ReconciliationLatestReport | null>(null)
+    const [focused, setFocused] = useState<string | null>(null)
     const [discrepancies, setDiscrepancies] = useState<DiscrepancyItem[]>([])
-    const [total, setTotal] = useState(0)
     const [page, setPage] = useState(1)
-    const [pageSize] = useState(10)
-    const [totalPages, setTotalPages] = useState(1)
-
-    const [selectedStream, setSelectedStream] = useState<string>('all')
-    const [selectedFlag, setSelectedFlag] = useState<string>('ALL')
-
-    const [loading, setLoading] = useState(false)
-    const [reconciling, setReconciling] = useState(false)
+    const [pages, setPages] = useState(0)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState<{ title: string; message: string } | null>(null)
-    const running = useRef(false)
-    const posting = useRef(false)
-    const startedRun = useRef<string | null>(null)
-    const loadRevision = useRef(0)
+    const [notice, setNotice] = useState('')
+    const [posting, setPosting] = useState(false)
+    const [confirmation, setConfirmation] = useState<{ repair: boolean } | null>(null)
+    const [jobCursors, setJobCursors] = useState<Array<string | null>>([null])
+    const [jobNext, setJobNext] = useState<string | null>(null)
+    const jobAfter = jobCursors[jobCursors.length - 1]
+    const postingRef = useRef(false)
+    const busy = useRef(false)
+    const poller = useRef<ReturnType<typeof startVisiblePolling> | null>(null)
 
-    // CHẾ ĐỘ CHẠY & PHẠM VI ĐỐI SOÁT
-    const [reconcileMode, setReconcileMode] = useState<'INCREMENTAL' | 'FULL'>('INCREMENTAL')
-    const [lastExecutionTimeMs, setLastExecutionTimeMs] = useState<number | null>(null)
-
-    // MODAL THÔNG BÁO GIỮA MÀN HÌNH
-    const [confirmModal, setConfirmModal] = useState<{
-        title: string
-        message: string
-        onConfirm: () => void
-    } | null>(null)
-
-    const loadData = useCallback(async () => {
-        const revision = ++loadRevision.current
-        setLoading(true)
-        setError('')
+    const load = useCallback(async (signal: AbortSignal) => {
         try {
-            // Lấy báo cáo mới nhất trước để lấy run_id của từng stream
-            const latest = await getLatestReconciliationReport(selectedStream)
-            if (revision !== loadRevision.current) return
+            const [queued, evidence, latest] = await Promise.all([
+                getAuditJobs(stream, signal, jobAfter), getAuditCoverage(signal), getLatestReconciliationReport(stream, signal),
+            ])
+            const id = focused ?? queued.items[0]?.job_id
+            const details = id ? await getDiscrepancies({ runId: id, page, pageSize: 10 }, signal) : null
+            if (signal.aborted) return
+            setJobs(queued.items)
+            setJobNext(queued.next_cursor)
+            busy.current = queued.items.some(job => activeStatuses.has(job.status))
+            setCoverage(evidence)
             setReport(latest)
-            const active = latest.stream_reports.some(row => row.status === 'RUNNING')
-            running.current = active || posting.current
-            setReconciling(active || posting.current)
-            const completed = latest.stream_reports.find(row => row.run_id === startedRun.current && row.status !== 'RUNNING')
-            if (completed) {
-                startedRun.current = null
-                setNotice({ title: 'Kết quả đối soát', message: completed.summary_meta?.reason === 'RECONCILIATION_INTERRUPTED'
-                    ? 'Đối soát đã gián đoạn. Bấm Quét đối soát để ưu tiên phần chưa xử lý.'
-                    : completed.status === 'COMPLETED'
-                    ? 'Đã quét và xác minh xong kho tệp.'
-                    : completed.status === 'FAILED' ? 'Đối soát bị gián đoạn. Tiến độ đã được lưu; có thể chạy lại.'
-                    : 'Đã quét xong. Xem các tệp sai lệch hoặc chưa xác minh và lý do trong bảng chi tiết.' })
-            }
-
-            // Thu thập run_id của các stream trong báo cáo mới nhất
-            const latestRunIds = latest.stream_reports
-                ?.map((r) => r.run_id)
-                .filter((id): id is string => Boolean(id))
-
-            // Chỉ lấy discrepancies thuộc các lần chạy mới nhất (lọc theo run_id)
-            if (latestRunIds && latestRunIds.length > 0) {
-                const result = await getDiscrepancies({ latestOnly: true, stream: selectedStream,
-                    flag: selectedFlag, page, pageSize })
-                if (revision !== loadRevision.current) return
-                setDiscrepancies(result.items)
-                setTotal(result.total)
-                setTotalPages(result.total_pages)
-            } else {
-                setDiscrepancies([])
-                setTotal(0)
-                setTotalPages(0)
-            }
-        } catch (err) {
-            if (revision === loadRevision.current) setError(err instanceof Error ? err.message : 'Không thể tải báo cáo đối soát')
-        } finally {
-            if (revision === loadRevision.current) setLoading(false)
+            setDiscrepancies(details?.items ?? [])
+            setPages(details?.total_pages ?? 0)
+            setError('')
+        } catch (caught) {
+            if (!signal.aborted) setError(caught instanceof Error ? caught.message : 'Không tải được đối soát')
         }
-    }, [selectedStream, selectedFlag, page, pageSize])
+    }, [stream, focused, page, jobAfter])
 
     useEffect(() => {
-        void loadData()
-        return () => { loadRevision.current++ }
-    }, [loadData])
+        const current = startVisiblePolling(load, () => busy.current)
+        poller.current = current
+        return () => { current.stop(); poller.current = null }
+    }, [load])
 
-    useEffect(() => {
-        if (!reconciling) return
-        let inFlight = false
-        const timer = window.setInterval(() => {
-            if (document.hidden || inFlight) return
-            inFlight = true
-            void loadData().finally(() => { inFlight = false })
-        }, 5000)
-        return () => window.clearInterval(timer)
-    }, [reconciling, loadData])
-
-    const handleRunReconcile = useCallback(async (dryRun: boolean = true) => {
-        if (running.current) return
-        running.current = true
-        posting.current = true
-        setReconciling(true)
-        setError('')
+    async function run(repair = false) {
+        if (postingRef.current) return
+        postingRef.current = true
+        setPosting(true)
         try {
-            const result = await triggerReconciliation(selectedStream, dryRun, reconcileMode)
-            if (!['COMPLETED', 'PARTIAL', 'RUNNING', 'BLOCKED'].includes(result.status)) {
-                throw new Error(`Đối soát chưa hoàn tất (${result.status}). Kiểm tra worker và trạng thái thử lại.`)
-            }
-            if (result.execution_time_ms !== undefined) {
-                setLastExecutionTimeMs(result.execution_time_ms)
-            }
-            if (result.status === 'RUNNING') {
-                startedRun.current = result.reports.find(row => row.stream_name === 'files')?.run_id ?? null
-                setPage(1)
-                await loadData()
-                return
-            }
-            const modeText = result.mode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'
-            const timeText = result.execution_time_ms !== undefined ? ` (${result.execution_time_ms}ms)` : ''
-            setNotice({ title: 'Kết quả đối soát', message: result.status === 'BLOCKED'
-                ? `Đã quét xong đối soát (${modeText}). Có sai lệch vượt ngưỡng an toàn; dữ liệu chưa được thay đổi.`
-                : result.reports.some(report => report.status === 'PARTIAL')
-                    ? `Đã đối soát (${modeText})${timeText}. Một phần dữ liệu chưa đủ điều kiện xác minh; tệp SOURCE chưa được đọc kiểm tra sẽ không tính là toàn vẹn.`
-                    : dryRun
-                        ? `Đã quét xong đối soát (${modeText})${timeText}. Dữ liệu nghiệp vụ không thay đổi.`
-                        : `Đã hoàn tất tự phục hồi dữ liệu (${modeText})${timeText}.` })
+            const result = await queueAudit(stream, mode, repair,
+                stream !== 'all' && stream !== 'files' ? kind : undefined)
+            setFocused(result.job_id ?? result.items?.[0]?.job_id ?? null)
+            setJobCursors([null])
             setPage(1)
-            await loadData()
-        } catch (err) {
-            setNotice({ title: 'Không thể đối soát', message: err instanceof Error ? err.message : 'Lỗi khi kích hoạt đối soát' })
-        } finally {
-            posting.current = false
-            if (!startedRun.current) {
-                setReconciling(false)
-                running.current = false
-            }
-        }
-    }, [selectedStream, reconcileMode, loadData])
-
-    const hasBlockedRun = report?.stream_reports?.some((r) => r.status === 'BLOCKED')
-    const blockedReason = report?.stream_reports?.find((r) => r.summary_meta?.reason)?.summary_meta?.reason
-    const { unverified, hashPending, onlyHashPending, observedBytes, observedFiles } = auditSummary(report)
-    const onlyUnverified = unverified > 0 && report?.total_matched_records === 0 && report.total_mismatched_records === 0
-    const fileProgress = report?.stream_reports.find(row => row.stream_name === 'files')?.summary_meta
-
-    return (
-        <div className={styles.container}>
-            {notice && <NoticeDialog {...notice} onClose={() => setNotice(null)} />}
-            {/* THẺ ĐIỀU KHIỂN & BỘ LỌC */}
-            <div className={styles.card}>
-                <div className={styles.sectionHeader}>
-                    <div>
-                        <h2 className={styles.sectionTitle}>Đối soát dữ liệu</h2>
-                    </div>
-
-                    <div className={styles.actionsBar}>
-                        {/* 1. CHỌN LUỒNG */}
-                        <select
-                            className={styles.select}
-                            value={selectedStream}
-                            disabled={reconciling || loading}
-                            onChange={(e) => {
-                                setSelectedStream(e.target.value)
-                                setPage(1)
-                            }}
-                            aria-label="Chọn luồng dữ liệu"
-                        >
-                            <option value="all">Tất cả luồng dữ liệu</option>
-                            <option value="resources">Học liệu</option>
-                            <option value="files">Kho tệp</option>
-                            <option value="subjects">Môn học</option>
-                            <option value="grades">Khối lớp</option>
-                            <option value="users">Người dùng</option>
-                        </select>
-                        {/* 2. BỘ CHỌN PHẠM VI ĐỐI SOÁT */}
-                        <select
-                            className={styles.select}
-                            value={reconcileMode}
-                            onChange={(e) => setReconcileMode(e.target.value as 'INCREMENTAL' | 'FULL')}
-                            aria-label="Phạm vi đối soát"
-                        >
-                            <option value="INCREMENTAL">Incremental / tệp: kiểm tra nhanh</option>
-                            <option value="FULL">Full / tệp: SHA-256</option>
-                        </select>
-
-                        {/* 3. NÚT ĐỐI SOÁT & PHỤC HỒI THỦ CÔNG */}
-                        <button className={styles.primaryButton} disabled={reconciling || loading}
-                            onClick={() => void handleRunReconcile()}>Quét đối soát</button>
-                        {selectedStream !== 'all' && selectedStream !== 'files' && <button className={styles.secondaryButton}
-                            disabled={reconciling || loading} onClick={() => setConfirmModal({ title: 'Đồng bộ bản ghi lệch',
-                                message: 'Quét luồng đã chọn rồi chỉ đồng bộ ID metadata lệch. Không xóa bản ghi hoặc ghi đè tệp sai hash.',
-                                onConfirm: () => { setConfirmModal(null); void handleRunReconcile(false) } })}>Đồng bộ lệch</button>}
-                        {/* BADGE HIỂN THỊ THỜI GIAN THỰC THI */}
-                        {(lastExecutionTimeMs ?? report?.stream_reports?.[0]?.execution_time_ms ?? 0) > 0 && (
-                            <div className={styles.executionBadge} title="Thời gian thực thi đợt quét gần nhất">
-                                {lastExecutionTimeMs ?? report?.stream_reports?.[0]?.execution_time_ms} ms
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <ReconciliationSchedule />
-
-                {/* THÔNG BÁO / CẢNH BÁO */}
-                {error && <div className={`${styles.alertBox} ${styles.alertWarning}`}>{error}</div>}
-                {reconciling && <p role="status">Đang đối soát nền: {fileProgress?.processed_files ?? 0}/{fileProgress?.total_files ?? 0} tệp.
-                    Có thể rời trang; tiến độ được lưu sau từng tệp. Đã xác minh {formatBytes(fileProgress?.verified_bytes)}.</p>}
-                {!reconciling && fileProgress?.reason === 'RECONCILIATION_INTERRUPTED' && <p role="status">
-                    Lượt trước bị gián đoạn ở {fileProgress.processed_files ?? 0}/{fileProgress.total_files ?? 0} tệp.
-                    Bấm Quét đối soát để ưu tiên phần chưa xử lý.</p>}
-
-                {hasBlockedRun && (
-                    <div className={`${styles.alertBox} ${styles.alertWarning}`}>
-                        <strong>Cần kiểm tra:</strong> {blockedReason || 'Sai lệch vượt ngưỡng an toàn. Xem chi tiết trước khi đồng bộ lại.'}
-                    </div>
-                )}
-
-                {/* DASHBOARD KPI TỔNG HỢP */}
-                <div className={styles.statusGrid}>
-                    <div className={styles.statusItem}>
-                        <span className={styles.statusLabel}>Tỷ lệ đồng nhất</span>
-                        <span className={styles.statusValue} style={{ color: onlyHashPending ? '#475569' : (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
-                            {onlyHashPending ? 'Chưa kiểm tra SHA-256' : onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
-                        </span>
-                        <span className={styles.statusSub}>
-                            Trạng thái: <strong>{onlyHashPending && report?.overall_status === 'PARTIAL' ? 'Quét nhanh' : report?.overall_status ?? 'CHƯA CHẠY'}</strong>
-                        </span>
-                    </div>
-
-                    <div className={styles.statusItem}>
-                        <span className={styles.statusLabel}>Tổng bản ghi</span>
-                        <span className={styles.statusValue}>
-                            {report?.total_source_records ?? 0} / {report?.total_target_records ?? 0}
-                        </span>
-                        <span className={styles.statusSub}>
-                            Khớp: <strong style={{ color: '#166534' }}>{report?.total_matched_records ?? 0}</strong> | Lệch: <strong style={{ color: '#991b1b' }}>{report?.total_mismatched_records ?? 0}</strong>
-                            {hashPending > 0 && <> | Chờ SHA-256: <strong>{hashPending}</strong></>}
-                            {unverified > hashPending && <> | Chưa xác minh: <strong>{unverified - hashPending}</strong></>}
-                        </span>
-                    </div>
-
-                    <div className={styles.statusItem}>
-                        <span className={styles.statusLabel}>Dung lượng quan sát</span>
-                        <span className={styles.statusValue}>
-                            {observedFiles > 0 ? formatBytes(observedBytes) : 'Chưa có số liệu'}
-                        </span>
-                        <span className={styles.statusSub}>
-                            {observedFiles > 0 ? `Đọc được metadata ${observedFiles} tệp` : 'Chưa có thống kê dung lượng tệp'}
-                        </span>
-                    </div>
-
-                    <div className={styles.statusItem}>
-                        <span className={styles.statusLabel}>Table Fingerprint</span>
-                        <span className={styles.statusValue} style={{ fontSize: '13px', fontFamily: 'monospace' }}>
-                            {report?.stream_reports?.[0]?.target_table_hash ? `${report.stream_reports[0].target_table_hash.substring(0, 16)}...` : 'Chưa băm'}
-                        </span>
-                        <span className={styles.statusSub}>
-                            Lần chạy: {formatDate(report?.last_reconciled_at)}
-                            {(report?.stream_reports?.[0]?.execution_time_ms ?? 0) > 0 && (
-                                <> • {report?.stream_reports[0]?.execution_time_ms}ms</>
-                            )}
-                        </span>
-                    </div>
-                </div>
+            setNotice('Đã xếp hàng. Worker xử lý nền theo hạn mức; có thể rời trang. Kết quả xác minh chỉ có sau khi worker xử lý.')
+        } catch (caught) { setError(caught instanceof Error ? caught.message : 'Không xếp hàng được') }
+        finally { postingRef.current = false; setPosting(false) }
+    }
+    function requestRun(repair = false) {
+        if (repair || mode === 'FULL') setConfirmation({ repair })
+        else void run()
+    }
+    const selected = jobs.find(job => job.job_id === focused) ?? (!focused ? jobs[0] : undefined)
+    return <div className={styles.container}>
+        {notice && <NoticeDialog title="Đối soát" message={notice} onClose={() => setNotice('')} />}
+        {error && <p role="alert" className={styles.alertWarning}>{error}</p>}
+        <section className={styles.card}>
+            <h2>Đối soát &amp; Lịch</h2>
+            <p>Lịch được worker thực thi cả khi đóng trình duyệt. Quét thủ công vẫn dùng được khi lịch tắt.</p>
+            <div className={styles.statusGrid}>
+                <div>Lượt quét gần nhất: {report?.last_reconciled_at ? new Date(report.last_reconciled_at).toLocaleString('vi-VN') : 'Chưa có dữ liệu'}</div>
+                <div>Job đối soát: {selected?.status ?? 'Chưa có dữ liệu'}</div>
+                <div>Sai lệch của job: {String(selected?.progress.mismatched_count ?? 'Chưa có dữ liệu')}</div>
+                <div>SHA-256 còn hiệu lực: {coverage ? `${coverage.recent_sha256_evidence_count}/${coverage.total_files}` : 'Chưa xác minh'}</div>
             </div>
-
-            {/* BẢNG ĐỐI SOÁT SONG SONG CHI TIẾT */}
-            <div className={styles.card}>
-                <div className={styles.sectionHeader}>
-                    <div>
-                        <h3 className={styles.sectionTitle}>Chi tiết đối soát</h3>
-                    </div>
+            <p>Bằng chứng kho hiện tại khác với kết quả một lượt quét. LIGHT chỉ kiểm kích thước/revision.</p>
+            <p>Lịch mặc định của hệ thống: {coverage ? coverage.scheduler_enabled ? 'đang bật' : 'đang tắt' : 'chưa xác minh'}.
+                Lịch riêng bên dưới ưu tiên theo từng luồng; lịch IDS vẫn chạy theo cấu hình hệ thống.</p>
+            <label>Phạm vi hiển thị <select className={styles.select} aria-label="Luồng đối soát" value={stream} onChange={e => {
+                setStream(e.target.value); setFocused(null); setPage(1); setJobCursors([null])
+            }}>{Object.entries(scopes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <details><summary>Thao tác quét thủ công</summary>
+                <div className={styles.actionsBar}>
+                    <select className={styles.select} aria-label="Phạm vi đối soát" value={mode}
+                        onChange={e => setMode(e.target.value as typeof mode)}>
+                        <option value="INCREMENTAL">Metadata tăng dần / tệp LIGHT</option>
+                        <option value="FULL">Metadata toàn diện / tệp DEEP SHA-256</option>
+                    </select>
+                    {stream !== 'all' && stream !== 'files' && <select className={styles.select} value={kind}
+                        aria-label="Loại đối soát metadata" onChange={e => setKind(e.target.value as typeof kind)}>
+                        <option value="METADATA">METADATA</option><option value="IDS">IDS — thiếu/thừa ID</option>
+                    </select>}
+                    <button className={styles.primaryButton} disabled={posting} onClick={() => requestRun()}>Xếp hàng quét ngay</button>
+                    {stream !== 'all' && stream !== 'files' && kind === 'METADATA' &&
+                        <button className={styles.secondaryButton} disabled={posting} onClick={() => requestRun(true)}>Đồng bộ ID lệch</button>}
                 </div>
-
-                {/* TAB LỌC CỜ HIỆU */}
-                <div className={styles.filterTabs}>
-                    {[
-                        { key: 'ALL', label: 'Tất cả' },
-                        { key: 'DESYNC_BLOB_SIZE', label: 'Lệch dung lượng' },
-                        { key: 'DESYNC_CHECKSUM', label: 'Lệch SHA-256' },
-                        { key: 'ORPHAN_SOURCE', label: 'Mới ở Nguồn' },
-                        { key: 'NOT_VERIFIED', label: 'Chưa xác minh' },
-                        { key: 'ORPHAN_MASTER', label: 'Đã xóa ở Nguồn' },
-                        { key: 'DESYNC_METADATA', label: 'Lệch Metadata' },
-                    ].map((tab) => (
-                        <button
-                            key={tab.key}
-                            type="button"
-                            className={`${styles.filterTab} ${selectedFlag === tab.key ? styles.filterTabActive : ''}`}
-                            onClick={() => {
-                                setSelectedFlag(tab.key)
-                                setPage(1)
-                            }}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
-
-                {loading ? (
-                    <div className={styles.emptyState}>Đang tải dữ liệu...</div>
-                ) : discrepancies.length === 0 ? (
-                    <div className={styles.emptyState}>
-                        {report?.latest_run_id
-                            ? 'Không có sai lệch theo bộ lọc đã chọn.'
-                            : 'Chưa có kết quả đối soát. Hãy quét để kiểm tra.'}
-                    </div>
-                ) : (
-                    <div className={styles.tableWrap}>
-                        <table className={styles.table}>
-                            <thead>
-                                <tr>
-                                    <th style={{ width: '18%' }}>Bản ghi</th>
-                                    <th style={{ width: '31%' }}>Dữ liệu Nguồn</th>
-                                    <th style={{ width: '31%' }}>Dữ liệu Đích</th>
-                                    <th style={{ width: '12%' }}>Cờ hiệu</th>
-                                    <th style={{ width: '8%' }}>Trạng thái</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {discrepancies.map((item) => {
-                                    const hashPendingOnly = pendingHash(item)
-                                    const flagInfo = hashPendingOnly ? { label: 'Chưa kiểm tra hash', badgeClass: styles.badgeInfo,
-                                        desc: 'Quét nhanh đã đọc metadata; chưa xác minh SHA-256' } : FLAG_LABELS[item.discrepancy_flag] || {
-                                        label: item.discrepancy_flag,
-                                        badgeClass: styles.badgeGray,
-                                        desc: item.discrepancy_flag,
-                                    }
-                                    const sVal = item.source_value || {}
-                                    const tVal = item.target_value || {}
-
-                                    return (
-                                        <tr key={item.id}>
-                                            <td>
-                                                <div className={styles.cellTitle}>{item.record_id}</div>
-                                                <div className={styles.cellMeta}>
-                                                    Luồng: <strong>{item.stream_name}</strong>
-                                                </div>
-                                                <div className={styles.cellMeta}>
-                                                    Phát hiện: {formatDate(item.detected_at)}
-                                                </div>
-                                            </td>
-
-                                            <td>
-                                                {item.source_value ? (
-                                                    <div>
-                                                        {sVal.title && <div className={styles.cellTitle}>{sVal.title}</div>}
-                                                        {sVal.source_file_size !== undefined && (
-                                                            <div className={styles.cellMeta}>
-                                                                Dung lượng: <strong>{formatBytes(sVal.source_file_size)}</strong>
-                                                            </div>
-                                                        )}
-                                                        {sVal.source_hash && (
-                                                            <div className={styles.cellMeta}>
-                                                                SHA-256: <span className={styles.codeSnippet}>{sVal.source_hash.substring(0, 16)}...</span>
-                                                            </div>
-                                                        )}
-                                                        {sVal.email && <div className={styles.cellMeta}>Email: {sVal.email}</div>}
-                                                    </div>
-                                                ) : (
-                                                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>{item.discrepancy_flag === 'ORPHAN_MASTER' ? '[Không có ở nguồn]' : '[Chưa có metadata đối chiếu]'}</span>
-                                                )}
-                                            </td>
-
-                                            <td>
-                                                {item.target_value ? (
-                                                    <div>
-                                                        {tVal.title && <div className={styles.cellTitle}>{tVal.title}</div>}
-                                                        {tVal.reason_code && <div className={styles.cellMeta}>
-                                                            Lý do: <strong>{({
-                                                                SOURCE_REFERENCE_DISABLED: 'Chưa bật truy xuất nguồn',
-                                                                SOURCE_TEMP_POLICY_REQUIRED: 'Chưa bật tệp tạm',
-                                                                SOURCE_HASH_MISMATCH: 'SHA-256 nguồn không khớp phiên bản đã đồng bộ',
-                                                                SOURCE_VERSION_MUTATED: 'Thông tin phiên bản nguồn đã thay đổi',
-                                                                FILE_NOT_FOUND: 'Không tìm thấy tệp tại nguồn',
-                                                                SOURCE_UNAVAILABLE: 'Nguồn chưa khả dụng',
-                                                                SOURCE_RESOLVER_UNAVAILABLE: 'Chưa cấu hình resolver nguồn',
-                                                                BLOCKED_SOURCE_MAPPING: 'Chưa xác minh được tham chiếu nguồn',
-                                                                BLOCKED_SOURCE_POLICY: 'Nguồn chưa cho phép truy xuất',
-                                                                RECONCILIATION_READ_BUDGET: 'Tệp vượt thời gian xử lý; các tệp khác vẫn được quét',
-                                                                SHA256_NOT_CHECKED: 'Quét nhanh chưa tính SHA-256; chọn Full để xác minh hash',
-                                                            } as Record<string, string>)[tVal.reason_code] ?? tVal.reason_code}</strong>
-                                                        </div>}
-                                                        {tVal.storage_file_size !== undefined && (
-                                                            <div className={styles.cellMeta}>
-                                                                Dung lượng quan sát: <strong>{formatBytes(tVal.storage_file_size)}</strong>
-                                                                {tVal.size_delta_bytes !== undefined && (
-                                                                    <span style={{ color: '#991b1b', marginLeft: '6px' }}>
-                                                                        ({tVal.size_delta_bytes > 0 ? `+${formatBytes(tVal.size_delta_bytes)}` : `-${formatBytes(Math.abs(tVal.size_delta_bytes))}`})
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                        {(tVal.computed_hash || tVal.source_hash) && (
-                                                            <div className={styles.cellMeta}>
-                                                                SHA-256: <span className={styles.codeSnippet}>{(tVal.computed_hash || tVal.source_hash).substring(0, 16)}...</span>
-                                                            </div>
-                                                        )}
-                                                        {tVal.file_exists === false && (
-                                                            <div style={{ color: '#991b1b', fontSize: '11px', fontWeight: 600 }}>
-                                                                [Mất tệp trên đĩa]
-                                                            </div>
-                                                        )}
-                                                        {tVal.email && <div className={styles.cellMeta}>Email: {tVal.email}</div>}
-                                                    </div>
-                                                ) : (
-                                                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>[Chưa có ở đích]</span>
-                                                )}
-                                            </td>
-
-                                            <td>
-                                                <span className={`${styles.badge} ${flagInfo.badgeClass}`} title={flagInfo.desc}>
-                                                    {flagInfo.label}
-                                                </span>
-                                            </td>
-
-                                            <td>
-                                                <span style={{ fontSize: '12px', fontWeight: 500, color: item.resolution_status === 'AUTO_HEALED' ? '#166534' : '#64748b' }}>
-                                                    {hashPendingOnly ? 'Chờ kiểm tra hash' : item.resolution_status === 'AUTO_HEALED' ? 'Đã tự sửa' : 'Chưa xử lý'}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    )
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-
-                {/* PHÂN TRANG */}
-                {total > 0 && (
-                    <div className={styles.pagination}>
-                        <span>
-                            Hiển thị {discrepancies.length} / {total} bản ghi
-                        </span>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                            <button
-                                type="button"
-                                className={styles.secondaryButton}
-                                disabled={page <= 1}
-                                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                            >
-                                Trang trước
-                            </button>
-                            <span style={{ alignSelf: 'center', margin: '0 8px', fontSize: '12px' }}>
-                                Trang {page} / {totalPages || 1}
-                            </span>
-                            <button
-                                type="button"
-                                className={styles.secondaryButton}
-                                disabled={page >= totalPages}
-                                onClick={() => setPage((p) => p + 1)}
-                            >
-                                Trang sau
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* MODAL THÔNG BÁO GIỮA MÀN HÌNH */}
-            {confirmModal && (
-                <div
-                    className={styles.modalBackdrop}
-                    onClick={() => setConfirmModal(null)}
-                >
-                    <div
-                        className={styles.modalCard}
-                        onClick={(e) => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                    >
-                        <h3 className={styles.modalTitle}>{confirmModal.title}</h3>
-                        <p className={styles.modalContent}>{confirmModal.message}</p>
-                        <div className={styles.modalActions}>
-                            <button
-                                type="button"
-                                className={styles.secondaryButton}
-                                onClick={() => setConfirmModal(null)}
-                            >
-                                Hủy bỏ
-                            </button>
-                            <button
-                                type="button"
-                                className={styles.primaryButton}
-                                onClick={confirmModal.onConfirm}
-                            >
-                                Xác nhận
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
-    )
+            </details>
+            <button className={styles.secondaryButton} onClick={() => void poller.current?.refresh()}>Làm mới trạng thái</button>
+            <ReconciliationSchedule />
+        </section>
+        <section className={styles.card}>
+            <h3>Job đối soát gần nhất</h3>
+            <p>Worker đối soát: chưa có bằng chứng heartbeat trong API này.</p>
+            {!jobs.length && <p>Chưa có job trong phạm vi đã chọn.</p>}
+            <div className={styles.tableWrap}><table className={styles.table}>
+                <thead><tr><th>Luồng</th><th>Loại</th><th>Trạng thái</th><th>Đã quét / khớp / lệch / chưa xác minh</th><th>Repair</th><th>Chi tiết</th></tr></thead>
+                <tbody>{jobs.map(job => <tr key={job.job_id}>
+                    <td>{scopes[job.stream] ?? job.stream}</td><td>{job.audit_type}</td><td>{job.status}{job.error_code && ` · ${job.error_code}`}</td>
+                    <td>{['records_scanned', 'matched_count', 'mismatched_count', 'not_verified_count'].map(key => String(job.progress[key] ?? '—')).join(' / ')}</td>
+                    <td>{job.progress.repair_requested ? 'Đã yêu cầu' : 'Chỉ kiểm tra'}</td>
+                    <td><button className={styles.secondaryButton} onClick={() => { setFocused(job.job_id); setPage(1) }}>Xem</button>
+                        <details><summary>Chi tiết kỹ thuật</summary><p>Job / Run: {job.job_id}</p>
+                            {job.next_retry_at && <p>Thử lại: {new Date(job.next_retry_at).toLocaleString('vi-VN')}</p>}
+                            <pre>{JSON.stringify(job.progress, null, 2)}</pre></details></td>
+                </tr>)}</tbody>
+            </table></div>
+            <button className={styles.secondaryButton} disabled={jobCursors.length === 1} onClick={() => {
+                setJobCursors(values => values.slice(0, -1)); setFocused(null); setPage(1)
+            }}>Job mới hơn</button>
+            <button className={styles.secondaryButton} disabled={!jobNext} onClick={() => {
+                if (jobNext) setJobCursors(values => [...values, jobNext]); setFocused(null); setPage(1)
+            }}>Job cũ hơn</button>
+            <h3>Sai lệch của job đang xem</h3>
+            {!discrepancies.length && <p>Chưa có sai lệch được ghi nhận cho job này; chưa đủ để kết luận toàn bộ kho đã xác minh.</p>}
+            <div className={styles.tableWrap}><table className={styles.table}>
+                <thead><tr><th>Bản ghi</th><th>Kết quả</th><th>Xử lý</th><th>Bằng chứng</th></tr></thead>
+                <tbody>{discrepancies.map(row => <tr key={row.id}>
+                    <td>{row.record_id}</td><td>{row.target_value?.reason_code === 'SHA256_NOT_CHECKED'
+                        ? 'Đã kiểm kích thước; chưa xác minh SHA-256' : row.discrepancy_flag}</td>
+                    <td>{row.resolution_status}</td><td><details><summary>Chi tiết kỹ thuật</summary>
+                        <pre>{JSON.stringify({ source: row.source_value, target: row.target_value }, null, 2)}</pre></details></td>
+                </tr>)}</tbody>
+            </table></div>
+            <button className={styles.secondaryButton} disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Trước</button>
+            <span> Trang {page}/{pages || 1} </span>
+            <button className={styles.secondaryButton} disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Sau</button>
+        </section>
+        {confirmation && <div className={styles.modalBackdrop}><div className={styles.modalCard} role="dialog" aria-modal="true" aria-label="Xác nhận đối soát">
+            <h3>Xác nhận thao tác thủ công</h3>
+            <p>{confirmation.repair ? 'Chỉ sửa các ID metadata đủ điều kiện; không xóa MASTER hay ghi đè tệp.'
+                : 'Quét toàn diện có thể đọc toàn bộ metadata hoặc tải tệp để băm SHA-256. Worker áp dụng hạn mức từng lượt.'}</p>
+            <button className={styles.secondaryButton} onClick={() => setConfirmation(null)}>Hủy</button>
+            <button className={styles.primaryButton} onClick={() => { const repair = confirmation.repair; setConfirmation(null); void run(repair) }}>Xác nhận</button>
+        </div></div>}
+    </div>
 }
