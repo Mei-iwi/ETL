@@ -298,7 +298,7 @@ python -m data_sync_etl.security.cli hash --output "$ETL_HOME/private/auth/admin
 
 ### 2.7. Khởi động đầy đủ
 
-Mỗi dòng là **một terminal riêng** tại gốc repo. Mỗi terminal Python kích hoạt cùng venv (`source .venv/Scripts/activate`, Linux `.venv/bin/activate`). API không tự chạy ba worker.
+Mỗi dòng là **một terminal riêng** tại gốc repo. Mỗi terminal Python kích hoạt cùng venv (`source .venv/Scripts/activate`, Linux `.venv/bin/activate`). API không tự chạy các worker.
 
 | Tiến trình | Lệnh |
 | --- | --- |
@@ -307,6 +307,7 @@ Mỗi dòng là **một terminal riêng** tại gốc repo. Mỗi terminal Pytho
 | Đồng bộ metadata | `python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-1` |
 | Xác minh nguồn, nhập tham chiếu, tạo job | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
 | Trích xuất/OCR/ASR và hoàn thiện chỉ mục | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
+| Đối soát theo lịch đã lưu, đồng bộ đúng ID lệch | `python -m data_sync_etl.workers.reconciliation` |
 
 ```bash
 curl -fsS http://127.0.0.1:8000/health
@@ -320,7 +321,7 @@ Mở **http://127.0.0.1:3000/login**. Swagger sau đăng nhập qua **http://127
 4. Tệp mới: source-file worker xác minh → tạo job → OCR worker xử lý → ContentUnit/ContentBag/chỉ mục. Thêm/cập nhật tệp LOCAL từ giao diện cũng tạo job.
 5. MP3/MP4 cũ ở `METADATA_ONLY` được quét lại theo lô khi source-file worker khởi động trong chế độ xử lý, xếp hàng trên đúng phiên bản cũ. Tệp bị xóa/từ chối/sai hash không tự bỏ chặn.
 
-Dừng bằng Ctrl+C. Đổi `.env`/model phải restart API và **cả ba worker**; đổi auth origin/proxy key cần restart Vite. Có thể thêm `--reload` cho API khi phát triển; tránh chạy nhiều tiến trình model trùng.
+Dừng bằng Ctrl+C. Đổi `.env` phải restart API và **các worker liên quan**; đổi auth origin/proxy key cần restart Vite. Có thể thêm `--reload` cho API khi phát triển; tránh chạy nhiều tiến trình model trùng.
 
 ### 2.8. User MASTER cùng admin riêng
 
@@ -374,7 +375,7 @@ sudo systemctl enable --now docker
 sudo usermod -aG docker "$USER"
 ```
 
-Đăng xuất rồi đăng nhập lại để áp dụng nhóm Docker (nhóm này có quyền tương đương root). Máy đã có Docker/Podman cần xử lý gói xung đột theo hướng dẫn chính thức trước khi cài. Clone repo bằng lệnh ở 2.2 rồi đứng tại thư mục gốc.
+Đăng xuất rồi đăng nhập lại để áp dụng nhóm Docker (nhóm này có quyền tương đương root). Máy đã có Docker/Podman cần xử lý gói xung đột theo hướng dẫn chính thức trước khi cài. Clone repo bằng lệnh ở mục 1 rồi đứng tại thư mục gốc.
 
 ### 3.1. Tạo thư mục và `docker.env`
 
@@ -677,7 +678,7 @@ APP=(docker compose --env-file docker.env -f deploy/compose.app.yml -f deploy/co
 "${APP[@]}" run --rm --no-deps api check-auth
 "${APP[@]}" run --rm --no-deps --entrypoint python api /opt/etl/model.py verify
 "${APP[@]}" --profile ops run --rm --no-deps preflight
-"${APP[@]}" --profile workers up -d --no-build api frontend master-sync-worker source-file-worker ocr-worker
+"${APP[@]}" --profile workers up -d --no-build api frontend master-sync-worker source-file-worker ocr-worker reconciliation-worker
 "${APP[@]}" --profile workers ps
 ```
 
@@ -837,7 +838,7 @@ Docker dùng `"${APP[@]}" run --rm --no-deps api semantic-schema`/semantic-statu
 
 | Kiểm tra / hiện tượng | Xử lý |
 | --- | --- |
-| Hoàn tất cài đặt | DB/schema đúng, model verify+encode PASS, API health OK, login được, 3 worker chạy, Full/Auto đúng; thử1 tệp tới CONTENT_READY/index READY rồi tìm bằng3 chế độ |
+| Hoàn tất cài đặt | DB/schema đúng, model verify+encode PASS, API health OK, login được, 4 worker chạy nếu dùng lịch đối soát; thử 1 tệp tới CONTENT_READY/index READY rồi tìm bằng 3 chế độ |
 | Thiếu argon2/pymongo… | Kiểm tra venv: `python -c "import sys; print(sys.executable)"`; cài đúng extra, pip check |
 | SOURCE_REFERENCE_DISABLED | Sửa đúng .env/docker.env và restart/recreate đúng tiến trình |
 | METADATA_ONLY / Chưa xử lý | SOURCE_METADATA_MEDIA_ENABLED=false, đủ model/binary, restart source-file worker; kiểm tra tạo job và OCR worker nhận. PUBLISHED không đồng nghĩa đã trích xuất |
@@ -858,4 +859,27 @@ Migration/seed/các lệnh --apply sẽ ghi DB khi bạn chạy: chỉ dùng đ�
 
 ## Đối soát độc lập
 
-Đối soát nhẹ/sâu dùng queue audit riêng, migration `0019` và cấu hình `RECONCILIATION_SCHEDULER_ENABLED=false` mặc định. Worker riêng: `python -m data_sync_etl.workers.reconciliation`; không gắn vào worker Sync. Kết quả và giới hạn kiểm thử: [RECONCILIATION_TEST_RESULTS.json](RECONCILIATION_TEST_RESULTS.json). Benchmark SQLite/local: [RECONCILIATION_BENCHMARK.json](RECONCILIATION_BENCHMARK.json).
+Đối soát dùng các bảng audit có từ migration `0019`; không tự migrate DB đang có dữ liệu. Local mở terminal thứ sáu, kích hoạt venv rồi chạy:
+
+```bash
+python -m data_sync_etl.workers.reconciliation
+# Kiểm tra một lượt rồi thoát:
+# python -m data_sync_etl.workers.reconciliation --once
+```
+
+Docker build lại image rồi Start với `-Workers` hoặc `--workers`: launcher chạy thêm `reconciliation-worker`, dùng chung backend image. Worker này không cần nạp BGE-M3/Whisper. Dùng Drive/Neon/remote DB phải giữ overlay tương ứng như API/source-file worker.
+
+Giới hạn mặc định ở `.env.example` và `deploy/docker.env.example`: `RECONCILIATION_MAX_FILES_PER_RUN=100`, `RECONCILIATION_MAX_BYTES_PER_RUN=2147483648`, `RECONCILIATION_MAX_SECONDS_PER_RUN=1800`, `RECONCILIATION_FILE_TIMEOUT_SECONDS=120`. Sửa `.env` cho local hoặc `docker.env` cho Docker rồi restart/recreate các tiến trình liên quan. Hết ngân sách trả PARTIAL và giữ checkpoint; không tăng vô hạn để chữa nguồn mất kết nối.
+
+Trong **Đối soát toàn vẹn dữ liệu → Lịch đối soát theo từng luồng**:
+
+1. Chọn riêng Khối lớp, Môn học, Người dùng, Học liệu hoặc Kho tệp; mặc định lịch đều tắt.
+2. Chọn 15/20/30 phút hoặc 1 tiếng, chế độ Incremental hoặc Full, bật lịch rồi **Lưu**. Lịch lưu trên server, không phụ thuộc tab trình duyệt. **Quét luồng này** xếp hàng một lượt độc lập.
+3. Với metadata, bật **Đồng bộ lệch** để chỉ cập nhật các ID thiếu/lệch sau khi đối soát; tắt để chỉ đọc/báo cáo. Không tự xóa bản ghi mồ côi, không ghi đè học liệu LOCAL hoặc vượt kiểm tra ownership.
+4. Kho tệp Incremental chỉ kiểm tra metadata/kích thước nhanh, không tải bytes hoặc ghi nhận là đã xác minh SHA-256. Full kiểm tra bytes/hash theo lô, giới hạn thời gian/I/O và tiếp tục bằng checkpoint. Sai hash hoặc nguồn chưa truy xuất được vẫn phải xử lý tại nguồn; không tự sửa hash hay ghi đè phiên bản.
+
+Hai nút **Đồng bộ Full** và **Chạy Incremental** thủ công vẫn ở trang Đồng bộ dữ liệu. Lịch tương thích cũ ở trang này nay cũng đối soát trước, chỉ gọi đồng bộ cho ID lệch. Tránh bật đồng thời lịch cũ và lịch mới cho cùng một luồng. `RECONCILIATION_SCHEDULER_ENABLED=false` chỉ tắt bộ lịch nền định sẵn cũ; lịch do admin lưu trên giao diện vẫn được worker riêng thực thi.
+
+`AUTH_MODE=master_users` vẫn kiểm tra độ mới. Một lần sửa vài user không làm mới bằng chứng cho toàn bộ users; chỉ audit users hoàn tất, so sánh cả hash/role riêng tư và sửa hết ID lệch mới được sử dụng làm bằng chứng. Lịch users 15 phút không đáp ứng `AUTH_MASTER_FRESHNESS_SECONDS=120`: cần giữ lịch tương thích users ngắn để audit thường xuyên, hoặc chủ hệ thống phê duyệt chính sách freshness phù hợp; không tự nới cờ để bỏ kiểm tra.
+
+Các bảng tải dữ liệu theo trang; tổng số trang tệp được yêu cầu khi chuyển trang/bộ lọc, không đếm lại ở mỗi lần polling. Polling quản trị dừng khi tab ẩn. Các báo cáo [RECONCILIATION_TEST_RESULTS.json](RECONCILIATION_TEST_RESULTS.json) và [RECONCILIATION_BENCHMARK.json](RECONCILIATION_BENCHMARK.json) là bằng chứng của phiên bản trước; không dùng để kết luận hiệu năng live của thay đổi mới.
