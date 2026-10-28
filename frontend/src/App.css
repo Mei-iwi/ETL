@@ -1,3 +1,19 @@
 #app {
   min-height: 100vh;
 }
+
+.route-state {
+  min-height: 12rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  color: #64748b;
+  text-align: center;
+}
+
+.route-state p {
+  margin: 0;
+}
