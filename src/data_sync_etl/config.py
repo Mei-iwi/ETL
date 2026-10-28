@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     reconciliation_scheduler_enabled: bool = False
     reconciliation_max_active: int = Field(default=1, ge=1, le=2)
     source_file_import_max_active: int = Field(default=1, ge=1, le=2)
+    ocr_max_active: int = Field(default=1, ge=1, le=2)
     reconciliation_worker_heartbeat_file: Path | None = Field(default=None, repr=False)
     reconciliation_light_interval_seconds: int = Field(default=3600, ge=60, le=86400)
     reconciliation_id_sweep_interval_seconds: int = Field(default=604800, ge=3600, le=2592000)
