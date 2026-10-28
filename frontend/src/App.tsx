@@ -9,35 +9,34 @@ import {
 import './App.css'
 import { AuthGuard, AuthProvider } from './auth/AuthProvider'
 import { LoginPage } from './auth/LoginPage'
-import { AccountManagementPage, ChangePasswordPage } from './auth/AccountPages'
-import { PersonalProfilePage } from './auth/PersonalProfilePage'
 
 import { AppLayout } from './components/layout/AppLayout'
-import { OverviewSummary } from './pages/overview/OverviewSummary'
-import { OverviewProcess } from './pages/overview/OverviewProcess'
 
-import { LibraryListPage } from './pages/library/LibraryListPage'
-import { LibrarySyncErrorsPage } from './pages/library/LibrarySyncErrorsPage'
-import { LibrarySourceFilesPage } from './pages/library/LibrarySourceFilesPage'
-import { LibraryCreatePage } from './pages/library/LibraryCreatePage'
-import { LibraryProcessingPage } from './pages/library/LibraryProcessingPage'
-import { LibraryIndexingPage } from './pages/library/LibraryIndexingPage'
-import { LibraryResourceDetailPage } from './pages/library/LibraryResourceDetailPage'
-import { LibraryVersionHistoryPage } from './pages/library/LibraryVersionHistoryPage'
-
+const AccountManagementPage = lazy(() => import('./auth/AccountPages').then(module => ({ default: module.AccountManagementPage })))
+const ChangePasswordPage = lazy(() => import('./auth/AccountPages').then(module => ({ default: module.ChangePasswordPage })))
+const PersonalProfilePage = lazy(() => import('./auth/PersonalProfilePage').then(module => ({ default: module.PersonalProfilePage })))
+const OverviewSummary = lazy(() => import('./pages/overview/OverviewSummary').then(module => ({ default: module.OverviewSummary })))
+const OverviewProcess = lazy(() => import('./pages/overview/OverviewProcess').then(module => ({ default: module.OverviewProcess })))
+const LibraryListPage = lazy(() => import('./pages/library/LibraryListPage').then(module => ({ default: module.LibraryListPage })))
+const LibrarySyncErrorsPage = lazy(() => import('./pages/library/LibrarySyncErrorsPage').then(module => ({ default: module.LibrarySyncErrorsPage })))
+const LibrarySourceFilesPage = lazy(() => import('./pages/library/LibrarySourceFilesPage').then(module => ({ default: module.LibrarySourceFilesPage })))
+const LibraryCreatePage = lazy(() => import('./pages/library/LibraryCreatePage').then(module => ({ default: module.LibraryCreatePage })))
+const LibraryProcessingPage = lazy(() => import('./pages/library/LibraryProcessingPage').then(module => ({ default: module.LibraryProcessingPage })))
+const LibraryIndexingPage = lazy(() => import('./pages/library/LibraryIndexingPage').then(module => ({ default: module.LibraryIndexingPage })))
+const LibraryResourceDetailPage = lazy(() => import('./pages/library/LibraryResourceDetailPage').then(module => ({ default: module.LibraryResourceDetailPage })))
+const LibraryVersionHistoryPage = lazy(() => import('./pages/library/LibraryVersionHistoryPage').then(module => ({ default: module.LibraryVersionHistoryPage })))
 const QueryMethodPage = lazy(() => import('./pages/search/QueryMethodPage').then(module => ({ default: module.QueryMethodPage })))
-
-import { EvaluationDataPage } from './pages/experiments/EvaluationDataPage'
-import { EvaluationResultsPage } from './pages/experiments/EvalutionResultsPage'
-import { ExperimentsReportPage } from './pages/experiments/ExperimentsReportsPage'
-import { RunExperimentPage } from './pages/experiments/RunExperimentPage'
-
-import { SystemStatusPage } from './pages/system/SystemStatusPage'
-import { MasterDataPage } from './pages/system/MasterDataPage'
-import { SystemCapalitiesPage } from './pages/system/SystemCapalitiesPage'
-import { SystemMasterSyncLayout, SystemMasterSyncPage } from './pages/system/SystemMasterSyncPage'
-import { DataReconciliationPage } from './pages/system/DataReconciliationPage'
-import { LibraryUpdateVersion } from './pages/library/LibraryUpdateVersion'
+const EvaluationDataPage = lazy(() => import('./pages/experiments/EvaluationDataPage').then(module => ({ default: module.EvaluationDataPage })))
+const EvaluationResultsPage = lazy(() => import('./pages/experiments/EvalutionResultsPage').then(module => ({ default: module.EvaluationResultsPage })))
+const ExperimentsReportPage = lazy(() => import('./pages/experiments/ExperimentsReportsPage').then(module => ({ default: module.ExperimentsReportPage })))
+const RunExperimentPage = lazy(() => import('./pages/experiments/RunExperimentPage').then(module => ({ default: module.RunExperimentPage })))
+const SystemStatusPage = lazy(() => import('./pages/system/SystemStatusPage').then(module => ({ default: module.SystemStatusPage })))
+const MasterDataPage = lazy(() => import('./pages/system/MasterDataPage').then(module => ({ default: module.MasterDataPage })))
+const SystemCapalitiesPage = lazy(() => import('./pages/system/SystemCapalitiesPage').then(module => ({ default: module.SystemCapalitiesPage })))
+const SystemMasterSyncLayout = lazy(() => import('./pages/system/SystemMasterSyncPage').then(module => ({ default: module.SystemMasterSyncLayout })))
+const SystemMasterSyncPage = lazy(() => import('./pages/system/SystemMasterSyncPage').then(module => ({ default: module.SystemMasterSyncPage })))
+const DataReconciliationPage = lazy(() => import('./pages/system/DataReconciliationPage').then(module => ({ default: module.DataReconciliationPage })))
+const LibraryUpdateVersion = lazy(() => import('./pages/library/LibraryUpdateVersion').then(module => ({ default: module.LibraryUpdateVersion })))
 
 export default function App() {
   return (

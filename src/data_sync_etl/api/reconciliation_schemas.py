@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -19,6 +19,12 @@ class ReconcileTriggerRequest(BaseModel):
         default="INCREMENTAL",
         description="Chế độ đối soát: INCREMENTAL (chỉ file mới/thay đổi) hoặc FULL (toàn bộ kho)",
     )
+
+
+class AuditJobRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    audit_type: Literal['LIGHT', 'DEEP', 'METADATA', 'IDS'] = 'DEEP'
+    stream: Literal['files', 'resources', 'subjects', 'grades', 'users'] = 'files'
 
 
 class ReconciliationRunReport(BaseModel):

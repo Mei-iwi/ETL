@@ -855,3 +855,7 @@ Docker dùng `"${APP[@]}" run --rm --no-deps api semantic-schema`/semantic-statu
 | Linux permission denied | UID10001 đọc secret/model; frontend đọc proxy key qua group10001; không chmod777 private |
 
 Migration/seed/các lệnh --apply sẽ ghi DB khi bạn chạy: chỉ dùng đúng môi trường được phép. Không chạy full suite trên DB Dev/Production để kiểm tra cài đặt. Hướng dẫn media/API: [MEDIA_PIPELINE.md](MEDIA_PIPELINE.md); bằng chứng/giới hạn: [MEDIA_ACCEPTANCE.md](MEDIA_ACCEPTANCE.md). LAN/HTTPS cần [TLS/reverse proxy](deploy/README.md), không bật localhost bypass trên LAN.
+
+## Đối soát độc lập
+
+Đối soát nhẹ/sâu dùng queue audit riêng, migration `0019` và cấu hình `RECONCILIATION_SCHEDULER_ENABLED=false` mặc định. Worker riêng: `python -m data_sync_etl.workers.reconciliation`; không gắn vào worker Sync. Kết quả và giới hạn kiểm thử: [RECONCILIATION_TEST_RESULTS.json](RECONCILIATION_TEST_RESULTS.json). Benchmark SQLite/local: [RECONCILIATION_BENCHMARK.json](RECONCILIATION_BENCHMARK.json).

@@ -10,12 +10,17 @@ Các API:
 from __future__ import annotations
 
 import math
+from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 
+from data_sync_etl.adapters.persistence.audit_queue import utc
+from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit, identity
+from data_sync_etl.api.admin_access import require_local_admin
 from data_sync_etl.api.reconciliation_schemas import (
+    AuditJobRequest,
     DiscrepancyItemResponse,
     DiscrepancyListResponse,
     ReconcileTriggerRequest,
@@ -25,12 +30,74 @@ from data_sync_etl.api.reconciliation_schemas import (
 )
 from data_sync_etl.application.reconciliation_engine import serialize_json_value
 from data_sync_etl.db.models import (
+    MasterLearningResource,
+    ReconciliationAuditJob,
+    ReconciliationFileState,
+    ResourceVersion,
     SyncReconciliationDiscrepancy,
     SyncReconciliationRun,
 )
-from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.core import DomainError, now
 
-router = APIRouter(prefix="/api/v1/reconciliation", tags=["Reconciliation & Integrity Verification"])
+
+def reconciliation_admin(request: Request):
+    return require_local_admin(request)
+
+
+router = APIRouter(prefix="/api/v1/reconciliation", tags=["Reconciliation & Integrity Verification"],
+                   dependencies=[Depends(reconciliation_admin)])
+
+
+@router.post('/audit-jobs', status_code=202)
+def enqueue_audit(request: Request, body: AuditJobRequest):
+    container = request.app.state.container
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings)
+    try:
+        job_id = audit.queue.enqueue(body.audit_type, body.stream)
+    except DomainError:
+        raise HTTPException(422, 'INVALID_AUDIT_SCOPE') from None
+    return {'job_id': job_id, 'status': 'PENDING', 'audit_type': body.audit_type,
+            'stream': body.stream, 'worker_required': True}
+
+
+@router.get('/audit-jobs')
+def audit_jobs(request: Request, after: str | None = None, size: int = Query(20, ge=1, le=100)):
+    with request.app.state.container.uow() as repo:
+        query = select(ReconciliationAuditJob).order_by(ReconciliationAuditJob.id).limit(size + 1)
+        if after:
+            query = query.where(ReconciliationAuditJob.id > after)
+        rows = list(repo.session.scalars(query))
+        return {'items': [{'job_id': r.id, 'audit_type': r.audit_type, 'stream': r.stream_name,
+            'status': r.status, 'error_code': r.error_code, 'progress': r.checkpoint,
+            'created_at': r.created_at, 'next_retry_at': r.next_retry_at} for r in rows[:size]],
+            'next_cursor': rows[size - 1].id if len(rows) > size else None}
+
+
+@router.get('/coverage')
+def audit_coverage(request: Request):
+    container = request.app.state.container
+    return ScheduledAudit(container.reconciliation_engine, container.settings).coverage()
+
+
+@router.get('/file-evidence/{version_id}')
+def file_evidence(request: Request, version_id: str):
+    with request.app.state.container.uow() as repo:
+        row = repo.session.get(ReconciliationFileState, version_id)
+        if row is None:
+            return {'resource_version_id': version_id, 'status': 'NOT_VERIFIED'}
+        version = repo.session.get(ResourceVersion, version_id)
+        resource = repo.session.get(MasterLearningResource, version.resource_id) if version else None
+        recent = bool(version and resource and row.last_verified_at
+            and utc(row.last_verified_at) >= now() - timedelta(
+                days=request.app.state.container.settings.reconciliation_deep_coverage_days)
+            and row.observed_identity == identity(version, resource.source_origin)
+            and row.last_verified_hash == version.source_hash)
+        stale = row.status == 'SYNCED' and not recent
+        return {'resource_version_id': version_id, 'status': 'NOT_VERIFIED' if stale else row.status,
+            'reason_code': 'AUDIT_EVIDENCE_STALE' if stale else row.reason_code,
+            'recent_sha256_evidence': recent,
+            'last_verified_at': row.last_verified_at, 'verification_method': row.verification_method,
+            'last_verified_size': row.last_verified_size, 'next_due_at': row.next_due_at}
 
 
 @router.post("/runs", response_model=ReconcileTriggerResponse,
@@ -66,6 +133,8 @@ def trigger_reconciliation(
             raise HTTPException(422, 'Luồng dữ liệu vượt giới hạn 10.000 bản ghi; cần đối soát theo lô riêng.') from None
         if str(exc) in ('RECONCILIATION_START_TIMEOUT', 'RECONCILIATION_FAILED'):
             raise HTTPException(503, 'Không khởi động được đối soát nền. Kiểm tra kết nối Master và bảng audit.') from None
+        if str(exc) in ('SOURCE_UNAVAILABLE', 'SOURCE_METADATA_UNSUPPORTED'):
+            raise HTTPException(503, 'SOURCE_AUDIT_UNAVAILABLE') from None
         raise
     return result
 
@@ -125,6 +194,11 @@ def get_latest_reconciliation_report(
         recoverable = (any(r.stream_name == 'files' and r.status == 'RUNNING' for r in latest_runs)
                        and container.reconciliation_jobs.can_recover())
         def displayed_status(run):
+            if run.status == 'RUNNING' and (run.summary_meta or {}).get('audit_type'):
+                job = session.get(ReconciliationAuditJob, run.run_id)
+                active = (job and job.status == 'RUNNING' and job.lease_expires_at
+                          and utc(job.lease_expires_at) > now())
+                return 'RUNNING' if active else 'PARTIAL'
             return 'PARTIAL' if recoverable and run.stream_name == 'files' and run.status == 'RUNNING' else run.status
         overall_status = next((status for status in ('RUNNING', 'FAILED', 'BLOCKED', 'PARTIAL')
                                if any(displayed_status(run) == status for run in latest_runs)), 'COMPLETED')

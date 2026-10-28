@@ -133,7 +133,10 @@ def test_reconciliation_engine_safety_bounds_blocked(container):
 
     Nếu tỷ lệ lệch lớn hơn 10%, trạng thái chuyển thành BLOCKED và ghi cờ BLOCKED_MASS_DISCREPANCY.
     """
-    engine = ReconciliationEngine(container.uow, max_ratio=0.05)  # 5% ngưỡng
+    from tests.unit.test_reconcile_master import CompleteSource
+    source = CompleteSource()
+    source.ids = []  # Authoritative empty snapshot, rather than an unavailable adapter.
+    engine = ReconciliationEngine(container.uow, source_adapter=source, max_ratio=0.05)
 
     # Tạo 20 bản ghi ở Master mà Source không có (tỷ lệ lệch 100% > 5%)
     with container.uow() as repo:

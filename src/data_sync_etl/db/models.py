@@ -476,6 +476,42 @@ class SyncReconciliationDiscrepancy(Base):
     resolution_status = Column(String(30), nullable=False, default="UNRESOLVED")
 
 
+class ReconciliationAuditJob(Base):
+    __tablename__ = 'reconciliation_audit_jobs'
+    __table_args__ = (Index('ix_audit_jobs_due', 'status', 'next_retry_at'),)
+    id = Column(String(36), primary_key=True, default=new_id)
+    job_key = Column(String(150), nullable=False, unique=True)
+    audit_type = Column(String(30), nullable=False)
+    stream_name = Column(String(30), nullable=False)
+    status = Column(String(30), nullable=False, default='PENDING')
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    finished_at = Column(DateTime(timezone=True))
+    claim_token = Column(String(36))
+    lease_expires_at = Column(DateTime(timezone=True))
+    heartbeat_at = Column(DateTime(timezone=True))
+    next_retry_at = Column(DateTime(timezone=True))
+    attempts = Column(Integer, nullable=False, default=0)
+    checkpoint = Column(JSON_TYPE, nullable=False, default=dict)
+    error_code = Column(String(80))
+
+
+class ReconciliationFileState(Base):
+    __tablename__ = 'reconciliation_file_states'
+    __table_args__ = (Index('ix_audit_file_due', 'next_due_at', 'resource_version_id'),)
+    resource_version_id = Column(String(36), primary_key=True)
+    last_verified_at = Column(DateTime(timezone=True))
+    last_verified_hash = Column(String(64))
+    last_verified_size = Column(BigInteger)
+    verification_method = Column(String(40))
+    observed_identity = Column(String(64))
+    last_observed_revision = Column(String(64))
+    last_attempt_at = Column(DateTime(timezone=True))
+    next_due_at = Column(DateTime(timezone=True))
+    status = Column(String(30), nullable=False)
+    reason_code = Column(String(80))
+    attempts = Column(Integer, nullable=False, default=0)
+
+
 class ResourceDeletionEvent(Base):
     __tablename__ = 'resource_deletion_events'
     __table_args__ = (

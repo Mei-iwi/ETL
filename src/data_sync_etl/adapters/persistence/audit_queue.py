@@ -1,0 +1,107 @@
+"""Durable audit-only queue. Every write is fenced by token AND unexpired lease."""
+from datetime import UTC, timedelta
+
+from sqlalchemy import and_, or_, select, update
+from sqlalchemy.exc import IntegrityError
+
+from data_sync_etl.db.models import ReconciliationAuditJob as Job
+from data_sync_etl.db.models import SyncReconciliationRun
+from data_sync_etl.domain.core import DomainError, new_id, now
+
+
+def utc(stamp):
+    return stamp.replace(tzinfo=UTC) if stamp and stamp.tzinfo is None else stamp
+
+
+class AuditQueue:
+    def __init__(self, uow, settings):
+        self.uow, self.settings = uow, settings
+
+    def enqueue(self, audit_type='DEEP', stream='files', job_key=None):
+        if audit_type not in ('DEEP', 'LIGHT', 'METADATA', 'IDS') or stream not in ('files', 'resources', 'subjects', 'grades', 'users'):
+            raise DomainError('INVALID_AUDIT_SCOPE')
+        if (audit_type in ('DEEP', 'LIGHT')) != (stream == 'files'):
+            raise DomainError('INVALID_AUDIT_SCOPE')
+        key = job_key or new_id()
+        try:
+            with self.uow() as repo:
+                existing = repo.session.scalar(select(Job).where(Job.job_key == key))
+                if existing:
+                    return existing.id
+                previous = repo.session.scalar(select(Job).where(Job.audit_type == audit_type,
+                    Job.stream_name == stream).order_by(Job.created_at.desc()).limit(1))
+                # File scans continue by keyset across independent budgeted jobs.
+                checkpoint = {}
+                if previous and previous.checkpoint and previous.status != 'FAILED':
+                    checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
+                        'last_id', 'phase', 'generation', 'source_seen', 'source_summary')}
+                    if audit_type == 'METADATA' and previous.status == 'PARTIAL':
+                        checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
+                            'last_id', 'scan_started', 'since', 'watermark_next', 'generation')}
+                row = Job(id=new_id(), job_key=key, audit_type=audit_type, stream_name=stream,
+                          status='PENDING', checkpoint=checkpoint)
+                repo.session.add(row)
+                repo.session.flush()
+                return row.id
+        except IntegrityError:
+            with self.uow() as repo:
+                return repo.session.scalar(select(Job.id).where(Job.job_key == key))
+
+    def claim(self):
+        stamp = now()
+        with self.uow() as repo:
+            eligible = or_(and_(Job.status.in_(('PENDING', 'RETRY_WAIT')),
+                                or_(Job.next_retry_at.is_(None), Job.next_retry_at <= stamp)),
+                           and_(Job.status == 'RUNNING', Job.lease_expires_at <= stamp))
+            if not self.settings.reconciliation_scheduler_enabled:
+                # Scheduled slot keys contain ':'; manual API keys are UUID/ULID.
+                # Disabling the scheduler also pauses unclaimed scheduled work.
+                eligible = and_(eligible, ~Job.job_key.contains(':'))
+            row = repo.session.scalar(select(Job).where(eligible).order_by(Job.created_at, Job.id)
+                .with_for_update(skip_locked=True).limit(1))
+            if row is None:
+                return None
+            if row.attempts >= self.settings.reconciliation_retry_max_attempts:
+                row.status, row.error_code, row.finished_at = 'FAILED', 'AUDIT_RETRY_EXHAUSTED', stamp
+                return None
+            token = new_id()
+            attempts = row.attempts + 1
+            changed = repo.session.execute(update(Job).where(Job.id == row.id, eligible).values(
+                status='RUNNING', claim_token=token, heartbeat_at=stamp,
+                lease_expires_at=stamp + timedelta(seconds=self.settings.reconciliation_lease_seconds),
+                attempts=attempts).execution_options(synchronize_session=False))
+            if changed.rowcount != 1:
+                return None
+            return {'id': row.id, 'claim_token': token, 'audit_type': row.audit_type,
+                    'stream_name': row.stream_name, 'checkpoint': dict(row.checkpoint or {}),
+                    'created_at': utc(row.created_at), 'attempts': attempts,
+                    'queue_wait_seconds': max(0, (stamp - utc(row.created_at)).total_seconds())}
+
+    def owned(self, session, claim):
+        row = session.scalar(select(Job).where(Job.id == claim['id']).with_for_update())
+        if not row or row.status != 'RUNNING' or row.claim_token != claim['claim_token'] or utc(row.lease_expires_at) <= now():
+            raise DomainError('AUDIT_LEASE_LOST')
+        return row
+
+    def heartbeat(self, claim):
+        with self.uow() as repo:
+            row = self.owned(repo.session, claim)
+            row.heartbeat_at = now()
+            row.lease_expires_at = now() + timedelta(seconds=self.settings.reconciliation_lease_seconds)
+
+    def fail(self, claim):
+        try:
+            with self.uow() as repo:
+                row = self.owned(repo.session, claim)
+                exhausted = row.attempts >= self.settings.reconciliation_retry_max_attempts
+                row.status = 'FAILED' if exhausted else 'RETRY_WAIT'
+                row.error_code = 'AUDIT_RETRY_EXHAUSTED' if exhausted else 'AUDIT_UNAVAILABLE'
+                row.next_retry_at = now() + timedelta(seconds=min(3600,
+                    self.settings.reconciliation_retry_seconds * 2 ** (row.attempts - 1)))
+                row.claim_token, row.lease_expires_at = None, None
+                run = repo.session.get(SyncReconciliationRun, claim['id'])
+                if run:
+                    run.status, run.finished_at = 'FAILED' if exhausted else 'PARTIAL', now()
+                    run.summary_meta = {**(run.summary_meta or {}), 'error_code': row.error_code}
+        except DomainError:
+            pass  # An obsolete worker cannot mark a new owner's work failed.
