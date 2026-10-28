@@ -13,7 +13,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX,
 } }).outputText
 
-function runtime(plans = [], fetcher = () => { throw new Error('Unexpected request') }) {
+function runtime(plans = [], fetcher = () => { throw new Error('Unexpected request') }, editor) {
     let index = 0
     const updates = new Map()
     const exports = {}
@@ -23,7 +23,9 @@ function runtime(plans = [], fetcher = () => { throw new Error('Unexpected reque
         if (name === 'react') return { ...React, useEffect: fn => effects.push(fn), useRef: initial => ({ current: initial }),
             useState: initial => {
                 const key = index++
-                return [key === 0 ? plans : initial, value => updates.set(key, value)]
+                return [key === 0 ? plans : key === 1 ? editor === undefined
+                    ? plans[0] ? { plan: plans[0], branch: plans[0].calendar_configured ? 'fast' : 'legacy' } : null
+                    : editor : initial, value => updates.set(key, value)]
             },
         }
         if (name.includes('NoticeDialog')) return { NoticeDialog: () => null }
@@ -138,64 +140,68 @@ test('invalid save is shown without a PUT and file controls never offer metadata
     assert.match(renderToStaticMarkup(controls), /DEEP — SHA-256/)
 })
 
-test('every stream uses neutral bold emphasis and a scan mode dropdown with or without calendar schedules', () => {
+test('overview has five simple rows, no repeated form and one setup action per stream', () => {
     const helper = runtime()
     const plans = ['grades', 'subjects', 'users', 'resources', 'files'].map(stream => ({ stream, calendar_configured: true,
         mode: 'INCREMENTAL', enabled: false, interval_seconds: 1800, repair: false,
         fast_schedule: { ...helper.calendarDefaults(stream, 'fast'), enabled: true },
         thorough_schedule: helper.calendarDefaults(stream, 'thorough') }))
-    const api = runtime(plans)
+    const api = runtime(plans, undefined, null)
     const tree = api.ReconciliationSchedule()
     const rows = find(tree, node => node.type === 'tr' && node.props['data-audit-stream'])
-    const subject = rows.find(row => row.props['data-audit-stream'] === 'subjects')
-    const files = rows.find(row => row.props['data-audit-stream'] === 'files')
-    assert.equal(subject.props.className, undefined)
-    assert.equal(files.props.className, undefined)
-    assert.equal(rows.find(row => row.props['data-audit-stream'] === 'users').props.className, undefined)
-    const subjectHtml = renderToStaticMarkup(subject)
-    assert.match(subjectHtml, /Incremental/)
-    assert.match(subjectHtml, /Full metadata \+ IDS/)
-    assert.match(subjectHtml, /<strong>Môn học<\/strong>/)
-    assert.match(renderToStaticMarkup(files), /<strong>Kho tệp<\/strong>/)
-    const labels = { all: 'Tất cả luồng', grades: 'Khối lớp', subjects: 'Môn học', users: 'Người dùng', resources: 'Học liệu', files: 'Kho tệp' }
-    for (const calendar of [true, false]) {
-        const view = runtime(plans.map(plan => ({ ...plan, calendar_configured: calendar })))
-        const allRows = find(view.ReconciliationSchedule(), node => node.type === 'tr' && node.props['data-audit-stream'])
-        assert.equal(allRows.length, 6)
-        for (const row of allRows) {
-            assert.equal(row.props.className, undefined)
-            assert.ok(find(row, node => node.type === 'strong' && node.props.children === labels[row.props['data-audit-stream']]).length)
-            const select = find(row, node => node.type === 'select' && node.props['aria-label']?.startsWith('Chế độ'))[0]
-            assert.equal(select.props.value, 'INCREMENTAL')
-            assert.equal(select.props.disabled, false)
-        }
-    }
-    assert.match(renderToStaticMarkup(files), /LIGHT/)
-    assert.match(renderToStaticMarkup(files), /DEEP — SHA-256/)
-    for (const branch of ['fast', 'thorough']) {
-        const controls = helper.CalendarControls({ stream: 'subjects', branch,
-            value: plans.find(plan => plan.stream === 'subjects')[`${branch}_schedule`], disabled: false, onChange: () => {} })
-        assert.match(renderToStaticMarkup(controls), /Chế độ quét/)
-    }
+    assert.equal(rows.length, 5)
+    assert.equal(find(tree, node => node.type === 'th').length, 3)
+    assert.equal(find(tree, node => node.type === 'select').length, 0)
+    assert.equal(find(tree, node => node.type === 'button' && node.props.children === 'Lưu').length, 0)
+    assert.equal(find(tree, node => node.type === 'button' && node.props.children === 'Thiết lập').length, 5)
+    assert.doesNotMatch(renderToStaticMarkup(tree), /Cấu hình nâng cao|Lưu chung|Theo từng lịch/)
+    const setup = find(tree, node => node.props?.['aria-label'] === 'Thiết lập Môn học')[0]
+    setup.props.onClick()
+    assert.equal(api.updates.get(1).plan.stream, 'subjects')
+    const selected = runtime(plans, undefined, api.updates.get(1))
+    const open = selected.ReconciliationSchedule()
+    assert.equal(find(open, node => node.type === selected.CalendarControls).length, 1)
+    assert.equal(find(open, node => node.type === 'button' && node.props.children === 'Lưu').length, 1)
+    assert.equal(find(open, node => node.type === 'select' && node.props['aria-label'] === 'Chọn lịch cấu hình').length, 1)
+    find(open, node => node.type === 'button' && node.props.children === 'Hủy')[0].props.onClick()
+    assert.equal(selected.updates.get(1), null)
 })
 
-test('mode dropdown enables the selected branches without losing their cadence or repair policy', () => {
+test('shared form changes only the draft and retains both schedule branches', () => {
     const helper = runtime()
     const item = { stream: 'subjects', calendar_configured: true,
         fast_schedule: { ...helper.calendarDefaults('subjects', 'fast'), enabled: true, hour: 5, repair: true },
         thorough_schedule: { ...helper.calendarDefaults('subjects', 'thorough'), weekday: 3, hour: 8 } }
-    for (const [mode, fast, thorough] of [['FULL', false, true], ['BOTH', true, true],
-        ['OFF', false, false], ['INCREMENTAL', true, false]]) {
-        const api = runtime([item])
-        const tree = api.ReconciliationSchedule()
-        const select = find(tree, node => node.type === 'select' && node.props['aria-label'] === 'Chế độ Môn học')[0]
-        select.props.onChange({ target: { value: mode } })
-        const next = api.updates.get(0)([item])[0]
-        assert.equal(next.fast_schedule.enabled, fast)
-        assert.equal(next.thorough_schedule.enabled, thorough)
-        assert.equal(next.fast_schedule.hour, 5)
-        assert.equal(next.fast_schedule.repair, true)
-        assert.equal(next.thorough_schedule.weekday, 3)
-        assert.equal(next.thorough_schedule.hour, 8)
-    }
+    const editor = { plan: item, branch: 'fast' }
+    const api = runtime([item], undefined, editor)
+    const tree = api.ReconciliationSchedule()
+    const select = find(tree, node => node.type === 'select' && node.props['aria-label'] === 'Chọn lịch cấu hình')[0]
+    select.props.onChange({ target: { value: 'thorough' } })
+    const next = api.updates.get(1)(editor)
+    assert.equal(next.branch, 'thorough')
+    assert.equal(next.plan.fast_schedule.hour, 5)
+    assert.equal(next.plan.thorough_schedule.weekday, 3)
+    const selected = runtime([item], undefined, next)
+    const open = selected.ReconciliationSchedule()
+    find(open, node => node.type === selected.CalendarControls)[0].props.onChange({ enabled: true, hour: 10 })
+    const draft = selected.updates.get(1)(next)
+    assert.equal(draft.plan.fast_schedule.hour, 5)
+    assert.equal(draft.plan.fast_schedule.repair, true)
+    assert.equal(draft.plan.thorough_schedule.enabled, true)
+    assert.equal(draft.plan.thorough_schedule.hour, 10)
+    assert.equal(item.thorough_schedule.hour, 8)
+    assert.equal(selected.updates.has(0), false) // Persisted overview is unchanged until Save succeeds.
+})
+
+test('compact summary reflects only enabled schedules and preserves legacy intervals', () => {
+    const api = runtime()
+    assert.deepEqual(plain(api.scheduleSummary({ stream: 'users', enabled: false })), ['Chưa bật'])
+    assert.deepEqual(plain(api.scheduleSummary({ stream: 'files', enabled: true, mode: 'FULL', interval_seconds: 300 })), ['DEEP · 5 phút'])
+    const item = { stream: 'subjects', calendar_configured: true,
+        fast_schedule: { ...api.calendarDefaults('subjects', 'fast'), enabled: true },
+        thorough_schedule: { ...api.calendarDefaults('subjects', 'thorough'), enabled: true } }
+    const result = api.scheduleSummary(item)
+    assert.equal(result.length, 2)
+    assert.match(result[0], /Incremental · Hằng ngày 02:00/)
+    assert.match(result[1], /Full metadata \+ IDS · Chủ nhật 03:00/)
 })

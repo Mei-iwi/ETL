@@ -165,7 +165,7 @@ test('schedule checkbox persists on/off only after saving and never enqueues a s
             if (name.endsWith('.css')) return { default: {} }
             if (name === 'react') return { ...React, useEffect: () => {}, useRef: initial => ({ current: initial }), useState: initial => {
                 const key = index++
-                return [key === 0 ? plans : initial, value => updates.set(key, value)]
+                return [key === 0 ? plans : key === 1 ? { plan: plans[0], branch: 'legacy' } : initial, value => updates.set(key, value)]
             } }
             if (name.includes('NoticeDialog')) return { NoticeDialog: () => null }
             return require(name)
@@ -180,9 +180,9 @@ test('schedule checkbox persists on/off only after saving and never enqueues a s
         const before = calls.length
         checkbox.props.onChange({ target: { checked: enabled } })
         assert.equal(calls.length, before)
-        const draft = updates.get(0)(plans)
+        const draft = updates.get(1)({ plan: plans[0], branch: 'legacy' })
         // Apply the draft as React would on its next render.
-        Object.assign(plans[0], draft[0])
+        Object.assign(plans[0], draft.plan)
         find(tree, node => node.type === 'button' && node.props.children === 'Lưu')[0].props.onClick()
         await new Promise(resolve => setImmediate(resolve))
         const saved = calls.findLast(call => call.method === 'PUT')

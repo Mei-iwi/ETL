@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import styles from './DataReconciliationPage.module.css'
 import { NoticeDialog } from '../../components/NoticeDialog'
 
@@ -18,11 +18,6 @@ const intervalLabel = (seconds: number) => seconds === 3600 ? '1 tiếng' : `${s
 export function scanModeLabel(stream: string, branch: 'fast' | 'thorough') {
     return stream === 'files' ? branch === 'fast' ? 'LIGHT' : 'DEEP — SHA-256'
         : branch === 'fast' ? 'Incremental' : 'Full metadata + IDS'
-}
-
-function calendarMode(plan: Plan) {
-    return plan.fast_schedule?.enabled ? plan.thorough_schedule?.enabled ? 'BOTH' : 'INCREMENTAL'
-        : plan.thorough_schedule?.enabled ? 'FULL' : 'OFF'
 }
 
 export function calendarDefaults(stream: string, branch: 'fast' | 'thorough'): CalendarPlan {
@@ -69,147 +64,128 @@ async function savePlan(stream: string, payload: object) {
     }
 }
 
+type Editor = { plan: Plan; branch: 'legacy' | 'fast' | 'thorough' }
+
+export function scheduleSummary(plan: Plan) {
+    if (!plan.calendar_configured) return plan.enabled
+        ? [`${plan.stream === 'files' ? plan.mode === 'FULL' ? 'DEEP' : 'LIGHT' : plan.mode === 'FULL' ? 'Full metadata' : 'Incremental'} · ${intervalLabel(plan.interval_seconds)}`]
+        : ['Chưa bật']
+    const summaries = (['fast', 'thorough'] as const).flatMap(branch => {
+        const value = plan[branch === 'fast' ? 'fast_schedule' : 'thorough_schedule']
+        if (!value?.enabled) return []
+        const cadence = value.cadence === 'DAILY' ? 'Hằng ngày' : value.cadence === 'WEEKLY'
+            ? ['Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy', 'Chủ nhật'][value.weekday]
+            : value.cadence === 'MONTHLY' ? `Ngày ${value.month_day} mỗi tháng` : intervalLabel(value.interval_seconds)
+        const time = value.cadence === 'INTERVAL' ? '' : ` ${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}`
+        return [`${scanModeLabel(plan.stream, branch)} · ${cadence}${time}`]
+    })
+    return summaries.length ? summaries : ['Chưa bật']
+}
+
 export function ReconciliationSchedule() {
     const [plans, setPlans] = useState<Plan[]>([])
-    const [common, setCommon] = useState<Omit<Plan, 'stream'>>({ enabled: false, interval_seconds: 1800, mode: 'INCREMENTAL', repair: true })
+    const [editor, setEditor] = useState<Editor | null>(null)
     const [busy, setBusy] = useState<string | null>(null)
     const [notice, setNotice] = useState('')
     const saving = useRef(false)
     useEffect(() => {
         const controller = new AbortController()
         void readPlans(controller.signal).then(items => {
-            if (controller.signal.aborted) return
-            setPlans(items)
-            const first = items[0]
-            if (first) setCommon({ enabled: items.every(plan => plan.enabled),
-                interval_seconds: items.every(plan => plan.interval_seconds === first.interval_seconds) ? first.interval_seconds : 1800,
-                mode: items.every(plan => plan.mode === first.mode) ? first.mode : 'INCREMENTAL',
-                repair: items.filter(plan => plan.stream !== 'files').every(plan => plan.repair) })
+            if (!controller.signal.aborted) setPlans(items)
         }).catch(error => { if (!controller.signal.aborted) setNotice(String(error)) })
         return () => controller.abort()
     }, [])
 
-    function change(stream: string, values: Partial<Plan>) {
-        setPlans(previous => previous.map(plan => plan.stream === stream ? { ...plan, ...values } : plan))
+    function change(values: Partial<Plan>) {
+        setEditor(previous => previous ? { ...previous, plan: { ...previous.plan, ...values } } : previous)
     }
-    function changeCalendar(plan: Plan, branch: 'fast' | 'thorough', values: Partial<CalendarPlan>) {
-        const key = branch === 'fast' ? 'fast_schedule' : 'thorough_schedule'
-        change(plan.stream, { calendar_configured: true,
-            [key]: { ...calendarDefaults(plan.stream, branch), ...plan[key], ...values, next_run_at: null } })
-    }
-    function changeMode(plan: Plan, mode: string) {
-        change(plan.stream, {
-            fast_schedule: { ...calendarDefaults(plan.stream, 'fast'), ...plan.fast_schedule,
-                enabled: mode === 'INCREMENTAL' || mode === 'BOTH', next_run_at: null },
-            thorough_schedule: { ...calendarDefaults(plan.stream, 'thorough'), ...plan.thorough_schedule,
-                enabled: mode === 'FULL' || mode === 'BOTH', next_run_at: null },
+    function changeCalendar(values: Partial<CalendarPlan>) {
+        setEditor(previous => {
+            if (!previous || previous.branch === 'legacy') return previous
+            const key = previous.branch === 'fast' ? 'fast_schedule' : 'thorough_schedule'
+            return { ...previous, plan: { ...previous.plan, [key]: {
+                ...calendarDefaults(previous.plan.stream, previous.branch), ...previous.plan[key], ...values, next_run_at: null,
+            } } }
         })
     }
-
-    async function submit(plan: Plan) {
-        if (saving.current) return
+    async function submit() {
+        if (!editor || saving.current) return
         saving.current = true
+        const plan = { ...editor.plan, calendar_configured: editor.branch !== 'legacy' }
         setBusy(plan.stream)
         try {
             await savePlan(plan.stream, schedulePayload(plan))
             const items = await readPlans()
-            // Preserve unsaved drafts in other rows.
             setPlans(previous => previous.map(row => row.stream === plan.stream
                 ? items.find(item => item.stream === row.stream) ?? row : row))
-            setNotice('Đã lưu lịch. Worker đối soát thực thi độc lập với Auto Sync.')
+            setEditor(null)
+            setNotice('Đã lưu lịch.')
         } catch (error) { setNotice(error instanceof Error ? error.message : 'Không lưu được lịch') }
-        finally { saving.current = false; setBusy(null) }
-    }
-    async function submitAll() {
-        if (saving.current) return
-        saving.current = true
-        setBusy('all')
-        try {
-            await savePlan('all', schedulePayload({ stream: 'all', ...common }))
-            const items = await readPlans()
-            setPlans(items)
-            setNotice('Đã lưu chu kỳ phút/giờ chung. Lịch nâng cao đã cấu hình được giữ nguyên.')
-        } catch (error) { setNotice(error instanceof Error ? error.message : 'Không lưu được lịch chung') }
         finally { saving.current = false; setBusy(null) }
     }
 
     return <section aria-label="Lịch đối soát độc lập">
-        <h3>Lịch đối soát theo từng luồng</h3>
+        <h3>Lịch đối soát</h3>
         <div className={styles.tableWrap}>
             <table className={styles.table}>
-                <thead><tr><th>Luồng</th><th>Tự động</th><th>Chu kỳ</th><th>Chế độ quét</th><th title="Chỉ sửa ID metadata đủ điều kiện; không ghi đè tệp sai hash">Tự đồng bộ khi lệch</th><th>Thao tác</th></tr></thead>
-                <tbody>
-                    <tr data-audit-stream="all">
-                        <td><strong>Tất cả luồng</strong></td>
-                        <td><input aria-label="Tự động tất cả luồng" type="checkbox" checked={common.enabled}
-                            disabled={busy !== null} onChange={event => setCommon(previous => ({ ...previous, enabled: event.target.checked }))} /></td>
-                        <td><select className={styles.select} aria-label="Chu kỳ chung" value={common.interval_seconds} disabled={busy !== null}
-                            onChange={event => setCommon(previous => ({ ...previous, interval_seconds: Number(event.target.value) }))}>
-                            {intervals.map(seconds => <option key={seconds} value={seconds}>{intervalLabel(seconds)}</option>)}
-                        </select></td>
-                        <td><select className={styles.select} aria-label="Chế độ quét chung" value={common.mode} disabled={busy !== null}
-                            onChange={event => setCommon(previous => ({ ...previous, mode: event.target.value as Plan['mode'] }))}>
-                            <option value="INCREMENTAL">Incremental / LIGHT</option><option value="FULL">Full metadata / DEEP SHA-256</option>
-                        </select></td>
-                        <td><input aria-label="Tự đồng bộ metadata khi lệch tất cả luồng" type="checkbox" checked={common.repair} disabled={busy !== null}
-                            onChange={event => setCommon(previous => ({ ...previous, repair: event.target.checked }))} /></td>
-                        <td><button className={styles.primaryButton} disabled={busy !== null || plans.length !== 5}
-                            title="Áp dụng lịch phút/giờ cũ, giữ nguyên lịch nâng cao" onClick={() => void submitAll()}>Lưu chung</button></td>
-                    </tr>
-                    {plans.map(plan => <Fragment key={plan.stream}>
-                        <tr data-audit-stream={plan.stream}>
-                            <td><strong>{labels[plan.stream]}</strong></td>
-                            <td>{plan.calendar_configured ? 'Theo từng lịch' : <input aria-label={`Tự động ${labels[plan.stream]}`} type="checkbox"
-                                checked={plan.enabled} disabled={busy !== null} onChange={event => change(plan.stream, { enabled: event.target.checked })} />}</td>
-                            <td>{plan.calendar_configured ? 'Ngày / tuần / tháng' : <select className={styles.select} aria-label={`Chu kỳ ${labels[plan.stream]}`}
-                                value={plan.interval_seconds} disabled={busy !== null} onChange={event => change(plan.stream, { interval_seconds: Number(event.target.value) })}>
-                                {intervals.map(seconds => <option key={seconds} value={seconds}>{intervalLabel(seconds)}</option>)}
-                            </select>}</td>
-                            <td>{plan.calendar_configured ? <select className={styles.select} aria-label={`Chế độ ${labels[plan.stream]}`}
-                                title="Chọn lịch sử dụng chế độ quét; áp dụng khi bấm Lưu" value={calendarMode(plan)} disabled={busy !== null}
-                                onChange={event => changeMode(plan, event.target.value)}>
-                                <option value="OFF">Tắt hai lịch</option>
-                                <option value="INCREMENTAL">{scanModeLabel(plan.stream, 'fast')}</option>
-                                <option value="FULL">{scanModeLabel(plan.stream, 'thorough')}</option>
-                                <option value="BOTH">{plan.stream === 'files' ? 'LIGHT + DEEP' : 'Incremental + Full metadata'}</option>
-                            </select> : <select className={styles.select} aria-label={`Chế độ ${labels[plan.stream]}`}
-                                value={plan.mode} disabled={busy !== null} onChange={event => change(plan.stream, { mode: event.target.value as Plan['mode'] })}>
-                                <option value="INCREMENTAL">{plan.stream === 'files' ? 'LIGHT' : 'Incremental'}</option>
-                                <option value="FULL">{plan.stream === 'files' ? 'DEEP — SHA-256' : 'Full metadata'}</option>
-                            </select>}</td>
-                            <td>{plan.stream === 'files' ? 'Chỉ kiểm tra' : plan.calendar_configured ? 'Theo từng lịch' : <input type="checkbox" checked={plan.repair}
-                                disabled={busy !== null} aria-label={`Tự đồng bộ khi lệch ${labels[plan.stream]}`}
-                                onChange={event => change(plan.stream, { repair: event.target.checked })} />}</td>
-                            <td><button className={styles.primaryButton} disabled={busy !== null} onClick={() => void submit(plan)}>Lưu</button></td>
-                        </tr>
-                        <tr>
-                            <td colSpan={6}><details>
-                            <summary><strong>Cấu hình nâng cao — {labels[plan.stream]}</strong></summary>
-                            <div className={styles.scheduleAdvanced}>
-                                {(['fast', 'thorough'] as const).map(branch => <CalendarControls key={branch} stream={plan.stream} branch={branch}
-                                    value={plan[branch === 'fast' ? 'fast_schedule' : 'thorough_schedule'] ?? calendarDefaults(plan.stream, branch)}
-                                    disabled={busy !== null} onChange={values => changeCalendar(plan, branch, values)} />)}
-                            </div>
-                        </details></td></tr>
-                    </Fragment>)}
-                </tbody>
+                <thead><tr><th>Luồng</th><th>Lịch đang áp dụng</th><th>Thao tác</th></tr></thead>
+                <tbody>{plans.map(plan => <tr key={plan.stream} data-audit-stream={plan.stream}>
+                    <td><strong>{labels[plan.stream]}</strong></td>
+                    <td>{scheduleSummary(plan).map(line => <div key={line}>{line}</div>)}</td>
+                    <td><button className={styles.secondaryButton} disabled={busy !== null}
+                        aria-label={`Thiết lập ${labels[plan.stream]}`}
+                        aria-expanded={editor?.plan.stream === plan.stream}
+                        onClick={() => setEditor({ plan, branch: plan.calendar_configured ? 'fast' : 'legacy' })}>Thiết lập</button></td>
+                </tr>)}</tbody>
             </table>
         </div>
+        {editor && <div className={styles.scheduleEditor} aria-label={`Thiết lập lịch ${labels[editor.plan.stream]}`}>
+            <h4>Thiết lập — {labels[editor.plan.stream]}</h4>
+            <label className={styles.scheduleChoice}>Chế độ quét
+                <select className={styles.select} aria-label="Chọn lịch cấu hình" value={editor.branch} disabled={busy !== null}
+                    onChange={event => setEditor(previous => previous ? { ...previous, branch: event.target.value as Editor['branch'] } : previous)}>
+                    {!editor.plan.calendar_configured && <option value="legacy">Lịch phút/giờ hiện tại</option>}
+                    <option value="fast">{scanModeLabel(editor.plan.stream, 'fast')} — thường xuyên</option>
+                    <option value="thorough">{scanModeLabel(editor.plan.stream, 'thorough')} — toàn diện</option>
+                </select>
+            </label>
+            {editor.branch === 'legacy' ? <fieldset className={styles.schedulePlan} disabled={busy !== null} aria-label="Lịch phút/giờ">
+                <label><input aria-label={`Tự động ${labels[editor.plan.stream]}`} type="checkbox" checked={editor.plan.enabled}
+                    onChange={event => change({ enabled: event.target.checked })} /> Bật lịch</label>
+                <label>Chu kỳ <select className={styles.select} aria-label="Chu kỳ" value={editor.plan.interval_seconds}
+                    onChange={event => change({ interval_seconds: Number(event.target.value) })}>
+                    {intervals.map(seconds => <option key={seconds} value={seconds}>{intervalLabel(seconds)}</option>)}
+                </select></label>
+                <label>Chế độ <select className={styles.select} aria-label="Chế độ quét" value={editor.plan.mode}
+                    onChange={event => change({ mode: event.target.value as Plan['mode'] })}>
+                    <option value="INCREMENTAL">{editor.plan.stream === 'files' ? 'LIGHT' : 'Incremental'}</option>
+                    <option value="FULL">{editor.plan.stream === 'files' ? 'DEEP — SHA-256' : 'Full metadata'}</option>
+                </select></label>
+                {editor.plan.stream !== 'files' && <label><input type="checkbox" checked={editor.plan.repair}
+                    aria-label="Tự đồng bộ khi lệch" onChange={event => change({ repair: event.target.checked })} /> Tự đồng bộ khi lệch</label>}
+            </fieldset> : <CalendarControls compact stream={editor.plan.stream} branch={editor.branch} disabled={busy !== null}
+                value={editor.plan[editor.branch === 'fast' ? 'fast_schedule' : 'thorough_schedule'] ?? calendarDefaults(editor.plan.stream, editor.branch)}
+                onChange={changeCalendar} />}
+            <div className={styles.actionsBar}>
+                <button className={styles.primaryButton} disabled={busy !== null} onClick={() => void submit()}>Lưu</button>
+                <button className={styles.secondaryButton} disabled={busy !== null} onClick={() => setEditor(null)}>Hủy</button>
+            </div>
+        </div>}
         {notice && <NoticeDialog title="Lịch đối soát" message={notice} onClose={() => setNotice('')} />}
     </section>
 }
 
-export function CalendarControls({ stream, branch, value, disabled, onChange }: {
-    stream: string; branch: 'fast' | 'thorough'; value: CalendarPlan; disabled: boolean; onChange: (values: Partial<CalendarPlan>) => void
+export function CalendarControls({ stream, branch, value, disabled, onChange, compact = false }: {
+    stream: string; branch: 'fast' | 'thorough'; value: CalendarPlan; disabled: boolean; onChange: (values: Partial<CalendarPlan>) => void; compact?: boolean
 }) {
     const prefix = `${labels[stream]} ${branch === 'fast' ? 'FAST' : 'THOROUGH'}`
     const time = `${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}`
-    return <fieldset className={styles.schedulePlan} disabled={disabled}>
-        <legend>{branch === 'fast' ? 'Thường xuyên (FAST)' : 'Toàn diện (THOROUGH)'}</legend>
-        <label>Chế độ quét <output aria-label={`Chế độ quét ${prefix}`} title={stream === 'files' && branch === 'fast'
+    return <fieldset className={styles.schedulePlan} disabled={disabled} aria-label={`Lịch ${prefix}`}>
+        {!compact && <legend>{branch === 'fast' ? 'Thường xuyên (FAST)' : 'Toàn diện (THOROUGH)'}</legend>}
+        {!compact && <label>Chế độ quét <output aria-label={`Chế độ quét ${prefix}`} title={stream === 'files' && branch === 'fast'
             ? 'Chỉ kiểm metadata/kích thước; chưa xác minh SHA-256' : undefined}>
             <strong>{scanModeLabel(stream, branch)}</strong>
-        </output></label>
+        </output></label>}
         <label><input type="checkbox" aria-label={`Bật ${prefix}`} checked={value.enabled}
             onChange={event => onChange({ enabled: event.target.checked })} /> Bật lịch</label>
         <label>Chu kỳ <select className={styles.select} aria-label={`Chu kỳ ${prefix}`} value={value.cadence}
@@ -230,8 +206,10 @@ export function CalendarControls({ stream, branch, value, disabled, onChange }: 
             <label>Giờ chạy <input className={styles.select} type="time" aria-label={`Giờ ${prefix}`} value={time}
                 onChange={event => { const [hour, minute] = event.target.value.split(':').map(Number); onChange({ hour, minute }) }} /></label>
         </>}
-        <label>Múi giờ <input className={styles.select} aria-label={`Múi giờ ${prefix}`} value={value.timezone}
-            maxLength={64} onChange={event => onChange({ timezone: event.target.value })} /></label>
+        <details><summary>Múi giờ: {value.timezone}</summary>
+            <label>Múi giờ <input className={styles.select} aria-label={`Múi giờ ${prefix}`} value={value.timezone}
+                maxLength={64} onChange={event => onChange({ timezone: event.target.value })} /></label>
+        </details>
         {stream !== 'files' && <label><input type="checkbox" aria-label={`Tự đồng bộ khi lệch ${prefix}`} checked={value.repair}
             onChange={event => onChange({ repair: event.target.checked })} /> Tự đồng bộ ID metadata lệch</label>}
         <small>Lần tiếp theo: {value.enabled && value.next_run_at ? new Intl.DateTimeFormat('vi-VN', {
