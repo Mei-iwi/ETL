@@ -19,7 +19,7 @@ function runtime(plans = [], fetcher = () => { throw new Error('Unexpected reque
     const exports = {}
     const effects = []
     vm.runInNewContext(compiled, { exports, fetch: fetcher, Intl, AbortController, require: name => {
-        if (name.endsWith('.css')) return { default: {} }
+        if (name.endsWith('.css')) return { __esModule: true, default: new Proxy({}, { get: (_, key) => key }) }
         if (name === 'react') return { ...React, useEffect: fn => effects.push(fn), useRef: initial => ({ current: initial }),
             useState: initial => {
                 const key = index++
@@ -136,4 +136,31 @@ test('invalid save is shown without a PUT and file controls never offer metadata
         disabled: false, onChange: () => {} })
     assert.equal(find(controls, node => node.props?.['aria-label']?.startsWith('Tự đồng bộ')).length, 0)
     assert.match(renderToStaticMarkup(controls), /DEEP — SHA-256/)
+})
+
+test('subject and file rows stay highlighted and show both actual scan modes after configuring schedules', () => {
+    const helper = runtime()
+    const plans = ['subjects', 'files', 'users'].map(stream => ({ stream, calendar_configured: true,
+        fast_schedule: { ...helper.calendarDefaults(stream, 'fast'), enabled: true },
+        thorough_schedule: helper.calendarDefaults(stream, 'thorough') }))
+    const api = runtime(plans)
+    const tree = api.ReconciliationSchedule()
+    const rows = find(tree, node => node.type === 'tr' && node.props['data-audit-stream'])
+    const subject = rows.find(row => row.props['data-audit-stream'] === 'subjects')
+    const files = rows.find(row => row.props['data-audit-stream'] === 'files')
+    assert.equal(subject.props.className, 'scheduleSubject')
+    assert.equal(files.props.className, 'scheduleFiles')
+    assert.equal(rows.find(row => row.props['data-audit-stream'] === 'users').props.className, undefined)
+    const subjectHtml = renderToStaticMarkup(subject)
+    assert.match(subjectHtml, /Incremental/)
+    assert.match(subjectHtml, /Full metadata \+ IDS/)
+    assert.match(subjectHtml, /FAST: Bật/)
+    assert.match(subjectHtml, /THOROUGH: Tắt/)
+    assert.match(renderToStaticMarkup(files), /LIGHT/)
+    assert.match(renderToStaticMarkup(files), /DEEP — SHA-256/)
+    for (const branch of ['fast', 'thorough']) {
+        const controls = helper.CalendarControls({ stream: 'subjects', branch,
+            value: plans[0][`${branch}_schedule`], disabled: false, onChange: () => {} })
+        assert.match(renderToStaticMarkup(controls), /Chế độ quét/)
+    }
 })

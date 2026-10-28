@@ -15,6 +15,11 @@ const labels: Record<string, string> = { grades: 'Khối lớp', subjects: 'Môn
 const intervals = [60, 300, 600, 900, 1200, 1800, 3600]
 const intervalLabel = (seconds: number) => seconds === 3600 ? '1 tiếng' : `${seconds / 60} phút`
 
+export function scanModeLabel(stream: string, branch: 'fast' | 'thorough') {
+    return stream === 'files' ? branch === 'fast' ? 'LIGHT' : 'DEEP — SHA-256'
+        : branch === 'fast' ? 'Incremental' : 'Full metadata + IDS'
+}
+
 export function calendarDefaults(stream: string, branch: 'fast' | 'thorough'): CalendarPlan {
     return { enabled: false, cadence: branch === 'fast' ? 'DAILY' : stream === 'files' ? 'MONTHLY' : 'WEEKLY',
         hour: branch === 'fast' ? 2 : 3, minute: 0, weekday: 6, month_day: 1,
@@ -139,15 +144,22 @@ export function ReconciliationSchedule() {
                             title="Áp dụng lịch phút/giờ cũ, giữ nguyên lịch nâng cao" onClick={() => void submitAll()}>Lưu chung</button></td>
                     </tr>
                     {plans.map(plan => <Fragment key={plan.stream}>
-                        <tr data-audit-stream={plan.stream}>
-                            <td>{labels[plan.stream]}</td>
+                        <tr data-audit-stream={plan.stream} className={plan.stream === 'subjects' ? styles.scheduleSubject
+                            : plan.stream === 'files' ? styles.scheduleFiles : undefined}>
+                            <td>{plan.stream === 'subjects' || plan.stream === 'files'
+                                ? <strong className={styles.scheduleStreamName}>{labels[plan.stream]}</strong> : labels[plan.stream]}</td>
                             <td>{plan.calendar_configured ? 'Theo từng lịch' : <input aria-label={`Tự động ${labels[plan.stream]}`} type="checkbox"
                                 checked={plan.enabled} disabled={busy !== null} onChange={event => change(plan.stream, { enabled: event.target.checked })} />}</td>
                             <td>{plan.calendar_configured ? 'Ngày / tuần / tháng' : <select className={styles.select} aria-label={`Chu kỳ ${labels[plan.stream]}`}
                                 value={plan.interval_seconds} disabled={busy !== null} onChange={event => change(plan.stream, { interval_seconds: Number(event.target.value) })}>
                                 {intervals.map(seconds => <option key={seconds} value={seconds}>{intervalLabel(seconds)}</option>)}
                             </select>}</td>
-                            <td>{plan.calendar_configured ? 'FAST + THOROUGH' : <select className={styles.select} aria-label={`Chế độ ${labels[plan.stream]}`}
+                            <td>{plan.calendar_configured ? <div className={styles.scheduleModes} aria-label={`Chế độ ${labels[plan.stream]}`}>
+                                {(['fast', 'thorough'] as const).map(branch => <span key={branch}>
+                                    <strong>{scanModeLabel(plan.stream, branch)}</strong>
+                                    <small>{branch === 'fast' ? 'FAST' : 'THOROUGH'}: {plan[branch === 'fast' ? 'fast_schedule' : 'thorough_schedule']?.enabled ? 'Bật' : 'Tắt'}</small>
+                                </span>)}
+                            </div> : <select className={styles.select} aria-label={`Chế độ ${labels[plan.stream]}`}
                                 value={plan.mode} disabled={busy !== null} onChange={event => change(plan.stream, { mode: event.target.value as Plan['mode'] })}>
                                 <option value="INCREMENTAL">Incremental / LIGHT</option><option value="FULL">Full metadata / DEEP SHA-256</option>
                             </select>}</td>
@@ -156,7 +168,8 @@ export function ReconciliationSchedule() {
                                 onChange={event => change(plan.stream, { repair: event.target.checked })} />}</td>
                             <td><button className={styles.primaryButton} disabled={busy !== null} onClick={() => void submit(plan)}>Lưu</button></td>
                         </tr>
-                        <tr><td colSpan={6}><details>
+                        <tr className={plan.stream === 'subjects' ? styles.scheduleSubject : plan.stream === 'files' ? styles.scheduleFiles : undefined}>
+                            <td colSpan={6}><details>
                             <summary>Cấu hình nâng cao — {labels[plan.stream]}</summary>
                             <div className={styles.scheduleAdvanced}>
                                 {(['fast', 'thorough'] as const).map(branch => <CalendarControls key={branch} stream={plan.stream} branch={branch}
@@ -178,9 +191,11 @@ export function CalendarControls({ stream, branch, value, disabled, onChange }: 
     const prefix = `${labels[stream]} ${branch === 'fast' ? 'FAST' : 'THOROUGH'}`
     const time = `${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}`
     return <fieldset className={styles.schedulePlan} disabled={disabled}>
-        <legend>{branch === 'fast' ? 'Thường xuyên' : 'Toàn diện'} ({stream === 'files'
-            ? branch === 'fast' ? 'LIGHT — chỉ metadata/kích thước' : 'DEEP — SHA-256'
-            : branch === 'fast' ? 'Metadata Incremental' : 'Metadata Full + IDS'})</legend>
+        <legend>{branch === 'fast' ? 'Thường xuyên (FAST)' : 'Toàn diện (THOROUGH)'}</legend>
+        <label>Chế độ quét <output aria-label={`Chế độ quét ${prefix}`} title={stream === 'files' && branch === 'fast'
+            ? 'Chỉ kiểm metadata/kích thước; chưa xác minh SHA-256' : undefined}>
+            <strong>{scanModeLabel(stream, branch)}</strong>
+        </output></label>
         <label><input type="checkbox" aria-label={`Bật ${prefix}`} checked={value.enabled}
             onChange={event => onChange({ enabled: event.target.checked })} /> Bật lịch</label>
         <label>Chu kỳ <select className={styles.select} aria-label={`Chu kỳ ${prefix}`} value={value.cadence}
