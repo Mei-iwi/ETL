@@ -229,7 +229,7 @@ python -m alembic current
 python -m data_sync_etl.adapters.mongo.schema --check
 ```
 
-Nâng DB có dữ liệu cần chủ DB sao lưu, kiểm tra lịch sử migration và dừng API/worker trước khi phê duyệt. MASTER hiện có revision media `0018`; dùng `head` theo checkout, không tự `stamp` để bỏ qua lỗi.
+Nâng DB có dữ liệu cần chủ DB sao lưu, kiểm tra lịch sử migration và dừng API/worker trước khi phê duyệt. MASTER cần revision `0019` cho lịch/queue đối soát (`0018` là revision media); dùng `head` theo checkout, không tự `stamp` để bỏ qua lỗi.
 
 **Chỉ cho ba DB local mới/trống**, dùng Compose ở gốc repo:
 
@@ -308,6 +308,39 @@ Mỗi dòng là **một terminal riêng** tại gốc repo. Mỗi terminal Pytho
 | Xác minh nguồn, nhập tham chiếu, tạo job | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
 | Trích xuất/OCR/ASR và hoàn thiện chỉ mục | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
 | Đối soát theo lịch đã lưu, đồng bộ đúng ID lệch | `python -m data_sync_etl.workers.reconciliation` |
+
+**Lệnh chạy liên tục cho cả 4 worker** — mỗi lệnh mở trong một terminal riêng, đã kích hoạt venv và đứng tại gốc repo:
+
+```bash
+# Terminal worker 1: lịch đồng bộ tương thích, đối soát trước khi sửa ID lệch.
+python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-1
+```
+
+```bash
+# Terminal worker 2: phát hiện phiên bản nguồn, xác minh tệp và tạo job xử lý.
+python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1
+```
+
+```bash
+# Terminal worker 3: OCR, Office, ASR MP3/MP4 và hoàn thiện chỉ mục.
+python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1
+```
+
+```bash
+# Terminal worker 4: lịch đối soát từng luồng lưu trên server và queue audit.
+python -m data_sync_etl.workers.reconciliation
+```
+
+Để kiểm tra một lượt rồi thoát, dùng `--once`. Các lệnh này vẫn thực hiện công việc thật theo cấu hình, không phải dry-run:
+
+```bash
+python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-check --once
+python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-check --once
+python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-check --once
+python -m data_sync_etl.workers.reconciliation --once
+```
+
+Worker đối soát không nhận `--worker-id`; ba worker CLI cần ID riêng nếu chạy nhiều tiến trình. Muốn xem tham số mà chưa kết nối DB, thêm `--help` vào lệnh tương ứng. Worker chạy không có nghĩa lịch đã bật: chọn luồng/chu kỳ và **Lưu** trên giao diện. Chạy `--once` có thể trả IDLE nếu chưa đến lịch hoặc queue đang rỗng. Dừng worker local bằng Ctrl+C; khởi động lại sau khi đổi code/env.
 
 ```bash
 curl -fsS http://127.0.0.1:8000/health
@@ -682,6 +715,21 @@ APP=(docker compose --env-file docker.env -f deploy/compose.app.yml -f deploy/co
 "${APP[@]}" --profile workers ps
 ```
 
+**Quản lý riêng worker Docker**, dùng cùng mảng APP và các overlay đã chọn ở trên:
+
+```bash
+# Khởi động/recreate đủ 4 worker sau khi đã build image và cấu hình DB/model.
+"${APP[@]}" --profile workers up -d --no-build master-sync-worker source-file-worker ocr-worker reconciliation-worker
+# Chỉ khởi động worker đối soát:
+"${APP[@]}" --profile workers up -d --no-build reconciliation-worker
+# Theo dõi log; Ctrl+C chỉ thoát xem log, container vẫn chạy.
+"${APP[@]}" --profile workers logs -f --tail 100 master-sync-worker source-file-worker ocr-worker reconciliation-worker
+# Dừng riêng worker đối soát, giữ API và các worker khác:
+"${APP[@]}" --profile workers stop reconciliation-worker
+```
+
+Các tên service đúng là `master-sync-worker`, `source-file-worker`, `ocr-worker`, `reconciliation-worker`. Hai launcher Start với `-Workers`/`--workers` đã chạy đủ bốn service này. Dùng `-Drive`/`ETL_WITH_DRIVE=true` khi nguồn là Drive, kể cả khi chỉ chạy đối soát tệp. Build chỉ tạo image; cần Start/`up -d` để chạy code mới.
+
 Không dùng đồng thời overlay source-neon và remote-db. Bộ tùy chỉnh dùng cùng APP cho build/start/stop, tránh mất mount/env.
 
 Đồng bộ baseline từ UI như2.7. CLI trong container cần nạp runtime secret: `docker exec python ...` đơn thuần không kế thừa DSN mà tiến trình API đã tự nạp:
@@ -693,6 +741,34 @@ app_cli() {
 app_cli sync-master --full --stream all
 app_cli source-file-precheck
 ```
+
+Chạy một lượt bằng đúng container worker, nạp kết nối và kiểm tra boundary như lúc khởi động service:
+
+```bash
+worker_once() {
+  local worker_service="$1"
+  shift
+  "${APP[@]}" run --rm --no-deps -T --entrypoint python "$worker_service" - "$@" <<'PY'
+import os, sys
+sys.path.insert(0, '/opt/etl')
+from runtime import verify_runtime
+verify_runtime(os.environ['ETL_SERVICE_ROLE'])
+if sys.argv[1] == 'reconciliation':
+    from data_sync_etl.workers.reconciliation import main
+    sys.argv = ['reconciliation', '--once']
+    main()
+else:
+    from data_sync_etl.cli.main import main
+    raise SystemExit(main())
+PY
+}
+worker_once master-sync-worker run-master-sync-worker --worker-id master-sync-check --once
+worker_once source-file-worker run-source-file-worker --worker-id source-file-check --once
+worker_once ocr-worker run-ocr-worker --worker-id ocr-check --once
+worker_once reconciliation-worker reconciliation
+```
+
+Các lệnh một lượt có thể chạy đồng bộ/xử lý thật. Chỉ cần bấm **Quét luồng này** trên giao diện nếu service đối soát đã chạy liên tục.
 
 **SOURCE demo mới/rỗng**, chỉ nếu bạn chọn dữ liệu thử và đã khởi tạo schema: mount script/fixture/owner secret vào container setup riêng, không cấp owner cho app. `REPO_HOST` dùng Windows Git Bash; Linux dùng `export REPO_HOST="$PWD"`:
 
@@ -883,3 +959,20 @@ Hai nút **Đồng bộ Full** và **Chạy Incremental** thủ công vẫn ở 
 `AUTH_MODE=master_users` vẫn kiểm tra độ mới. Một lần sửa vài user không làm mới bằng chứng cho toàn bộ users; chỉ audit users hoàn tất, so sánh cả hash/role riêng tư và sửa hết ID lệch mới được sử dụng làm bằng chứng. Lịch users 15 phút không đáp ứng `AUTH_MASTER_FRESHNESS_SECONDS=120`: cần giữ lịch tương thích users ngắn để audit thường xuyên, hoặc chủ hệ thống phê duyệt chính sách freshness phù hợp; không tự nới cờ để bỏ kiểm tra.
 
 Các bảng tải dữ liệu theo trang; tổng số trang tệp được yêu cầu khi chuyển trang/bộ lọc, không đếm lại ở mỗi lần polling. Polling quản trị dừng khi tab ẩn. Các báo cáo [RECONCILIATION_TEST_RESULTS.json](RECONCILIATION_TEST_RESULTS.json) và [RECONCILIATION_BENCHMARK.json](RECONCILIATION_BENCHMARK.json) là bằng chứng của phiên bản trước; không dùng để kết luận hiệu năng live của thay đổi mới.
+
+### Worker từ điển tùy chọn: chỉ thử nghiệm offline
+
+CLI `concepts run-worker` dùng fixture tổng hợp, không nằm trong bốn service runtime ở trên. Giữ các cờ từ điển chưa nghiệm thu ở OFF. Nếu cần thử riêng, chọn thư mục mới/rỗng và dùng venv đã cài dependencies:
+
+```bash
+python -m data_sync_etl.cli.concepts example --root "$ETL_HOME/concept-offline-example"
+python -m data_sync_etl.cli.concepts run-worker --root "$ETL_HOME/concept-offline-example" --fixture "$ETL_HOME/concept-offline-example/example-corpus.json" --apply --loop
+```
+
+Lệnh `example` chỉ chạy một lần, từ chối ghi đè fixture có sẵn. Terminal khác kiểm tra bằng:
+
+```bash
+python -m data_sync_etl.cli.concepts health --root "$ETL_HOME/concept-offline-example"
+```
+
+Bỏ `--loop` để chạy một tick; bỏ `--apply` ở `run-worker` để xem dry-run. Chế độ `--live` hiện trả `BLOCKED_LIVE`; ví dụ offline không chứng minh từ điển live đã sẵn sàng.
