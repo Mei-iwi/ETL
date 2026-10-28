@@ -129,6 +129,12 @@ class ScheduledAudit:
             run.target_count = checkpoint.get('records_scanned', 0)
             run.matched_count = checkpoint.get('matched_count', 0)
             run.mismatched_count = checkpoint.get('mismatched_count', 0)
+            if checkpoint.get('manual_full_scan'):
+                run.source_count += checkpoint.get('cycle_records_scanned', 0)
+                run.target_count += checkpoint.get('cycle_records_scanned', 0)
+                run.matched_count += checkpoint.get('cycle_matched_count', 0)
+                run.mismatched_count += checkpoint.get('cycle_mismatched_count', 0)
+                run.summary_meta['execution_time_ms'] = checkpoint.get('execution_time_ms', 0) + checkpoint.get('cycle_execution_time_ms', 0)
             if file_state:
                 version_id, values = file_state
                 current = repo.session.get(ResourceVersion, version_id)

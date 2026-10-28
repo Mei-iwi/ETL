@@ -93,6 +93,7 @@ function render(overrides = {}) {
             getDiscrepancies: async () => ({ items: [], total: 0, total_pages: 0 }),
         }
         if (name.includes('reconciliationDisplay')) return {
+            auditJobInProgress: job => ['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(job.status),
             auditSummary: () => ({ unverified: 0, hashPending: 0, onlyHashPending: false, observedBytes: null, observedFiles: 0 }),
             formatAuditBytes: () => '—', pendingHash: () => false,
         }

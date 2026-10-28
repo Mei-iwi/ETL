@@ -221,7 +221,7 @@ def get_latest_reconciliation_report(
             meta = run.summary_meta or {}
             scanned = meta.get('records_scanned')
             if run.stream_name == 'files' and meta.get('audit_type') in ('LIGHT', 'DEEP') and type(scanned) is int and scanned >= 0:
-                return scanned  # Expected file versions examined, also for earlier queued runs.
+                return scanned + (meta.get('cycle_records_scanned', 0) if meta.get('manual_full_scan') else 0)
             return run.source_count
 
         total_source = sum(source_count(r) for r in latest_runs)

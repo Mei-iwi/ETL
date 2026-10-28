@@ -142,7 +142,8 @@ class AuditSchedule:
                             continue
                     slot = int(stamp.timestamp() // interval)
                     decisions.append((kind, stream, f'{kind}:{stream}:{interval}:{slot}', None, False, False))
-        return list(dict.fromkeys(self._enqueue(queue, stamp, *decision) for decision in decisions))
+        resumed = queue.resume_full_files()
+        return list(dict.fromkeys([*resumed, *(self._enqueue(queue, stamp, *decision) for decision in decisions)]))
 
     def _enqueue(self, queue, stamp, kind, stream, key, mode, repair, calendar):
         with self.uow() as repo:

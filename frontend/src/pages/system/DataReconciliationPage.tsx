@@ -12,7 +12,7 @@ import type {
 } from '../../types/reconciliation'
 import styles from './DataReconciliationPage.module.css'
 import { ReconciliationSchedule } from './ReconciliationSchedule'
-import { auditSummary, formatAuditBytes as formatBytes, pendingHash } from './reconciliationDisplay'
+import { auditJobInProgress, auditSummary, formatAuditBytes as formatBytes, pendingHash } from './reconciliationDisplay'
 import { startVisiblePolling } from './visiblePolling'
 
 function formatDate(dateStr?: string | null): string {
@@ -113,12 +113,12 @@ export function DataReconciliationPage() {
             ])
             if (signal?.aborted || revision !== loadRevision.current) return
             setReport(latest)
-            const active = queued.items.some(row => ['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(row.status))
+            const active = queued.items.some(auditJobInProgress)
                 || latest.stream_reports.some(row => row.status === 'RUNNING')
             running.current = active || posting.current
             setReconciling(active || posting.current)
             const completed = startedRun.current.map(id => queued.items.find(row => row.job_id === id))
-            if (completed.length && completed.every(row => row && !['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(row.status))) {
+            if (completed.length && completed.every(row => row && !auditJobInProgress(row))) {
                 startedRun.current = []
                 setNotice({ title: 'Kết quả đối soát', message: completed.some(row => row?.status === 'FAILED' || row?.status === 'BLOCKED')
                     ? 'Đối soát gặp lỗi hoặc bị chặn. Xem kết quả và lý do trước khi chạy lại.'
