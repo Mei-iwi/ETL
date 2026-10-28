@@ -42,15 +42,19 @@ class MasterSync:
                 event(stage='mongo_metadata_validation', action='SKIP_PG_SHARED_METADATA_VALIDATION')
                 return result
             for name in result:
-                if name in ('users', 'resources') and self.metadata_projection is not None:
-                    try:
-                        self.last_metadata_report.update(self.metadata_projection.run(name) or {})
-                    except Exception:
-                        self.last_metadata_report[name] = {'status': 'FAILED', 'reason': 'RECONCILE_REQUIRED',
-                                                           'master_state': 'COMMITTED'}
-                        event(stage='master_metadata_projection', stream=name,
-                              action='FAILED_RECONCILE_REQUIRED')
+                self._project_metadata(name)
             return result
+
+    def _project_metadata(self, stream):
+        if (self.skip_shared_metadata_validation or stream not in ('users', 'resources')
+                or self.metadata_projection is None):
+            return
+        try:
+            self.last_metadata_report.update(self.metadata_projection.run(stream) or {})
+        except Exception:
+            self.last_metadata_report[stream] = {'status': 'FAILED', 'reason': 'RECONCILE_REQUIRED',
+                                               'master_state': 'COMMITTED'}
+            event(stage='master_metadata_projection', stream=stream, action='FAILED_RECONCILE_REQUIRED')
 
     def status(self, limit=20):
         with self.uow() as repo:
@@ -80,7 +84,10 @@ class MasterSync:
         with self.uow.sync_lock() as acquired:
             if not acquired:
                 raise SyncAlreadyRunning('Master data sync is already running')
-            return self._stream(stream, False, record_ids=ids, fence=fence)
+            result = self._stream(stream, False, record_ids=ids, fence=fence)
+        # Keep the existing projection policy; never perform Mongo RPC under the PG lock.
+        self._project_metadata(stream)
+        return result
 
     def _stream(self, stream, full, record_ids=None, fence=None):
         run_id, started = new_id(), monotonic()

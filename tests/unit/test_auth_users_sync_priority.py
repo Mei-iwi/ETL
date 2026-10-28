@@ -8,8 +8,8 @@ from data_sync_etl.workers.master_sync import MasterSyncWorker
 
 @pytest.mark.parametrize('budget,streams,expected', [
     (120, ['resources', 'users', 'grades', 'subjects'], ['users', 'resources', 'users', 'grades', 'subjects']),
-    (None, ['resources', 'users', 'grades'], ['resources', 'users', 'grades']),
-    (120, ['resources', 'grades'], ['resources', 'grades']),
+    (None, ['resources', 'users', 'grades'], ['grades', 'users', 'resources']),
+    (120, ['resources', 'grades'], ['grades', 'resources']),
     (120, ['users'], ['users']),
 ])
 def test_users_refresh_does_not_wait_for_the_whole_slow_cycle(monkeypatch, budget, streams, expected):

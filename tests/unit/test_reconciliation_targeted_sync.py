@@ -64,6 +64,30 @@ def test_bounded_metadata_job_repairs_only_mismatch(container, monkeypatch):
         assert repo.get('subjects', row['id'])['subject_name'] != 'stale'
 
 
+def test_repair_cannot_claim_success_when_target_changes_after_write(container, monkeypatch):
+    from data_sync_etl.db.models import SyncReconciliationDiscrepancy
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        row = repo.find('subjects', limit=1)[0]
+        repo.update('subjects', row['id'], {'subject_name': 'stale'})
+    original = container.sync.run_selected
+    def repair(*args, **kwargs):
+        result = original(*args, **kwargs)
+        with container.uow() as repo:
+            repo.update('subjects', row['id'], {'subject_name': 'changed-again'})
+        return result
+    monkeypatch.setattr(container.sync, 'run_selected', repair)
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    job_id = audit.queue.enqueue('METADATA', 'subjects', mode='FULL', repair=True)
+    audit.once(job_id)
+    with container.uow() as repo:
+        job = repo.session.get(Job, job_id)
+        assert job.status == 'RETRY_WAIT'
+        assert job.checkpoint['repair_pending'] == [row['id']]
+        assert all(row.resolution_status == 'UNRESOLVED' for row in repo.session.scalars(
+            select(SyncReconciliationDiscrepancy).where(SyncReconciliationDiscrepancy.run_id == job_id)))
+
+
 def test_users_freshness_requires_complete_private_audit_not_partial_repair(container):
     from datetime import timedelta
 
@@ -117,6 +141,56 @@ def test_private_user_delta_includes_role_changes_without_exposing_password(tmp_
         assert 'fixture-private-hash' not in str(serialize_json_value(pages))
     finally:
         engine.dispose()
+
+
+def test_users_delta_does_not_assert_authoritative_auth_freshness(container):
+    container.sync.run(full=True)
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    first = audit.queue.enqueue('METADATA', 'users', mode='FULL', repair=True)
+    audit.once(first)
+    second = audit.queue.enqueue('METADATA', 'users', mode='INCREMENTAL', repair=True)
+    audit.once(second)
+    with container.uow() as repo:
+        assert repo.session.get(Job, first).checkpoint['auth_verified'] is True
+        delta = repo.session.get(Job, second)
+        assert delta.status == 'COMPLETED'
+        assert delta.checkpoint['since'] is not None
+        assert not delta.checkpoint.get('auth_verified', False)
+
+
+def test_targeted_repair_keeps_metadata_projection_outside_sync_lock(container):
+    from types import SimpleNamespace
+    container.sync.run(full=True)
+    projected = []
+    def project(stream):
+        with container.uow.sync_lock() as acquired:
+            assert acquired
+        projected.append(stream)
+        return {stream: {'status': 'COMPLETED'}}
+    container.sync.metadata_projection = SimpleNamespace(run=project)
+    container.sync.skip_shared_metadata_validation = False
+    container.sync.run_selected('users', ['user-1'])
+    assert projected == ['users']
+    assert container.sync.last_metadata_report['users']['status'] == 'COMPLETED'
+
+
+def test_source_disappearing_after_repair_is_not_marked_synced(container, monkeypatch):
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        row = repo.find('subjects', limit=1)[0]
+        repo.update('subjects', row['id'], {'subject_name': 'stale'})
+    original = container.sync.run_selected
+    def repair(*args, **kwargs):
+        result = original(*args, **kwargs)
+        monkeypatch.setattr(container.sync.source, 'selected_batches', lambda *args: iter(()))
+        return result
+    monkeypatch.setattr(container.sync, 'run_selected', repair)
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    job = audit.queue.enqueue('METADATA', 'subjects', mode='FULL', repair=True)
+    audit.once(job)
+    with container.uow() as repo:
+        assert repo.session.get(Job, job).status == 'RETRY_WAIT'
+        assert repo.session.get(Job, job).checkpoint['repair_pending'] == [row['id']]
 
 
 def test_disable_schedule_cancels_only_its_pending_work(container):

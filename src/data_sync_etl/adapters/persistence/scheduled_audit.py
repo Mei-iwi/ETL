@@ -31,6 +31,7 @@ from data_sync_etl.domain.core import DomainError, new_id, now
 from data_sync_etl.domain.reconciliation import (
     METADATA_FIELDS,
     STREAM_TABLE_MAPPING,
+    _comparable,
     metadata_differences,
     observe_file_result,
     serialize_json_value,
@@ -351,7 +352,7 @@ class ScheduledAudit:
             pages.close()  # Release the read-only SOURCE snapshot at each budget boundary.
         if complete:
             checkpoint.update(last_id=None, watermark_next=checkpoint['scan_started'])
-            if (stream == 'users' and checkpoint.get('repair_requested') and not checkpoint['not_verified_count']
+            if (stream == 'users' and since is None and checkpoint.get('repair_requested') and not checkpoint['not_verified_count']
                     and checkpoint['auth_scope_complete']):
                 checkpoint['auth_verified'] = True
         checkpoint['coverage_status'] = 'DELTA_VISITED' if complete else 'COVERAGE_BEHIND'
@@ -365,6 +366,37 @@ class ScheduledAudit:
             raise DomainError('AUDIT_REPAIR_WORKER_REQUIRED')
         self.sync.run_selected(claim['stream_name'], ids,
             fence=lambda session: self.queue.owned(session, claim))
+        # A successful write is not proof: SOURCE or ownership may have changed.
+        stream = claim['stream_name']
+        seen = set()
+        for batch in self.sync.source.selected_batches(stream, ids, self.settings.reconciliation_audit_batch_size):
+            with self.engine.uow() as repo:
+                self.queue.owned(repo.session, claim)
+                for aggregate in batch:
+                    record_id = aggregate.cursor.id
+                    model = MODELS[STREAM_TABLE_MAPPING[stream]['target_table']]
+                    # Repository DTOs deliberately omit secrets. Read private auth
+                    # columns here only for comparison; never serialize this row.
+                    target = repo.session.execute(select(*model.__table__.columns).where(
+                        model.id == record_id)).mappings().one_or_none()
+                    if record_id not in ids or not target or target.get('source_origin') == 'LOCAL':
+                        raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
+                    source = aggregate.values
+                    if metadata_differences(stream, source, target) or any(
+                            _comparable(key, source[key]) != _comparable(key, target.get(key))
+                            for key in AUTH_FIELDS if key in source):
+                        raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
+                    if stream == 'resources':
+                        for table, desired in [('resource_subjects', aggregate.subjects),
+                                               ('resource_grade_levels', aggregate.grades)]:
+                            expected = [row.model_dump(exclude={'updated_at'}) for row in desired]
+                            actual = repo.find(table, {'resource_id': record_id})
+                            if sorted(repr(sorted(row.items())) for row in expected) != sorted(
+                                    repr(sorted(row.items())) for row in actual):
+                                raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
+                    seen.add(record_id)
+        if seen != set(ids):
+            raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
         with self.engine.uow() as repo:
             self.queue.owned(repo.session, claim)
             rows = repo.session.scalars(select(Discrepancy).where(
