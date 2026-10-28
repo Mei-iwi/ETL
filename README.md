@@ -931,13 +931,12 @@ Docker dùng `"${APP[@]}" run --rm --no-deps api semantic-schema`/semantic-statu
 | Docker vẫn bản cũ | Build đúng tag/env/overlay, recreate, Ctrl+F5; không chỉ docker restart và không xóa volume |
 | Linux permission denied | UID10001 đọc secret/model; frontend đọc proxy key qua group10001; không chmod777 private |
 
-Migration/seed/các lệnh --apply sẽ ghi DB khi bạn chạy: chỉ dùng đúng môi trường được phép. Không chạy full suite trên DB Dev/Production để kiểm tra cài đặt. Hướng dẫn media/API: [MEDIA_PIPELINE.md](MEDIA_PIPELINE.md); bằng chứng/giới hạn: [MEDIA_ACCEPTANCE.md](MEDIA_ACCEPTANCE.md). LAN/HTTPS cần [TLS/reverse proxy](deploy/README.md), không bật localhost bypass trên LAN.
+Migration/seed/các lệnh --apply sẽ ghi DB khi bạn chạy: chỉ dùng đúng môi trường được phép. Không chạy full suite trên DB Dev/Production để kiểm tra cài đặt. LAN/HTTPS cần [TLS/reverse proxy](deploy/README.md), không bật localhost bypass trên LAN.
 
 ## Đối soát độc lập
 
 Chạy nhiều worker có giới hạn (mặc định 1, tối đa 2 claim import/audit), khóa theo
-resource/stream, kiểm thử PostgreSQL và hướng dẫn scale/rollback:
-[BOUNDED_WORKERS.md](BOUNDED_WORKERS.md). Chưa coi triển khai là ACCEPT khi còn
+resource/stream. Chưa coi triển khai là ACCEPT khi còn
 baseline failure hoặc thiếu benchmark toàn pipeline; không tự tăng số worker mặc định.
 
 Đối soát dùng các bảng audit có từ migration `0019`; không tự migrate DB đang có dữ liệu. Local mở terminal thứ sáu, kích hoạt venv rồi chạy:
@@ -965,7 +964,7 @@ Hai nút **Đồng bộ Full** và **Chạy Incremental** thủ công vẫn ở 
 
 `AUTH_MODE=master_users` vẫn kiểm tra độ mới. Auto Sync users phải bật với chu kỳ ngắn hơn giới hạn freshness và Master Sync Worker phải chạy; lịch audit ngày/tuần không thay trách nhiệm này. Partial repair hoặc audit delta không tự làm mới bằng chứng auth toàn diện. Audit Full users chỉ được dùng khi xác minh đầy đủ trường auth và tập ID SOURCE/MASTER; không tự nới freshness để bỏ kiểm tra.
 
-Các bảng tải dữ liệu theo trang; tổng số trang tệp được yêu cầu khi chuyển trang/bộ lọc, không đếm lại ở mỗi lần polling. Polling quản trị dừng khi tab ẩn. Các báo cáo [RECONCILIATION_TEST_RESULTS.json](RECONCILIATION_TEST_RESULTS.json) và [RECONCILIATION_BENCHMARK.json](RECONCILIATION_BENCHMARK.json) là bằng chứng của phiên bản trước; không dùng để kết luận hiệu năng live của thay đổi mới.
+Các bảng tải dữ liệu theo trang; tổng số trang tệp được yêu cầu khi chuyển trang/bộ lọc, không đếm lại ở mỗi lần polling. Polling quản trị dừng khi tab ẩn.
 
 ### Worker từ điển tùy chọn: chỉ thử nghiệm offline
 

@@ -2,7 +2,8 @@
 
 TEST_DATABASE_URL must pass scripts.verify.validate_test_url. No application .env
 is loaded. Requires dev dependencies; psutil supplies optional CPU/RSS sampling.
-Run: python -m scripts.benchmark_bounded_workers --output BOUNDED_WORKERS_BENCHMARK.json
+Create artifacts/bounded-workers/ first.
+Run: python -m scripts.benchmark_bounded_workers --output artifacts/bounded-workers/benchmark.json
 """
 import argparse
 import hashlib
