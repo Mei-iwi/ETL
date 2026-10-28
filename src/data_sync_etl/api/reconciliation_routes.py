@@ -10,14 +10,13 @@ Các API:
 from __future__ import annotations
 
 import math
-from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 
 from data_sync_etl.adapters.persistence.audit_queue import utc
-from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit, identity
+from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit, recent_file_evidence
 from data_sync_etl.api.admin_access import require_local_admin
 from data_sync_etl.api.reconciliation_schemas import (
     AllAuditJobRequest,
@@ -84,18 +83,24 @@ def configure_audit_schedule(request: Request, stream: str, body: 'AuditSchedule
     from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
     container = request.app.state.container
     try:
-        AuditSchedule(container.uow, container.settings).configure(stream, body.model_dump())
-    except ValueError:
+        AuditSchedule(container.uow, container.settings).configure(stream, body.model_dump(exclude_unset=True))
+    except ValueError as error:
+        if str(error) == 'AUDIT_SCHEDULE_BUSY':
+            raise HTTPException(409, 'Lịch đang được cập nhật; vui lòng thử lưu lại.') from None
         raise HTTPException(422, 'INVALID_AUDIT_SCOPE') from None
     return {'status': 'CONFIGURED', 'worker_required': True}
 
 
 @router.get('/audit-jobs')
-def audit_jobs(request: Request, after: str | None = None, size: int = Query(20, ge=1, le=100)):
+def audit_jobs(request: Request, after: str | None = None, size: int = Query(20, ge=1, le=100),
+               stream: str | None = None, newest: bool = False):
     with request.app.state.container.uow() as repo:
-        query = select(ReconciliationAuditJob).order_by(ReconciliationAuditJob.id).limit(size + 1)
+        query = select(ReconciliationAuditJob).where(ReconciliationAuditJob.status != 'CONFIGURED')
+        if stream:
+            query = query.where(ReconciliationAuditJob.stream_name == stream)
+        query = query.order_by(ReconciliationAuditJob.id.desc() if newest else ReconciliationAuditJob.id).limit(size + 1)
         if after:
-            query = query.where(ReconciliationAuditJob.id > after)
+            query = query.where(ReconciliationAuditJob.id < after if newest else ReconciliationAuditJob.id > after)
         rows = list(repo.session.scalars(query))
         return {'items': [{'job_id': r.id, 'audit_type': r.audit_type, 'stream': r.stream_name,
             'status': r.status, 'error_code': r.error_code, 'progress': r.checkpoint,
@@ -117,11 +122,8 @@ def file_evidence(request: Request, version_id: str):
             return {'resource_version_id': version_id, 'status': 'NOT_VERIFIED'}
         version = repo.session.get(ResourceVersion, version_id)
         resource = repo.session.get(MasterLearningResource, version.resource_id) if version else None
-        recent = bool(version and resource and row.last_verified_at
-            and utc(row.last_verified_at) >= now() - timedelta(
-                days=request.app.state.container.settings.reconciliation_deep_coverage_days)
-            and row.observed_identity == identity(version, resource.source_origin)
-            and row.last_verified_hash == version.source_hash)
+        recent = bool(resource and recent_file_evidence(row, version, resource.source_origin,
+            request.app.state.container.settings))
         stale = row.status == 'SYNCED' and not recent
         return {'resource_version_id': version_id, 'status': 'NOT_VERIFIED' if stale else row.status,
             'reason_code': 'AUDIT_EVIDENCE_STALE' if stale else row.reason_code,
@@ -215,7 +217,14 @@ def get_latest_reconciliation_report(
                 "stream_reports": [],
             }
 
-        total_source = sum(r.source_count for r in latest_runs)
+        def source_count(run):
+            meta = run.summary_meta or {}
+            scanned = meta.get('records_scanned')
+            if run.stream_name == 'files' and meta.get('audit_type') in ('LIGHT', 'DEEP') and type(scanned) is int and scanned >= 0:
+                return scanned  # Expected file versions examined, also for earlier queued runs.
+            return run.source_count
+
+        total_source = sum(source_count(r) for r in latest_runs)
         total_target = sum(r.target_count for r in latest_runs)
         total_matched = sum(r.matched_count for r in latest_runs)
         total_mismatched = sum(r.mismatched_count for r in latest_runs)
@@ -239,7 +248,7 @@ def get_latest_reconciliation_report(
 
         stream_reports = []
         for r in latest_runs:
-            pop = max(1, max(r.source_count, r.target_count))
+            pop = max(1, max(source_count(r), r.target_count))
             match_pct = round((r.matched_count / pop) * 100, 2)
             meta = r.summary_meta or {}
             run_mode = meta.get("mode", "INCREMENTAL")
@@ -253,7 +262,7 @@ def get_latest_reconciliation_report(
                     execution_time_ms=run_exec_ms,
                     started_at=r.started_at.isoformat(),
                     finished_at=r.finished_at.isoformat() if r.finished_at else None,
-                    source_count=r.source_count,
+                    source_count=source_count(r),
                     target_count=r.target_count,
                     matched_count=r.matched_count,
                     mismatched_count=r.mismatched_count,

@@ -1,4 +1,5 @@
 from sqlalchemy import select
+import pytest
 
 from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
 from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
@@ -64,6 +65,63 @@ def test_bounded_metadata_job_repairs_only_mismatch(container, monkeypatch):
         assert repo.get('subjects', row['id'])['subject_name'] != 'stale'
 
 
+@pytest.mark.parametrize('repair_enabled', [False, True])
+@pytest.mark.parametrize('has_drift', [False, True])
+def test_scheduled_audit_repairs_only_drift_when_policy_allows(container, monkeypatch, repair_enabled, has_drift):
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        before = repo.get('sync_checkpoints', 'subjects')
+        subject = repo.find('subjects', limit=1)[0]
+        if has_drift:
+            repo.update('subjects', subject['id'], {'subject_name': '__audit_drift__'})
+    repaired = []
+    original = container.sync.run_selected
+    def repair(stream, ids, **kwargs):
+        assert stream == 'subjects'
+        repaired.extend(ids)
+        return original(stream, ids, **kwargs)
+    monkeypatch.setattr(container.sync, 'run_selected', repair)
+    schedule = AuditSchedule(container.uow, container.settings)
+    schedule.configure('subjects', dict(enabled=True, interval_seconds=60, mode='FULL', repair=repair_enabled))
+    jobs = schedule.tick()
+    assert schedule.tick() == jobs
+    assert len(jobs) == 1
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    assert audit.once(jobs[0])
+    assert repaired == ([subject['id']] if has_drift and repair_enabled else [])
+    with container.uow() as repo:
+        job = repo.session.get(Job, jobs[0])
+        assert job.status == 'COMPLETED'
+        assert job.checkpoint.get('repaired_count', 0) == int(has_drift and repair_enabled)
+        assert repo.get('sync_checkpoints', 'subjects') == before
+        assert repo.get('subjects', subject['id'])['subject_name'] == (
+            '__audit_drift__' if has_drift and not repair_enabled else subject['subject_name'])
+
+
+def test_repair_cannot_claim_success_when_target_changes_after_write(container, monkeypatch):
+    from data_sync_etl.db.models import SyncReconciliationDiscrepancy
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        row = repo.find('subjects', limit=1)[0]
+        repo.update('subjects', row['id'], {'subject_name': 'stale'})
+    original = container.sync.run_selected
+    def repair(*args, **kwargs):
+        result = original(*args, **kwargs)
+        with container.uow() as repo:
+            repo.update('subjects', row['id'], {'subject_name': 'changed-again'})
+        return result
+    monkeypatch.setattr(container.sync, 'run_selected', repair)
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    job_id = audit.queue.enqueue('METADATA', 'subjects', mode='FULL', repair=True)
+    audit.once(job_id)
+    with container.uow() as repo:
+        job = repo.session.get(Job, job_id)
+        assert job.status == 'RETRY_WAIT'
+        assert job.checkpoint['repair_pending'] == [row['id']]
+        assert all(row.resolution_status == 'UNRESOLVED' for row in repo.session.scalars(
+            select(SyncReconciliationDiscrepancy).where(SyncReconciliationDiscrepancy.run_id == job_id)))
+
+
 def test_users_freshness_requires_complete_private_audit_not_partial_repair(container):
     from datetime import timedelta
 
@@ -119,6 +177,95 @@ def test_private_user_delta_includes_role_changes_without_exposing_password(tmp_
         engine.dispose()
 
 
+def test_users_delta_does_not_assert_authoritative_auth_freshness(container):
+    container.sync.run(full=True)
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    first = audit.queue.enqueue('METADATA', 'users', mode='FULL', repair=True)
+    audit.once(first)
+    second = audit.queue.enqueue('METADATA', 'users', mode='INCREMENTAL', repair=True)
+    audit.once(second)
+    with container.uow() as repo:
+        assert repo.session.get(Job, first).checkpoint['auth_verified'] is True
+        delta = repo.session.get(Job, second)
+        assert delta.status == 'COMPLETED'
+        assert delta.checkpoint['since'] is not None
+        assert not delta.checkpoint.get('auth_verified', False)
+
+
+def test_targeted_repair_keeps_metadata_projection_outside_sync_lock(container):
+    from types import SimpleNamespace
+    container.sync.run(full=True)
+    projected = []
+    def project(stream):
+        with container.uow.sync_lock() as acquired:
+            assert acquired
+        projected.append(stream)
+        return {stream: {'status': 'COMPLETED'}}
+    container.sync.metadata_projection = SimpleNamespace(run=project)
+    container.sync.skip_shared_metadata_validation = False
+    container.sync.run_selected('users', ['user-1'])
+    assert projected == ['users']
+    assert container.sync.last_metadata_report['users']['status'] == 'COMPLETED'
+
+
+def test_source_disappearing_after_repair_is_not_marked_synced(container, monkeypatch):
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        row = repo.find('subjects', limit=1)[0]
+        repo.update('subjects', row['id'], {'subject_name': 'stale'})
+    original = container.sync.run_selected
+    def repair(*args, **kwargs):
+        result = original(*args, **kwargs)
+        monkeypatch.setattr(container.sync.source, 'selected_batches', lambda *args: iter(()))
+        return result
+    monkeypatch.setattr(container.sync, 'run_selected', repair)
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    job = audit.queue.enqueue('METADATA', 'subjects', mode='FULL', repair=True)
+    audit.once(job)
+    with container.uow() as repo:
+        assert repo.session.get(Job, job).status == 'RETRY_WAIT'
+        assert repo.session.get(Job, job).checkpoint['repair_pending'] == [row['id']]
+
+
+def test_full_users_audit_cannot_refresh_auth_for_source_missing_users(container):
+    from tests.unit.test_sync import change
+    container.sync.run(full=True)
+    with container.uow() as repo:
+        before = repo.count('master_users', {})
+    change(container, 'users', lambda rows: rows.pop())
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    job = audit.queue.enqueue('METADATA', 'users', mode='FULL', repair=True)
+    audit.once(job)
+    with container.uow() as repo:
+        checkpoint = repo.session.get(Job, job).checkpoint
+        assert not checkpoint.get('auth_verified', False)
+        assert checkpoint['auth_identity_complete'] is False
+        assert repo.count('master_users', {}) == before
+
+
+def test_full_users_identity_proof_resumes_across_bounded_jobs(container):
+    from tests.unit.test_sync import change
+    change(container, 'users', lambda rows: rows.append({**rows[0], 'id': 'auth-second',
+                                                       'email': 'auth-second@example.test'}))
+    container.sync.run(full=True)
+    container.settings.reconciliation_max_files_per_run = 1
+    audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
+    completed = False
+    for _ in range(10):
+        job = audit.queue.enqueue('METADATA', 'users', mode='FULL', repair=True)
+        audit.once(job)
+        with container.uow() as repo:
+            row = repo.session.get(Job, job)
+            if row.status == 'COMPLETED':
+                assert row.checkpoint['auth_identity_complete'] is True
+                assert row.checkpoint['auth_verified'] is True
+                completed = True
+                break
+            assert row.status == 'PARTIAL'
+            assert not row.checkpoint.get('auth_verified', False)
+    assert completed
+
+
 def test_disable_schedule_cancels_only_its_pending_work(container):
     schedule = AuditSchedule(container.uow, container.settings)
     values = dict(enabled=True, interval_seconds=900, mode='FULL', repair=True)
@@ -131,6 +278,25 @@ def test_disable_schedule_cancels_only_its_pending_work(container):
         assert repo.session.get(Job, manual).status == 'PENDING'
         scheduled = repo.session.scalar(select(Job).where(Job.job_key.startswith('configured:subjects:')))
         assert scheduled.status == 'CANCELLED'
+
+
+def test_configured_and_fallback_share_decisions_across_slots(container, monkeypatch):
+    from datetime import timedelta
+    from data_sync_etl.domain.core import now
+    container.settings.reconciliation_scheduler_enabled = True
+    schedule = AuditSchedule(container.uow, container.settings)
+    schedule.configure('subjects', dict(enabled=True, interval_seconds=60, mode='FULL', repair=True))
+    first = set(schedule.tick())
+    monkeypatch.setattr('data_sync_etl.adapters.persistence.audit_schedule.now', lambda: stamp)
+    stamp = now() + timedelta(days=2)
+    assert set(schedule.tick()) == first
+    with container.uow() as repo:
+        jobs = list(repo.session.scalars(select(Job).where(Job.status == 'PENDING')))
+        assert len(jobs) == 10
+        subject = [row for row in jobs if row.stream_name == 'subjects']
+        assert {row.audit_type for row in subject} == {'METADATA', 'IDS'}
+        assert next(row for row in subject if row.audit_type == 'METADATA').checkpoint['repair_requested']
+        assert {row.audit_type for row in jobs if row.stream_name == 'files'} == {'LIGHT', 'DEEP'}
 
 
 def test_legacy_ticks_reuse_retrying_audit_instead_of_flooding_queue(container, monkeypatch):

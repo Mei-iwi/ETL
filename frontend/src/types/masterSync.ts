@@ -66,6 +66,7 @@ export type SourceSyncFilesResponse = {
         last_error_code: string | null
         target_version_id: string | null
         processing_job_id: string | null
+        integrity?: { status: string; reason_code: string | null; recent_sha256_evidence: boolean } | null
     }>
     next_cursor: string | null
     file_sync_supported: boolean

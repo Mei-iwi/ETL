@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from data_sync_etl.domain.audit_calendar import DEFAULT_TIMEZONE
 
 
 class ReconcileTriggerRequest(BaseModel):
@@ -32,12 +35,42 @@ class AuditJobRequest(AllAuditJobRequest):
     stream: Literal['files', 'resources', 'subjects', 'grades', 'users'] = 'files'
 
 
+class CalendarAuditSchedule(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    enabled: bool = False
+    cadence: Literal['INTERVAL', 'DAILY', 'WEEKLY', 'MONTHLY'] = 'DAILY'
+    hour: int = Field(default=2, ge=0, le=23)
+    minute: int = Field(default=0, ge=0, le=59)
+    weekday: int = Field(default=6, ge=0, le=6)
+    month_day: int = Field(default=1, ge=1, le=28)
+    timezone: str = Field(default=DEFAULT_TIMEZONE, min_length=1, max_length=64)
+    interval_seconds: Literal[60, 300, 600, 900, 1200, 1800, 3600] = 1800
+    repair: bool = False
+
+    @model_validator(mode='after')
+    def valid_timezone(self):
+        try:
+            ZoneInfo(self.timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError('INVALID_AUDIT_TIMEZONE') from None
+        return self
+
+
 class AuditScheduleRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: bool = False
     interval_seconds: Literal[60, 300, 600, 900, 1200, 1800, 3600] = 1800
     mode: Literal['INCREMENTAL', 'FULL'] = 'INCREMENTAL'
     repair: bool = False
+    fast_schedule: CalendarAuditSchedule | None = None
+    thorough_schedule: CalendarAuditSchedule | None = None
+
+    @model_validator(mode='after')
+    def no_null_schedule(self):
+        if any(key in self.model_fields_set and getattr(self, key) is None
+               for key in ('fast_schedule', 'thorough_schedule')):
+            raise ValueError('INVALID_AUDIT_SCHEDULE')
+        return self
 
 
 class ReconciliationRunReport(BaseModel):

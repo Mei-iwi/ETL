@@ -3,7 +3,8 @@ import { NoticeDialog } from '../../components/NoticeDialog'
 import {
     getDiscrepancies,
     getLatestReconciliationReport,
-    triggerReconciliation,
+    queueAudit,
+    getAuditJobs,
 } from '../../services/reconciliationApi'
 import type {
     DiscrepancyItem,
@@ -12,6 +13,7 @@ import type {
 import styles from './DataReconciliationPage.module.css'
 import { ReconciliationSchedule } from './ReconciliationSchedule'
 import { auditSummary, formatAuditBytes as formatBytes, pendingHash } from './reconciliationDisplay'
+import { startVisiblePolling } from './visiblePolling'
 
 function formatDate(dateStr?: string | null): string {
     if (!dateStr) return '—'
@@ -86,7 +88,7 @@ export function DataReconciliationPage() {
     const [notice, setNotice] = useState<{ title: string; message: string } | null>(null)
     const running = useRef(false)
     const posting = useRef(false)
-    const startedRun = useRef<string | null>(null)
+    const startedRun = useRef<string[]>([])
     const loadRevision = useRef(0)
 
     // CHẾ ĐỘ CHẠY & PHẠM VI ĐỐI SOÁT
@@ -100,27 +102,27 @@ export function DataReconciliationPage() {
         onConfirm: () => void
     } | null>(null)
 
-    const loadData = useCallback(async () => {
+    const loadData = useCallback(async (signal?: AbortSignal) => {
         const revision = ++loadRevision.current
         setLoading(true)
         setError('')
         try {
             // Lấy báo cáo mới nhất trước để lấy run_id của từng stream
-            const latest = await getLatestReconciliationReport(selectedStream)
-            if (revision !== loadRevision.current) return
+            const [latest, queued] = await Promise.all([
+                getLatestReconciliationReport(selectedStream, signal), getAuditJobs(selectedStream, signal),
+            ])
+            if (signal?.aborted || revision !== loadRevision.current) return
             setReport(latest)
-            const active = latest.stream_reports.some(row => row.status === 'RUNNING')
+            const active = queued.items.some(row => ['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(row.status))
+                || latest.stream_reports.some(row => row.status === 'RUNNING')
             running.current = active || posting.current
             setReconciling(active || posting.current)
-            const completed = latest.stream_reports.find(row => row.run_id === startedRun.current && row.status !== 'RUNNING')
-            if (completed) {
-                startedRun.current = null
-                setNotice({ title: 'Kết quả đối soát', message: completed.summary_meta?.reason === 'RECONCILIATION_INTERRUPTED'
-                    ? 'Đối soát đã gián đoạn. Bấm Quét đối soát để ưu tiên phần chưa xử lý.'
-                    : completed.status === 'COMPLETED'
-                    ? 'Đã quét và xác minh xong kho tệp.'
-                    : completed.status === 'FAILED' ? 'Đối soát bị gián đoạn. Tiến độ đã được lưu; có thể chạy lại.'
-                    : 'Đã quét xong. Xem các tệp sai lệch hoặc chưa xác minh và lý do trong bảng chi tiết.' })
+            const completed = startedRun.current.map(id => queued.items.find(row => row.job_id === id))
+            if (completed.length && completed.every(row => row && !['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(row.status))) {
+                startedRun.current = []
+                setNotice({ title: 'Kết quả đối soát', message: completed.some(row => row?.status === 'FAILED' || row?.status === 'BLOCKED')
+                    ? 'Đối soát gặp lỗi hoặc bị chặn. Xem kết quả và lý do trước khi chạy lại.'
+                    : 'Lượt đối soát đã kết thúc. Xem các bản ghi sai lệch hoặc chưa xác minh; quét nhanh không xác minh SHA-256.' })
             }
 
             // Thu thập run_id của các stream trong báo cáo mới nhất
@@ -131,8 +133,8 @@ export function DataReconciliationPage() {
             // Chỉ lấy discrepancies thuộc các lần chạy mới nhất (lọc theo run_id)
             if (latestRunIds && latestRunIds.length > 0) {
                 const result = await getDiscrepancies({ latestOnly: true, stream: selectedStream,
-                    flag: selectedFlag, page, pageSize })
-                if (revision !== loadRevision.current) return
+                    flag: selectedFlag, page, pageSize }, signal)
+                if (signal?.aborted || revision !== loadRevision.current) return
                 setDiscrepancies(result.items)
                 setTotal(result.total)
                 setTotalPages(result.total_pages)
@@ -142,27 +144,16 @@ export function DataReconciliationPage() {
                 setTotalPages(0)
             }
         } catch (err) {
-            if (revision === loadRevision.current) setError(err instanceof Error ? err.message : 'Không thể tải báo cáo đối soát')
+            if (!signal?.aborted && revision === loadRevision.current) setError(err instanceof Error ? err.message : 'Không thể tải báo cáo đối soát')
         } finally {
-            if (revision === loadRevision.current) setLoading(false)
+            if (!signal?.aborted && revision === loadRevision.current) setLoading(false)
         }
     }, [selectedStream, selectedFlag, page, pageSize])
 
     useEffect(() => {
-        void loadData()
-        return () => { loadRevision.current++ }
+        const polling = startVisiblePolling(loadData, () => running.current)
+        return () => { polling.stop(); loadRevision.current++ }
     }, [loadData])
-
-    useEffect(() => {
-        if (!reconciling) return
-        let inFlight = false
-        const timer = window.setInterval(() => {
-            if (document.hidden || inFlight) return
-            inFlight = true
-            void loadData().finally(() => { inFlight = false })
-        }, 5000)
-        return () => window.clearInterval(timer)
-    }, [reconciling, loadData])
 
     const handleRunReconcile = useCallback(async (dryRun: boolean = true) => {
         if (running.current) return
@@ -171,35 +162,17 @@ export function DataReconciliationPage() {
         setReconciling(true)
         setError('')
         try {
-            const result = await triggerReconciliation(selectedStream, dryRun, reconcileMode)
-            if (!['COMPLETED', 'PARTIAL', 'RUNNING', 'BLOCKED'].includes(result.status)) {
-                throw new Error(`Đối soát chưa hoàn tất (${result.status}). Kiểm tra worker và trạng thái thử lại.`)
-            }
-            if (result.execution_time_ms !== undefined) {
-                setLastExecutionTimeMs(result.execution_time_ms)
-            }
-            if (result.status === 'RUNNING') {
-                startedRun.current = result.reports.find(row => row.stream_name === 'files')?.run_id ?? null
-                setPage(1)
-                await loadData()
-                return
-            }
-            const modeText = result.mode === 'INCREMENTAL' ? 'Tăng dần' : 'Toàn diện'
-            const timeText = result.execution_time_ms !== undefined ? ` (${result.execution_time_ms}ms)` : ''
-            setNotice({ title: 'Kết quả đối soát', message: result.status === 'BLOCKED'
-                ? `Đã quét xong đối soát (${modeText}). Có sai lệch vượt ngưỡng an toàn; dữ liệu chưa được thay đổi.`
-                : result.reports.some(report => report.status === 'PARTIAL')
-                    ? `Đã đối soát (${modeText})${timeText}. Một phần dữ liệu chưa đủ điều kiện xác minh; tệp SOURCE chưa được đọc kiểm tra sẽ không tính là toàn vẹn.`
-                    : dryRun
-                        ? `Đã quét xong đối soát (${modeText})${timeText}. Dữ liệu nghiệp vụ không thay đổi.`
-                        : `Đã hoàn tất tự phục hồi dữ liệu (${modeText})${timeText}.` })
+            const result = await queueAudit(selectedStream, reconcileMode, !dryRun)
+            startedRun.current = result.items?.map(row => row.job_id) ?? (result.job_id ? [result.job_id] : [])
+            setLastExecutionTimeMs(null)
+            setNotice({ title: 'Đối soát', message: 'Đã xếp hàng đối soát. Worker sẽ xử lý nền theo hạn mức.' })
             setPage(1)
             await loadData()
         } catch (err) {
             setNotice({ title: 'Không thể đối soát', message: err instanceof Error ? err.message : 'Lỗi khi kích hoạt đối soát' })
         } finally {
             posting.current = false
-            if (!startedRun.current) {
+            if (!startedRun.current.length) {
                 setReconciling(false)
                 running.current = false
             }
@@ -211,6 +184,7 @@ export function DataReconciliationPage() {
     const { unverified, hashPending, onlyHashPending, observedBytes, observedFiles } = auditSummary(report)
     const onlyUnverified = unverified > 0 && report?.total_matched_records === 0 && report.total_mismatched_records === 0
     const fileProgress = report?.stream_reports.find(row => row.stream_name === 'files')?.summary_meta
+    const scanInProgress = reconciling || report?.overall_status === 'RUNNING'
 
     return (
         <div className={styles.container}>
@@ -254,7 +228,11 @@ export function DataReconciliationPage() {
 
                         {/* 3. NÚT ĐỐI SOÁT & PHỤC HỒI THỦ CÔNG */}
                         <button className={styles.primaryButton} disabled={reconciling || loading}
-                            onClick={() => void handleRunReconcile()}>Quét đối soát</button>
+                            onClick={() => reconcileMode === 'FULL' ? setConfirmModal({
+                                title: 'Xác nhận quét toàn diện',
+                                message: 'Worker sẽ quét metadata toàn diện hoặc đọc tệp để kiểm SHA-256 theo hạn mức.',
+                                onConfirm: () => { setConfirmModal(null); void handleRunReconcile() },
+                            }) : void handleRunReconcile()}>Quét đối soát</button>
                         {selectedStream !== 'all' && selectedStream !== 'files' && <button className={styles.secondaryButton}
                             disabled={reconciling || loading} onClick={() => setConfirmModal({ title: 'Đồng bộ bản ghi lệch',
                                 message: 'Quét luồng đã chọn rồi chỉ đồng bộ ID metadata lệch. Không xóa bản ghi hoặc ghi đè tệp sai hash.',
@@ -272,8 +250,7 @@ export function DataReconciliationPage() {
 
                 {/* THÔNG BÁO / CẢNH BÁO */}
                 {error && <div className={`${styles.alertBox} ${styles.alertWarning}`}>{error}</div>}
-                {reconciling && <p role="status">Đang đối soát nền: {fileProgress?.processed_files ?? 0}/{fileProgress?.total_files ?? 0} tệp.
-                    Có thể rời trang; tiến độ được lưu sau từng tệp. Đã xác minh {formatBytes(fileProgress?.verified_bytes)}.</p>}
+                {reconciling && <p role="status">Đã xếp hàng hoặc đang đối soát nền. Có thể rời trang; kết quả sẽ cập nhật sau khi worker xử lý.</p>}
                 {!reconciling && fileProgress?.reason === 'RECONCILIATION_INTERRUPTED' && <p role="status">
                     Lượt trước bị gián đoạn ở {fileProgress.processed_files ?? 0}/{fileProgress.total_files ?? 0} tệp.
                     Bấm Quét đối soát để ưu tiên phần chưa xử lý.</p>}
@@ -288,8 +265,8 @@ export function DataReconciliationPage() {
                 <div className={styles.statusGrid}>
                     <div className={styles.statusItem}>
                         <span className={styles.statusLabel}>Tỷ lệ đồng nhất</span>
-                        <span className={styles.statusValue} style={{ color: onlyHashPending ? '#475569' : (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
-                            {onlyHashPending ? 'Chưa kiểm tra SHA-256' : onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
+                        <span className={styles.statusValue} style={{ color: scanInProgress || onlyHashPending ? '#475569' : (report?.overall_match_rate_percent ?? 100) >= 90 ? '#166534' : '#991b1b' }}>
+                            {scanInProgress ? 'Đang kiểm tra' : onlyHashPending ? 'Chưa kiểm tra SHA-256' : onlyUnverified ? 'Chưa xác minh' : report?.latest_run_id ? `${report.overall_match_rate_percent}%` : '—'}
                         </span>
                         <span className={styles.statusSub}>
                             Trạng thái: <strong>{onlyHashPending && report?.overall_status === 'PARTIAL' ? 'Quét nhanh' : report?.overall_status ?? 'CHƯA CHẠY'}</strong>
@@ -297,7 +274,7 @@ export function DataReconciliationPage() {
                     </div>
 
                     <div className={styles.statusItem}>
-                        <span className={styles.statusLabel}>Tổng bản ghi</span>
+                        <span className={styles.statusLabel} title="Số liệu của các lượt đối soát, không phải tiến độ hoàn thành">Bản ghi SOURCE / MASTER</span>
                         <span className={styles.statusValue}>
                             {report?.total_source_records ?? 0} / {report?.total_target_records ?? 0}
                         </span>

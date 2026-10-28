@@ -28,7 +28,8 @@ def main():
                 try:
                     if hasattr(container, 'uow'):
                         AuditSchedule(container.uow, container.settings).tick()
-                    audit.schedule()
+                    else:
+                        audit.schedule()
                     worked = audit.once()
                 except Exception:
                     worked = False

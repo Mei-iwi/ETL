@@ -281,14 +281,22 @@ class ReconciliationEngine:
                     if hasattr(resolver, 'files'):
                         resolver.files = MeteredFiles(resolver.files, self.file_metrics, self.file_max_bytes,
                                                       reference.provider)
+                    revision_before = (resolver._revision(reference, _ReadBudget(deadline, self.file_cancelled))
+                                       if hasattr(reference, 'bucket') else None)
                     with resolver.temporary_path(reference, cancelled=_ReadBudget(deadline, self.file_cancelled)) as source_path:
                         size = source_path.stat().st_size
+                    revision_after = (resolver._revision(reference, _ReadBudget(deadline, self.file_cancelled))
+                                      if hasattr(reference, 'bucket') else None)
+                    if revision_before != revision_after:
+                        raise SourceFileError('SOURCE_REVISION_CHANGED')
                     self.file_metrics['sha256_computed_count'] += 1
                     expected = ver.source_file_size
                     flag = FLAG_DESYNC_BLOB_SIZE if expected is not None and expected != size else FLAG_SYNCED
                     result.update(discrepancy_flag=flag, message='Đã đọc và xác minh tệp từ nguồn')
                     result['target_value'] = {'verified_size': size, 'verified_sha256': ver.source_hash,
-                                              'verification': 'SOURCE_STREAM_SHA256'}
+                        'verification': 'SOURCE_STREAM_SHA256',
+                        'observed_revision': hashlib.sha256(repr(revision_after).encode()).hexdigest()
+                        if revision_after is not None else None}
                 except SourceFileError as exc:
                     if exc.code == 'SOURCE_HASH_MISMATCH':
                         self.file_metrics['sha256_computed_count'] += 1
@@ -343,6 +351,8 @@ class ReconciliationEngine:
                     'source_value': None, 'target_value': {'reason_code': 'LOCAL_FILE_UNAVAILABLE'}})
                 continue
             expected_size = ver.source_file_size
+            local_revision = (observed_stat.st_dev, observed_stat.st_ino, observed_stat.st_size,
+                              observed_stat.st_mtime_ns, observed_stat.st_ctime_ns)
 
             if expected_size is not None and expected_size != st_size:
                 # Kích thước byte bị lệch
@@ -368,8 +378,7 @@ class ReconciliationEngine:
                 results.append({'record_id': ver.id, 'discrepancy_flag': FLAG_NOT_VERIFIED,
                     'source_value': {'source_file_size': expected_size},
                     'target_value': {'storage_file_size': st_size, 'verification': 'SIZE_ONLY',
-                        'observed_revision': hashlib.sha256(repr((observed_stat.st_dev, observed_stat.st_ino,
-                            observed_stat.st_size, observed_stat.st_mtime_ns, observed_stat.st_ctime_ns)).encode()).hexdigest(),
+                        'observed_revision': hashlib.sha256(repr(local_revision).encode()).hexdigest(),
                         'size_status': 'SIZE_MATCHED' if expected_size is not None else 'NOT_VERIFIED',
                         'reason_code': 'SHA256_NOT_CHECKED'}})
                 continue
@@ -379,6 +388,10 @@ class ReconciliationEngine:
                 continue
             try:
                 computed_hash = self._hash_local(blob_path, deadline)
+                current = blob_path.stat()
+                if local_revision != (current.st_dev, current.st_ino, current.st_size,
+                                      current.st_mtime_ns, current.st_ctime_ns):
+                    raise SourceFileError('LOCAL_FILE_CHANGED')
             except (OSError, SourceFileError) as exc:
                 results.append({'record_id': ver.id, 'discrepancy_flag': FLAG_NOT_VERIFIED,
                     'source_value': None, 'target_value': {'verification': 'NOT_VERIFIED',
@@ -414,6 +427,7 @@ class ReconciliationEngine:
                     "target_value": {
                         "source_hash": computed_hash,
                         "storage_file_size": st_size,
+                        "observed_revision": hashlib.sha256(repr(local_revision).encode()).hexdigest(),
                     },
                     "message": "File blob verified and synced",
                 })

@@ -1,7 +1,7 @@
 """Durable audit-only queue. Every write is fenced by token AND unexpired lease."""
 from datetime import UTC, timedelta
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
@@ -19,7 +19,8 @@ class AuditQueue:
     def __init__(self, uow, settings):
         self.uow, self.settings = uow, settings
 
-    def enqueue(self, audit_type='DEEP', stream='files', job_key=None, *, mode=None, repair=False):
+    def enqueue(self, audit_type='DEEP', stream='files', job_key=None, *, mode=None, repair=False,
+                resume_from=None, scheduled_cycle=None):
         if audit_type not in ('DEEP', 'LIGHT', 'METADATA', 'IDS') or stream not in ('files', 'resources', 'subjects', 'grades', 'users'):
             raise DomainError('INVALID_AUDIT_SCOPE')
         if (audit_type in ('DEEP', 'LIGHT')) != (stream == 'files'):
@@ -27,17 +28,25 @@ class AuditQueue:
         key = job_key or new_id()
         try:
             with self.uow() as repo:
-                return self._enqueue_in(repo, audit_type, stream, key, mode, repair)
+                return self._enqueue_in(repo, audit_type, stream, key, mode, repair, resume_from, scheduled_cycle)
         except IntegrityError:
             with self.uow() as repo:
                 return repo.session.scalar(select(Job.id).where(Job.job_key == key))
 
-    def _enqueue_in(self, repo, audit_type, stream, key, mode, repair):
+    def _enqueue_in(self, repo, audit_type, stream, key, mode, repair, resume_from=None, scheduled_cycle=None):
         existing = repo.session.scalar(select(Job).where(Job.job_key == key))
         if existing:
             return existing.id
         previous = repo.session.scalar(select(Job).where(Job.audit_type == audit_type,
             Job.stream_name == stream).order_by(Job.created_at.desc()).limit(1))
+        if scheduled_cycle is not None:
+            # Calendar cycles must not inherit cursors from manual work or the
+            # other FAST/THOROUGH branch, even when both use METADATA.
+            previous = repo.session.get(Job, resume_from) if resume_from else None
+            if resume_from and (previous is None or previous.status != 'PARTIAL'
+                    or previous.audit_type != audit_type or previous.stream_name != stream
+                    or (previous.checkpoint or {}).get('schedule_cycle') != scheduled_cycle):
+                raise DomainError('INVALID_AUDIT_SCOPE')
         # File scans continue by keyset across independent budgeted jobs.
         checkpoint = {}
         if previous and previous.checkpoint and previous.status != 'FAILED':
@@ -46,7 +55,7 @@ class AuditQueue:
             if audit_type == 'METADATA' and previous.status == 'PARTIAL' and previous.checkpoint.get('last_id'):
                 checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
                     'last_id', 'scan_started', 'since', 'watermark_next', 'generation',
-                    'auth_scope_complete')}
+                    'auth_scope_complete', 'auth_identity_digest', 'auth_identity_count')}
             elif audit_type == 'METADATA':
                 checkpoint = {}
         if mode == 'FULL' and not (previous and previous.status == 'PARTIAL'
@@ -56,6 +65,19 @@ class AuditQueue:
             checkpoint = {}
         if mode is not None:
             checkpoint.update(mode=mode, repair_requested=repair)
+        if scheduled_cycle is not None:
+            cp = (previous.checkpoint or {}) if previous else {}
+            if previous and audit_type in ('METADATA', 'IDS'):
+                checkpoint.update({key: value for key, value in cp.items() if key in (
+                    'records_scanned', 'matched_count', 'mismatched_count', 'not_verified_count',
+                    'source_pages_read', 'repaired_count', 'auth_scope_complete',
+                    'auth_identity_count', 'auth_identity_digest')})
+            if previous and audit_type in ('LIGHT', 'DEEP'):
+                for metric in ('records_scanned', 'bytes_read', 'mismatched_count', 'not_verified_count'):
+                    checkpoint[f'cycle_{metric}'] = cp.get(f'cycle_{metric}', 0) + cp.get(metric, 0)
+            checkpoint.update(schedule_cycle=scheduled_cycle,
+                schedule_batch=cp.get('schedule_batch', -1) + 1,
+                schedule_start_after=checkpoint.get('last_id'))
         row = Job(id=new_id(), job_key=key, audit_type=audit_type, stream_name=stream,
                   status='PENDING', checkpoint=checkpoint)
         repo.session.add(row)
@@ -95,7 +117,8 @@ class AuditQueue:
             excluded = []
             while True:
                 row = repo.session.scalar(select(Job).where(eligible, ~busy_stream,
-                    Job.stream_name.not_in(excluded)).order_by(Job.created_at, Job.id)
+                    Job.stream_name.not_in(excluded)).order_by(
+                    case((~Job.job_key.contains(':'), 0), else_=1), Job.created_at, Job.id)
                     .with_for_update(skip_locked=True).limit(1))
                 if row is None:
                     return None

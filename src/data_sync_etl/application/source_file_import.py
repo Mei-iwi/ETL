@@ -490,10 +490,29 @@ class SourceFileImportService:
             return row["manual_retries"] < self.settings.processing_manual_retry_limit
         return row["status"] == "PROCESSING" and self._processing(repo, row)[1]
 
-    def list_files(self, after=None, size=20, failed_only=False, retry_eligible=None, include_total=False):
+    def list_files(self, after=None, size=20, failed_only=False, retry_eligible=None, include_total=False,
+                   integrity_only=False, evidence_reader=None):
         availability = self.availability()
+        scan_cursor = None
         with self.uow() as repo:
-            if retry_eligible is None:
+            if integrity_only:
+                if evidence_reader is None:
+                    raise DomainError('INTEGRITY_EVIDENCE_REQUIRED')
+                rows, scan_after = [], after
+                # Bound each request even when most of a large repository is verified.
+                for _ in range(10):
+                    batch = repo.source_import_page(scan_after, 100)
+                    for row in batch:
+                        if not evidence_reader(repo, row)['recent_sha256_evidence']:
+                            rows.append(row)
+                            if len(rows) > size:
+                                break
+                    if len(rows) > size or len(batch) < 100:
+                        scan_cursor = None
+                        break
+                    scan_after = batch[-1]['source_version_id']
+                    scan_cursor = scan_after
+            elif retry_eligible is None:
                 rows = repo.source_import_page(after, size + 1, failed_only=failed_only)
             else:
                 # Filter before pagination using the same eligibility rules as the Retry action.
@@ -514,7 +533,7 @@ class SourceFileImportService:
                     scan_after = batch[-1]["source_version_id"]
             undiscovered = not rows and not repo.find('source_file_imports', limit=1)
             total = None
-            if include_total and not undiscovered:
+            if include_total and not undiscovered and not integrity_only:
                 key = (failed_only, retry_eligible, availability['file_sync_supported'])
                 cached = self._file_count_cache.get(key)
                 if cached and monotonic() - cached[0] < 30:
@@ -548,13 +567,14 @@ class SourceFileImportService:
                     "retry_eligible": (availability["file_sync_supported"] or row["target_version_id"] is not None)
                     and self._eligible(repo, row),
                     "target_version_id": row["target_version_id"], "processing_job_id": row["processing_job_id"],
+                    "integrity": evidence_reader(repo, row) if evidence_reader else None,
                 })
         if not failed_only and undiscovered and hasattr(self.source, "list_versions"):
             # Preserve the initial metadata view before the worker has discovered any jobs.
             total = self.source.version_count() if include_total and hasattr(self.source, 'version_count') else None
             return {**self.source.list_versions(after=after, size=size), 'total': total,
                     'total_pages': (total + size - 1) // size if total is not None else None, **availability}
-        return {"items": items, "next_cursor": rows[size - 1]["source_version_id"] if len(rows) > size else None,
+        return {"items": items, "next_cursor": rows[size - 1]["source_version_id"] if len(rows) > size else scan_cursor,
                 'total': total, 'total_pages': (total + size - 1) // size if total is not None else None, **availability}
 
     def retry(self, file_id):

@@ -5,6 +5,43 @@
     margin-top: 20px;
 }
 
+.scheduleEditor {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #e5eaf1;
+}
+
+.scheduleChoice {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.scheduleEditor .schedulePlan {
+    border: 0;
+    padding: 8px 0 12px;
+}
+
+.schedulePlan {
+    min-width: 0;
+    border: 1px solid #e5eaf1;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.schedulePlan label {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.schedulePlan input, .schedulePlan select {
+    max-width: 100%;
+}
+
 .card {
     padding: 24px 28px;
     background-color: #ffffff;

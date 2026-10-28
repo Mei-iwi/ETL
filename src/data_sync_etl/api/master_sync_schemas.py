@@ -99,6 +99,7 @@ class SourceSyncFile(BaseModel):
     last_error_code: str | None = None
     target_version_id: str | None = None
     processing_job_id: str | None = None
+    integrity: dict | None = None
 
 
 class SourceSyncFilesResponse(BaseModel):

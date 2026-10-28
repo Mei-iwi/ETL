@@ -31,6 +31,7 @@ from data_sync_etl.domain.core import DomainError, new_id, now
 from data_sync_etl.domain.reconciliation import (
     METADATA_FIELDS,
     STREAM_TABLE_MAPPING,
+    _comparable,
     metadata_differences,
     observe_file_result,
     serialize_json_value,
@@ -41,6 +42,16 @@ from data_sync_etl.workers.lifecycle import tick
 def identity(version, origin):
     return sha256(str((version.source_hash, version.source_file_size, version.storage_bucket,
         version.storage_object_key, version.version_number, version.parent_version_id, origin)).encode()).hexdigest()
+
+
+def recent_file_evidence(state, version, origin, settings):
+    return bool(version and state.verification_method == 'SHA256' and state.last_observed_revision
+        and state.last_verified_at and utc(state.last_verified_at) >= now() - timedelta(
+            days=settings.reconciliation_deep_coverage_days)
+        and state.observed_identity == identity(version, origin)
+        and state.last_verified_hash == version.source_hash
+        and (state.status == 'SYNCED' or state.status == 'NOT_VERIFIED'
+             and state.reason_code == 'SHA256_NOT_CHECKED'))
 
 
 FILE_COLUMNS = ('id', 'resource_id', 'source_hash', 'source_file_size', 'storage_file_size',
@@ -56,16 +67,8 @@ class ScheduledAudit:
     def schedule(self):
         if not self.settings.reconciliation_scheduler_enabled:
             return []  # No DB read or SOURCE activity while disabled.
-        stamp = now().timestamp()
-        jobs = []
-        for kind, interval in [('METADATA', self.settings.reconciliation_light_interval_seconds),
-                               ('IDS', self.settings.reconciliation_id_sweep_interval_seconds),
-                               ('LIGHT', self.settings.reconciliation_light_interval_seconds),
-                               ('DEEP', 86400)]:
-            streams = ['files'] if kind in ('DEEP', 'LIGHT') else ['grades', 'subjects', 'users', 'resources']
-            for stream in streams:
-                jobs.append(self.queue.enqueue(kind, stream, f'{kind}:{stream}:{int(stamp // interval)}'))
-        return jobs
+        from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
+        return AuditSchedule(self.engine.uow, self.settings).tick()
 
     def once(self, job_id=None):
         claim = self.queue.claim(job_id)
@@ -121,7 +124,8 @@ class ScheduledAudit:
                 'dry_run': not checkpoint.get('repair_requested', False),
                 'mode': checkpoint.get('mode', 'INCREMENTAL'), 'whole_repository_verified': False,
                 'verification_scope': 'AUDIT_JOB', 'cache_reused_count': 0}
-            run.source_count = checkpoint.get('source_count', 0)
+            run.source_count = (checkpoint.get('records_scanned', 0) if claim['audit_type'] in ('LIGHT', 'DEEP')
+                                else checkpoint.get('source_count', 0))
             run.target_count = checkpoint.get('records_scanned', 0)
             run.matched_count = checkpoint.get('matched_count', 0)
             run.mismatched_count = checkpoint.get('mismatched_count', 0)
@@ -185,11 +189,14 @@ class ScheduledAudit:
                 if visited >= settings.reconciliation_max_files_per_run or monotonic() - started >= settings.reconciliation_max_seconds_per_run:
                     break
                 observed = identity(version, origin)
-                due = (claim['audit_type'] == 'LIGHT' or not previous or previous['observed_identity'] != observed
+                due = (claim['audit_type'] == 'LIGHT' or checkpoint.get('mode') == 'FULL'
+                       or not previous or previous['observed_identity'] != observed
                        or previous['next_due_at'] is None or utc(previous['next_due_at']) <= now())
                 if not due:
                     after = version.id
                     checkpoint['last_id'] = after
+                    visited += 1
+                    self._save(claim, checkpoint)
                     continue  # Explicitly skipped, never credited as freshly verified.
                 engine.file_max_bytes = settings.reconciliation_max_bytes_per_run - used_bytes
                 if engine.file_max_bytes <= 0:
@@ -215,6 +222,15 @@ class ScheduledAudit:
                 attempts = (previous or {}).get('attempts', 0) + 1
                 state = {'last_attempt_at': now(), 'status': flag, 'reason_code': reason,
                          'observed_identity': observed}
+                revision = values.get('observed_revision')
+                state['last_observed_revision'] = revision
+                if (claim['audit_type'] == 'LIGHT' and (not revision or not previous
+                        or previous['last_observed_revision'] != revision
+                        or previous['observed_identity'] != observed or reason != 'SHA256_NOT_CHECKED'
+                        or flag != 'NOT_VERIFIED')):
+                    # Without a separate verified-revision column, invalidate proof
+                    # before replacing the observation it was bound to.
+                    state.update(verification_method='STALE_SHA256', next_due_at=now())
                 if values.get('observed_revision'):
                     state['last_observed_revision'] = values['observed_revision']
                     if previous and previous['last_observed_revision'] != values['observed_revision']:
@@ -227,7 +243,7 @@ class ScheduledAudit:
                     if flag == 'SYNCED':
                         state.update(last_verified_at=now(), last_verified_hash=version.source_hash,
                             last_verified_size=values.get('verified_size', values.get('storage_file_size')),
-                            verification_method='SHA256')
+                            verification_method='SHA256' if revision else 'STALE_SHA256')
                 elif flag not in ('NOT_VERIFIED', 'SYNCED') or previous and previous['observed_identity'] != observed:
                     state['next_due_at'] = now()
                 if (claim['audit_type'] == 'LIGHT' and previous and flag == 'NOT_VERIFIED'
@@ -247,7 +263,8 @@ class ScheduledAudit:
         checkpoint.update(coverage_status='CYCLE_VISITED' if exhausted else 'COVERAGE_BEHIND',
             cycle_finished=exhausted, io_concurrency=1)
         # A visited cycle is not a claim that all files have current valid SHA-256.
-        self._save(claim, checkpoint, status='PARTIAL' if not exhausted or checkpoint['not_verified_count'] else 'COMPLETED')
+        self._save(claim, checkpoint, status='PARTIAL' if not exhausted or checkpoint['not_verified_count']
+                   or checkpoint.get('cycle_not_verified_count') else 'COMPLETED')
 
     def _metadata(self, claim):
         checkpoint = dict(claim['checkpoint'])
@@ -284,6 +301,12 @@ class ScheduledAudit:
                 checkpoint['source_pages_read'] += 1
                 source_rows = source_rows[:self.settings.reconciliation_max_files_per_run - visited]
                 ids = [str(row['id']) for row in source_rows]
+                if stream == 'users' and since is None:
+                    digest = checkpoint.get('auth_identity_digest', '')
+                    for record_id in ids:
+                        digest = sha256(f'{digest}:{record_id}'.encode()).hexdigest()
+                    checkpoint['auth_identity_digest'] = digest
+                    checkpoint['auth_identity_count'] = checkpoint.get('auth_identity_count', 0) + len(ids)
                 with self.engine.uow() as repo:
                     columns = [model.id, model.source_origin] + [getattr(model, key)
                         for key in (*METADATA_FIELDS[stream], *(AUTH_FIELDS if stream == 'users' else ()))]
@@ -359,11 +382,26 @@ class ScheduledAudit:
             pages.close()  # Release the read-only SOURCE snapshot at each budget boundary.
         if complete:
             checkpoint.update(last_id=None, watermark_next=checkpoint['scan_started'])
-            if (stream == 'users' and checkpoint.get('repair_requested') and not checkpoint['not_verified_count']
-                    and checkpoint['auth_scope_complete']):
+            if (stream == 'users' and since is None and checkpoint.get('repair_requested') and not checkpoint['not_verified_count']
+                    and checkpoint['auth_scope_complete'] and self._users_identity_complete(checkpoint)):
                 checkpoint['auth_verified'] = True
         checkpoint['coverage_status'] = 'DELTA_VISITED' if complete else 'COVERAGE_BEHIND'
         self._save(claim, checkpoint, status='COMPLETED' if complete and not checkpoint['not_verified_count'] else 'PARTIAL')
+
+    def _users_identity_complete(self, checkpoint):
+        # A metadata pass over remaining SOURCE users must not refresh auth for
+        # a user missing at SOURCE but still present in MASTER. No deletion here.
+        model = MODELS[STREAM_TABLE_MAPPING['users']['target_table']]
+        with self.engine.uow() as repo:
+            ids = list(repo.session.scalars(select(model.id).where(
+                model.source_origin != 'LOCAL', model.source_missing_at.is_(None)).limit(10001)))
+        digest = ''
+        for record_id in sorted(ids):
+            digest = sha256(f'{digest}:{record_id}'.encode()).hexdigest()
+        complete = bool(ids and len(ids) <= 10000 and len(ids) == checkpoint.get('auth_identity_count')
+                        and digest == checkpoint.get('auth_identity_digest'))
+        checkpoint['auth_identity_complete'] = complete
+        return complete
 
     def _repair_pending(self, claim, checkpoint):
         ids = checkpoint.get('repair_pending', [])
@@ -373,6 +411,37 @@ class ScheduledAudit:
             raise DomainError('AUDIT_REPAIR_WORKER_REQUIRED')
         self.sync.run_selected(claim['stream_name'], ids,
             fence=lambda session: self.queue.owned(session, claim))
+        # A successful write is not proof: SOURCE or ownership may have changed.
+        stream = claim['stream_name']
+        seen = set()
+        for batch in self.sync.source.selected_batches(stream, ids, self.settings.reconciliation_audit_batch_size):
+            with self.engine.uow() as repo:
+                self.queue.owned(repo.session, claim)
+                for aggregate in batch:
+                    record_id = aggregate.cursor.id
+                    model = MODELS[STREAM_TABLE_MAPPING[stream]['target_table']]
+                    # Repository DTOs deliberately omit secrets. Read private auth
+                    # columns here only for comparison; never serialize this row.
+                    target = repo.session.execute(select(*model.__table__.columns).where(
+                        model.id == record_id)).mappings().one_or_none()
+                    if record_id not in ids or not target or target.get('source_origin') == 'LOCAL':
+                        raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
+                    source = aggregate.values
+                    if metadata_differences(stream, source, target) or any(
+                            _comparable(key, source[key]) != _comparable(key, target.get(key))
+                            for key in AUTH_FIELDS if key in source):
+                        raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
+                    if stream == 'resources':
+                        for table, desired in [('resource_subjects', aggregate.subjects),
+                                               ('resource_grade_levels', aggregate.grades)]:
+                            expected = [row.model_dump(exclude={'updated_at'}) for row in desired]
+                            actual = repo.find(table, {'resource_id': record_id})
+                            if sorted(repr(sorted(row.items())) for row in expected) != sorted(
+                                    repr(sorted(row.items())) for row in actual):
+                                raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
+                    seen.add(record_id)
+        if seen != set(ids):
+            raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
         with self.engine.uow() as repo:
             self.queue.owned(repo.session, claim)
             rows = repo.session.scalars(select(Discrepancy).where(
@@ -478,12 +547,16 @@ class ScheduledAudit:
                 for row in rows:
                     version = SimpleNamespace(**dict(zip(FILE_COLUMNS, row[:len(FILE_COLUMNS)], strict=True)))
                     state = row[-1]
-                    verified += bool(state.observed_identity == identity(version, row[-2])
-                        and state.last_verified_hash == version.source_hash
-                        and (state.status == 'SYNCED' or state.reason_code == 'SHA256_NOT_CHECKED'))
+                    verified += recent_file_evidence(state, version, row[-2], self.settings)
                 after = rows[-1][0]
+            size_checked = repo.session.scalar(select(func.count()).select_from(FileState).where(
+                FileState.reason_code == 'SHA256_NOT_CHECKED'))
+            mismatched = repo.session.scalar(select(func.count()).select_from(FileState).where(
+                FileState.status.in_(('DESYNC_CHECKSUM', 'DESYNC_BLOB_SIZE', 'MUTATED_SOURCE', 'DESYNC_METADATA'))))
             return {'scheduler_enabled': self.settings.reconciliation_scheduler_enabled,
                 'total_files': total, 'recent_sha256_evidence_count': verified,
+                'size_checked': size_checked, 'mismatched': mismatched,
+                'stale_or_unverified': max(0, total - verified),
                 'not_verified_count': max(0, total - verified), 'io_concurrency': 1,
                 'coverage_status': 'COVERAGE_BEHIND' if verified < total else 'RECENT_EVIDENCE',
                 'whole_repository_verified': False}

@@ -55,7 +55,6 @@ from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.reconcile_master import ReconcileMaster
-from data_sync_etl.application.reconciled_sync import ReconciledSync
 from data_sync_etl.application.reconciliation_engine import ReconciliationEngine
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
@@ -186,7 +185,9 @@ class Container:
             lease_seconds=self.settings.master_sync_auto_lease_seconds,
         )
         self.master_sync_worker = MasterSyncWorker(
-            ReconciledSync(self.reconciliation_engine, self.sync, self.settings),
+            # Scheduled audits have their own worker. Auto Sync must commit real
+            # users SyncRuns, including empty deltas, to maintain auth freshness.
+            self.sync,
             self.auto_sync,
             poll_seconds=self.settings.master_sync_auto_poll_seconds,
             auth_freshness_seconds=(self.settings.auth_master_freshness_seconds
