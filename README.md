@@ -935,6 +935,11 @@ Migration/seed/các lệnh --apply sẽ ghi DB khi bạn chạy: chỉ dùng đ�
 
 ## Đối soát độc lập
 
+Chạy nhiều worker có giới hạn (mặc định 1, tối đa 2 claim import/audit), khóa theo
+resource/stream, kiểm thử PostgreSQL và hướng dẫn scale/rollback:
+[BOUNDED_WORKERS.md](BOUNDED_WORKERS.md). Chưa coi triển khai là ACCEPT khi còn
+baseline failure hoặc thiếu benchmark toàn pipeline; không tự tăng số worker mặc định.
+
 Đối soát dùng các bảng audit có từ migration `0019`; không tự migrate DB đang có dữ liệu. Local mở terminal thứ sáu, kích hoạt venv rồi chạy:
 
 ```bash

@@ -43,7 +43,7 @@ class OCRPipeline:
         self.media = media
         self.default_target_language = default_target_language
 
-    def create_job(self, version_id, triggered_by=None):
+    def create_job(self, version_id, triggered_by=None, *, fence=None):
         reference = self.resolver.resolve(version_id)
         if reference.ownership == 'LOCAL_OWNED':
             # Preserve LOCAL command idempotency even if its managed file later disappears.
@@ -53,10 +53,12 @@ class OCRPipeline:
             if jobs:
                 return jobs[0]
         with self.resolver.temporary_path(reference) as path:
-            return self._create_job(version_id, triggered_by, path)
+            return self._create_job(version_id, triggered_by, path, fence=fence)
 
-    def _create_job(self, version_id, triggered_by, path):
+    def _create_job(self, version_id, triggered_by, path, *, fence=None):
         with self.uow() as repo:
+            if fence is not None:
+                fence(repo)
             version = repo.get("resource_versions", version_id, lock=True)
             if version is None:
                 raise DomainError("Resource version not found")
@@ -113,6 +115,8 @@ class OCRPipeline:
                     "ocr_page_tasks",
                     dict(job_id=job["id"], page_num=page, status="PENDING", retry_count=0),
                 )
+            if fence is not None:
+                fence(repo)
             return job
 
     def claim(self, worker_id):
@@ -147,12 +151,13 @@ class OCRPipeline:
             )
             return {**task, **change, 'deletion_revision': resource['deletion_revision']}
 
-    @staticmethod
-    def owns(current, claimed):
+    def owns(self, current, claimed):
         return (
             current
             and current["status"] == "RUNNING"
             and current["claim_token"] == claimed["claim_token"]
+            and current['heartbeat_at'] is not None
+            and current['heartbeat_at'] > now() - timedelta(seconds=self.heartbeat_timeout)
         )
 
     def heartbeat(self, claimed):
