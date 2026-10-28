@@ -8,6 +8,8 @@ from sqlalchemy import bindparam, inspect, text
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.reconciliation import METADATA_FIELDS, STREAM_TABLE_MAPPING
 
+AUTH_FIELDS = ('hashed_password', 'role_code', 'role_is_active', 'role_deleted_at', 'role_updated_at')
+
 
 def resource_relations(conn, rows):
     ids = [row['id'] for row in rows]
@@ -61,12 +63,31 @@ def metadata_pages(adapter, stream, since, after, size):
                 available = {c['name'] for c in inspect(conn).get_columns(table)}
                 fields = ['id', 'updated_at'] + sorted(c for c in available
                     if aliases.get(c, c) in METADATA_FIELDS[stream])
+                changed_at = 'updated_at'
+                if stream == 'users' and 'hashed_password' in available and inspect(conn).has_table('roles'):
+                    # Private comparison only. Audit serialization strips password material.
+                    table = ('(SELECT u.*,r.code AS role_code,r.is_active AS role_is_active,'
+                             'r.deleted_at AS role_deleted_at,r.updated_at AS role_updated_at,'
+                             'CASE WHEN u.updated_at > r.updated_at THEN u.updated_at ELSE r.updated_at END '
+                             'AS effective_updated_at FROM users u JOIN roles r ON r.id=u.role_id) audit_users')
+                    fields += list(AUTH_FIELDS)
+                    changed_at = 'effective_updated_at'
                 projection = ', '.join(f'{c} AS {aliases[c]}' if c in aliases else c for c in dict.fromkeys(fields))
+                if stream == 'users' and 'deleted_at' not in available:
+                    # Canonical SOURCE users has no deleted_at column. The same
+                    # SourceRecord contract used by sync defaults it to None.
+                    projection += ', NULL AS deleted_at'
                 key = 'id COLLATE "C"' if conn.dialect.name == 'postgresql' else 'id'
                 while True:
                     conditions = []
                     if since is not None:
-                        conditions.append('updated_at >= :since')
+                        changed = [f'{changed_at} >= :since']
+                        if stream == 'resources':
+                            for relation in ('resource_subjects', 'resource_grade_levels'):
+                                if inspect(conn).has_table(relation) and 'updated_at' in {
+                                        c['name'] for c in inspect(conn).get_columns(relation)}:
+                                    changed.append(f'id IN (SELECT resource_id FROM {relation} WHERE updated_at >= :since)')
+                        conditions.append('(' + ' OR '.join(changed) + ')')
                     if after:
                         conditions.append(f'{key} > :after')
                     where = ' WHERE ' + ' AND '.join(conditions) if conditions else ''

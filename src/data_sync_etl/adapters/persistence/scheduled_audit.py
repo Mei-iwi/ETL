@@ -1,4 +1,4 @@
-"""Budgeted audit execution; never invokes Sync, OCR, indexing or business writes."""
+"""Budgeted audits; exact-ID metadata repair requires an explicit admin request."""
 from copy import copy
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import func, select, text
 
-from data_sync_etl.adapters.persistence.audit_metadata import metadata_pages
+from data_sync_etl.adapters.persistence.audit_metadata import AUTH_FIELDS, metadata_pages
 from data_sync_etl.adapters.persistence.audit_queue import AuditQueue, utc
 from data_sync_etl.db.models import (
     MODELS,
@@ -34,6 +34,7 @@ from data_sync_etl.domain.reconciliation import (
     metadata_differences,
     serialize_json_value,
 )
+from data_sync_etl.workers.lifecycle import tick
 
 
 def identity(version, origin):
@@ -46,8 +47,9 @@ FILE_COLUMNS = ('id', 'resource_id', 'source_hash', 'source_file_size', 'storage
 
 
 class ScheduledAudit:
-    def __init__(self, engine, settings):
+    def __init__(self, engine, settings, sync=None):
         self.engine, self.settings = engine, settings
+        self.sync = sync
         self.queue = AuditQueue(engine.uow, settings)
 
     def schedule(self):
@@ -64,8 +66,8 @@ class ScheduledAudit:
                 jobs.append(self.queue.enqueue(kind, stream, f'{kind}:{stream}:{int(stamp // interval)}'))
         return jobs
 
-    def once(self):
-        claim = self.queue.claim()
+    def once(self, job_id=None):
+        claim = self.queue.claim(job_id)
         if claim is None:
             return False
         stop, lost = Event(), Event()
@@ -74,6 +76,7 @@ class ScheduledAudit:
             while not stop.wait(self.settings.reconciliation_lease_seconds / 3):
                 try:
                     self.queue.heartbeat(claim)
+                    tick()
                 except Exception:
                     lost.set()
                     return
@@ -81,12 +84,15 @@ class ScheduledAudit:
         thread = Thread(target=heartbeat, daemon=True, name='audit-heartbeat')
         thread.start()
         try:
-            if claim['audit_type'] in ('LIGHT', 'DEEP'):
-                self._files(claim, lost)
-            elif claim['audit_type'] == 'IDS':
-                self._ids(claim, lost)
-            else:
-                self._metadata(claim)
+            with self.engine.uow.processing_lock(f"reconciliation-{claim['stream_name']}") as acquired:
+                if not acquired:
+                    raise DomainError('RECONCILIATION_BUSY')
+                if claim['audit_type'] in ('LIGHT', 'DEEP'):
+                    self._files(claim, lost)
+                elif claim['audit_type'] == 'IDS':
+                    self._ids(claim, lost)
+                else:
+                    self._metadata(claim)
         except Exception:
             self.queue.fail(claim)
         finally:
@@ -111,7 +117,8 @@ class ScheduledAudit:
             run.status, run.finished_at = 'RUNNING', None
             job.checkpoint = serialize_json_value(checkpoint)
             run.summary_meta = {**serialize_json_value(checkpoint), 'audit_type': claim['audit_type'],
-                'dry_run': True, 'mode': 'INCREMENTAL', 'whole_repository_verified': False,
+                'dry_run': not checkpoint.get('repair_requested', False),
+                'mode': checkpoint.get('mode', 'INCREMENTAL'), 'whole_repository_verified': False,
                 'verification_scope': 'AUDIT_JOB', 'cache_reused_count': 0}
             run.source_count = checkpoint.get('source_count', 0)
             run.target_count = checkpoint.get('records_scanned', 0)
@@ -243,11 +250,18 @@ class ScheduledAudit:
     def _metadata(self, claim):
         checkpoint = dict(claim['checkpoint'])
         stream = claim['stream_name']
+        checkpoint.setdefault('auth_scope_complete', True)
+        self._repair_pending(claim, checkpoint)
         if 'scan_started' not in checkpoint:
             with self.engine.uow() as repo:
-                previous = repo.session.scalar(select(Job).where(Job.audit_type == 'METADATA',
-                    Job.stream_name == stream, Job.status == 'COMPLETED').order_by(Job.created_at.desc()).limit(1))
-                since = (previous.checkpoint or {}).get('watermark_next') if previous else None
+                query = select(Job).where(Job.audit_type == 'METADATA',
+                    Job.stream_name == stream, Job.status == 'COMPLETED')
+                if checkpoint.get('repair_requested'):
+                    query = query.where(Job.checkpoint['repair_requested'].as_boolean().is_(True))
+                previous = repo.session.scalar(query.order_by(Job.created_at.desc()).limit(1))
+                since = ((previous.checkpoint or {}).get('watermark_next') if previous else None)
+                if checkpoint.get('mode') == 'FULL':
+                    since = None
             checkpoint.update(scan_started=now().isoformat(), since=since, last_id=None)
         since = datetime.fromisoformat(checkpoint['since']) - timedelta(seconds=300) if checkpoint.get('since') else None
         for key in ('records_scanned', 'matched_count', 'mismatched_count', 'not_verified_count', 'source_pages_read'):
@@ -270,7 +284,7 @@ class ScheduledAudit:
                 ids = [str(row['id']) for row in source_rows]
                 with self.engine.uow() as repo:
                     columns = [model.id, model.source_origin] + [getattr(model, key)
-                        for key in METADATA_FIELDS[stream]]
+                        for key in (*METADATA_FIELDS[stream], *(AUTH_FIELDS if stream == 'users' else ()))]
                     targets = {str(row['id']): dict(row) for row in repo.session.execute(
                         select(*columns).where(model.id.in_(ids))).mappings()}
                     if stream == 'resources':
@@ -301,6 +315,13 @@ class ScheduledAudit:
                     fields = set(METADATA_FIELDS[stream])
                     compared = fields & source.keys() & target.keys()
                     different = metadata_differences(stream, source, target)
+                    if stream == 'users':
+                        fields.update(AUTH_FIELDS)
+                        for key in AUTH_FIELDS:
+                            if key in source and key in target:
+                                compared.add(key)
+                                if serialize_json_value(source[key]) != serialize_json_value(target[key]):
+                                    different.append(key)
                     if stream == 'resources':
                         for key in ('_resource_subjects', '_resource_grades'):
                             fields.add(key)
@@ -308,6 +329,9 @@ class ScheduledAudit:
                                 compared.add(key)
                                 if source[key] != target[key]:
                                     different.append(key)
+                    if stream == 'users' and compared != fields:
+                        checkpoint['auth_scope_complete'] = False
+                        checkpoint['unsupported_fields'] = sorted(set(checkpoint.get('unsupported_fields', ())) | (fields - compared))
                     if different:
                         results.append({'record_id': record_id, 'discrepancy_flag': 'DESYNC_METADATA',
                             'source_value': {key: source[key] for key in different},
@@ -321,7 +345,11 @@ class ScheduledAudit:
                         checkpoint['matched_count'] += 1
                 visited += len(source_rows)
                 checkpoint.update(last_id=ids[-1] if sql_order else None, source_count=checkpoint['records_scanned'])
+                if checkpoint.get('repair_requested'):
+                    checkpoint['repair_pending'] = [r['record_id'] for r in results
+                        if r['discrepancy_flag'] in ('ORPHAN_SOURCE', 'DESYNC_METADATA')]
                 self._save(claim, checkpoint, results)
+                self._repair_pending(claim, checkpoint)
                 if visited >= self.settings.reconciliation_max_files_per_run or monotonic() - started >= self.settings.reconciliation_max_seconds_per_run:
                     complete = False
                     break
@@ -329,8 +357,30 @@ class ScheduledAudit:
             pages.close()  # Release the read-only SOURCE snapshot at each budget boundary.
         if complete:
             checkpoint.update(last_id=None, watermark_next=checkpoint['scan_started'])
+            if (stream == 'users' and checkpoint.get('repair_requested') and not checkpoint['not_verified_count']
+                    and checkpoint['auth_scope_complete']):
+                checkpoint['auth_verified'] = True
         checkpoint['coverage_status'] = 'DELTA_VISITED' if complete else 'COVERAGE_BEHIND'
         self._save(claim, checkpoint, status='COMPLETED' if complete and not checkpoint['not_verified_count'] else 'PARTIAL')
+
+    def _repair_pending(self, claim, checkpoint):
+        ids = checkpoint.get('repair_pending', [])
+        if not ids:
+            return
+        if self.sync is None:
+            raise DomainError('AUDIT_REPAIR_WORKER_REQUIRED')
+        self.sync.run_selected(claim['stream_name'], ids,
+            fence=lambda session: self.queue.owned(session, claim))
+        with self.engine.uow() as repo:
+            self.queue.owned(repo.session, claim)
+            rows = repo.session.scalars(select(Discrepancy).where(
+                Discrepancy.run_id == claim['id'], Discrepancy.record_id.in_(ids),
+                Discrepancy.discrepancy_flag.in_(('ORPHAN_SOURCE', 'DESYNC_METADATA'))))
+            for row in rows:
+                row.resolution_status = 'SYNCED'
+        checkpoint['repaired_count'] = checkpoint.get('repaired_count', 0) + len(ids)
+        checkpoint['repair_pending'] = []
+        self._save(claim, checkpoint)
 
     def _ids(self, claim, lost):
         adapter = self.engine.source_adapter

@@ -32,7 +32,7 @@ class MasterSyncRunResult(BaseModel):
 
 class MasterSyncRunStatus(MasterSyncRunResult):
     stream_name: SyncStream
-    sync_mode: Literal["FULL", "INCREMENTAL"] | None = None
+    sync_mode: Literal["FULL", "INCREMENTAL", "REPAIR"] | None = None
     status: Literal["RUNNING", "COMPLETED", "FAILED"]
     started_at: datetime
     finished_at: datetime | None = None
@@ -104,6 +104,8 @@ class SourceSyncFile(BaseModel):
 class SourceSyncFilesResponse(BaseModel):
     items: list[SourceSyncFile]
     next_cursor: str | None
+    total: int | None = None
+    total_pages: int | None = None
     file_sync_supported: bool = False
     file_sync_error: str | None = "BLOCKED_SOURCE_STORAGE"
     file_worker_healthy: bool = False

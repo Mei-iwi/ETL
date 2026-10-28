@@ -17,7 +17,7 @@ class AuditQueue:
     def __init__(self, uow, settings):
         self.uow, self.settings = uow, settings
 
-    def enqueue(self, audit_type='DEEP', stream='files', job_key=None):
+    def enqueue(self, audit_type='DEEP', stream='files', job_key=None, *, mode=None, repair=False):
         if audit_type not in ('DEEP', 'LIGHT', 'METADATA', 'IDS') or stream not in ('files', 'resources', 'subjects', 'grades', 'users'):
             raise DomainError('INVALID_AUDIT_SCOPE')
         if (audit_type in ('DEEP', 'LIGHT')) != (stream == 'files'):
@@ -35,9 +35,19 @@ class AuditQueue:
                 if previous and previous.checkpoint and previous.status != 'FAILED':
                     checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
                         'last_id', 'phase', 'generation', 'source_seen', 'source_summary')}
-                    if audit_type == 'METADATA' and previous.status == 'PARTIAL':
+                    if audit_type == 'METADATA' and previous.status == 'PARTIAL' and previous.checkpoint.get('last_id'):
                         checkpoint = {k: v for k, v in previous.checkpoint.items() if k in (
-                            'last_id', 'scan_started', 'since', 'watermark_next', 'generation')}
+                            'last_id', 'scan_started', 'since', 'watermark_next', 'generation',
+                            'auth_scope_complete')}
+                    elif audit_type == 'METADATA':
+                        checkpoint = {}
+                if mode == 'FULL' and not (previous and previous.status == 'PARTIAL'
+                                           and (previous.checkpoint or {}).get('mode') == 'FULL'):
+                    checkpoint = {}
+                if previous and bool((previous.checkpoint or {}).get('repair_requested')) != repair:
+                    checkpoint = {}
+                if mode is not None:
+                    checkpoint.update(mode=mode, repair_requested=repair)
                 row = Job(id=new_id(), job_key=key, audit_type=audit_type, stream_name=stream,
                           status='PENDING', checkpoint=checkpoint)
                 repo.session.add(row)
@@ -47,16 +57,18 @@ class AuditQueue:
             with self.uow() as repo:
                 return repo.session.scalar(select(Job.id).where(Job.job_key == key))
 
-    def claim(self):
+    def claim(self, job_id=None):
         stamp = now()
         with self.uow() as repo:
             eligible = or_(and_(Job.status.in_(('PENDING', 'RETRY_WAIT')),
                                 or_(Job.next_retry_at.is_(None), Job.next_retry_at <= stamp)),
                            and_(Job.status == 'RUNNING', Job.lease_expires_at <= stamp))
+            if job_id is not None:
+                eligible = and_(eligible, Job.id == job_id)
             if not self.settings.reconciliation_scheduler_enabled:
                 # Scheduled slot keys contain ':'; manual API keys are UUID/ULID.
                 # Disabling the scheduler also pauses unclaimed scheduled work.
-                eligible = and_(eligible, ~Job.job_key.contains(':'))
+                eligible = and_(eligible, or_(~Job.job_key.contains(':'), Job.job_key.startswith('configured:')))
             row = repo.session.scalar(select(Job).where(eligible).order_by(Job.created_at, Job.id)
                 .with_for_update(skip_locked=True).limit(1))
             if row is None:

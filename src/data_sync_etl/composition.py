@@ -55,6 +55,7 @@ from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.reconcile_master import ReconcileMaster
+from data_sync_etl.application.reconciled_sync import ReconciledSync
 from data_sync_etl.application.reconciliation_engine import ReconciliationEngine
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
@@ -185,7 +186,7 @@ class Container:
             lease_seconds=self.settings.master_sync_auto_lease_seconds,
         )
         self.master_sync_worker = MasterSyncWorker(
-            self.sync,
+            ReconciledSync(self.reconciliation_engine, self.sync, self.settings),
             self.auto_sync,
             poll_seconds=self.settings.master_sync_auto_poll_seconds,
             auth_freshness_seconds=(self.settings.auth_master_freshness_seconds
@@ -369,6 +370,7 @@ class Container:
         self.source_file_import.resolver = self.source_resolver
         self.reconciliation_engine.source_resolver = self.source_resolver
         self.reconciliation_engine.file_read_budget_seconds = self.settings.source_read_timeout_seconds
+        self.reconciliation_engine.audit_settings = self.settings
         self.reconciliation_jobs = FileReconciliationJobs(self.reconciliation_engine)
         self.file_previews = FilePreviewService(self.source_resolver, self.settings)
         self.ocr.resolver = self.source_resolver

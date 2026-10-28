@@ -12,7 +12,12 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
-from data_sync_etl.db.models import MasterLearningResource, MasterUser, SyncRun
+from data_sync_etl.db.models import (
+    MasterLearningResource,
+    MasterUser,
+    SyncReconciliationRun,
+    SyncRun,
+)
 from data_sync_etl.logging import event
 from data_sync_etl.security.auth import AuthError, AuthService, Principal
 
@@ -57,7 +62,13 @@ class MasterIdentityReader:
             with self.engine.connect().execution_options(isolation_level=isolation, postgresql_readonly=True) as connection:
                 with connection.begin():
                     stamp = connection.scalar(select(func.max(SyncRun.finished_at)).where(
-                        SyncRun.stream_name == 'users', SyncRun.status == 'COMPLETED'))
+                        SyncRun.stream_name == 'users', SyncRun.status == 'COMPLETED',
+                        SyncRun.sync_mode.in_(('FULL', 'INCREMENTAL'))))
+                    verified = connection.scalar(select(func.max(SyncReconciliationRun.finished_at)).where(
+                        SyncReconciliationRun.stream_name == 'users', SyncReconciliationRun.status == 'COMPLETED',
+                        SyncReconciliationRun.summary_meta['auth_verified'].as_boolean().is_(True)))
+                    if verified is not None and (stamp is None or verified > stamp):
+                        stamp = verified
                     if stamp is None:
                         raise AuthError('AUTH_MASTER_STALE', 503)
                     if stamp.tzinfo is None:

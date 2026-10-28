@@ -1023,12 +1023,14 @@ def source_sync_files(
     after: Annotated[str | None, Query(min_length=1, max_length=30)] = None,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
     status: Literal["failed", "failed-retryable", "failed-blocked"] | None = None,
+    include_total: bool = False,
 ):
     container = source_file_admin(request)
     try:
         result = container.source_file_import.list_files(
             after=after, size=size, failed_only=status is not None,
             retry_eligible=True if status == "failed-retryable" else False if status == "failed-blocked" else None,
+            include_total=include_total,
         )
     except DomainError:
         raise HTTPException(503, "Không thể đọc phiên bản nguồn; kiểm tra kết nối và quyền đọc") from None
