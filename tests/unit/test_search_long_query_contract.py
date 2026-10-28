@@ -14,9 +14,16 @@ def test_150_word_query_retains_negation_comparison_and_identifiers():
     assert bounded_query(unicodedata.normalize('NFD', query)) == query
 
 
-@pytest.mark.parametrize('query', ['x' * 2001, 'word ' * 257, '', ' '])
+@pytest.mark.parametrize('query', ['x' * 4001, 'word ' * 513, '', ' '])
 def test_hard_limits_reject_instead_of_truncating_intent(query):
     with pytest.raises(ValidationError):
         SearchRequest(query=query)
     with pytest.raises(ValueError):
         bounded_query(query)
+
+
+def test_300_word_query_is_supported():
+    query = ' '.join(['học'] * 290 + ['toán', 'hình', 'không', 'lớp', '12', 'tích', 'đạo', 'C++', 'C#', 'CO2'])
+    assert len(query.split()) == 300
+    assert SearchRequest(query=query).query == query
+    assert bounded_query(query) == query

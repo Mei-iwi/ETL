@@ -17,6 +17,10 @@ export interface ReconciliationRunReport {
     target_table_hash?: string | null
     summary_meta?: {
         mode?: 'INCREMENTAL' | 'FULL'
+        manual_full_scan?: boolean
+        cycle_not_verified_count?: number
+        cycle_observed_file_bytes?: number
+        cycle_observed_file_count?: number
         execution_time_ms?: number
         mismatch_ratio?: number
         max_allowed_ratio?: number

@@ -39,6 +39,9 @@ class AuditQueue:
             return existing.id
         previous = repo.session.scalar(select(Job).where(Job.audit_type == audit_type,
             Job.stream_name == stream).order_by(Job.created_at.desc()).limit(1))
+        manual_full = audit_type == 'DEEP' and stream == 'files' and mode == 'FULL' and scheduled_cycle is None and ':' not in key
+        if manual_full:
+            previous = None  # A new explicit full scan starts at the beginning.
         if scheduled_cycle is not None:
             # Calendar cycles must not inherit cursors from manual work or the
             # other FAST/THOROUGH branch, even when both use METADATA.
@@ -65,6 +68,8 @@ class AuditQueue:
             checkpoint = {}
         if mode is not None:
             checkpoint.update(mode=mode, repair_requested=repair)
+        if manual_full:
+            checkpoint.update(manual_full_scan=True, manual_batch_start=None)
         if scheduled_cycle is not None:
             cp = (previous.checkpoint or {}) if previous else {}
             if previous and audit_type in ('METADATA', 'IDS'):
@@ -83,6 +88,40 @@ class AuditQueue:
         repo.session.add(row)
         repo.session.flush()
         return row.id
+
+    def resume_full_files(self):
+        """Continue explicitly requested full scans, using the same durable job.
+
+        Only a successfully checkpointed, advancing budget boundary is resumed.
+        Errors keep the existing bounded retry policy; completed/unverified
+        cycles and batches without progress are never restarted here.
+        """
+        stamp, resumed = now(), []
+        with self.uow() as repo:
+            admission_lock(repo.session, 'audit')
+            rows = repo.session.scalars(select(Job).where(Job.status == 'PARTIAL', Job.audit_type == 'DEEP',
+                Job.stream_name == 'files', Job.checkpoint['manual_full_scan'].as_boolean().is_(True),
+                Job.checkpoint['coverage_status'].as_string() == 'COVERAGE_BEHIND',
+                Job.checkpoint['cycle_finished'].as_boolean().is_not(True),
+                Job.checkpoint['last_id'].as_string().is_not(None),
+                or_(Job.checkpoint['manual_batch_start'].as_string().is_(None),
+                    Job.checkpoint['last_id'].as_string() != Job.checkpoint['manual_batch_start'].as_string()),
+                Job.finished_at <= stamp - timedelta(seconds=self.settings.reconciliation_retry_seconds))
+                .order_by(Job.created_at, Job.id).with_for_update(skip_locked=True).limit(20))
+            for row in rows:
+                cp = dict(row.checkpoint or {})
+                if (cp.get('coverage_status') != 'COVERAGE_BEHIND' or cp.get('cycle_finished')
+                        or not cp.get('last_id') or cp['last_id'] == cp.get('manual_batch_start')):
+                    continue
+                for metric in ('records_scanned', 'matched_count', 'mismatched_count', 'not_verified_count',
+                               'bytes_read', 'sha256_computed_count', 'observed_file_bytes', 'observed_file_count', 'execution_time_ms'):
+                    cp[f'cycle_{metric}'] = cp.get(f'cycle_{metric}', 0) + cp.get(metric, 0)
+                    cp[metric] = 0
+                cp['manual_batch_start'] = cp['last_id']
+                row.checkpoint, row.status, row.finished_at = cp, 'PENDING', None
+                row.attempts, row.next_retry_at, row.error_code = 0, None, None
+                resumed.append(row.id)
+        return resumed
 
     def enqueue_all(self, *, mode='INCREMENTAL', repair=False):
         if mode not in ('INCREMENTAL', 'FULL'):

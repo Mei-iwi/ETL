@@ -65,6 +65,18 @@ def test_prepared_query_avoids_second_prepare_and_does_not_store_queries(runtime
     assert not any(query in repr(model.__dict__) for query in VIETNAMESE)
 
 
+def test_query_token_budget_rejects_before_sentence_transformer_can_truncate(runtime):
+    model, calls = runtime
+    model.prepare()
+    model._model.tokenizer = SimpleNamespace(encode=lambda text, **kwargs: text.split())
+    model._model.max_seq_length = 4
+    before = calls['encode']
+    model.validate_query('C++ và C#')
+    with pytest.raises(IndexingError, match='SEMANTIC_TOKEN_LIMIT'):
+        model.validate_query('one two three four tail-condition')
+    assert calls['encode'] == before
+
+
 @pytest.mark.parametrize('change', ['missing_weights', 'bad_json', 'revision', 'dimension', 'id'])
 def test_cached_vector_never_hides_unavailable_or_changed_runtime(runtime, change):
     model, _ = runtime

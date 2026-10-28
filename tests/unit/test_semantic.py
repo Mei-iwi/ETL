@@ -104,6 +104,38 @@ def test_adapter_batch_token_limit_and_revision_change(monkeypatch):
         model.embed_queries(['query'])
 
 
+def test_opt_in_query_windows_preserve_tail_and_budget_before_inference(monkeypatch):
+    model = BgeM3Embedding('.', 'a' * 40, max_tokens=5)
+    encoded = []
+    class Array(list):
+        def tolist(self):
+            return list(self)
+    class Tokenizer:
+        def encode(self, text, **kwargs):
+            assert kwargs == {'truncation': False}
+            return text.split()
+    class Runtime:
+        tokenizer = Tokenizer()
+        def encode(self, texts, **kwargs):
+            encoded.extend(texts)
+            return {'dense_vecs': Array([[1.] + [0.] * 1023 for _ in texts])}
+    model._model = Runtime()
+    model._loaded_identity = model.model_identity()
+    monkeypatch.setattr(model, 'is_available', lambda: True)
+    query = 'one two three four five six seven eight C++ NoSQL'
+    with pytest.raises(IndexingError, match='SEMANTIC_TOKEN_LIMIT'):
+        model.embed_queries([query])
+    assert encoded == []
+    result = model.embed_query_windows(query)
+    assert ' '.join(encoded).split() == query.split()
+    assert result['query_windows'] == 2 and not result['truncated']
+    assert result['vector'][0] == 1.
+    encoded.clear()
+    with pytest.raises(IndexingError, match='SEMANTIC_QUERY_WINDOW_LIMIT'):
+        model.embed_query_windows('word ' * 32)
+    assert encoded == []
+
+
 def test_additive_schema_does_not_include_legacy():
     definitions = contracts()
     assert set(definitions) == {'semantic_chunk_vectors_v1', 'semantic_chunk_indexes_v1'}

@@ -132,6 +132,8 @@ class SearchResponse(StrictDTO):
     message: Literal['OK', 'NO_READY_INDEX', 'NO_ACCESSIBLE_CONTENT', 'QUERY_NO_KEYWORDS', 'PUBLIC_ACCESS_UNCONFIRMED']
     access_scope: Literal['public', 'local_demo', 'authenticated_admin', 'authenticated_user'] = 'public'
     vector_index: dict | None = None
+    query_plan: dict | None = None
+    retrieval_diagnostics: dict | None = None
 
     @model_serializer(mode='wrap')
     def omit_unused_vector_index(self, handler):
@@ -145,6 +147,10 @@ class SearchResponse(StrictDTO):
             result.pop('vector_index', None)
         if self.branch_status is None:
             result.pop('branch_status', None)
+        if self.query_plan is None:
+            result.pop('query_plan', None)
+        if self.retrieval_diagnostics is None:
+            result.pop('retrieval_diagnostics', None)
         return result
 
 
@@ -211,6 +217,7 @@ MESSAGES = {
     'SEMANTIC_INDEX_STALE': 'Nội dung hoặc chỉ mục đã thay đổi. Vui lòng tìm lại.',
     'SEMANTIC_CANDIDATE_LIMIT': 'Có quá nhiều đoạn văn. Hãy thu hẹp bộ lọc tìm kiếm.',
     'SEMANTIC_TOKEN_LIMIT': 'Văn bản vượt giới hạn xử lý của mô hình ngữ nghĩa.',
+    'SEMANTIC_QUERY_WINDOW_LIMIT': 'Truy vấn vượt ngân sách xử lý ngữ nghĩa. Hãy tách thành các câu hỏi ngắn hơn.',
     'BLOCKED_LEXICAL_ANALYZER': 'Underthesea chưa sẵn sàng. Cần cài đúng phiên bản analyzer.',
     'SEARCH_MODEL_LOADING': 'Đang chuẩn bị tìm kiếm. Có thể chọn BoW.',
     'SEARCH_RUNTIME_BUSY': 'Đang xử lý tìm kiếm khác. Vui lòng thử lại sau.',

@@ -190,6 +190,23 @@ class LocalSentenceEmbedding:
         self.prepare()
         return self._encode
 
+    def validate_query(self, text: str) -> None:
+        """Prevent the legacy sentence-transformer from silently truncating a query.
+
+        Search calls this after preparation and before vector cache lookup.
+        Document encoding and its index contract remain unchanged.
+        """
+        tokenizer = getattr(self._model, 'tokenizer', None)
+        limit = getattr(self._model, 'max_seq_length', None)
+        if tokenizer is None or type(limit) is not int or limit <= 0:
+            raise IndexingError('BLOCKED_EMBEDDING_RUNTIME', 503)
+        try:
+            count = len(tokenizer.encode(text, truncation=False))
+        except Exception:
+            raise IndexingError('BLOCKED_EMBEDDING_RUNTIME', 503) from None
+        if count > limit:
+            raise IndexingError('SEMANTIC_TOKEN_LIMIT', 422)
+
     def _encode(self, text):
         try:
             vector = self._model.encode(text, show_progress_bar=False).tolist()

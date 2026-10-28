@@ -69,13 +69,13 @@ def test_vector_always_encodes_raw_query_even_with_approved_lexical_variant(sear
 @pytest.mark.parametrize('text', ['C++ C# CO₂ CO2 H2O', 'HL26_R013 HL26_V010', '🙂', '!!!',
     'khong the loc muoi hoa tan', 'toan', 'quang hơp', 'cell trong Excel', 'cell trong sinh học',
     'cach add fractions khac mau', 'quang hop photosynthesis photosynthèse', 'Comment additionner des fractions ?',
-    'base de données', 'ĐƯỜNG', 'co so du lieu   ', 'ＡＢＣ русский', 'word '*30, '\u0301', 'abc\x00def', 'abc\x1fdef'])
+    'base de données', 'ĐƯỜNG', 'co so du lieu   ', 'ＡＢＣ русский', 'word '*30, '\u0301'])
 def test_unicode_symbols_negation_and_unusual_inputs_are_not_globally_folded(text):
     request = SearchRequest(query=text)
     assert request.query == unicodedata.normalize('NFC', text).strip()
 
 
-@pytest.mark.parametrize('text', ['', '   ', 'x'*2001, '\ud800'])
+@pytest.mark.parametrize('text', ['', '   ', 'x'*4001, '\ud800', 'abc\x00def', 'abc\x1fdef'])
 def test_invalid_search_lengths_remain_explicit_errors(text):
     with pytest.raises(ValidationError):
         SearchRequest(query=text)

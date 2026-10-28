@@ -32,6 +32,7 @@ from data_sync_etl.domain.lexical import (
 from data_sync_etl.domain.meaning_bags import match_meaning
 from data_sync_etl.domain.query_variants import VERSION as ACCENT_VARIANT_VERSION
 from data_sync_etl.domain.query_variants import approved_accent_variant
+from data_sync_etl.domain.query_planner import PLANNER_VERSION, lexical_plan_variants, plan_query
 from data_sync_etl.domain.retrieval_fusion import version_rrf
 from data_sync_etl.domain.search import SearchError, bounded_query, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
@@ -102,6 +103,8 @@ class SearchService:
 
     def _ranking_algorithm(self, method):
         base = self._base_ranking_algorithm(method)
+        if self.settings.search_query_understanding_enabled:
+            base += '+' + PLANNER_VERSION
         if method != 'vector' and self.settings.search_corpus_accent_candidates_enabled:
             base += '+corpus-accent-candidates-v1'
         return base + '+approved-accent-max-v1' if self.settings.search_approved_accent_variants_enabled else base
@@ -233,6 +236,9 @@ class SearchService:
             started += warmup_seconds
             self._deadline(started)
             dimension = self.settings.index_embedding_dimension
+            validate_query = getattr(embedding, 'validate_query', None)
+            if validate_query is not None:
+                validate_query(query)  # Cache hits must obey the live tokenizer budget too.
             vector = (context.encode(embedding, encoder, query, dimension) if context is not None
                       else validate_vector(encoder(query), dimension))
             self._deadline(started)
@@ -369,8 +375,14 @@ class SearchService:
             query = bounded_query(query)
         except ValueError as exc:
             raise SearchError('QUERY_INVALID', 422) from exc
+        query_plan = None
+        if self.settings.search_query_understanding_enabled:
+            try:
+                query_plan = plan_query(query)
+            except ValueError:
+                pass  # A representation validation failure falls back to original.
         options = dict(access=access, _query_context=_query_context, _batch_texts=_batch_texts,
-                       _batch_bags=_batch_bags, _evaluation_capture=_evaluation_capture)
+                       _batch_bags=_batch_bags, _evaluation_capture=_evaluation_capture, _query_plan=query_plan)
         provider = self.concept_resolver
         call = CURRENT_SEARCH.get()
         if call is not None:
@@ -401,10 +413,10 @@ class SearchService:
                 _REQUEST_DICTIONARY.reset(token)
 
     def _search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
-                _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None):
+                _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None, _query_plan=None):
         access = access or SearchAccess()
         options = dict(access=access, _query_context=_query_context, _batch_texts=_batch_texts,
-                       _batch_bags=_batch_bags, _evaluation_capture=_evaluation_capture)
+                       _batch_bags=_batch_bags, _evaluation_capture=_evaluation_capture, _query_plan=_query_plan)
         if not self.settings.search_metadata_enabled or not access.internal:
             return self._content_search(query, method, filters, page, size, **options)
         from data_sync_etl.application.metadata_search import fuse_results
@@ -493,7 +505,7 @@ class SearchService:
 
     def _content_search(self, query, method='hybrid', filters=None, page=1, size=10, *, access=None,
                         _query_context=None, _batch_texts=False, _batch_bags=False, _evaluation_capture=None,
-                        _branch_capture=None):
+                        _branch_capture=None, _query_plan=None):
         access = access or SearchAccess()
         started, filters = monotonic(), filters or {}
         query = normalize_query(query)
@@ -507,9 +519,30 @@ class SearchService:
         policy = self.settings.search_expansion.model_copy(deep=True)
         expansion = self.dictionary.expand(query, domain=filters.get('domain'), policy=policy)
         variant = (approved_accent_variant(query, self.dictionary, policy=policy, domain=filters.get('domain'))
-                   if method != 'vector' and self.settings.search_approved_accent_variants_enabled else None)
+                   if self.settings.search_approved_accent_variants_enabled and (
+                       method != 'vector' or self.settings.search_query_semantic_variants_enabled and _query_plan) else None)
         variant_expansion = self.dictionary.expand(variant, domain=filters.get('domain'), policy=policy) if variant else None
         variant_keywords = query_terms(variant) if variant else []
+        lexical_specs = {query: (keywords, expansion, 1.)}
+        if variant is not None and method != 'vector':
+            lexical_specs[variant] = (variant_keywords, variant_expansion, policy.synonyms)
+        if _query_plan and method != 'vector':
+            for text in lexical_plan_variants(_query_plan, decompose=self.settings.search_query_decomposition_enabled)[1:]:
+                if len(lexical_specs) >= 4:
+                    break
+                lexical_specs.setdefault(text, (query_terms(text),
+                    self.dictionary.expand(text, domain=filters.get('domain'), policy=policy), policy.synonyms))
+        dense_variant = None
+        if _query_plan and method != 'bow' and self.settings.search_query_semantic_variants_enabled:
+            if variant:
+                dense_variant = variant
+            elif (not _query_plan.negation_terms and not _query_plan.comparison_constraints
+                    and len(lexical_plan_variants(_query_plan)) > 1):
+                dense_variant = _query_plan.core_query
+        if dense_variant and (len(dense_variant) > 1000 or len(query_terms(dense_variant)) > 128):
+            dense_variant = None  # Reserve inference for a bounded supplementary representation.
+        dense_keywords = query_terms(dense_variant) if dense_variant else []
+        dense_expansion = self.dictionary.expand(dense_variant, domain=filters.get('domain'), policy=policy) if dense_variant else None
         extra_vectors = []
         if self.bags is None:
             raise SearchError('SEARCH_SCHEMA_UNAVAILABLE')
@@ -524,10 +557,18 @@ class SearchService:
                     raise SearchError('SEMANTIC_SCHEMA_NOT_READY', 503)
                 self.semantic.embedding.require_search_ready()
                 with self._inference():
-                    vector = self.semantic.query(query)
+                    vector = (self.semantic.query(query, split_long=True, checkpoint=lambda: self._deadline(started))
+                              if _query_plan and self.settings.search_query_long_semantic_enabled else self.semantic.query(query))
                 self._deadline(started)
             else:
                 vector, started = self._query_vector(query, _query_context, started)
+            if dense_variant:
+                if use_semantic:
+                    with self._inference():
+                        extra_vectors = [self.semantic.query(dense_variant)]
+                else:
+                    extra_vectors = [self._query_vector(dense_variant, _query_context, started)[0]]
+                self._deadline(started)
         with self.indexing.uow() as repo:
             metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
         if len(metadata) > self.settings.search_max_bags:
@@ -564,12 +605,11 @@ class SearchService:
                 raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
             snapshots[version_id] = snapshot
             roots, snippets, preview = self._snippets(snapshot, keywords, started, allowed, query, expansion, policy)
-            if variant is not None:
-                _, alternatives, _ = self._snippets(snapshot, variant_keywords, started, allowed,
-                                                     variant, variant_expansion, policy)
+            for text, (terms, expanded, _) in list(lexical_specs.items())[1:]:
+                _, alternatives, _ = self._snippets(snapshot, terms, started, allowed, text, expanded, policy)
                 for key, candidate in alternatives.items():
                     if candidate[0] > snippets[key][0]:
-                        snippets[key] = (candidate[0], {**candidate[1], '_retrieval_query': variant})
+                        snippets[key] = (candidate[0], {**candidate[1], '_retrieval_query': text})
             authorized_roots[version_id] = set(roots)
             evidence_options = {}
             if extra_vectors:
@@ -600,8 +640,8 @@ class SearchService:
                     continue
                 ready_count += 1
                 matched = sorted(set(keywords) & set(bag.lexical.terms))
-                if variant is not None:
-                    matched = sorted(set(matched) | (set(variant_keywords) & set(bag.lexical.terms)))
+                for terms, _, _ in list(lexical_specs.values())[1:]:
+                    matched = sorted(set(matched) | (set(terms) & set(bag.lexical.terms)))
                 if policy.enabled:
                     matched = sorted(set(matched) | equivalent_terms(query, bag.lexical.title_tokens, expansion=expansion, dictionary=self.dictionary, policy=policy)
                                  | set().union(*(equivalent_terms(query, passage, expansion=expansion, dictionary=self.dictionary, policy=policy)
@@ -624,8 +664,8 @@ class SearchService:
                             'margin': self.settings.search_meaning_context_margin})
                         for extra in extra_vectors:
                             candidate = match_meaning(extra, bag.meanings, context={
-                                'query': variant, 'keywords': variant_keywords,
-                                'expansion': variant_expansion,
+                                'query': dense_variant, 'keywords': dense_keywords,
+                                'expansion': dense_expansion,
                                 'dictionary': self.dictionary, 'policy': policy,
                                 'margin': self.settings.search_meaning_context_margin})
                             if candidate[0] > value:
@@ -687,12 +727,13 @@ class SearchService:
                        dictionary=self.dictionary, policy=policy, expansion=expansion,
                        accent_insensitive=self.settings.search_corpus_accent_candidates_enabled,
                        min_coverage=self.settings.search_bow_min_coverage, focus_query=variant)
-            if variant is not None:
-                assisted = bm25(variant, {key: row[0].lexical for key, row in by_bag.items()},
-                    dictionary=self.dictionary, policy=policy, domain=filters.get('domain'),
+            for text, (_, expanded, weight) in list(lexical_specs.items())[1:]:
+                self._deadline(started)
+                assisted = bm25(text, {key: row[0].lexical for key, row in by_bag.items()},
+                    dictionary=self.dictionary, policy=policy, expansion=expanded, domain=filters.get('domain'),
                     min_coverage=self.settings.search_bow_min_coverage)
                 # Union by identity and maximum score, never duplicate-score addition.
-                bow = {key: max(bow.get(key, 0), policy.synonyms * assisted.get(key, 0))
+                bow = {key: max(bow.get(key, 0), weight * assisted.get(key, 0))
                        for key in bow.keys() | assisted.keys()}
             scores = bow if method == 'bow' else semantic if method == 'vector' else rrf(bow, semantic)
             fusion = (version_rrf({'bow': bow, 'vector': semantic},
@@ -761,10 +802,9 @@ class SearchService:
                             context_url=f'/api/v1/chunks/{token}/context', context_evidence='semantic', meaning_variants=[])
                         if method == 'vector':
                             item['score_components'] = {'vector': item['score']}
-                rendered_variant = variant is not None and chunk.get('_retrieval_query') == variant
-                rendered_expansion = variant_expansion if rendered_variant else expansion
-                item['snippet'] = snippet_text(chunk['text'], set(variant_keywords if rendered_variant else keywords),
-                    query=variant if rendered_variant else query,
+                rendered_query = chunk.get('_retrieval_query', query)
+                rendered_keywords, rendered_expansion, _ = lexical_specs.get(rendered_query, lexical_specs[query])
+                item['snippet'] = snippet_text(chunk['text'], set(rendered_keywords), query=rendered_query,
                     anchor=chunk.get('anchor'), expansion=rendered_expansion, dictionary=self.dictionary, policy=policy)
                 locator = next((u.get('source_locator') for u in snapshot[2] if u['id'] == chunk['content_unit_id']), None)
                 if locator:
@@ -860,6 +900,12 @@ class SearchService:
                                     for key in selected_versions)}
         return {'query': query, 'method': method, 'page': page, 'size': size, 'total': total,
                 **vector_info,
+                **({'query_plan': _query_plan.model_dump(mode='json') if _query_plan else None,
+                    'retrieval_diagnostics': {'planner_status': 'READY' if _query_plan else 'FALLBACK_ORIGINAL',
+                        'lexical_queries': list(lexical_specs) if method != 'vector' else [],
+                        'semantic_queries': [query, *([dense_variant] if dense_variant else [])] if method != 'bow' else [],
+                        'fusion': 'per-bag-max-before-rrf', 'metadata_query': 'original'}}
+                   if self.settings.search_query_understanding_enabled else {}),
                 'total_pages': (total + size - 1) // size, 'items': items[offset:offset+size],
                 'ranking_algorithm': self._ranking_algorithm(method),
                 'query_expansion': {**expansion.model_dump(), **({'variant_policy': ACCENT_VARIANT_VERSION,
@@ -887,7 +933,12 @@ class SearchService:
                                               self.settings.search_meaning_fallback_min_similarity,
                                               self.settings.search_meaning_fallback_min_context_similarity,
                                               self.settings.search_meaning_context_margin] +
-                                              ([ACCENT_VARIANT_VERSION] if self.settings.search_approved_accent_variants_enabled else [])),
+                                              ([ACCENT_VARIANT_VERSION] if self.settings.search_approved_accent_variants_enabled else []) +
+                                              ([PLANNER_VERSION, _query_plan.fingerprint if _query_plan else 'fallback',
+                                                self.settings.search_query_decomposition_enabled,
+                                                self.settings.search_query_semantic_variants_enabled,
+                                                self.settings.search_query_long_semantic_enabled]
+                                               if self.settings.search_query_understanding_enabled else [])),
                 'representation_unit': 'content_bag', 'ready_bag_count': ready_count, 'access_scope': access.scope,
                 'readiness': {'lexical_ready_bags': ready_count, 'dense_ready_bags': ready_count,
                               'eligible_versions': len(by_version), 'ready_versions': len(snapshots),

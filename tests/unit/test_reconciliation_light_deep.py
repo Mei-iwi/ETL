@@ -106,3 +106,115 @@ def test_drive_audit_budget_counts_eager_download_and_hash_stream():
     assert metrics['bytes_read'] == 0
     with original.open_stream('DRIVE', 'files/blob/sample.txt') as stream:
         assert stream.read() == b'content'  # Audit policy never mutates the sync reader.
+
+
+def test_deep_then_unchanged_light_preserves_proof_but_not_light_hash_credit(local_file):
+    from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
+    from data_sync_etl.db.models import ReconciliationFileState as State, ReconciliationAuditJob as Job
+    from data_sync_etl.main import create_app
+    from tests.local_admin_client import TestClient
+
+    c, _, version_id = local_file
+    audit = ScheduledAudit(c.reconciliation_engine, c.settings)
+    audit.once(audit.queue.enqueue('DEEP', 'files', mode='FULL'))
+    with c.uow() as repo:
+        stamp = repo.session.get(State, version_id).last_verified_at
+    light = audit.queue.enqueue('LIGHT', 'files')
+    audit.once(light)
+    c.settings.admin_enabled = True
+    with TestClient(create_app(c)) as client:
+        coverage = client.get('/api/v1/reconciliation/coverage').json()
+        assert coverage['recent_sha256_evidence_count'] == coverage['total_files'] == 1
+        assert coverage['last_deep_verified_at'] is not None
+        evidence = client.get('/api/v1/reconciliation/file-evidence/' + version_id).json()
+        assert evidence['status'] == 'SYNCED' and evidence['recent_sha256_evidence'] is True
+        latest = client.get('/api/v1/reconciliation/runs/latest?stream=files').json()
+        assert latest['stream_reports'][0]['summary_meta']['audit_type'] == 'LIGHT'
+    with c.uow() as repo:
+        assert repo.session.get(State, version_id).last_verified_at == stamp
+        job = repo.session.get(Job, light)
+        assert job.checkpoint['bytes_read'] == job.checkpoint['sha256_computed_count'] == 0
+        assert job.checkpoint['matched_count'] == 0
+
+
+@pytest.mark.parametrize('change', ['revision', 'expected_hash', 'expected_size', 'ownership', 'missing_revision'])
+def test_light_invalidates_changed_or_unprovable_binding(local_file, monkeypatch, change):
+    from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
+    from data_sync_etl.adapters.persistence.audit_queue import utc
+    from data_sync_etl.db.models import ReconciliationFileState as State
+    from data_sync_etl.domain.core import now
+
+    c, path, version_id = local_file
+    audit = ScheduledAudit(c.reconciliation_engine, c.settings)
+    audit.once(audit.queue.enqueue('DEEP', 'files', mode='FULL'))
+    assert audit.coverage()['recent_sha256_evidence_count'] == 1
+    if change == 'revision':
+        path.write_bytes(b'corrupt!')
+    elif change == 'missing_revision':
+        original = type(c.reconciliation_engine).verify_file_snapshot
+        def without_revision(self, *args, **kwargs):
+            rows = original(self, *args, **kwargs)
+            rows[0]['target_value'].pop('observed_revision', None)
+            return rows
+        monkeypatch.setattr(type(c.reconciliation_engine), 'verify_file_snapshot', without_revision)
+    else:
+        with c.uow() as repo:
+            version = repo.session.get(ResourceVersion, version_id)
+            if change == 'expected_hash':
+                version.source_hash = 'f' * 64
+            elif change == 'expected_size':
+                version.source_file_size = 9
+            else:
+                resource = repo.get('master_learning_resources', version.resource_id)
+                repo.insert('master_learning_resources', {**resource, 'id': 'new-owner'})
+                version.resource_id = 'new-owner'
+    audit.once(audit.queue.enqueue('LIGHT', 'files'))
+    assert audit.coverage()['recent_sha256_evidence_count'] == 0
+    with c.uow() as repo:
+        state = repo.session.get(State, version_id)
+        assert state.verification_method == 'STALE_SHA256'
+        assert state.last_verified_hash is not None
+        assert utc(state.next_due_at) <= now()
+    audit.once(audit.queue.enqueue('LIGHT', 'files'))
+    assert audit.coverage()['recent_sha256_evidence_count'] == 0
+
+
+@pytest.mark.parametrize('change', ['checksum', 'missing', 'budget', 'invalid_hash'])
+def test_failed_deep_followed_by_light_does_not_revive_old_proof(local_file, change):
+    from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
+
+    c, path, version_id = local_file
+    audit = ScheduledAudit(c.reconciliation_engine, c.settings)
+    audit.once(audit.queue.enqueue('DEEP', 'files', mode='FULL'))
+    if change == 'checksum':
+        path.write_bytes(b'corrupt!')
+    elif change == 'missing':
+        path.unlink()
+    elif change == 'budget':
+        c.settings.reconciliation_max_bytes_per_run = 7
+    else:
+        with c.uow() as repo:
+            repo.session.get(ResourceVersion, version_id).source_hash = 'invalid'
+    audit.once(audit.queue.enqueue('DEEP', 'files', mode='FULL'))
+    c.settings.reconciliation_max_bytes_per_run = 100
+    audit.once(audit.queue.enqueue('LIGHT', 'files'))
+    assert audit.coverage()['recent_sha256_evidence_count'] == 0
+    assert audit.coverage()['not_verified_count'] == 1
+
+
+def test_light_without_deep_and_partial_deep_report_actual_repository_coverage(local_file):
+    from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
+
+    c, _, version_id = local_file
+    audit = ScheduledAudit(c.reconciliation_engine, c.settings)
+    audit.once(audit.queue.enqueue('LIGHT', 'files'))
+    assert audit.coverage()['recent_sha256_evidence_count'] == 0
+    with c.uow() as repo:
+        values = repo.get('resource_versions', version_id)
+        repo.session.add(ResourceVersion(**{**values, 'id': new_id(), 'version_number': 2}))
+    c.settings.reconciliation_max_files_per_run = 1
+    audit.once(audit.queue.enqueue('DEEP', 'files', mode='FULL'))
+    coverage = audit.coverage()
+    assert coverage['recent_sha256_evidence_count'] == 1
+    assert coverage['total_files'] == 2 and coverage['not_verified_count'] == 1
+    assert coverage['coverage_status'] == 'COVERAGE_BEHIND'

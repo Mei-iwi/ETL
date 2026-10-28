@@ -1,6 +1,7 @@
 import type { SearchMethod, SearchRequest } from '../../types/search'
+import { normalizeSearchQuery } from '../../services/searchQuery.ts'
 
-export const SEARCH_QUERY_MAX_LENGTH = 2000
+export const SEARCH_QUERY_MAX_LENGTH = 4000
 
 export const methods: { value: SearchMethod; label: string; }[] = [
     { value: 'hybrid', label: 'Tìm kết hợp'},
@@ -15,7 +16,7 @@ export function readSearch(params: URLSearchParams): SearchRequest {
         return Number.isInteger(value) && value >= 1 && value <= max ? value : fallback
     }
     return {
-        query: (params.get('q') || '').normalize('NFC').trim(),
+        query: normalizeSearchQuery(params.get('q') || ''),
         method: methods.some(item => item.value === method) ? method as SearchMethod : 'hybrid',
         filters: Object.fromEntries(['domain', 'subject_id', 'grade_level_id', 'resource_type_code', 'resource_format', 'resource_id', 'resource_version_id']
             .map(key => [key, params.get(key) || null])),
@@ -24,7 +25,7 @@ export function readSearch(params: URLSearchParams): SearchRequest {
 }
 
 export function writeSearch(request: SearchRequest) {
-    const params = new URLSearchParams({ q: request.query.normalize('NFC').trim(), method: request.method,
+    const params = new URLSearchParams({ q: normalizeSearchQuery(request.query), method: request.method,
         page: String(request.page), size: String(request.size) })
     for (const [key, value] of Object.entries(request.filters)) if (value) params.set(key, value)
     return params

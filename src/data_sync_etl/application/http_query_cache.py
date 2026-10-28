@@ -13,7 +13,7 @@ from time import monotonic
 from data_sync_etl.domain.indexing import validate_vector
 from data_sync_etl.domain.search import normalize_query
 
-QUERY_CONTRACT = 'search-nfc-strip-local-sentence-cpu-default-encode-v1'
+QUERY_CONTRACT = 'search-nfc-whitespace-query-token-budget-v2'
 SCOPE = 'verified-http-local-demo-v1'
 COUNTERS = ('hit', 'miss', 'published', 'expired', 'evicted', 'invalidated',
             'bypass_runtime', 'bypass_limits', 'bypass_disabled', 'bypass_scope', 'failed')

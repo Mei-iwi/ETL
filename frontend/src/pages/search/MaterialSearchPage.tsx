@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { normalizeSearchQuery } from '../../services/searchQuery.ts'
 import type { FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { BookOpen, Search, SlidersHorizontal, X } from 'lucide-react'
@@ -54,7 +55,7 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
     function submit(event: FormEvent) {
         event.preventDefault()
         if (busy || submitting.current || (method !== 'bow' && !model.ready)) return
-        const normalized = query.normalize('NFC').trim()
+        const normalized = normalizeSearchQuery(query)
         if (!normalized || normalized.length > SEARCH_QUERY_MAX_LENGTH) { setError(`Nhập nội dung cần tìm, tối đa ${SEARCH_QUERY_MAX_LENGTH} ký tự.`); return }
         const next = writeSearch({ query: normalized, method, filters, page: 1, size: 5 }).toString()
         if (next === params.toString()) return

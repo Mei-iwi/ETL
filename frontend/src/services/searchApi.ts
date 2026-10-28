@@ -1,4 +1,5 @@
 import type { ChunkContext, SearchRequest, SearchResponse } from '../types/search'
+import { normalizeSearchQuery } from './searchQuery.ts'
 
 export class SearchApiError extends Error {
     status: number
@@ -56,7 +57,7 @@ function validSearch(value: unknown, request: SearchRequest): value is SearchRes
             && integer(value.readiness.eligible_versions) && integer(value.readiness.ready_versions)
             && value.readiness.ready_versions <= value.readiness.eligible_versions
             && typeof value.readiness.reindex_required === 'boolean'))
-        && value.query === request.query.normalize('NFC').trim() && value.method === request.method
+        && value.query === normalizeSearchQuery(request.query) && value.method === request.method
         && value.page === request.page && value.size === request.size && integer(value.page, 1) && integer(value.size, 1)
         && integer(value.total) && integer(value.total_pages) && value.total_pages === Math.ceil(value.total / value.size)
         && typeof value.ranking_algorithm === 'string' && value.representation_unit === 'content_bag' && integer(value.ready_bag_count)
