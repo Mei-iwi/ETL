@@ -138,7 +138,7 @@ test('invalid save is shown without a PUT and file controls never offer metadata
     assert.match(renderToStaticMarkup(controls), /DEEP — SHA-256/)
 })
 
-test('subject and file rows stay highlighted and show both actual scan modes after configuring schedules', () => {
+test('subject and file names use simple bold emphasis and configured modes remain dropdowns', () => {
     const helper = runtime()
     const plans = ['subjects', 'files', 'users'].map(stream => ({ stream, calendar_configured: true,
         fast_schedule: { ...helper.calendarDefaults(stream, 'fast'), enabled: true },
@@ -148,19 +148,45 @@ test('subject and file rows stay highlighted and show both actual scan modes aft
     const rows = find(tree, node => node.type === 'tr' && node.props['data-audit-stream'])
     const subject = rows.find(row => row.props['data-audit-stream'] === 'subjects')
     const files = rows.find(row => row.props['data-audit-stream'] === 'files')
-    assert.equal(subject.props.className, 'scheduleSubject')
-    assert.equal(files.props.className, 'scheduleFiles')
+    assert.equal(subject.props.className, undefined)
+    assert.equal(files.props.className, undefined)
     assert.equal(rows.find(row => row.props['data-audit-stream'] === 'users').props.className, undefined)
     const subjectHtml = renderToStaticMarkup(subject)
     assert.match(subjectHtml, /Incremental/)
     assert.match(subjectHtml, /Full metadata \+ IDS/)
-    assert.match(subjectHtml, /FAST: Bật/)
-    assert.match(subjectHtml, /THOROUGH: Tắt/)
+    assert.match(subjectHtml, /<strong>Môn học<\/strong>/)
+    assert.match(renderToStaticMarkup(files), /<strong>Kho tệp<\/strong>/)
+    for (const row of [subject, files]) {
+        const select = find(row, node => node.type === 'select')[0]
+        assert.equal(select.props.value, 'INCREMENTAL')
+        assert.equal(select.props.disabled, false)
+    }
     assert.match(renderToStaticMarkup(files), /LIGHT/)
     assert.match(renderToStaticMarkup(files), /DEEP — SHA-256/)
     for (const branch of ['fast', 'thorough']) {
         const controls = helper.CalendarControls({ stream: 'subjects', branch,
             value: plans[0][`${branch}_schedule`], disabled: false, onChange: () => {} })
         assert.match(renderToStaticMarkup(controls), /Chế độ quét/)
+    }
+})
+
+test('mode dropdown enables the selected branches without losing their cadence or repair policy', () => {
+    const helper = runtime()
+    const item = { stream: 'subjects', calendar_configured: true,
+        fast_schedule: { ...helper.calendarDefaults('subjects', 'fast'), enabled: true, hour: 5, repair: true },
+        thorough_schedule: { ...helper.calendarDefaults('subjects', 'thorough'), weekday: 3, hour: 8 } }
+    for (const [mode, fast, thorough] of [['FULL', false, true], ['BOTH', true, true],
+        ['OFF', false, false], ['INCREMENTAL', true, false]]) {
+        const api = runtime([item])
+        const tree = api.ReconciliationSchedule()
+        const select = find(tree, node => node.type === 'select' && node.props['aria-label'] === 'Chế độ Môn học')[0]
+        select.props.onChange({ target: { value: mode } })
+        const next = api.updates.get(0)([item])[0]
+        assert.equal(next.fast_schedule.enabled, fast)
+        assert.equal(next.thorough_schedule.enabled, thorough)
+        assert.equal(next.fast_schedule.hour, 5)
+        assert.equal(next.fast_schedule.repair, true)
+        assert.equal(next.thorough_schedule.weekday, 3)
+        assert.equal(next.thorough_schedule.hour, 8)
     }
 })
