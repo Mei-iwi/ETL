@@ -144,7 +144,7 @@ function IndexWorkspace({ versionId, view }: { versionId: string; view: IndexVie
             inFlight = true
             current = new AbortController()
             try {
-                const data = await getIndexStatus(versionId, current.signal)
+                const data = await getIndexStatus(versionId, current.signal, false)
                 if (!active) return
                 setStatus(data)
                 setStatusError('')
@@ -257,22 +257,43 @@ function IndexWorkspace({ versionId, view }: { versionId: string; view: IndexVie
             {view === 'chunks' && <ChunkList key={`${status?.published_run_id ?? versionId}:${status?.processing_status}:${refresh}`} versionId={versionId} />}
         </div>
         <div className={styles.indexPanel} data-index-panel="bags" hidden={view !== 'bags'}>
-            {view === 'bags' && <BagList key={versionId} status={status} loading={!status && !statusError} error={statusError} />}
+            {view === 'bags' && <BagList key={`${versionId}:${status?.published_run_id ?? ''}`} versionId={versionId} status={status} loading={!status && !statusError} error={statusError} />}
         </div>
         {confirming && <ReindexConfirmation onCancel={() => setConfirming(false)} onConfirm={() => { setConfirming(false); void build(true) }} />}
     </>
 }
 
-function BagList({ status, loading, error }: { status: IndexStatusResult | null; loading: boolean; error: string }) {
+function BagList({ versionId, status, loading, error }: { versionId: string; status: IndexStatusResult | null; loading: boolean; error: string }) {
     const [offset, setOffset] = useState(0)
-    const bags = status?.bags ?? []
+    const [details, setDetails] = useState<IndexStatusResult | null>(null)
+    const [detailError, setDetailError] = useState('')
+    const [attempt, setAttempt] = useState(0)
+    const publishedRun = status?.published_run_id
+    useEffect(() => {
+        if (!publishedRun) return
+        const controller = new AbortController()
+        void Promise.resolve().then(() => controller.signal.aborted ? null : getIndexStatus(versionId, controller.signal))
+            .then(value => {
+                if (!value || controller.signal.aborted) return
+                if (value.published_run_id !== publishedRun || value.index_status !== 'READY') {
+                    setDetails(null)
+                    setDetailError('Chỉ mục đã thay đổi. Tải lại trạng thái trước khi xem túi từ.')
+                    return
+                }
+                setDetails(value); setDetailError('')
+            }).catch(reason => { if (!controller.signal.aborted) { setDetails(null); setDetailError(errorNotice(reason, 'Không tải được túi từ.')) } })
+        return () => controller.abort()
+    }, [versionId, publishedRun, attempt])
+    const bags = details?.published_run_id === publishedRun ? details?.bags ?? [] : []
+    const pending = loading || Boolean(publishedRun && !details && !detailError)
     const pageSize = 10
     const currentOffset = offset < bags.length ? offset : 0
     return <section className={styles.resultCard}>
         <h2>ContentBag ({status?.bag_count ?? 0})</h2>
-        {loading && <p className={styles.statusNote} role="status">Đang tải ContentBag...</p>}
+        {pending && <p className={styles.statusNote} role="status">Đang tải ContentBag...</p>}
+        {detailError && <p role="alert">{detailError} <button type="button" onClick={() => { setDetailError(''); setAttempt(value => value + 1) }}>Thử lại</button></p>}
         {error && <p className={styles.statusNote} role="alert">{error}</p>}
-        {!loading && !error && bags.length === 0 && <p className={styles.statusNote}>Chưa có ContentBag.</p>}
+        {!pending && !error && !detailError && bags.length === 0 && <p className={styles.statusNote}>Chưa có ContentBag.</p>}
         {!error && bags.length > 0 && <div className={styles.tableWrapper}>
             <table className={styles.simpleTable}>
                 <thead>

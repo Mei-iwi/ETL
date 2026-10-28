@@ -48,6 +48,13 @@ def test_four_apis_persist_reload_and_report_without_recompute(evaluation):
         assert len(body['summary']) == 3
         assert body['summary']['bow']['metrics']['5']['precision']['value'] == .1
         assert body['summary']['bow']['metrics']['5']['recall']['excluded_queries'] == 1
+        summary = client.get(f'/api/v1/evaluations/runs/{run_id}?include_observations=false')
+        assert summary.status_code == 200 and summary.headers['cache-control'] == 'private, no-store'
+        assert summary.json()['observations'] == []
+        assert summary.json()['pagination']['total'] == 6
+        assert summary.json()['summary'] == body['summary']
+        assert summary.json()['corpus_fingerprint'] == body['corpus_fingerprint']
+        assert client.get(f'/api/v1/evaluations/runs/{run_id}?include_observations=invalid').status_code == 422
         csv = client.get(f'/api/v1/evaluations/runs/{run_id}/report')
         assert csv.status_code == 200 and csv.content.startswith(b'\xef\xbb\xbf')
         assert "'=SAMPLE" in csv.text and 'bag-cosine' not in csv.text
@@ -60,6 +67,7 @@ def test_four_apis_persist_reload_and_report_without_recompute(evaluation):
             ('post', '/api/v1/evaluations/datasets', command),
             ('post', '/api/v1/evaluations/runs', {'dataset_id': dataset['dataset_id']}),
             ('get', f'/api/v1/evaluations/runs/{run_id}', None),
+            ('get', f'/api/v1/evaluations/runs/{run_id}?include_observations=false', None),
             ('get', f'/api/v1/evaluations/runs/{run_id}/report', None),
         ]:
             assert client.request(method, path, json=payload).status_code == 403

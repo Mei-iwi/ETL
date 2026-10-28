@@ -3,6 +3,7 @@ import { ProcessingPreferences } from './ProcessingPreferences'
 import { defaultProcessingPreferences, getMediaFileType, saveProcessingPreferences } from '../services/processingPreferences'
 import type { ProcessingPreferencesValue } from '../services/processingPreferences'
 import styles from './MediaProcessing.module.css'
+import { startVisiblePolling } from '../pages/system/visiblePolling'
 
 type Segment = {
     segment_id: string; source_type: string; source_language: string; target_language: string
@@ -27,27 +28,34 @@ export function BilingualPanel({ versionId, refreshKey }: { versionId: string; r
     const pendingSeek = useRef<number | null>(null)
     const hydrated = useRef(false)
     const [playerVisible, setPlayerVisible] = useState(false)
+    const [expanded, setExpanded] = useState(false)
+    const [page, setPage] = useState(0)
+    const pageSize = 20
     useEffect(() => {
-        const controller = new AbortController()
-        let timer: ReturnType<typeof setTimeout>
-        async function load() {
+        let pending = false
+        const polling = startVisiblePolling(async signal => {
+            await Promise.resolve()
+            if (signal.aborted) return
             try {
-                const response = await fetch(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/bilingual`, { signal: controller.signal })
+                const response = await fetch(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/bilingual`, { signal })
                 if (!response.ok) throw new Error('Không thể tải bản đối chiếu.')
                 const result = await response.json() as View
+                if (signal.aborted) return
                 setView(result)
                 if (!hydrated.current) {
                     setPreferences({ ...defaultProcessingPreferences, ...result.options })
                     hydrated.current = true
                 }
                 setError('')
-                if (result.options.translation_pending) timer = setTimeout(() => { void load() }, 4000)
+                pending = Boolean(result.options.translation_pending)
             } catch (caught) {
-                if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : 'Không thể tải nội dung.')
+                if (!signal.aborted) {
+                    pending = false
+                    setError(caught instanceof Error ? caught.message : 'Không thể tải nội dung.')
+                }
             }
-        }
-        if (versionId) void load()
-        return () => { controller.abort(); clearTimeout(timer) }
+        }, () => pending, document, { busy: 4000, idle: null })
+        return () => polling.stop()
     }, [versionId, refreshKey, reload])
 
     async function configure(retry: boolean) {
@@ -69,6 +77,7 @@ export function BilingualPanel({ versionId, refreshKey }: { versionId: string; r
     const hasTranslation = view?.items.some(s => Boolean(s.translated_text))
     const hasTimed = view?.items.some(s => ['speech', 'subtitle'].includes(s.source_type) && s.start_time != null && s.end_time != null)
     const hasTimedTranslation = view?.items.some(s => ['speech', 'subtitle'].includes(s.source_type) && s.start_time != null && s.end_time != null && s.translated_text)
+    const currentPage = Math.min(page, Math.max(0, Math.ceil((view?.items.length ?? 0) / pageSize) - 1))
     const mediaType = getMediaFileType(view?.original_filename) ?? (view?.extraction.some(e => e.media)
         ? view.extraction.some(e => e.media?.selected_video_track != null) ? 'video' : 'audio' : undefined)
     return <section className={`${styles.card} ${styles.panel}`}>
@@ -78,7 +87,7 @@ export function BilingualPanel({ versionId, refreshKey }: { versionId: string; r
             <button className={styles.primaryButton} type="button" disabled={busy || Boolean(view?.items.length)} onClick={() => { void configure(false) }}>Lưu tùy chọn trước xử lý</button>
             <button className={styles.secondaryButton} type="button" disabled={busy || !view?.items.length || view.options.translation_pending} onClick={() => { void configure(true) }}>Dịch lại / sửa ngôn ngữ nguồn</button>
         </div>
-        {error && <p className={styles.alert} role="alert">{error}</p>}
+        {error && <p className={styles.alert} role="alert">{error} <button type="button" onClick={() => setReload(value => value + 1)}>Thử lại</button></p>}
         {view?.options.translation_pending && <p role="status">Đang chờ worker trích xuất hoặc dịch.</p>}
         {view?.options.translation_state === 'partial' && <p>Một số đoạn chưa dịch được. Nguyên ngữ vẫn được giữ; có thể kiểm tra model/ngôn ngữ rồi thử dịch lại.</p>}
         {view?.extraction.map((entry, index) => <p key={index}>
@@ -98,10 +107,13 @@ export function BilingualPanel({ versionId, refreshKey }: { versionId: string; r
         {playerVisible && view && <video ref={player} src={view.original_file_url} controls preload="metadata"
             onLoadedMetadata={() => { if (player.current && pendingSeek.current != null) player.current.currentTime = pendingSeek.current }}
             className={styles.player} />}
+        <details onToggle={event => setExpanded(event.currentTarget.open)}>
+        <summary aria-expanded={expanded} aria-controls="bilingual-segments">Xem nội dung đối chiếu ({view?.items.length ?? 0})</summary>
+        {expanded && <div id="bilingual-segments">
         <label className={styles.field}>Hiển thị <select value={mode} onChange={e => setMode(e.target.value)}>
             <option value="parallel">Đối chiếu hai cột</option><option value="original">Nguyên ngữ</option><option value="translated">Bản dịch</option>
         </select></label>
-        {view?.items.map(segment => <article key={segment.segment_id} className={styles.segment}>
+        {view?.items.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(segment => <article key={segment.segment_id} className={styles.segment}>
             <div className={styles.segmentMeta}>{segment.source_type} · {segment.source_language} → {segment.target_language} · {segment.translation_status}
                 {segment.generated && <strong> · Mô tả do mô hình sinh</strong>}
                 {segment.page_number != null && <a href={`${view.original_file_url}#page=${segment.page_number}`} target="_blank" rel="noreferrer"> · Trang {segment.page_number}</a>}
@@ -118,5 +130,12 @@ export function BilingualPanel({ versionId, refreshKey }: { versionId: string; r
                 {mode !== 'original' && <p lang={segment.target_language}>{segment.translated_text ?? 'Chưa có bản dịch.'}</p>}
             </div>
         </article>)}
+        {view && view.items.length > pageSize && <div className={styles.actions}>
+            <button type="button" disabled={currentPage === 0} onClick={() => setPage(Math.max(0, currentPage - 1))}>Trước</button>
+            <span>Trang {currentPage + 1} / {Math.ceil(view.items.length / pageSize)}</span>
+            <button type="button" disabled={(currentPage + 1) * pageSize >= view.items.length} onClick={() => setPage(currentPage + 1)}>Tiếp</button>
+        </div>}
+        </div>}
+        </details>
     </section>
 }

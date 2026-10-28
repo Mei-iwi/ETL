@@ -27,6 +27,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     let contextEvidence = 'lexical'
     let metadataFields = ['TITLE']
     let holdAuthConfig = true
+    let failSubjects = false
     const reconciliationBodies = []
     let reconciliationPolls = 0
     let releaseSearch
@@ -53,6 +54,10 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         }
         if (['/api/v1/subjects', '/api/v1/grade-levels', '/api/v1/resource-types'].includes(url.pathname)) {
             catalogCount++
+            if (failSubjects && url.pathname.endsWith('/subjects')) {
+                failSubjects = false
+                return json({ detail: 'Fixture catalog unavailable' }, 503)
+            }
             return json({ items: url.pathname.endsWith('subjects') ? [{ id: 's1', name: 'Toán', grade_level_id: 'g1' }] :
                 url.pathname.endsWith('grade-levels') ? [{ id: 'g1', grade_name_vi: 'Lớp 6' }] : [{ code: 'DOC', name: 'Tài liệu' }],
                 pagination: { page: 1, total_pages: 1 } })
@@ -208,6 +213,41 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }))
         await call('Page.enable')
         await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false })
+        if (process.env.ETL_TEST_LAZY_CATALOG === '1') {
+            holdAuthConfig = false; modelState = 'READY'
+            await open('/search/query-methods?grade_level_id=g1&subject_id=s1&resource_type_code=DOC')
+            await waitFor(() => evaluate("!!document.querySelector('form details summary')"))
+            await delay(300)
+            const closed = catalogCount
+            assert.equal(closed, process.env.ETL_LAZY_BASELINE === '1' ? 3 : 0)
+            assert.equal(await evaluate("document.querySelector('#search-grade').value"), 'g1')
+            await evaluate("document.querySelector('form details summary').focus()")
+            await call('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+            await call('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+            await waitFor(() => evaluate("document.querySelector('#search-grade')?.disabled === false"))
+            assert.equal(catalogCount, 3)
+            await evaluate("document.querySelector('form details').open=false")
+            await delay(100)
+            await evaluate("document.querySelector('form details').open=true")
+            await delay(200)
+            assert.equal(catalogCount, 3, 'reopening does not reload completed options')
+            assert.equal(await evaluate("document.querySelector('#search-subject').value"), 's1')
+            assert.equal(postCount, 0, 'opening filters never searches or mutates')
+            console.log(JSON.stringify({ fixture: 'G1', catalog_requests_closed: closed, after_open_and_reopen: catalogCount }))
+            if (process.env.ETL_LAZY_BASELINE !== '1') {
+                failSubjects = true
+                await open('/search/query-methods')
+                await waitFor(() => evaluate("!!document.querySelector('form details')"))
+                await evaluate("document.querySelector('form details').open=true")
+                await waitFor(() => evaluate("document.body.textContent.includes('Không tải được danh mục.') && !document.querySelector('#search-grade').disabled && !document.querySelector('#search-type').disabled"))
+                const beforeRetry = catalogCount
+                await evaluate("Array.from(document.querySelectorAll('form details button')).find(el => el.textContent === 'Thử lại').click()")
+                await waitFor(() => evaluate("document.querySelector('#search-subject')?.disabled === false"))
+                assert.equal(catalogCount, beforeRetry + 1, 'retry fetches only the failed source')
+                assert.equal(postCount, 0)
+            }
+            return
+        }
         if (process.env.ETL_TEST_SEARCH_NOTICES_ONLY === '1') {
             holdAuthConfig = false; modelState = 'READY'; mode = 'metadata-unready'; resultCount = 1
             for (const role of ['VIEWER', 'ADMIN']) {
@@ -247,6 +287,7 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await click('Theo từ khóa')
         await waitFor(() => evaluate("document.querySelector('fieldset button[aria-pressed=\"true\"]')?.textContent === 'Theo từ khóa'"))
         assert.equal(postCount, 0)
+        await evaluate("document.querySelector('form details').open=true")
         await waitFor(() => evaluate("document.querySelector('#search-grade')?.disabled === false"))
         await evaluate("Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(document.querySelector('#search-query'), 'toán'); document.querySelector('#search-query').dispatchEvent(new Event('input', { bubbles: true }))")
         await evaluate("document.querySelector('form details').open=true")

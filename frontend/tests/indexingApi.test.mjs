@@ -2,6 +2,19 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { startIndex, getChunks, getIndexStatus, reindex, IndexingApiError } from '../src/services/indexingApi.ts'
 
+test('summary status is opt-in and does not change the default details request', async t => {
+    const paths = []
+    t.mock.method(globalThis, 'fetch', async (path, options) => {
+        paths.push(path)
+        assert.equal(options.method, 'GET')
+        return Response.json({ bags: [] })
+    })
+    await getIndexStatus('v1', undefined, false)
+    await getIndexStatus('v1')
+    assert.deepEqual(paths, ['/api/v1/resource-versions/v1/index-status?include_bags=false',
+        '/api/v1/resource-versions/v1/index-status'])
+})
+
 test('start index is explicit POST with encoded version and abort signal', async () => {
     const old = globalThis.fetch
     const controller = new AbortController()

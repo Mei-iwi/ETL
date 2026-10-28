@@ -63,6 +63,27 @@ test('polling aborts stale generations, hidden requests and unmount without dupl
     assert.equal(calls.length, 3)
 })
 
+test('terminal visible polling releases its timer but revalidates after returning to the tab', async () => {
+    class Visibility extends EventTarget { hidden = false }
+    const visibility = new Visibility()
+    const calls = []
+    const poll = startVisiblePolling(async signal => { calls.push(signal) }, () => false,
+        visibility, { busy: 5, idle: null })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(calls.length, 1)
+    visibility.hidden = true
+    visibility.dispatchEvent(new Event('visibilitychange'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].aborted, true)
+    visibility.hidden = false
+    visibility.dispatchEvent(new Event('visibilitychange'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(calls.length, 2)
+    poll.stop()
+    assert.equal(calls[1].aborted, true)
+})
+
 const require = createRequire(new URL('../package.json', import.meta.url))
 const ts = require('typescript')
 const React = require('react')

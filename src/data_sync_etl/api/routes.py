@@ -409,13 +409,15 @@ def list_evaluation_runs(request: Request, response: Response,
 @router.get('/api/v1/evaluations/runs/{id}', tags=[TAG_EVALUATION], response_model=RunDetailResponse)
 def get_evaluation_run(id: str, request: Request, response: Response,
                        offset: Annotated[int, Query(ge=0, le=300)] = 0,
-                       limit: Annotated[int, Query(ge=1, le=50)] = 20):
+                       limit: Annotated[int, Query(ge=1, le=50)] = 20,
+                       include_observations: bool = True):
     response.headers['Cache-Control'] = 'private, no-store'
     try:
         service, access = evaluation_services(request)
         run = service.get_run(id, access)
         rows = run['observations']
-        return {**{key: value for key, value in run.items() if key != 'auth_user_id'}, 'observations': rows[offset:offset + limit],
+        return {**{key: value for key, value in run.items() if key != 'auth_user_id'},
+                'observations': rows[offset:offset + limit] if include_observations else [],
                 'pagination': {'offset': offset, 'limit': limit, 'total': len(rows)}}
     except Exception as exc:
         raise evaluation_error(exc) from None
@@ -1130,9 +1132,11 @@ def create_job(id: ResourceId, request: Request, body: JobInput | None = None):
 @router.get("/api/v1/resource-versions/{id}/index-status", tags=[TAG_INDEXING],
             response_model=IndexStatusResponse, responses=ERROR_RESPONSES,
             summary="Theo dõi trạng thái lập chỉ mục, tách biệt OCR")
-def index_status(id: ResourceId, request: Request):
+def index_status(id: ResourceId, request: Request, include_bags: bool = True):
     try:
-        return request.app.state.container.indexing.status(id)
+        result = request.app.state.container.indexing.status(id)
+        # Keep the same live artifact verification; only omit optional wire details.
+        return result if include_bags else {**result, 'bags': []}
     except Exception as exc:
         raise index_error(exc) from None
 

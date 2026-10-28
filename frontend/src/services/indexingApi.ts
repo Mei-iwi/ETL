@@ -46,8 +46,8 @@ export function getChunks(versionId: string, offset = 0, signal?: AbortSignal, c
     return request<ChunksResult>(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/chunks?${params}`, signal)
 }
 
-export function getIndexStatus(versionId: string, signal?: AbortSignal) {
-    return request<IndexStatusResult>(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/index-status`, signal)
+export function getIndexStatus(versionId: string, signal?: AbortSignal, includeBags = true) {
+    return request<IndexStatusResult>(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/index-status${includeBags ? '' : '?include_bags=false'}`, signal)
 }
 
 export function reindex(versionId: string, signal?: AbortSignal) {

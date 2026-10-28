@@ -9,12 +9,13 @@ import { dirname, extname, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-const root = process.env.ETL_TEST_DIST ? dirname(resolve(process.env.ETL_TEST_DIST)) : resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const dist = resolve(process.env.ETL_TEST_DIST || join(root, 'dist'))
 const browserPath = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 test('index UI selects a version, never POSTs on mount, queues and displays runtime errors', {
-    skip: !existsSync(browserPath) || !existsSync(join(root, 'dist/index.html')),
+    skip: !existsSync(browserPath) || !existsSync(join(dist, 'index.html')),
     timeout: 60000,
 }, async () => {
     let postCount = 0
@@ -31,7 +32,8 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
     let forcedState = null
     let autoEnabled = false
     const server = createServer(async (req, res) => {
-        const path = new URL(req.url, 'http://localhost').pathname
+        const url = new URL(req.url, 'http://localhost')
+        const path = url.pathname
         function json(body, status = 200) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
         if (path === '/health') return json({ status: 'ok', database: 'ok' })
         if (path === '/api/v1/auth/config') return json({ mode: 'legacy_local' })
@@ -46,7 +48,7 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
             const state = forcedState ?? (waitingForOcr && ++ocrReads < 2 ? 'CONTENT_NOT_READY' : structureBlocked ? 'BLOCKED_STRUCTURE' : blockStatus ? 'BLOCKED_RUNTIME' : !second && activeRun ? (++pendingReads < 2 ? 'PENDING' : 'READY') : 'NOT_STARTED')
             return json({ resource_version_id: second ? 'version-two' : 'version-test', processing_status: state === 'CONTENT_NOT_READY' ? 'OCR_PENDING' : 'CONTENT_READY',
                 index_status: state, representation_mode: state === 'BLOCKED_STRUCTURE' ? 'unavailable' : 'fallback', auto_enabled: autoEnabled, bag_count: state === 'READY' ? 11 : 0,
-                bags: state === 'READY' ? Array.from({ length: 11 }, (_, i) => ({ id: `root-test-${i}`, title: `Test Bag ${i + 1}`, unit_type: 'PAGE_TEXT', representation_mode: 'fallback', keywords: ['toán'], embedding_text: 'toán', embedding_model: 'ui-test-only@1', embedding_dimension: 3, vector_ready: true })) : [],
+                bags: state === 'READY' && url.searchParams.get('include_bags') !== 'false' ? Array.from({ length: 11 }, (_, i) => ({ id: `root-test-${i}`, title: `Test Bag ${i + 1}`, unit_type: 'PAGE_TEXT', representation_mode: 'fallback', keywords: ['toán'], embedding_text: 'toán', embedding_model: 'ui-test-only@1', embedding_dimension: 3, vector_ready: true })) : [],
                 latest_run_id: second ? null : activeRun, published_run_id: state === 'READY' ? activeRun : null, chunk_count: 0,
                 error_code: state === 'BLOCKED_STRUCTURE' ? 'BAG_STRUCTURE_UNAVAILABLE' : state === 'BLOCKED_RUNTIME' || state === 'FAILED' ? blockCode : null,
                 bow_ready: state === 'READY', vector_ready: state === 'READY', embedding_model: 'ui-test-only', embedding_dimension: 3,
@@ -74,8 +76,8 @@ test('index UI selects a version, never POSTs on mount, queues and displays runt
             return json({ resource_version_id: 'version-test', index_run_id: activeRun, index_status: 'PENDING', action: 'QUEUED' }, 202)
         }
         if (path.startsWith('/api/')) return json({ detail: 'fixture not found' }, 404)
-        const target = path.startsWith('/assets/') ? resolve(root, 'dist', '.' + path) : join(root, 'dist/index.html')
-        if (!target.startsWith(join(root, 'dist') + sep)) { res.writeHead(403); return res.end() }
+        const target = path.startsWith('/assets/') ? resolve(dist, '.' + path) : join(dist, 'index.html')
+        if (!target.startsWith(dist + sep)) { res.writeHead(403); return res.end() }
         try {
             res.writeHead(200, { 'Content-Type': { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png' }[extname(target)] || 'application/octet-stream' })
             res.end(await readFile(target))

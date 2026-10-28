@@ -58,6 +58,10 @@ def test_queue_worker_bags_and_api_contract(container):
         assert container.worker.once("index-test")
         status = api.get(base + "/index-status").json()
         assert status["index_status"] == "READY" and status["bag_count"] == 1
+        summary = api.get(base + '/index-status?include_bags=false')
+        assert summary.status_code == 200
+        assert summary.json() == {**status, 'bags': []}
+        assert api.get(base + '/index-status?include_bags=invalid').status_code == 422
         assert status["chunk_preview_count"] == 3 and status["representation_unit"] == "content_bag"
         assert api.post(base + "/index").status_code == 200
         assert api.get(base + "/chunks?limit=101").status_code == 422
@@ -65,6 +69,7 @@ def test_queue_worker_bags_and_api_contract(container):
         second = api.post(base + "/reindex")
         assert second.status_code == 202 and second.json()["index_run_id"] != first.json()["index_run_id"]
         assert api.get(base + "/index-status").json()["published_run_id"] is None
+        assert api.get(base + '/index-status?include_bags=false').json()['published_run_id'] is None
         assert api.post(base + "/reindex").status_code == 409
         assert index.once()
         assert len(index.bags.rows) == 1  # fixed PG root ID, not per-run history
