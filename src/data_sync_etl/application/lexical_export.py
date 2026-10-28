@@ -117,7 +117,8 @@ class TrustedLexicalExporter:
                 'dimension': self.search.settings.index_embedding_dimension},
             'statistics': corpus_statistics(snapshot),
             'principal_fingerprint': digest([access.scope, access.actor_id, sorted(access.resource_ids),
-                access.owner_id, access.allow_public, access.allow_owned_unreviewed])}
+                access.owner_id, access.allow_public, access.allow_owned_unreviewed,
+                access.allow_shared_unreviewed])}
         if include_review_candidates:
             payload['review_candidates'] = review_candidates
         payload['checksum'] = digest(payload)
@@ -135,7 +136,8 @@ class TrustedLexicalExporter:
             serialized = json.dumps(payload, ensure_ascii=False)
             access = self._principal()  # Serialization must not outlive a revoked session.
             current = digest([access.scope, access.actor_id, sorted(access.resource_ids),
-                              access.owner_id, access.allow_public, access.allow_owned_unreviewed])
+                              access.owner_id, access.allow_public, access.allow_owned_unreviewed,
+                              access.allow_shared_unreviewed])
             if current != payload['principal_fingerprint']:
                 raise SearchError('EVALUATION_ACCESS_CHANGED', 403)
             path.parent.mkdir(parents=True, exist_ok=True)

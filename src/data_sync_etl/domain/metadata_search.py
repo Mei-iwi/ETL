@@ -54,9 +54,10 @@ def metadata_allowed(resource, version, access):
              and resource.get('created_by') == access.owner_id)
     if not access.allow_public and not owned:
         return False
-    # Unit review cannot prove rights to metadata-only media. Require the live
-    # version's explicit final review, or the established owner exception.
-    return bool((owned and access.allow_owned_unreviewed)
+    # Published metadata follows the explicit authenticated shared-read policy.
+    # Resource/version restrictions above always take precedence.
+    return bool((access.allow_public and access.allow_shared_unreviewed)
+                or (owned and access.allow_owned_unreviewed)
                 or (version.get('final_approved_by') and version.get('final_approved_at')))
 
 

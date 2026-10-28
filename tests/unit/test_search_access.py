@@ -121,7 +121,8 @@ def test_client_cannot_select_scope_and_public_does_not_load_model(searchable):
     c.settings.search_internal_dev_enabled = False
     c.indexing.embedding.prepare = lambda: pytest.fail('public must not access private corpus/model')
     with local_client(c) as api:
-        assert api.post('/api/v1/search', json={'query': 'page', 'internal': True}).status_code == 422
+        for flag in ('internal', 'allow_public', 'allow_shared_unreviewed'):
+            assert api.post('/api/v1/search', json={'query': 'page', flag: True}).status_code == 422
         assert api.post('/api/v1/search', json={'query': 'page'}).json()['items'] == []
 
 

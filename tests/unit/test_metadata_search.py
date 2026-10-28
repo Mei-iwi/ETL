@@ -74,6 +74,22 @@ def search(c, query='quy đồng', method='bow', **kwargs):
     return c.search.search(query, method, access=kwargs.pop('access', SearchAccess('local_demo')), **kwargs)
 
 
+@pytest.mark.parametrize('method', ['bow', 'vector', 'hybrid'])
+def test_authenticated_shared_metadata_does_not_require_ownership_or_final_approval(metadata, method):
+    c, version, _, service = metadata
+    with c.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {'created_by': 'another-user'})
+    service.reconcile(apply=True, dense=method != 'bow')
+    access = SearchAccess('authenticated_user', owner_id='reader', allow_public=True,
+                          allow_shared_unreviewed=True)
+    result = search(c, method=method, access=access)
+    assert result['total'] == 1
+    assert result['items'][0]['resource_id'] == version['resource_id']
+    with c.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {'publication_status': 'DRAFT'})
+    assert search(c, method=method, access=access)['total'] == 0
+
+
 @pytest.mark.parametrize('extension', ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'mp3', 'mp4'])
 @pytest.mark.parametrize('method', ['bow', 'vector', 'hybrid'])
 def test_registered_formats_without_content(metadata, extension, method, monkeypatch):
@@ -244,6 +260,11 @@ def test_owner_review_private_flags():
     access = SearchAccess('authenticated_user', frozenset({'r'}), owner_id='owner', allow_owned_unreviewed=True)
     assert metadata_allowed(resource, version, access)
     assert not metadata_allowed(resource, version, SearchAccess('authenticated_user', allow_public=True))
+    shared = SearchAccess('authenticated_user', allow_public=True, allow_shared_unreviewed=True)
+    assert metadata_allowed(resource, version, shared)
+    assert not metadata_allowed({**resource, 'publication_status': 'DRAFT'}, version, shared)
+    assert not metadata_allowed({**resource, 'is_private': True}, version, shared)
+    assert not metadata_allowed(resource, {**version, 'rejection_reason': 'rejected'}, shared)
     assert not metadata_allowed({**resource, 'is_private': True}, version, access)
     assert not metadata_allowed(resource, {**version, 'review_status': 'QUARANTINED'}, access)
 

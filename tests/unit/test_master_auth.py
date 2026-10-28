@@ -249,7 +249,7 @@ def test_master_owner_can_open_viewer_and_download_original(source_viewer, maste
 
 
 @pytest.mark.parametrize('searchable', [{'unreviewed': True}], indirect=True)
-def test_owner_can_search_and_view_unreviewed_file_without_publishing_it(source_viewer, master_auth):
+def test_authenticated_reader_can_search_shared_unreviewed_file_without_management_rights(source_viewer, master_auth):
     container, version, _, source_path = source_viewer
     with container.uow() as repo:
         repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-1'})
@@ -270,11 +270,16 @@ def test_owner_can_search_and_view_unreviewed_file_without_publishing_it(source_
             assert all(row['review_status'] == 'UNREVIEWED' and not row['retrieval_eligible'] for row in units)
             repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-2'})
         assert login(api, master_auth).status_code == 200
-        assert api.get(url).status_code == 403  # The owner exception cannot transfer to a public reader.
+        assert api.get(url).status_code == 200  # Published content stays readable across owners.
         for method in ['bow', 'vector', 'hybrid']:
             response = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method})
-            assert response.status_code == 200 and response.json()['total'] == 0
-        assert api.get(item['context_url']).status_code == 404
+            assert response.status_code == 200 and response.json()['total'] == 1
+            assert response.json()['items'][0]['can_view_file'] is True
+        assert api.get(item['context_url']).status_code == 200
+        assert api.post(url.replace('/file', '/reindex'), headers=csrf(api), json={}).status_code == 403
+        assert api.patch(f'/api/v1/resources/{version["resource_id"]}/description',
+                         headers=csrf(api), json={'description': 'not owned'}).status_code == 403
+        assert api.delete(f'/api/v1/resources/{version["resource_id"]}', headers=csrf(api)).status_code == 403
 
 
 def test_public_viewer_gets_only_readable_versions_and_no_management_rights(source_viewer, master_auth):

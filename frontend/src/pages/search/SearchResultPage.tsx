@@ -77,16 +77,9 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                         {result.access_scope === 'local_demo' && <p role="status" className={styles.metadata}>Tra cứu thử nghiệm nội bộ</p>}
                         <button type="button" className={styles.textButton} onClick={() => { clearSearchViewCache(); setResult(null); setAttempt(value => value + 1) }}>Cập nhật kết quả</button>
                     </div>
-                    {result.readiness?.reindex_required && <p role="status" className={styles.metadata}>
-                        Một số học liệu chưa sẵn sàng để tìm kiếm: {result.readiness.ready_versions}/{result.readiness.eligible_versions} phiên bản đã có chỉ mục hợp lệ.
-                    </p>}
                     {result.branch_status && Object.values(result.branch_status).some(value =>
-                        !['READY', 'NOT_REQUESTED', 'OK', 'DISABLED', 'NO_ACCESSIBLE_CONTENT', 'NO_READY_INDEX'].includes(value)) &&
-                        <p role="status" className={styles.metadata}>{result.branch_status.metadata === 'METADATA_SCHEMA_NOT_READY'
-                            ? (result.branch_status.content === 'OK'
-                                ? 'Chỉ mục tìm kiếm metadata chưa sẵn sàng. Kết quả hiện tại dựa trên nội dung đã lập chỉ mục.'
-                                : 'Chỉ mục tìm kiếm metadata chưa sẵn sàng. Vui lòng liên hệ quản trị viên.')
-                            : 'Một phần tìm kiếm chưa sẵn sàng; kết quả hiện có thể chưa đầy đủ.'}</p>}
+                        !['READY', 'NOT_REQUESTED', 'OK', 'DISABLED', 'NO_ACCESSIBLE_CONTENT', 'NO_READY_INDEX', 'METADATA_SCHEMA_NOT_READY'].includes(value)) &&
+                        <p role="status" className={styles.metadata}>Một phần tìm kiếm chưa sẵn sàng; kết quả hiện có thể chưa đầy đủ.</p>}
                     {result.items.length === 0 && <div className={styles.emptyState}>
                         <SearchX size={32} aria-hidden="true" /><h3>{emptyState?.title}</h3>
                         <p>{emptyState?.message}</p>
