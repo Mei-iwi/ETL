@@ -595,6 +595,7 @@ MODELS = {
         EtlStageRun,
         ContentUnitText,
         SourceFileImport,
+        ReconciliationAuditJob,
         SyncReconciliationRun,
         SyncReconciliationDiscrepancy,
     ]

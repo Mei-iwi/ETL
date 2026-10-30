@@ -74,6 +74,11 @@ from data_sync_etl.api.search_schemas import (
 )
 from data_sync_etl.api.source_file_response import SourceFileResponse, source_file_error
 from data_sync_etl.api.source_resolution_schemas import SourceResolutionResponse
+from data_sync_etl.api.source_writeback_schemas import (
+    SourceWriteBackRequest,
+    SourceWriteBackResponse,
+    SourceWriteBackStatusResponse,
+)
 from data_sync_etl.api.subject_schemas import (
     RecommendedSubjectListResponse,
     SubjectListResponse,
@@ -86,6 +91,7 @@ from data_sync_etl.application.create_resource_version import (
     ResourceVersionNotFound as NewResourceVersionNotFound,
 )
 from data_sync_etl.application.source_file_import import SourceImportConflict, SourceImportNotFound
+from data_sync_etl.application.source_metadata_writeback import SourceWriteBackError
 from data_sync_etl.application.source_resolution import SourceResolutionError
 from data_sync_etl.application.update_resource_metadata import (
     InvalidResourceMetadata,
@@ -724,6 +730,58 @@ def source_resolution(id: ResourceId, request: Request,
                             detail={'code': exc.code, 'message': 'Source resolution is restricted'}) from None
     except Exception as exc:
         raise search_error(exc) from None
+
+
+@router.get(
+    "/api/v1/resources/{id}/source-writeback/status",
+    tags=[TAG_MASTER],
+    response_model=SourceWriteBackStatusResponse,
+    summary="Xem trạng thái quyền đồng bộ metadata MASTER về SOURCE",
+)
+def source_writeback_status(id: ResourceId, request: Request) -> SourceWriteBackStatusResponse:
+    container = services(request)
+    with container.uow() as repo:
+        if repo.get('master_learning_resources', id) is None:
+            raise HTTPException(status_code=404, detail='Resource not found')
+    return SourceWriteBackStatusResponse.model_validate(container.source_writeback.status())
+
+
+@router.get(
+    "/api/v1/source-writeback/status",
+    tags=[TAG_MASTER],
+    response_model=SourceWriteBackStatusResponse,
+    summary="Xem trạng thái toàn cục của write-back metadata",
+)
+def source_writeback_global_status(request: Request) -> SourceWriteBackStatusResponse:
+    return SourceWriteBackStatusResponse.model_validate(services(request).source_writeback.status())
+
+
+@router.post(
+    "/api/v1/resources/{id}/source-writeback",
+    tags=[TAG_MASTER],
+    response_model=SourceWriteBackResponse,
+    summary="Đề nghị hoặc phê duyệt đồng bộ metadata MASTER về SOURCE",
+)
+def source_writeback(id: ResourceId, body: SourceWriteBackRequest,
+                     request: Request) -> SourceWriteBackResponse:
+    container = services(request)
+    principal = getattr(request.state, 'auth_principal', None)
+    actor_id = getattr(principal, 'id', None) or 'local-admin'
+    role = getattr(principal, 'role', None) or 'ADMIN'
+    owner_id = actor_id.removeprefix('master:') if actor_id.startswith('master:') else None
+    fields = body.model_dump(exclude={'expected_source_state_hash', 'idempotency_key', 'approve', 'dry_run'},
+                             exclude_none=True)
+    try:
+        result = container.source_writeback.request(
+            id, fields, expected_source_state_hash=body.expected_source_state_hash,
+            idempotency_key=body.idempotency_key, actor_id=actor_id, role=role,
+            owner_id=owner_id, approve=body.approve, dry_run=body.dry_run,
+        )
+        return SourceWriteBackResponse.model_validate(result)
+    except SourceWriteBackError as exc:
+        raise HTTPException(status_code=exc.status,
+                            detail={'code': exc.code, 'phase': 'source_writeback',
+                                    'message': 'SOURCE write-back request was not applied'}) from None
 
 
 @router.get(

@@ -136,6 +136,17 @@ class SourceDataReader(Protocol):
     def get_resource_grade_levels(self, resource_id: str) -> list[ResourceGradeLevelRelation]: ...
 
 
+class SourceMetadataWriter(Protocol):
+    """Separate, capability-gated write port; never accepts arbitrary SQL/locators."""
+
+    supported: bool
+
+    def write_metadata(
+        self, *, record_id: str, fields: dict, expected_source_state_hash: str,
+        idempotency_key: str,
+    ) -> dict: ...
+
+
 class ReconciliationSnapshot(Protocol):
     def reconciliation_summary(self, stream: str) -> dict: ...
     def reconciliation_ids(self, stream: str, after: str | None, size: int) -> list[str]: ...

@@ -220,6 +220,31 @@ Thay password thật, percent-encode ký tự đặc biệt trong URL PostgreSQL
 
 `SOURCE_METADATA_MEDIA_ENABLED=false`: xử lý nội dung MP3/MP4; `true`: chỉ đăng ký metadata. Tệp local-source nằm ở `<SOURCE_FILE_STORAGE_ROOT>/<bucket>/<object_key>` theo metadata nguồn; SHA-256 phải khớp. Ba thư mục nguồn/storage/tạm phải tách riêng, không lồng nhau. Nếu FFmpeg/ffprobe chưa vào PATH, đặt đường dẫn binary tuyệt đối rồi restart tiến trình.
 
+### 2.4.1. Write-back metadata hai chiều (mặc định tắt)
+
+Luồng SOURCE → MASTER vẫn là luồng đồng bộ chính. MASTER → SOURCE chỉ tạo đề nghị
+write-back khi toàn bộ điều kiện sau đúng: `SOURCE_METADATA_WRITEBACK_ENABLED=true`,
+writer capability riêng đã được cấp, actor có quyền ADMIN/OPERATOR và đúng owner,
+identity SOURCE đã xác minh, `source_state_hash` còn khớp, và request có phê duyệt rõ ràng.
+Mặc định writer là `disabled`; PostgreSQL reader không có quyền ghi và không được dùng
+để suy ra quyền writer. Không truyền SQL, collection, URI, bucket, key hoặc credential từ
+frontend.
+
+Whitelist hiện tại chỉ cho phép trường `title`. Request được kiểm tra bằng compare-and-swap,
+idempotency key và outbox bền vững trên MASTER; trạng thái gồm
+`WRITEBACK_PENDING_APPROVAL`, `WRITEBACK_APPLIED`, `WRITEBACK_CONFLICT` và
+`WRITEBACK_FAILED`. Xung đột phải đối soát SOURCE → MASTER lại; không tự ghi đè và không
+tạo vòng lặp đồng bộ. API quản trị:
+
+```text
+GET  /api/v1/resources/{id}/source-writeback/status
+POST /api/v1/resources/{id}/source-writeback
+```
+
+Không bật write-back trên SOURCE thật khi chưa có writer account tách biệt, whitelist bảng/cột,
+CAS theo version/fingerprint, audit và kế hoạch rollback được chủ DB phê duyệt. Fake writer
+`InMemorySourceMetadataWriter` chỉ dùng trong test/demo cô lập và không ghi fixture hay DB thật.
+
 ### 2.5. Chuẩn bị database
 
 **DB có sẵn:** chỉ sửa kết nối và kiểm tra. Không bootstrap/seed lại hoặc tự đổi validator384→1024 trên dữ liệu cũ:

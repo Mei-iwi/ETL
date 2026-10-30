@@ -6,6 +6,7 @@ import {
     queueAudit,
     getAuditJobs,
     getAuditCoverage,
+    getSourceWriteBackStatus,
 } from '../../services/reconciliationApi'
 import type {
     DiscrepancyItem,
@@ -107,16 +108,18 @@ export function DataReconciliationPage() {
     const [displayJob, setDisplayJob] = useState<AuditJob | null>(null)
     const [coverage, setCoverage] = useState<AuditCoverage | null>(null)
     const [latestJob, setLatestJob] = useState<AuditJob | null>(null)
+    const [writebackStatus, setWritebackStatus] = useState<Awaited<ReturnType<typeof getSourceWriteBackStatus>> | null>(null)
 
     const loadData = useCallback(async (signal?: AbortSignal) => {
         const revision = ++loadRevision.current
         setLoading(true)
         setError('')
         try {
-            const [newest, evidence] = await Promise.all([
+            const [newest, evidence, writeback] = await Promise.all([
                 getAuditJobs(selectedStream, signal),
                 selectedStream === 'all' || selectedStream === 'files'
                     ? getAuditCoverage(signal).catch(() => null) : Promise.resolve(null),
+                getSourceWriteBackStatus(signal).catch(() => null),
             ])
             const queued = viewedRunIds.current.length
                 ? await getAuditJobs(selectedStream, signal, null, viewedRunIds.current) : newest
@@ -129,6 +132,7 @@ export function DataReconciliationPage() {
             setDisplayJob(jobs.find(auditJobInProgress) ?? jobs[0] ?? null)
             setCoverage(evidence)
             setLatestJob(newest.items[0] ?? null)
+            setWritebackStatus(writeback)
             const active = jobs.some(auditJobInProgress)
                 || latest.stream_reports.some(row => row.status === 'RUNNING')
             running.current = active || posting.current
@@ -270,6 +274,14 @@ export function DataReconciliationPage() {
                 </div>
 
                 <ReconciliationSchedule />
+
+                {writebackStatus && <div className={`${styles.alertBox} ${writebackStatus.enabled && writebackStatus.writer_supported
+                    ? styles.alertSuccess : styles.alertWarning}`} role="status">
+                    <strong>Write-back metadata:</strong>{' '}
+                    {writebackStatus.enabled && writebackStatus.writer_supported
+                        ? `Có thể đề nghị/duyệt các trường: ${writebackStatus.fields.join(', ')}`
+                        : 'Đang tắt mặc định; hệ thống chỉ đồng bộ SOURCE → MASTER và không ghi SOURCE.'}
+                </div>}
 
                 {/* THÔNG BÁO / CẢNH BÁO */}
                 {error && <div className={`${styles.alertBox} ${styles.alertWarning}`}>{error}</div>}

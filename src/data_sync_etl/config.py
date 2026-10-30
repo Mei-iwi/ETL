@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     source_file_import_retry_seconds: int = Field(default=30, ge=1, le=3600)
     source_file_import_lease_seconds: int = Field(default=120, ge=15, le=3600)
     source_file_reconcile_seconds: int = Field(default=300, ge=10, le=86400)
+    # Master -> SOURCE metadata write-back is an explicit opt-in.  The default
+    # production composition has no writer capability and remains read-only.
+    source_metadata_writeback_enabled: bool = False
+    source_metadata_writer_mode: Literal['disabled', 'fixture'] = 'disabled'
+    source_metadata_writeback_max_attempts: int = Field(default=3, ge=1, le=10)
     ocr_max_retries: int = Field(default=3, ge=1)
     ocr_heartbeat_timeout_seconds: int = Field(default=120, ge=3)
     ocr_recovery_interval_seconds: int = Field(default=30, ge=1)

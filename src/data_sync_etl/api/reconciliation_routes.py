@@ -96,7 +96,12 @@ def audit_jobs(request: Request, after: str | None = None, size: int = Query(20,
                stream: str | None = None, newest: bool = False,
                job_ids: list[str] | None = Query(None, max_length=5)):
     with request.app.state.container.uow() as repo:
-        query = select(ReconciliationAuditJob).where(ReconciliationAuditJob.status != 'CONFIGURED')
+        # SOURCE write-back requests reuse the durable job primitive but have a
+        # separate API/status surface; they are not reconciliation audit jobs.
+        query = select(ReconciliationAuditJob).where(
+            ReconciliationAuditJob.status != 'CONFIGURED',
+            ReconciliationAuditJob.audit_type != 'SOURCE_WRITEBACK',
+        )
         if stream:
             query = query.where(ReconciliationAuditJob.stream_name == stream)
         if job_ids:

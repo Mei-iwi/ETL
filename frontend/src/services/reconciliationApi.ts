@@ -110,6 +110,13 @@ export function getAuditJobs(stream: string, signal?: AbortSignal, after?: strin
 export function getAuditCoverage(signal?: AbortSignal) {
     return auditRequest<AuditCoverage>('coverage', { signal })
 }
+export type SourceWriteBackStatus = {
+    enabled: boolean; writer_supported: boolean; mode: string; fields: string[]; default: 'disabled'
+}
+export function getSourceWriteBackStatus(signal?: AbortSignal) {
+    return fetch('/api/v1/source-writeback/status', { signal, cache: 'no-store', headers: { Accept: 'application/json' } })
+        .then(async response => { if (!response.ok) throw new Error(await getErrorMessage(response)); return response.json() as Promise<SourceWriteBackStatus> })
+}
 export function queueAudit(stream: string, mode: 'INCREMENTAL' | 'FULL', repair = false, kind?: AuditKind) {
     const all = stream === 'all'
     return auditRequest<{ job_id?: string; status: string; items?: Array<{ job_id: string }> }>(

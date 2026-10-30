@@ -24,6 +24,7 @@ from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectR
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.source.mongo_metadata import MongoMetadataSourceReader
 from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
+from data_sync_etl.adapters.source.writeback import DisabledSourceMetadataWriter
 from data_sync_etl.adapters.storage.evaluation_store import EvaluationFileStore
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
 from data_sync_etl.adapters.storage.source_dispatcher import SourceFileDispatcher
@@ -61,6 +62,7 @@ from data_sync_etl.application.search import SearchService
 from data_sync_etl.application.semantic import SemanticService
 from data_sync_etl.application.source_file_import import SourceFileImportService
 from data_sync_etl.application.source_file_resolver import SourceFileResolver
+from data_sync_etl.application.source_metadata_writeback import SourceMetadataWriteBackService
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
 from data_sync_etl.application.source_resolution import SourceResolutionService
 from data_sync_etl.application.sync import MasterSync
@@ -136,6 +138,11 @@ class Container:
         self.resource_lookups = ListResourceLookups(self.uow, self.source if isinstance(self.source, PostgreSQLSourceAdapter) else None)
         self.resource_detail = GetResourceDetail(self.uow)
         self.source_resolution = SourceResolutionService(self.uow, self.source, self.settings)
+        # A real SOURCE writer is intentionally not constructed by production
+        # composition. Tests/demo may inject an isolated writer capability.
+        self.source_metadata_writer = DisabledSourceMetadataWriter()
+        self.source_writeback = SourceMetadataWriteBackService(
+            self.uow, self.source_metadata_writer, self.settings)
         self.resource_versions = ListResourceVersions(self.uow)
         self.processing_job_detail = GetProcessingJob(self.uow)
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
