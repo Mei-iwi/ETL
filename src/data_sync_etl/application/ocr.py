@@ -50,6 +50,9 @@ class OCRPipeline:
             version = repo.get('resource_versions', version_id)
             if version and version.get('lifecycle_status') == 'METADATA_ONLY':
                 raise DomainError('CONTENT_NOT_AVAILABLE')
+            resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+            if resource and resource.get('source_origin') != 'LOCAL':
+                raise DomainError('EXTERNAL_SOURCE_PROCESSING_DISABLED')
         reference = self.resolver.resolve(version_id)
         if reference.ownership == 'LOCAL_OWNED':
             # Preserve LOCAL command idempotency even if its managed file later disappears.
@@ -137,6 +140,9 @@ class OCRPipeline:
             version = repo.get('resource_versions', job['resource_version_id'])
             resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
             if resource_deleted(resource):
+                return None
+            if resource.get('source_origin') != 'LOCAL':
+                self._fail(repo, task, SourceFileError('EXTERNAL_SOURCE_PROCESSING_DISABLED'), permanent=True)
                 return None
             stamp = now()
             change = dict(

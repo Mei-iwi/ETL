@@ -181,14 +181,15 @@ def test_source_import_claim_pauses_without_consuming_retry_on_deletion(importin
     c, _, _ = importing
     c.source_file_import.discover_once()
     claimed = c.source_file_import.claim()
-    assert claimed
+    assert claimed is None
     deletion(c)
-    c.source_file_import.execute(claimed)
     with c.uow() as repo:
-        row = repo.get('source_file_imports', claimed['id'])
-        assert row['status'] == 'RETRY_WAIT' and row['attempts'] == 0
-        assert row['last_error_code'] == 'RESOURCE_SOFT_DELETED'
-        assert not repo.find('resource_versions', {'resource_id': 'resource-1'})
+        row, = repo.find('source_file_imports', {'resource_id': 'resource-1'})
+        assert row['status'] == 'METADATA_ONLY' and row['attempts'] == 0
+        assert repo.find('resource_versions', {'resource_id': 'resource-1'})
+        assert not repo.find('ocr_jobs', {})
+    with pytest.raises(Exception, match='FILE_NOT_FOUND'):
+        c.source_resolver.resolve(row['target_version_id'])
     assert c.source_file_import.claim() is None
 
 

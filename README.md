@@ -218,7 +218,7 @@ TRANSLATION_TARGET_LANGUAGE=vi
 
 Thay password thật, percent-encode ký tự đặc biệt trong URL PostgreSQL/MongoDB. Với Compose ở gốc, nên dùng password owner chỉ gồm chữ/số để các URL migration nội suy không bị sai; có thể tự tạo bằng `python -c "import secrets; print(secrets.token_hex(24))"`, dùng hai giá trị khác nhau cho hai owner. `SOURCE_MIGRATION_DATABASE_URL` chỉ dùng owner của DB nguồn riêng mới/trống; bỏ dòng này khi dùng SOURCE có sẵn/remote. `SOURCE_ADAPTER=json` chỉ đọc fixture, không đọc PostgreSQL.
 
-`SOURCE_METADATA_MEDIA_ENABLED=false`: xử lý nội dung MP3/MP4; `true`: chỉ đăng ký metadata. Tệp local-source nằm ở `<SOURCE_FILE_STORAGE_ROOT>/<bucket>/<object_key>` theo metadata nguồn; SHA-256 phải khớp. Ba thư mục nguồn/storage/tạm phải tách riêng, không lồng nhau. Nếu FFmpeg/ffprobe chưa vào PATH, đặt đường dẫn binary tuyệt đối rồi restart tiến trình.
+Tệp thuộc SOURCE (kể cả nguồn local-source/Drive cũ) chỉ đồng bộ metadata; ETL không tải, sao chép, OCR hay tạo chỉ mục nội dung từ tệp SOURCE. `SOURCE_METADATA_MEDIA_ENABLED` không bật xử lý nội dung SOURCE. Tệp LOCAL tải lên giao diện vẫn chạy pipeline kiểm tra, OCR và lập chỉ mục bình thường. Mở nguồn ngoài chỉ khả dụng qua API viewer đã xác minh chính xác phiên bản và quyền; thiếu hợp đồng viewer thì trả metadata-only.
 
 ### 2.4.1. Write-back metadata hai chiều (mặc định tắt)
 
@@ -401,8 +401,8 @@ Mở **http://127.0.0.1:3000/login**. Swagger sau đăng nhập qua **http://127
 1. Đăng nhập admin → **Đồng bộ dữ liệu nguồn** → chạy Full baseline nếu chưa chạy CLI.
 2. Bật Auto Incremental cho các luồng cần thiết; lịch/enable lưu trong DB, worker chạy không tự bật lịch.
 3. Model/schema đã READY thì đặt `INDEX_AUTO_ENABLED=true`, restart API và worker.
-4. Tệp mới: source-file worker xác minh → tạo job → OCR worker xử lý → ContentUnit/ContentBag/chỉ mục. Thêm/cập nhật tệp LOCAL từ giao diện cũng tạo job.
-5. MP3/MP4 cũ ở `METADATA_ONLY` được quét lại theo lô khi source-file worker khởi động trong chế độ xử lý, xếp hàng trên đúng phiên bản cũ. Tệp bị xóa/từ chối/sai hash không tự bỏ chặn.
+4. Tệp SOURCE mới chỉ tạo tham chiếu metadata; source-file worker không đọc byte, không tạo OCR job và không có retry tải tệp. Tệp LOCAL thêm/cập nhật qua giao diện vẫn tạo job → OCR → ContentUnit/ContentBag/chỉ mục.
+5. MP3/MP4 SOURCE ở `METADATA_ONLY` không được quét lại để xử lý nội dung. Tệp SOURCE bị xóa/từ chối hoặc có mapping/hash sai tiếp tục bị chặn theo chính sách.
 
 Dừng bằng Ctrl+C. Đổi `.env` phải restart API và **các worker liên quan**; đổi auth origin/proxy key cần restart Vite. Có thể thêm `--reload` cho API khi phát triển; tránh chạy nhiều tiến trình model trùng.
 
@@ -1003,7 +1003,7 @@ Docker dùng `"${APP[@]}" run --rm --no-deps api semantic-schema`/semantic-statu
 | Hoàn tất cài đặt | DB/schema đúng, model verify+encode PASS, API health OK, login được, 4 worker chạy nếu dùng lịch đối soát; thử 1 tệp tới CONTENT_READY/index READY rồi tìm bằng 3 chế độ |
 | Thiếu argon2/pymongo… | Kiểm tra venv: `python -c "import sys; print(sys.executable)"`; cài đúng extra, pip check |
 | SOURCE_REFERENCE_DISABLED | Sửa đúng .env/docker.env và restart/recreate đúng tiến trình |
-| METADATA_ONLY / Chưa xử lý | SOURCE_METADATA_MEDIA_ENABLED=false, đủ model/binary, restart source-file worker; kiểm tra tạo job và OCR worker nhận. PUBLISHED không đồng nghĩa đã trích xuất |
+| SOURCE ở METADATA_ONLY | Đây là chính sách metadata-only: ETL không tải/OCR/chỉ mục tệp SOURCE. Kiểm tra viewer bằng API `/api/v1/resources/{id}/open`; nếu chưa có hợp đồng viewer được allowlist thì nội dung nguồn chưa thể mở từ ETL. Tệp LOCAL vẫn dùng pipeline OCR thông thường |
 | AUTH_MASTER_STALE | Kiểm tra Auto users/interval/heartbeat/lần COMPLETED; không chỉ watermark |
 | Docs trắng/OpenAPI403 | Đăng nhập qua frontend proxy3000/8080; không gọi backend để bỏ boundary |
 | SOURCE_HASH_MISMATCH / SOURCE_VERSION_MUTATED | Xác minh bytes/hash/phiên bản ở nguồn; không bỏ kiểm tra hoặc ghi đè lịch sử |
@@ -1123,3 +1123,7 @@ Bỏ `--loop` để chạy một tick; bỏ `--apply` ở `run-worker` để xem
 Mỗi `ContentBag` lưu TF của từ bề mặt, độ dài tài liệu, TF riêng của tiêu đề và các đoạn theo ranh giới `ContentUnit`. BoW dùng các TF này để tính BM25 tự cài đặt (k1=1.2, b=0.75); IDF tính theo số tài liệu chứa thuật ngữ và title chỉ là phần tăng trọng số có kiểm soát. Nguồn thống kê nằm trong tập đã xác thực quyền, gồm cả tài liệu không khớp truy vấn. Khi metadata search dùng shortlist ứng viên, N, độ dài trung bình và DF vẫn lấy từ toàn bộ corpus được phép, không lấy riêng shortlist.
 
 Đây là triển khai BM25 nền tảng cùng các kiểm tra/ràng buộc của nhóm (Unicode NFC, ranh giới Bag, phrase evidence, ACL và fingerprint), không phải phát minh thuật toán BM25. Khi hợp đồng xếp hạng thay đổi, `RANKING_VERSION` được tăng; tài liệu/chỉ mục cũ không tự động được coi là đã reindex.
+
+## Architecture and SOURCE federation status
+
+See [the current architecture, migration governance findings, and SOURCE federation readiness](SOURCE_FEDERATION_READINESS.md). Multi-source resource/version metadata sync is feature-gated and uses existing MASTER identity columns, versions/imports, checkpoints, and reconciliation audit tables; SOURCE registrations are server configuration, not database rows. A fail-closed open-at-SOURCE API and frontend action accept only per-source allowlisted HTTPS viewer links. Production writeback remains disabled; real PostgreSQL/Mongo/API viewer integration, physical SOURCE acceptance, and migration-governance approval remain incomplete.

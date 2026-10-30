@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     source_fixture_root: Path = Path("fixtures/source")
     source_adapter: Literal["json", "postgresql", "production"] = "json"
     source_namespace: str = Field(default='postgresql:learning', min_length=1, max_length=255)
+    # N-source registrations are server-owned JSON with env: references only; never client input.
+    source_registry_config: list[dict[str, object]] = Field(default_factory=list, repr=False)
+    source_federation_enabled: bool = False
     source_database_url: str | None = Field(default=None, repr=False)
     source_migration_database_url: str | None = Field(default=None, repr=False)
     source_replay_seconds: int = Field(default=300, ge=0)

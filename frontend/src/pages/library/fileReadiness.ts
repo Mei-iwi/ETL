@@ -1,5 +1,20 @@
 export type FileIndexStatus = { processing_status: string; index_status: string; metadata_only?: boolean }
 export type SourceResolution = { version_id: string; resolution_status: 'available' | 'unavailable' | 'stale' | 'blocked'; content_availability: 'metadata-only' | 'authorized-indexed'; source_record_available: boolean }
+export type SourceOpen = {
+    master_resource_id: string; version_id: string | null
+    status: 'EXTERNAL_VIEWER_AVAILABLE' | 'SOURCE_AUTH_REQUIRED' | 'METADATA_ONLY' | 'SOURCE_UNAVAILABLE'
+        | 'SOURCE_OPEN_UNSUPPORTED' | 'VERSION_STALE' | 'ACCESS_DENIED'
+    files: { source_file_id: string; file_name: string | null; mime_type: string | null
+        revision: string | null; access_status: 'ALLOWED' | 'AUTH_REQUIRED' | 'DENIED' | 'UNAVAILABLE' | 'METADATA_ONLY'
+        viewer_url: string | null }[]
+}
+export function trustedViewerHref(value: string | null | undefined) {
+    if (!value) return null
+    try {
+        const url = new URL(value)
+        return url.protocol === 'https:' && !url.username && !url.password ? url.href : null
+    } catch { return null }
+}
 export function sourceResolutionAllowsFile(resolution: SourceResolution | null, selected: string) {
     return resolution?.version_id === selected && resolution.resolution_status === 'available'
         && resolution.source_record_available === true && resolution.content_availability === 'authorized-indexed'
@@ -50,6 +65,8 @@ export async function fileResponseError(response: Response): Promise<string> {
         PERMISSION_DENIED: 'Nguồn đã từ chối quyền truy cập.',
         DRIVE_CREDENTIALS_EXPIRED: 'Quyền kết nối nguồn đã hết hạn. Vui lòng liên hệ người quản trị.',
     }
+    if (code === 'EXTERNAL_SOURCE_CONTENT_DISABLED')
+        return 'Tài liệu nằm tại kho nguồn; ETL chỉ hỗ trợ metadata và viewer đã được nguồn xác minh.'
     return typeof code === 'string' && messages[code] ? messages[code] : fileErrorMessage(response.status)
 }
 

@@ -12,7 +12,6 @@ from data_sync_etl.domain.core import (
     ProcessingRetryConflict,
     SourceFileError,
     UploadTooLargeError,
-    new_id,
     now,
 )
 from data_sync_etl.domain.format_validation import (
@@ -50,12 +49,12 @@ class SourceFileImportService:
         self._file_count_cache = {}
 
     def _media_processing_enabled(self):
-        return (not self.settings.source_metadata_media_enabled
-                and self.settings.source_reference_enabled and self.settings.source_temporary_files_enabled)
+        # External SOURCE material is metadata-only, including legacy sources.
+        return False
 
     def _metadata_only_policy(self):
-        """External SOURCE is metadata-only until both read gates are explicit."""
-        return not (self.settings.source_reference_enabled and self.settings.source_temporary_files_enabled)
+        """External SOURCE bytes are never imported by the ETL file worker."""
+        return True
 
     @staticmethod
     def _metadata_locator(source_version_id, source_object_key=None):
@@ -73,6 +72,8 @@ class SourceFileImportService:
         """Register a searchable metadata version without copying or exposing SOURCE paths."""
         if row.get("target_version_id"):
             return row["target_version_id"]
+        if repo.get('master_learning_resources', row['resource_id']) is None:
+            return None
         collision = repo.find("resource_versions", {
             "resource_id": row["resource_id"], "version_number": row["source_version_number"]}, limit=1)
         if collision:
@@ -101,25 +102,22 @@ class SourceFileImportService:
         return version["id"]
 
     def availability(self):
-        storage_error = None
-        try:
-            self.files.check()
-        except SourceFileError as exc:
-            storage_error = exc.code
-        error = storage_error if hasattr(self.source, 'version_page') else 'BLOCKED_SOURCE_DATABASE'
-        if hasattr(self.source, 'version_page') and not self.settings.source_reference_enabled:
-            error = 'SOURCE_REFERENCE_DISABLED'
-        elif hasattr(self.source, 'version_page') and not self.settings.source_temporary_files_enabled:
-            error = 'SOURCE_TEMP_POLICY_REQUIRED'
         with self.uow() as repo:
             worker = repo.get("sync_checkpoints", "source-file-worker")
-        healthy = bool(worker and worker["last_id"] and worker["updated_at"] > now() - timedelta(seconds=30))
-        backends = self.files.readiness() if hasattr(self.files, 'readiness') else {
-            'local': {'status': 'LOCAL_READY' if storage_error is None else 'LOCAL_UNAVAILABLE', 'error_code': storage_error}}
-        return {"file_sync_supported": error is None, "file_sync_error": error, 'file_backends': backends,
-                "file_worker_healthy": healthy}
+        healthy = bool(worker and worker["updated_at"] > now() - timedelta(seconds=30))
+        return {
+            'file_sync_supported': False,
+            'file_sync_error': 'EXTERNAL_SOURCE_METADATA_ONLY',
+            'file_backends': {},
+            'file_worker_healthy': healthy,
+        }
 
     def discover_once(self):
+        # Discovery is metadata-only. Federation versions are registered by
+        # SourceVersionSynchronizer; the legacy path remains for metadata-only
+        # inventory compatibility and must not materialize source bytes.
+        if getattr(self.settings, 'source_federation_enabled', False):
+            return 0
         if not hasattr(self.source, "version_page"):
             return 0
         with self.uow.processing_lock("source-file-discovery") as acquired:
@@ -193,6 +191,7 @@ class SourceFileImportService:
         if existing:
             row = repo.get("source_file_imports", existing[0]["id"], lock=True)
             lineage_changed = False
+            target = None
             if row["target_version_id"]:
                 target = repo.get("resource_versions", row["target_version_id"])
                 parent = repo.find("source_file_imports", {
@@ -225,13 +224,23 @@ class SourceFileImportService:
             # while still rejecting changed resource/version/hash/lineage.
             placeholder = row['storage_bucket'] == METADATA_ONLY_BUCKET and row['status'] == 'METADATA_ONLY'
             if lineage_changed or metadata_changed or (raw_changed and not metadata_only and not placeholder):
-                repo.update("source_file_imports", row["id"], {
+                failed_fields = {
                     "status": "FAILED", "last_error_code": "SOURCE_VERSION_MUTATED",
                     "claim_token": None, "lease_expires_at": None, "updated_at": now(),
-                })
+                }
+                if metadata_only:
+                    bucket, key = self._metadata_locator(row['source_version_id'], source.get('storage_object_key'))
+                    failed_fields.update({'storage_bucket': bucket, 'storage_object_key': key,
+                                          'next_retry_at': None})
+                    if target is not None:
+                        repo.update('resource_versions', target['id'], {
+                            'storage_bucket': bucket, 'storage_object_key': key,
+                            'lifecycle_status': 'METADATA_ONLY',
+                        })
+                repo.update("source_file_imports", row["id"], failed_fields)
             else:
                 self._resume_metadata_media(repo, row, source)
-                if (self.settings.source_metadata_media_enabled and row['last_error_code'] == 'UNSUPPORTED_SOURCE_FORMAT'
+                if (not metadata_only and self.settings.source_metadata_media_enabled and row['last_error_code'] == 'UNSUPPORTED_SOURCE_FORMAT'
                         and row['target_version_id'] is None and row['status'] == 'FAILED'):
                     repo.update('source_file_imports', row['id'], {'status': 'PENDING', 'last_error_code': None})
                 fields = {
@@ -240,7 +249,19 @@ class SourceFileImportService:
                     "source_resource_active": source.get("resource_active", True) and source.get("resource_deleted_at") is None,
                     "source_updated_at": source["updated_at"], "updated_at": now(),
                 }
-                if not metadata_only:
+                if metadata_only:
+                    bucket, key = self._metadata_locator(row['source_version_id'], source.get('storage_object_key'))
+                    fields.update({"storage_bucket": bucket, "storage_object_key": key})
+                    if row['last_error_code'] not in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING'):
+                        fields.update({"status": "METADATA_ONLY", "last_error_code": METADATA_ONLY_ERROR,
+                                       "claim_token": None, "lease_expires_at": None,
+                                       "next_retry_at": None, "updated_at": now()})
+                    if target is not None:
+                        repo.update('resource_versions', target['id'], {
+                            'storage_bucket': bucket, 'storage_object_key': key,
+                            'lifecycle_status': 'METADATA_ONLY',
+                        })
+                else:
                     fields.update({"storage_bucket": source["storage_bucket"], "storage_object_key": source["storage_object_key"]})
                 repo.update("source_file_imports", row["id"], fields)
                 if metadata_only:
@@ -268,9 +289,7 @@ class SourceFileImportService:
             repo.ensure_checkpoint("source-file-worker")
             marker = sha256(worker_id.encode()).hexdigest()[:30] if worker_id else None
             repo.update("sync_checkpoints", "source-file-worker", {"updated_at": stamp, "last_id": marker})
-            return repo.claim_source_import(stamp, new_id(), stamp + timedelta(
-                seconds=self.settings.source_file_import_lease_seconds),
-                max_active=self.settings.source_file_import_max_active)
+            return None
 
     def worker_stopped(self, worker_id):
         with self.uow() as repo:
@@ -304,9 +323,14 @@ class SourceFileImportService:
                 and row["source_lifecycle_status"] in self.settings.source_file_allowed_statuses)
 
     def execute(self, claimed):
+        if not claimed or claimed.get('status') == 'METADATA_ONLY':
+            return
         try:
-            if claimed.get('status') == 'METADATA_ONLY':
-                return
+            self._fail(claimed, 'EXTERNAL_SOURCE_CONTENT_DISABLED', False)
+        except SourceImportConflict:
+            return
+        return
+        try:
             self.resolver._enabled()
             self.resolver.files = self.files
             media = claimed['storage_object_key'].lower().endswith(('.mp3', '.mp4'))
@@ -457,6 +481,7 @@ class SourceFileImportService:
         raise SourceFileError("SOURCE_LINEAGE_DEPTH_LIMIT")
 
     def _import(self, claimed):
+        raise SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED')
         with self.uow() as repo:
             row = self._owned(repo, claimed)
             if not self._source_allowed(row):
@@ -564,6 +589,8 @@ class SourceFileImportService:
         return state, exhausted and count < self.settings.processing_manual_retry_limit
 
     def _eligible(self, repo, row):
+        return False
+        # No external import row is retryable while SOURCE is metadata-only.
         if not self._source_allowed(row):
             return False
         resource = repo.get('master_learning_resources', row['resource_id'])
@@ -666,6 +693,10 @@ class SourceFileImportService:
                 'total': total, 'total_pages': (total + size - 1) // size if total is not None else None, **availability}
 
     def retry(self, file_id):
+        with self.uow() as repo:
+            if repo.get("source_file_imports", file_id) is None:
+                raise SourceImportNotFound("Import job not found")
+        raise SourceImportConflict('EXTERNAL_SOURCE_CONTENT_DISABLED')
         available = self.availability()["file_sync_supported"]
         with self.uow() as repo:
             row = repo.get("source_file_imports", file_id, lock=True)
@@ -704,34 +735,5 @@ class SourceFileImportService:
 
     def precheck(self, mongo_client=None):
         result = dict.fromkeys(["DB_SOURCE", "FILE_ROOT", "FILE_READ", "HASH", "SOURCE_REFERENCE_POLICY", "OCR_WORKER", "MONGO"], "BLOCKED")
-        if not self.settings.source_reference_enabled or not self.settings.source_temporary_files_enabled:
-            return result
-        result['SOURCE_REFERENCE_POLICY'] = 'PASS'
-        if hasattr(self.files, 'readiness'):
-            result['FILE_BACKENDS'] = self.files.readiness(probe=True)
-        try:
-            self.files.check()
-            result["FILE_ROOT"] = "PASS"
-        except SourceFileError:
-            pass
-        try:
-            page = self.source.version_page(size=3)
-            result["DB_SOURCE"] = "PASS"
-            if page["items"] and result["FILE_ROOT"] == "PASS":
-                matches = []
-                for row in page["items"]:
-                    reference = self.resolver.import_reference({**row, 'source_system': 'postgresql'})
-                    with self.resolver.temporary_path(reference):
-                        matches.append(True)
-                result["FILE_READ"] = "PASS"
-                result["HASH"] = "PASS" if all(matches) else "BLOCKED"
-        except Exception:
-            pass
-        if mongo_client is not None:
-            try:
-                mongo_client.admin.command("ping")
-                result["MONGO"] = "PASS"
-            except Exception:
-                pass
-        # No OCR worker heartbeat registry exists: process readiness cannot be inferred.
+        result['SOURCE_REFERENCE_POLICY'] = 'METADATA_ONLY'
         return result

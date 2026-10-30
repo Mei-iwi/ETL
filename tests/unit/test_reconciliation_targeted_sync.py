@@ -1,5 +1,5 @@
-from sqlalchemy import select
 import pytest
+from sqlalchemy import select
 
 from data_sync_etl.adapters.persistence.audit_schedule import AuditSchedule
 from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
@@ -282,6 +282,7 @@ def test_disable_schedule_cancels_only_its_pending_work(container):
 
 def test_configured_and_fallback_share_decisions_across_slots(container, monkeypatch):
     from datetime import timedelta
+
     from data_sync_etl.domain.core import now
     container.settings.reconciliation_scheduler_enabled = True
     schedule = AuditSchedule(container.uow, container.settings)
@@ -302,7 +303,7 @@ def test_configured_and_fallback_share_decisions_across_slots(container, monkeyp
 def test_legacy_ticks_reuse_retrying_audit_instead_of_flooding_queue(container, monkeypatch):
     from datetime import timedelta
 
-    from data_sync_etl.application.reconciled_sync import ReconciledSync
+    from data_sync_etl.adapters.persistence.reconciled_sync import SQLAlchemyReconciledSync
     from data_sync_etl.domain.core import now
 
     audit = ScheduledAudit(container.reconciliation_engine, container.settings, container.sync)
@@ -310,7 +311,7 @@ def test_legacy_ticks_reuse_retrying_audit_instead_of_flooding_queue(container, 
     with container.uow() as repo:
         job = repo.session.get(Job, job_id)
         job.status, job.next_retry_at = 'RETRY_WAIT', now() + timedelta(minutes=5)
-    service = ReconciledSync(container.reconciliation_engine, container.sync, container.settings)
+    service = SQLAlchemyReconciledSync(container.reconciliation_engine, container.sync, container.settings)
     for _ in range(3):
         assert service.run('subjects')['status'] == 'RETRY_WAIT'
     with container.uow() as repo:

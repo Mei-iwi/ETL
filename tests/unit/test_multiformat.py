@@ -210,7 +210,7 @@ def test_extract_native_provenance_and_unicode(tmp_path, extension):
 
 
 @pytest.mark.parametrize('extension', ['.docx', '.xlsx', '.png', '.csv'])
-def test_source_import_preserves_original_bytes_and_projection(container, tmp_path, monkeypatch, extension):
+def test_source_import_is_metadata_only_for_supported_formats(container, tmp_path, monkeypatch, extension):
     container.sync.run(full=True)
     container.settings.source_reference_enabled = True
     container.settings.source_temporary_files_enabled = True
@@ -223,8 +223,6 @@ def test_source_import_preserves_original_bytes_and_projection(container, tmp_pa
     payload = sample(extension)
     path.write_bytes(payload)
     container.source_files.root = root
-    if extension == '.png':
-        container.ocr.engine = ImageEngineDouble()
     rows = [{'source_version_id': 'source-format', 'resource_id': 'resource-1',
              'resource_title': 'Format import', 'source_version_number': 1, 'parent_version_id': None,
              'source_lifecycle_status': 'APPROVED', 'updated_at': now(),
@@ -233,17 +231,19 @@ def test_source_import_preserves_original_bytes_and_projection(container, tmp_pa
     monkeypatch.setattr(container.source, 'version_page', lambda **_: {'items': rows, 'next_cursor': None}, raising=False)
     monkeypatch.setattr(container.source, 'get_version', lambda id: next(
         (dict(r) for r in rows if r['source_version_id'] == id), None), raising=False)
-    assert container.source_file_worker.once('source-format')
-    for _ in range(20):
-        if not container.worker.once('format-test'):
-            break
+    assert not container.source_file_worker.once('source-format')
     listed = container.source_file_import.list_files()['items'][0]
-    assert listed['etl_status'] == 'CONTENT_READY'
+    assert listed['import_status'] == 'METADATA_ONLY'
+    assert not listed['retry_eligible']
     with container.uow() as repo:
         version = repo.get('resource_versions', listed['target_version_id'])
         assert repo.count('resource_versions', {}) == 1
-    with container.source_resolver.open_verified_stream(container.source_resolver.resolve(version['id'])) as stream:
-        assert stream.read() == payload
+        assert version['lifecycle_status'] == 'METADATA_ONLY'
+        assert not repo.find('ocr_jobs', {})
+    from data_sync_etl.domain.core import SourceFileError
+    with pytest.raises(SourceFileError, match='EXTERNAL_SOURCE_CONTENT_DISABLED'):
+        with container.source_resolver.open_verified_stream(container.source_resolver.resolve(version['id'])):
+            pass
     assert not list((container.storage.root / 'resources').rglob('*'))
     container.source_file_import.discover_once()
     assert not container.source_file_worker.once('source-format')
@@ -447,10 +447,10 @@ def test_update_version_accepts_native_formats_without_duplicate_versions(contai
         assert again.json()['resource_version_id'] == first.json()['resource_version_id']
 
 
-@pytest.mark.parametrize('extension,payload,expected', [
-    ('.docx', b'PK\x03\x04broken', 'INVALID_OPENXML_CONTAINER'),
+@pytest.mark.parametrize('extension,payload', [
+    ('.docx', b'PK\x03\x04broken'),
 ])
-def test_source_invalid_formats_fail_without_target_version(container, tmp_path, monkeypatch, extension, payload, expected):
+def test_source_invalid_content_is_not_read_or_processed(container, tmp_path, monkeypatch, extension, payload):
     container.sync.run(full=True)
     container.settings.source_reference_enabled = True
     container.settings.source_temporary_files_enabled = True
@@ -470,11 +470,14 @@ def test_source_invalid_formats_fail_without_target_version(container, tmp_path,
     monkeypatch.setattr(container.source, 'version_page', lambda **_: {'items': rows, 'next_cursor': None}, raising=False)
     monkeypatch.setattr(container.source, 'get_version', lambda id: next(
         (dict(r) for r in rows if r['source_version_id'] == id), None), raising=False)
-    assert container.source_file_worker.once('bad-format')
+    assert not container.source_file_worker.once('bad-format')
     listed = container.source_file_import.list_files()['items'][0]
-    assert listed['import_status'] == 'FAILED' and listed['last_error_code'] == expected
+    assert listed['import_status'] == 'METADATA_ONLY'
+    assert not listed['retry_eligible']
     with container.uow() as repo:
-        assert repo.count('resource_versions', {}) == repo.count('ocr_jobs', {}) == 0
+        version = repo.get('resource_versions', listed['target_version_id'])
+        assert version['lifecycle_status'] == 'METADATA_ONLY'
+        assert repo.count('ocr_jobs', {}) == 0
 
 
 @pytest.mark.parametrize('extension,payload,mime', [('.png', sample('.png'), 'image/png')])

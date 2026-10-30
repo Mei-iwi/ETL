@@ -20,11 +20,11 @@ test('metadata responses cannot bypass live revision/ACL checks through tab cach
     assert.equal(c.readSearchView('old', 1), null)
 })
 
-test('legacy cache retention and TTL are preserved when metadata is OFF', () => {
+test('cached search responses remain disabled until visibility epochs are supported', () => {
     const c = cache()
     const value = { items: [], total: 0 }
     c.saveSearchView('user-a-query', value, 0)
-    assert.equal(c.readSearchView('user-a-query', 1), value)
+    assert.equal(c.readSearchView('user-a-query', 1), null)
     assert.equal(c.readSearchView('user-b-query', 1), null)
     assert.equal(c.readSearchView('user-a-query', 60000), null)
 })

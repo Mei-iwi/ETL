@@ -5,9 +5,9 @@ import vm from 'node:vm'
 import ts from '../../frontend/node_modules/typescript/lib/typescript.js'
 
 const source = fs.readFileSync(new URL('../../frontend/src/pages/library/fileReadiness.ts', import.meta.url), 'utf8')
-const context = { exports: {} }
+const context = { exports: {}, URL }
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, context)
-const { sourceResolutionAllowsFile, canOpenFile } = context.exports
+const { sourceResolutionAllowsFile, canOpenFile, trustedViewerHref } = context.exports
 
 test('source availability is bound to selected version and authorized content', () => {
     const ready = { version_id: 'v1', resolution_status: 'available', source_record_available: true, content_availability: 'authorized-indexed' }
@@ -23,4 +23,12 @@ test('source availability is bound to selected version and authorized content', 
 test('metadata-only denies contradictory readiness flags', () => {
     assert.equal(canOpenFile({ processing_status: 'CONTENT_READY', index_status: 'READY', metadata_only: true }), false)
     assert.equal(canOpenFile({ processing_status: 'CONTENT_READY', index_status: 'READY' }), true)
+})
+
+test('external viewer links must be HTTPS and contain no user credentials', () => {
+    assert.equal(trustedViewerHref('https://viewer.example.edu/open/1'), 'https://viewer.example.edu/open/1')
+    assert.equal(trustedViewerHref('http://viewer.example.edu/open/1'), null)
+    assert.equal(trustedViewerHref('javascript:alert(1)'), null)
+    assert.equal(trustedViewerHref('https://user:secret@viewer.example.edu/open/1'), null)
+    assert.equal(trustedViewerHref(null), null)
 })

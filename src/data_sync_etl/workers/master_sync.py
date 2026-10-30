@@ -18,6 +18,25 @@ class MasterSyncWorker:
         if self.metadata_refresh is not None:
             self.metadata_refresh.tick()
 
+    def _run_stream(self, stream, full):
+        if not getattr(self.sync, 'federation_enabled', False):
+            return self.sync.run(stream, full=full)
+        registrations = tuple(item for item in self.sync.source_registry.registrations() if item.enabled)
+        if not registrations:
+            raise RuntimeError('SOURCE_REGISTRY_EMPTY')
+        results, failed = {}, False
+        for registration in registrations:
+            try:
+                results[registration.source_id] = self.sync.run(
+                    stream, full=full, source_id=registration.source_id)
+            except Exception:
+                # Continue other registered sources; their checkpoints are scoped
+                # by source_id and are not changed by this source's failure.
+                failed = True
+        if failed:
+            raise RuntimeError('FEDERATED_SOURCE_SYNC_FAILED')
+        return results
+
     def once(self, worker_id: str):
         with flow():
             streams = self.coordinator.heartbeat_and_claim(worker_id)
@@ -54,7 +73,7 @@ class MasterSyncWorker:
                 for stream in streams:
                     try:
                         started = monotonic()
-                        result = self.sync.run(stream, full=self.coordinator.mode(stream) == "FULL")
+                        result = self._run_stream(stream, full=self.coordinator.mode(stream) == "FULL")
                         if isinstance(result, dict) and result.get('status') in ('FAILED', 'RETRY_WAIT', 'BLOCKED'):
                             error_code, action = 'SYNC_FAILED', 'FAILED'
                         if stream == 'users':
@@ -65,7 +84,7 @@ class MasterSyncWorker:
                             # Never touch freshness timestamps without reading SOURCE
                             # and committing through the normal sync/checkpoint path.
                             extra_users_refresh = True
-                            self.sync.run('users', full=self.coordinator.mode('users') == 'FULL')
+                            self._run_stream('users', full=self.coordinator.mode('users') == 'FULL')
                     except SyncAlreadyRunning:
                         error_code = "SYNC_BUSY"
                         action = "SKIPPED"

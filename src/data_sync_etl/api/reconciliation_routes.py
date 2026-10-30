@@ -94,7 +94,7 @@ def configure_audit_schedule(request: Request, stream: str, body: 'AuditSchedule
 @router.get('/audit-jobs')
 def audit_jobs(request: Request, after: str | None = None, size: int = Query(20, ge=1, le=100),
                stream: str | None = None, newest: bool = False,
-               job_ids: list[str] | None = Query(None, max_length=5)):
+               job_ids: list[str] | None = Query(None, max_length=5)):  # noqa: B008
     with request.app.state.container.uow() as repo:
         # SOURCE write-back requests reuse the durable job primitive but have a
         # separate API/status surface; they are not reconciliation audit jobs.
@@ -156,12 +156,38 @@ def trigger_reconciliation(
     """
     body = body or ReconcileTriggerRequest()
     engine = request.app.state.container.reconciliation_engine
+    container = request.app.state.container
+    if container.settings.source_federation_enabled:
+        result = container.reconcile_master.run(
+            body.stream, apply=not body.dry_run, fingerprint=body.fingerprint, source_id=body.source_id)
+        reports = []
+        for stream_name, item in result.get('streams', {}).items():
+            source_count = item['source_count']
+            target_count = item['eligible_master_count']
+            missing = item['missing_candidate_count']
+            reports.append({
+                'run_id': result.get('run_id', 'preview'), 'stream_name': stream_name,
+                'status': result['status'], 'mode': body.mode, 'execution_time_ms': 0,
+                'started_at': result.get('previewed_at', now().isoformat()),
+                'finished_at': result.get('detected_at'), 'source_count': source_count,
+                'target_count': target_count, 'matched_count': max(0, min(source_count, target_count) - missing),
+                'mismatched_count': missing,
+                'match_rate_percent': round(100 * max(0, min(source_count, target_count) - missing)
+                                            / max(1, source_count), 2),
+                'summary_meta': item,
+            })
+        return {
+            'status': result['status'], 'executed_at': result.get('detected_at', result.get('previewed_at', now().isoformat())),
+            'dry_run': body.dry_run, 'mode': body.mode, 'execution_time_ms': 0,
+            'total_streams': len(reports), 'reports': reports,
+            'source_id': result.get('source_id'), 'fingerprint': result.get('fingerprint'),
+            'candidate_count': result.get('candidate_count'),
+            'sample_master_ids': result.get('sample_master_ids', []),
+        }
     if not body.dry_run:
         if body.stream in ('files', 'all'):
             raise HTTPException(409, 'Chọn riêng một luồng metadata để đồng bộ bản ghi lệch; tệp sai hash cần xử lý tại nguồn.')
-        from data_sync_etl.application.reconciled_sync import ReconciledSync
-        container = request.app.state.container
-        return ReconciledSync(engine, container.sync, container.settings).run(body.stream, full=body.mode == 'FULL')
+        return container.reconciled_sync.run(body.stream, full=body.mode == 'FULL')
     try:
         if body.stream in ('files', 'all'):
             result = request.app.state.container.reconciliation_jobs.start(body.stream, mode=body.mode)
@@ -187,7 +213,7 @@ def trigger_reconciliation(
 def get_latest_reconciliation_report(
     request: Request,
     stream: str | None = Query(None, description="Lọc theo luồng dữ liệu cụ thể"),
-    run_ids: list[str] | None = Query(None, max_length=5),
+    run_ids: list[str] | None = Query(None, max_length=5),  # noqa: B008
 ) -> dict[str, Any]:
     """Lấy báo cáo tổng hợp và Dashboard KPI của đợt đối soát mới nhất."""
     container = request.app.state.container
@@ -306,7 +332,7 @@ def get_latest_reconciliation_report(
 def list_discrepancies(
     request: Request,
     run_id: str | None = Query(None, description="Lọc theo mã đợt đối soát cụ thể"),
-    run_ids: list[str] | None = Query(None, max_length=5),
+    run_ids: list[str] | None = Query(None, max_length=5),  # noqa: B008
     latest_only: bool = Query(False, description="Chỉ lấy đợt mới nhất của từng luồng"),
     stream: str | None = Query(None, description="Lọc theo luồng dữ liệu (resources, files, subjects...)"),
     discrepancy_flag: str | None = Query(None, description="Lọc theo cờ hiệu (DESYNC_BLOB_SIZE, DESYNC_CHECKSUM, ORPHAN_SOURCE...)"),

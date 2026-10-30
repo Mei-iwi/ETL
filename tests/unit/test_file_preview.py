@@ -47,31 +47,17 @@ def test_preview_pdf_keeps_original_download_and_cleans_source(source_viewer, mo
     c, version, source, path = source_viewer
     body = sample(extension)
     original = set_format(c, version, path, extension, body, source)
-    with pymupdf.open() as pdf:
-        pdf.new_page()
-        converted = pdf.tobytes()
-    calls = []
-    def convert(input_path, directory, cancelled=None):
-        assert input_path.read_bytes() == body
-        assert input_path.parent == directory
-        calls.append(input_path)
-        output = directory / 'preview.pdf'
-        output.write_bytes(converted)
-        return output
-    monkeypatch.setattr(c.file_previews.converter, 'convert', convert)
-    monkeypatch.setattr(c.storage, 'get_local_path', lambda *_: pytest.fail('SOURCE used managed storage'))
+    def forbidden(*_args, **_kwargs):
+        pytest.fail('SOURCE preview/download is disabled')
+    monkeypatch.setattr(c.file_previews.converter, 'convert', forbidden)
+    monkeypatch.setattr(c.source_files, 'open_stream', forbidden)
+    monkeypatch.setattr(c.storage, 'get_local_path', forbidden)
     url = f"/api/v1/resource-versions/{version['id']}/file"
     with client(c) as api:
-        response = api.get(url + '?view=preview', headers={'Range': 'bytes=0-3'})
-        assert response.status_code == 206, response.text
-        assert response.content == b'%PDF'
-        assert response.headers['content-type'] == 'application/pdf'
-        assert response.headers['cache-control'] == 'private, no-store'
-        for query in ['?download=true', '?download=true&view=preview']:
+        for query in ['?view=preview', '?download=true', '?download=true&view=preview', '?view=text']:
             response = api.get(url + query)
-            assert response.status_code == 200 and response.content == body
-            assert response.headers['content-disposition'].endswith(extension + '"')
-        assert len(calls) == 1
+            assert response.status_code == 409
+            assert response.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
         c.settings.search_internal_dev_enabled = False
         assert api.get(url + '?view=preview').status_code == 404
     assert original.read_bytes() == body
@@ -86,10 +72,11 @@ def test_source_grid_and_original_download(source_viewer, extension):
     url = f"/api/v1/resource-versions/{version['id']}/file"
     with client(c) as api:
         response = api.get(url + '?view=preview')
-        assert response.status_code == 200, response.text
-        value = response.json()
-        assert value['kind'] == 'spreadsheet' and value['sheets'][0]['rows']
-        assert api.get(url + '?download=true&view=preview').content == body
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
+        download = api.get(url + '?download=true&view=preview')
+        assert download.status_code == 409
+        assert download.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
     assert original.read_bytes() == body
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
@@ -97,12 +84,11 @@ def test_source_grid_and_original_download(source_viewer, extension):
 def test_preview_failure_has_code_and_no_leaked_path(source_viewer, monkeypatch):
     c, version, source, path = source_viewer
     set_format(c, version, path, '.docx', sample('.docx'), source)
-    c.file_previews.converter.settings.office_pdf_executable = Path('does-not-exist')
-    monkeypatch.setattr(c.file_previews.converter, 'executable', lambda: (_ for _ in ()).throw(SourceFileError('PREVIEW_CONVERTER_UNAVAILABLE', transient=True)))
+    monkeypatch.setattr(c.file_previews.converter, 'convert', lambda *_a, **_k: pytest.fail('SOURCE preview disabled'))
     with client(c) as api:
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file?view=preview")
-        assert response.status_code == 503
-        assert response.json()['detail']['code'] == 'PREVIEW_CONVERTER_UNAVAILABLE'
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
         assert str(path) not in response.text
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
@@ -211,18 +197,14 @@ def test_local_preview_works_with_source_flags_off_and_keeps_original(searchable
     assert outputs and not outputs[0].exists()
 
 
-def test_preview_reauthorizes_after_conversion(source_viewer, monkeypatch):
+def test_preview_is_blocked_before_source_content_access(source_viewer, monkeypatch):
     c, version, source, path = source_viewer
     set_format(c, version, path, '.docx', sample('.docx'), source)
-    def revoked(input_path, directory, cancelled=None):
-        output = directory / 'preview.pdf'
-        output.write_bytes(b'%PDF private')
-        c.settings.search_internal_dev_enabled = False
-        return output
-    monkeypatch.setattr(c.file_previews.converter, 'convert', revoked)
+    monkeypatch.setattr(c.file_previews.converter, 'convert', lambda *_a, **_k: pytest.fail('SOURCE preview disabled'))
     with client(c) as api:
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file?view=preview")
-        assert response.status_code == 404 and not response.content.startswith(b'%PDF')
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
 
@@ -244,12 +226,8 @@ def test_orphan_preview_profile_cleanup_stays_inside_attempt(source_viewer):
 def test_source_revoked_during_conversion_never_sends_pdf(source_viewer, monkeypatch):
     c, version, source, path = source_viewer
     set_format(c, version, path, '.docx', sample('.docx'), source)
-    def revoked(input_path, directory, cancelled=None):
-        output = directory / 'preview.pdf'
-        output.write_bytes(b'%PDF private')
-        source['source_lifecycle_status'] = 'REJECTED'
-        return output
-    monkeypatch.setattr(c.file_previews.converter, 'convert', revoked)
+    source['source_lifecycle_status'] = 'REJECTED'
+    monkeypatch.setattr(c.file_previews.converter, 'convert', lambda *_a, **_k: pytest.fail('SOURCE preview disabled'))
     with client(c) as api:
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file?view=preview")
         assert response.status_code == 403

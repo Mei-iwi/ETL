@@ -73,7 +73,7 @@ from data_sync_etl.api.search_schemas import (
     search_error,
 )
 from data_sync_etl.api.source_file_response import SourceFileResponse, source_file_error
-from data_sync_etl.api.source_resolution_schemas import SourceResolutionResponse
+from data_sync_etl.api.source_resolution_schemas import SourceOpenResponse, SourceResolutionResponse
 from data_sync_etl.api.source_writeback_schemas import (
     SourceWriteBackRequest,
     SourceWriteBackResponse,
@@ -464,16 +464,16 @@ def chunk_context(context_id: Annotated[str, Path(min_length=1, max_length=256)]
 def resource_file(id: ResourceId, request: Request, download: bool = False, view: Literal['file', 'text', 'preview'] = 'file'):
     container = request.app.state.container
     try:
-        version = container.search.file_version(id, access=search_access(request), include_text=view == 'text')
+        version = container.search.file_version(id, access=search_access(request))
     except Exception as exc:
         raise search_error(exc) from None
     if view == 'text':
         try:
             reference = container.source_resolver.resolve(id)
             if reference.ownership == 'SOURCE_BACKED':
-                with container.source_resolver.temporary_path(reference):
-                    pass
-                version = container.search.file_version(id, access=search_access(request), include_text=True)
+                return source_file_error(SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED'))
+            # Content text is loaded only after the version is confirmed LOCAL.
+            version = container.search.file_version(id, access=search_access(request), include_text=True)
         except SourceFileError as exc:
             return source_file_error(exc)
         except Exception as exc:
@@ -484,7 +484,9 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
         reference = container.source_resolver.resolve(id)
     except SourceFileError as exc:
         return source_file_error(exc)
-    if reference.ownership == 'SOURCE_BACKED' or (view == 'preview' and not download):
+    if reference.ownership == 'SOURCE_BACKED':
+        return source_file_error(SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED'))
+    if view == 'preview' and not download:
         return SourceFileResponse(container.source_resolver, reference,
                                   lambda: container.search.file_version(id, access=search_access(request)), download=download,
                                   preview=container.file_previews if view == 'preview' and not download else None)
@@ -525,6 +527,8 @@ def resource_source_info(id: ResourceId, request: Request):
     try:
         container.search.file_version(id, access=search_access(request))
         reference = container.source_resolver.resolve(id)
+        if reference.ownership == 'SOURCE_BACKED':
+            return container.source_resolver.display_reference(reference)
         info = container.source_resolver.display_reference(reference)
         container.search.file_version(id, access=search_access(request))
         return info
@@ -730,6 +734,47 @@ def source_resolution(id: ResourceId, request: Request,
                             detail={'code': exc.code, 'message': 'Source resolution is restricted'}) from None
     except Exception as exc:
         raise search_error(exc) from None
+
+
+@router.get(
+    "/api/v1/resources/{id}/open",
+    tags=[TAG_MASTER],
+    response_model=SourceOpenResponse,
+    summary="Resolve an exact external SOURCE viewer without downloading the file",
+    responses=SEARCH_ERROR_RESPONSES,
+)
+def source_open(id: ResourceId, request: Request,
+                version_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None) -> SourceOpenResponse:
+    access = search_access(request)
+    try:
+        result = request.app.state.container.source_open.resolve(id, access, version_id)
+        return SourceOpenResponse.model_validate(result)
+    except SourceResolutionError as exc:
+        if exc.status == 404:
+            raise HTTPException(status_code=404, detail={'code': exc.code, 'message': 'Resource not found'}) from None
+        raise HTTPException(status_code=exc.status,
+                            detail={'code': exc.code, 'message': 'Source opening is restricted'}) from None
+    except Exception as exc:
+        raise search_error(exc) from None
+
+
+@router.get('/api/v1/source-federation/health', tags=[TAG_SYSTEM], summary='Trạng thái từng nguồn đã đăng ký')
+def source_federation_health(request: Request):
+    access = search_access(request)
+    if not access.internal:
+        raise HTTPException(status_code=403, detail='Authentication required')
+    registry = services(request).source_registry
+    sources = []
+    for registration in registry.registrations():
+        status = registry.health(registration.source_id)
+        sources.append({
+            'source_id': registration.source_id,
+            'backend': registration.backend,
+            'namespace': registration.namespace,
+            'enabled': registration.enabled,
+            'health': status,
+        })
+    return {'sources': sources}
 
 
 @router.get(
@@ -1065,7 +1110,12 @@ def retry_processing_job(
 )
 def sync_master_data(body: MasterSyncRequest, request: Request):
     try:
-        return services(request).sync.run(body.stream, body.full)
+        container = services(request)
+        if container.settings.source_federation_enabled:
+            return container.sync.run(body.stream, body.full, source_id=body.source_id)
+        if body.source_id is not None:
+            raise DomainError('SOURCE_FEDERATION_DISABLED')
+        return container.sync.run(body.stream, body.full)
     except SyncAlreadyRunning:
         raise HTTPException(409, "A Master Data sync is already running") from None
     except DomainError as exc:
@@ -1320,6 +1370,11 @@ def bilingual_access(request, version_id):
         resource = repo.get('master_learning_resources', version['resource_id']) if version else None
     if not resource or not resource['is_active'] or resource.get('deleted_at'):
         raise HTTPException(404, 'Resource version not found')
+    if resource.get('source_origin') != 'LOCAL':
+        raise HTTPException(409, detail={
+            'code': 'EXTERNAL_SOURCE_PROCESSING_DISABLED',
+            'message': 'Tài liệu nguồn ngoài chỉ hỗ trợ metadata; ETL không xử lý nội dung.',
+        })
     return container
 
 
@@ -1379,6 +1434,8 @@ def bilingual_source(id: ResourceId, request: Request):
         reference = container.source_resolver.resolve(id)
     except SourceFileError as exc:
         return source_file_error(exc)
+    if reference.ownership == 'SOURCE_BACKED':
+        return source_file_error(SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED'))
     return SourceFileResponse(container.source_resolver, reference,
                               lambda: bilingual_access(request, id), download=False)
 

@@ -27,19 +27,17 @@ def metadata_media(importing):
     return c, rows, row, media
 
 
-def test_worker_resumes_existing_version_without_source_delta_or_duplicate_job(metadata_media):
+def test_worker_never_resumes_external_source_content(metadata_media):
     c, _, before, media = metadata_media
     original = media.read_bytes()
-    # No new Master run; startup policy scan must still take this record.
-    assert c.source_file_worker.once('full-processing-fixture') is True
+    assert c.source_file_worker.once('full-processing-fixture') is False
     with c.uow() as repo:
         after = repo.get('source_file_imports', before['id'])
-        assert after['status'] == 'PROCESSING' and after['processing_job_id']
+        assert after['status'] == 'METADATA_ONLY' and after['processing_job_id'] is None
         assert after['target_version_id'] == before['target_version_id']
-        assert after['attempts'] == before['attempts'] + 1
+        assert after['attempts'] == before['attempts']
         assert after['manual_retries'] == before['manual_retries']
-        assert repo.count('ocr_jobs', {}) == repo.count('resource_versions', {}) == 1
-        assert repo.get('ocr_jobs', after['processing_job_id'])['status'] == 'PENDING'
+        assert repo.count('ocr_jobs', {}) == 0 and repo.count('resource_versions', {}) == 1
     assert c.source_file_worker.once('full-processing-fixture') is False
     assert media.read_bytes() == original
     assert not list((c.storage.root / 'resources').rglob('*.mp3'))
@@ -78,18 +76,18 @@ def test_policy_or_changed_source_never_auto_queues(metadata_media, blocked):
         assert repo.count('ocr_jobs', {}) == 0
 
 
-def test_resumed_source_bytes_are_revalidated_before_job_creation(metadata_media):
+def test_external_source_file_changes_are_not_read_or_ocr_queued(metadata_media):
     c, _, before, media = metadata_media
     media.write_bytes(media.read_bytes() + b'changed')
     c.source_file_worker.once('hash-verification-fixture')
     with c.uow() as repo:
         after = repo.get('source_file_imports', before['id'])
-        assert after['status'] == 'FAILED' and after['last_error_code'] == 'SOURCE_HASH_MISMATCH'
+        assert after['status'] == 'METADATA_ONLY'
         assert after['target_version_id'] == before['target_version_id']
         assert repo.count('ocr_jobs', {}) == 0
 
 
-def test_startup_scan_is_bounded_and_resumes_cursor_once(metadata_media, monkeypatch):
+def test_worker_startup_does_not_resume_external_file_processing(metadata_media, monkeypatch):
     c, rows, _, _ = metadata_media
     c.settings.sync_batch_size = 1
     calls = []
@@ -98,19 +96,18 @@ def test_startup_scan_is_bounded_and_resumes_cursor_once(metadata_media, monkeyp
         return {'items': [rows[0]] if after is None else [],
                 'next_cursor': rows[0]['source_version_id'] if after is None else None}
     monkeypatch.setattr(c.source, 'version_page', page)
-    with c.uow() as repo:
-        repo.update('sync_checkpoints', 'source-file-discovery', {'last_id': 'old-mode-cursor'})
-    assert c.source_file_worker.once('paged-worker') is True
     assert c.source_file_worker.once('paged-worker') is False
     assert c.source_file_worker.once('paged-worker') is False
-    assert calls == [(None, 1), (rows[0]['source_version_id'], 1)]
+    assert c.source_file_worker.once('paged-worker') is False
+    assert calls == []
 
 
 def test_manual_job_is_linked_instead_of_created_again(metadata_media):
     c, _, before, _ = metadata_media
-    job = c.process_version.run(before['target_version_id'])
-    assert c.source_file_worker.once('automatic-worker') is True
+    with pytest.raises(Exception, match='CONTENT_NOT_AVAILABLE'):
+        c.process_version.run(before['target_version_id'])
+    assert c.source_file_worker.once('automatic-worker') is False
     with c.uow() as repo:
         row = repo.get('source_file_imports', before['id'])
-        assert row['processing_job_id'] == job['job_id']
-        assert repo.count('ocr_jobs', {}) == 1
+        assert row['processing_job_id'] is None
+        assert repo.count('ocr_jobs', {}) == 0
