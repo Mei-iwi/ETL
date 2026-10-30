@@ -20,6 +20,7 @@ class SourceVersionMetadata(TypedDict):
     source_hash: str
     source_lifecycle_status: str
     resource_active: NotRequired[bool]
+    resource_publication_status: NotRequired[str]
     resource_deleted_at: NotRequired[datetime | None]
     updated_at: NotRequired[datetime]
     resource_title: NotRequired[str]

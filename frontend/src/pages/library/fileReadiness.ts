@@ -1,6 +1,11 @@
-export type FileIndexStatus = { processing_status: string; index_status: string }
+export type FileIndexStatus = { processing_status: string; index_status: string; metadata_only?: boolean }
+export type SourceResolution = { version_id: string; resolution_status: 'available' | 'unavailable' | 'stale' | 'blocked'; content_availability: 'metadata-only' | 'authorized-indexed'; source_record_available: boolean }
+export function sourceResolutionAllowsFile(resolution: SourceResolution | null, selected: string) {
+    return resolution?.version_id === selected && resolution.resolution_status === 'available'
+        && resolution.source_record_available === true && resolution.content_availability === 'authorized-indexed'
+}
 export function canOpenFile(status: FileIndexStatus | null | undefined) {
-    return status?.processing_status === 'CONTENT_READY' && status.index_status === 'READY'
+    return status?.metadata_only !== true && status?.processing_status === 'CONTENT_READY' && status.index_status === 'READY'
 }
 export function fileErrorMessage(status: number) {
     return ({

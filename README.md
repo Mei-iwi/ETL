@@ -220,6 +220,56 @@ Thay password thật, percent-encode ký tự đặc biệt trong URL PostgreSQL
 
 `SOURCE_METADATA_MEDIA_ENABLED=false`: xử lý nội dung MP3/MP4; `true`: chỉ đăng ký metadata. Tệp local-source nằm ở `<SOURCE_FILE_STORAGE_ROOT>/<bucket>/<object_key>` theo metadata nguồn; SHA-256 phải khớp. Ba thư mục nguồn/storage/tạm phải tách riêng, không lồng nhau. Nếu FFmpeg/ffprobe chưa vào PATH, đặt đường dẫn binary tuyệt đối rồi restart tiến trình.
 
+### 2.4.1. Write-back metadata hai chiều (mặc định tắt)
+
+`SOURCE_NAMESPACE` là tên nguồn ổn định, không chứa URI hay credential; mặc định
+`postgresql:learning` để giữ nguyên identity hiện có. Dùng namespace riêng cho từng
+SOURCE trước lần đồng bộ đầu tiên. Đổi namespace trên nguồn đã đồng bộ sẽ bị chặn
+để tránh ghép nhầm ID, cần quy trình chuyển mapping được kiểm tra riêng.
+
+Luồng SOURCE → MASTER vẫn là luồng đồng bộ chính. MASTER → SOURCE chỉ tạo đề nghị
+write-back khi toàn bộ điều kiện sau đúng: `SOURCE_METADATA_WRITEBACK_ENABLED=true`,
+writer capability riêng đã được cấp, actor có quyền ADMIN/OPERATOR và đúng owner,
+identity SOURCE đã xác minh, `source_state_hash` còn khớp, và request có phê duyệt rõ ràng.
+Mặc định writer là `disabled`; PostgreSQL reader không có quyền ghi và không được dùng
+để suy ra quyền writer. Không truyền SQL, collection, URI, bucket, key hoặc credential từ
+frontend.
+
+Sau kiểm tra nhóm 5 commit, service yêu cầu thêm grant resolver phía server gắn với
+actor, bản ghi, namespace và field. Role ADMIN hoặc owner đơn lẻ không cấp quyền ghi.
+Production composition chưa có writer/grant resolver, nên chỉ bật biến môi trường
+không kích hoạt được write-back. `SOURCE_METADATA_WRITER_MODE` là nhãn chế độ cấu hình;
+không phải lệnh tự tạo writer fixture hay PostgreSQL writer.
+
+Whitelist hiện tại chỉ cho phép trường `title`. Request được kiểm tra bằng compare-and-swap,
+idempotency key và outbox bền vững trên MASTER; trạng thái gồm
+`WRITEBACK_PENDING_APPROVAL`, `WRITEBACK_APPLIED`, `WRITEBACK_CONFLICT` và
+`WRITEBACK_FAILED`. Xung đột phải đối soát SOURCE → MASTER lại; không tự ghi đè và không
+tạo vòng lặp đồng bộ. API quản trị:
+
+```text
+GET  /api/v1/resources/{id}/source-writeback/status
+POST /api/v1/resources/{id}/source-writeback
+```
+
+Hai lệnh phải tách riêng: gửi đề nghị với `approve=false`, sau đó gửi cùng payload và
+idempotency key với `approve=true`. Gửi `approve=true` khi chưa có đề nghị bị trả 409.
+Retry lỗi tạm thời dùng lại key và giới hạn bởi `SOURCE_METADATA_WRITEBACK_MAX_ATTEMPTS`.
+Outbox ở MASTER lưu bền vững, còn fake writer chỉ giữ replay receipt trong bộ nhớ;
+chưa chứng minh exactly-once qua restart của SOURCE writer thực tế. Sau APPLIED, chạy
+SOURCE → MASTER để cập nhật canonical state và đối soát; không tự tạo đề nghị mới.
+
+Kiểm thử chuỗi cô lập (Windows PowerShell, dùng venv của repo):
+
+```powershell
+& .\.venv\Scripts\python.exe -m pytest tests/unit/test_five_commit_pipeline.py tests/unit/test_source_pipeline_http.py tests/unit/test_five_commit_regressions.py -q
+node --test tests/frontend/test_source_resolution.mjs
+```
+
+Không bật write-back trên SOURCE thật khi chưa có writer account tách biệt, whitelist bảng/cột,
+CAS theo version/fingerprint, audit và kế hoạch rollback được chủ DB phê duyệt. Fake writer
+`InMemorySourceMetadataWriter` chỉ dùng trong test/demo cô lập và không ghi fixture hay DB thật.
+
 ### 2.5. Chuẩn bị database
 
 **DB có sẵn:** chỉ sửa kết nối và kiểm tra. Không bootstrap/seed lại hoặc tự đổi validator384→1024 trên dữ liệu cũ:
@@ -1067,3 +1117,9 @@ python -m data_sync_etl.cli.concepts health --root "$ETL_HOME/concept-offline-ex
 ```
 
 Bỏ `--loop` để chạy một tick; bỏ `--apply` ở `run-worker` để xem dry-run. Chế độ `--live` hiện trả `BLOCKED_LIVE`; ví dụ offline không chứng minh từ điển live đã sẵn sàng.
+
+### BoW/BM25
+
+Mỗi `ContentBag` lưu TF của từ bề mặt, độ dài tài liệu, TF riêng của tiêu đề và các đoạn theo ranh giới `ContentUnit`. BoW dùng các TF này để tính BM25 tự cài đặt (k1=1.2, b=0.75); IDF tính theo số tài liệu chứa thuật ngữ và title chỉ là phần tăng trọng số có kiểm soát. Nguồn thống kê nằm trong tập đã xác thực quyền, gồm cả tài liệu không khớp truy vấn. Khi metadata search dùng shortlist ứng viên, N, độ dài trung bình và DF vẫn lấy từ toàn bộ corpus được phép, không lấy riêng shortlist.
+
+Đây là triển khai BM25 nền tảng cùng các kiểm tra/ràng buộc của nhóm (Unicode NFC, ranh giới Bag, phrase evidence, ACL và fingerprint), không phải phát minh thuật toán BM25. Khi hợp đồng xếp hạng thay đổi, `RANKING_VERSION` được tăng; tài liệu/chỉ mục cũ không tự động được coi là đã reindex.

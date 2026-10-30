@@ -46,6 +46,10 @@ class OCRPipeline:
         self.max_active = max_active
 
     def create_job(self, version_id, triggered_by=None, *, fence=None):
+        with self.uow() as repo:
+            version = repo.get('resource_versions', version_id)
+            if version and version.get('lifecycle_status') == 'METADATA_ONLY':
+                raise DomainError('CONTENT_NOT_AVAILABLE')
         reference = self.resolver.resolve(version_id)
         if reference.ownership == 'LOCAL_OWNED':
             # Preserve LOCAL command idempotency even if its managed file later disappears.

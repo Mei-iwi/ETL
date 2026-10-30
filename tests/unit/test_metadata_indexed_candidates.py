@@ -45,6 +45,19 @@ def enable(c, service):
     return service.store
 
 
+def test_indexed_vietnamese_statistics_equal_stored_lexical_representation(metadata):
+    c, _, _, service = metadata
+    enable(c, service)
+    service.reconcile(apply=True)
+    snapshots = service.indexed_snapshots({}, SearchAccess('local_demo'))
+    for field in SEARCH_FIELDS:
+        documents = {key: lexical_fields(snap)[field] for key, (_, snap) in snapshots.items()}
+        assert snapshots.lengths[field] == sum(doc.length for doc in documents.values())
+        for term in {term for doc in documents.values() for term in doc.terms}:
+            assert snapshots.document_frequencies[field][term] == sum(term in doc.terms for doc in documents.values())
+    assert search(c, 'phân số')['total'] == 1
+
+
 def seed(c, count):
     with c.uow() as repo:
         template = repo.get('master_learning_resources', 'resource-1')

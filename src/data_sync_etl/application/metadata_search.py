@@ -20,6 +20,7 @@ from data_sync_etl.domain.metadata_search import (
     candidate_terms,
     lexical_fields,
     metadata_allowed,
+    metadata_mapping_allowed,
     projection,
 )
 from data_sync_etl.domain.query_variants import approved_accent_variant
@@ -89,15 +90,7 @@ class MetadataSearchService:
         return report
 
     def mapping_allowed(self, resource, version, imports):
-        if resource.get('source_origin') == 'POSTGRESQL':
-            return (len(imports) == 1 and imports[0]['status'] in ('METADATA_ONLY', 'IMPORTED', 'PROCESSING')
-                    and imports[0]['last_error_code'] in (None, 'UNSUPPORTED_SOURCE_FORMAT')
-                    and imports[0]['source_resource_active']
-                    and imports[0]['source_lifecycle_status'] in self.settings.source_file_allowed_statuses
-                    and imports[0]['resource_id'] == resource['id']
-                    and imports[0]['source_version_number'] == version['version_number']
-                    and imports[0]['source_hash'] == version['source_hash'])
-        return resource.get('source_origin') == 'LOCAL' and not imports
+        return metadata_mapping_allowed(resource, version, imports, self.settings.source_file_allowed_statuses)
 
     def snapshots(self, filters, access, *, checkpoint=lambda: None, _page=False):
         cap = 250 if _page else self.settings.search_metadata_max_resources
@@ -153,6 +146,9 @@ class MetadataSearchService:
                 break
             after = cursor
         ready, lengths = set(), {field: 0 for field in SEARCH_FIELDS}
+        document_frequencies = {field: {} for field in SEARCH_FIELDS}
+        corpus_documents = {field: {} for field in SEARCH_FIELDS}
+        lexical_by_fields = {}
         for key, (_, snap) in result.items():
             row = headers.get(key, {})
             if (row.get('status') != 'READY' or row.get('template') != TEMPLATE
@@ -162,9 +158,18 @@ class MetadataSearchService:
                            ('projection_fingerprint', 'lexical_fingerprint', 'dense_input_fingerprint'))):
                 continue
             ready.add(key)
-            for field in SEARCH_FIELDS:
-                lengths[field] += len(surface_tokens(snap['fields'].get(field, '')))
-        result.ready_keys, result.lengths = ready, lengths
+            # Request-local reuse for repeated catalog/title/empty fields. No
+            # authority/ACL snapshot survives the request.
+            field_key = tuple(snap['fields'].get(name, '') for name in SEARCH_FIELDS)
+            if field_key not in lexical_by_fields:
+                lexical_by_fields[field_key] = lexical_fields(snap)
+            for field, document in lexical_by_fields[field_key].items():
+                corpus_documents[field][key] = document
+                lengths[field] += document.length
+                for token in document.terms:
+                    document_frequencies[field][token] = document_frequencies[field].get(token, 0) + 1
+        result.ready_keys, result.lengths, result.document_frequencies = ready, lengths, document_frequencies
+        result.corpus_documents = corpus_documents
         result.index_fingerprint = digest(headers)
         return result
 
@@ -296,14 +301,17 @@ class MetadataSearchService:
             fields = []
             for field in SEARCH_FIELDS:
                 documents = {key: LexicalDocument.model_validate(row['lexical'][field]) for key, row in verified.items()}
-                corpus = (len(snapshots.ready_keys), snapshots.lengths[field]) if indexed else None
+                corpus = ((len(snapshots.ready_keys), snapshots.lengths[field],
+                           snapshots.document_frequencies[field]) if indexed else None)
                 scores = bm25(query, documents, dictionary=dictionary, policy=policy,
                     domain=filters.get('domain'), corpus=corpus,
+                    statistics_documents=snapshots.corpus_documents[field] if indexed else None,
                     accent_insensitive=not indexed and self.settings.search_corpus_accent_candidates_enabled,
                     min_coverage=self.settings.search_bow_min_coverage, focus_query=variant)
                 if variant:
                     assisted = bm25(variant, documents, dictionary=dictionary, policy=policy,
                         domain=filters.get('domain'), corpus=corpus,
+                        statistics_documents=snapshots.corpus_documents[field] if indexed else None,
                         min_coverage=self.settings.search_bow_min_coverage)
                     scores = {key: max(scores.get(key, 0), policy.synonyms * assisted.get(key, 0))
                               for key in scores.keys() | assisted.keys()}

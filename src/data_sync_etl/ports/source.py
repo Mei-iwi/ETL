@@ -4,6 +4,8 @@ from typing import Annotated, Protocol
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from data_sync_etl.domain.source_ids import SourceLocator
+
 Id = Annotated[str, Field(min_length=1, max_length=30)]
 
 
@@ -134,6 +136,19 @@ class SourceDataReader(Protocol):
     def get_education_level(self, education_level_id: str) -> EducationLevel: ...
     def get_resource_subjects(self, resource_id: str) -> list[ResourceSubjectRelation]: ...
     def get_resource_grade_levels(self, resource_id: str) -> list[ResourceGradeLevelRelation]: ...
+
+
+class SourceMetadataWriter(Protocol):
+    """Separate, capability-gated write port; never accepts arbitrary SQL/locators."""
+
+    supported: bool
+
+    def write_metadata(
+        self, *, locator: SourceLocator, fields: dict, expected_source_state_hash: str,
+        idempotency_key: str,
+    ) -> dict: ...
+
+    def supports(self, locator: SourceLocator) -> bool: ...
 
 
 class ReconciliationSnapshot(Protocol):

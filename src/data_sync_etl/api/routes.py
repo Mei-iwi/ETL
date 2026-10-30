@@ -73,6 +73,12 @@ from data_sync_etl.api.search_schemas import (
     search_error,
 )
 from data_sync_etl.api.source_file_response import SourceFileResponse, source_file_error
+from data_sync_etl.api.source_resolution_schemas import SourceResolutionResponse
+from data_sync_etl.api.source_writeback_schemas import (
+    SourceWriteBackRequest,
+    SourceWriteBackResponse,
+    SourceWriteBackStatusResponse,
+)
 from data_sync_etl.api.subject_schemas import (
     RecommendedSubjectListResponse,
     SubjectListResponse,
@@ -85,6 +91,8 @@ from data_sync_etl.application.create_resource_version import (
     ResourceVersionNotFound as NewResourceVersionNotFound,
 )
 from data_sync_etl.application.source_file_import import SourceImportConflict, SourceImportNotFound
+from data_sync_etl.application.source_metadata_writeback import SourceWriteBackError
+from data_sync_etl.application.source_resolution import SourceResolutionError
 from data_sync_etl.application.update_resource_metadata import (
     InvalidResourceMetadata,
     ResourceMetadataNotFound,
@@ -703,6 +711,83 @@ def get_resource(id: ResourceId, request: Request) -> ResourceDetailResponse:
 
 
 @router.get(
+    "/api/v1/resources/{id}/source-resolution",
+    tags=[TAG_MASTER],
+    response_model=SourceResolutionResponse,
+    summary="Resolve học liệu qua MASTER tới metadata SOURCE bằng ID chính xác",
+    responses=SEARCH_ERROR_RESPONSES,
+)
+def source_resolution(id: ResourceId, request: Request,
+                      version_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None) -> SourceResolutionResponse:
+    access = search_access(request)
+    try:
+        result = request.app.state.container.source_resolution.resolve(id, access, version_id)
+        return SourceResolutionResponse.model_validate(result)
+    except SourceResolutionError as exc:
+        if exc.status == 404:
+            raise HTTPException(status_code=404, detail={'code': exc.code, 'message': 'Resource not found'}) from None
+        raise HTTPException(status_code=exc.status,
+                            detail={'code': exc.code, 'message': 'Source resolution is restricted'}) from None
+    except Exception as exc:
+        raise search_error(exc) from None
+
+
+@router.get(
+    "/api/v1/resources/{id}/source-writeback/status",
+    tags=[TAG_MASTER],
+    response_model=SourceWriteBackStatusResponse,
+    summary="Xem trạng thái quyền đồng bộ metadata MASTER về SOURCE",
+)
+def source_writeback_status(id: ResourceId, request: Request) -> SourceWriteBackStatusResponse:
+    container = services(request)
+    with container.uow() as repo:
+        if repo.get('master_learning_resources', id) is None:
+            raise HTTPException(status_code=404, detail='Resource not found')
+    return SourceWriteBackStatusResponse.model_validate(container.source_writeback.status())
+
+
+@router.get(
+    "/api/v1/source-writeback/status",
+    tags=[TAG_MASTER],
+    response_model=SourceWriteBackStatusResponse,
+    summary="Xem trạng thái toàn cục của write-back metadata",
+)
+def source_writeback_global_status(request: Request) -> SourceWriteBackStatusResponse:
+    return SourceWriteBackStatusResponse.model_validate(services(request).source_writeback.status())
+
+
+@router.post(
+    "/api/v1/resources/{id}/source-writeback",
+    tags=[TAG_MASTER],
+    response_model=SourceWriteBackResponse,
+    summary="Đề nghị hoặc phê duyệt đồng bộ metadata MASTER về SOURCE",
+)
+def source_writeback(id: ResourceId, body: SourceWriteBackRequest,
+                     request: Request) -> SourceWriteBackResponse:
+    container = services(request)
+    principal = getattr(request.state, 'auth_principal', None)
+    local_admin = container.settings.auth_mode == 'legacy_local'
+    actor_id = getattr(principal, 'id', None) or ('local-admin' if local_admin else None)
+    role = getattr(principal, 'role', None) or ('ADMIN' if local_admin else None)
+    if not actor_id or not role:
+        raise HTTPException(403, detail={'code': 'SOURCE_WRITEBACK_FORBIDDEN'})
+    owner_id = actor_id.removeprefix('master:') if actor_id.startswith('master:') else None
+    fields = body.model_dump(exclude={'expected_source_state_hash', 'idempotency_key', 'approve', 'dry_run'},
+                             exclude_none=True)
+    try:
+        result = container.source_writeback.request(
+            id, fields, expected_source_state_hash=body.expected_source_state_hash,
+            idempotency_key=body.idempotency_key, actor_id=actor_id, role=role,
+            owner_id=owner_id, approve=body.approve, dry_run=body.dry_run,
+        )
+        return SourceWriteBackResponse.model_validate(result)
+    except SourceWriteBackError as exc:
+        raise HTTPException(status_code=exc.status,
+                            detail={'code': exc.code, 'phase': 'source_writeback',
+                                    'message': 'SOURCE write-back request was not applied'}) from None
+
+
+@router.get(
     "/api/v1/resources/{id}/versions",
     tags=[TAG_MASTER],
     summary="Xem lịch sử phiên bản học liệu",
@@ -720,7 +805,10 @@ def list_resource_versions(id: ResourceId, request: Request) -> list[dict]:
             with container.uow() as repo:
                 resource = repo.get('master_learning_resources', id)
             if id not in principal.resource_ids or not owns_resource(principal, resource):
-                versions = [row for row in versions if can_read_public_file(container, row['id'])]
+                from data_sync_etl.security.authorization import public_metadata_version_ids
+
+                metadata_ids = public_metadata_version_ids(container, id)
+                versions = [row for row in versions if row['id'] in metadata_ids or can_read_public_file(container, row['id'])]
                 readable_ids = {row['id'] for row in versions}
                 versions = [{**row, 'parent_version_id': row['parent_version_id']
                              if row['parent_version_id'] in readable_ids else None} for row in versions]
@@ -1029,7 +1117,11 @@ def source_sync_files(
 ):
     container = source_file_admin(request)
     from data_sync_etl.adapters.persistence.scheduled_audit import recent_file_evidence
-    from data_sync_etl.db.models import MasterLearningResource, ReconciliationFileState, ResourceVersion
+    from data_sync_etl.db.models import (
+        MasterLearningResource,
+        ReconciliationFileState,
+        ResourceVersion,
+    )
     evidence_cache = {}
     def evidence_reader(repo, item):
         version_id = item['target_version_id']
@@ -1142,7 +1234,7 @@ def index_status(id: ResourceId, request: Request, response: Response, include_b
         result = request.app.state.container.indexing.status(id)
         # Keep the same live artifact verification; only omit optional wire details.
         if bag_limit is not None:
-            from data_sync_etl.domain.indexing import digest, IndexingError
+            from data_sync_etl.domain.indexing import IndexingError, digest
 
             # Integrity requires the complete artifact. Paging reduces wire JSON,
             # not verification or Mongo/PG I/O.

@@ -11,6 +11,7 @@ from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError
 from data_sync_etl.adapters.source.aggregate import build_aggregate
 from data_sync_etl.adapters.source.json_fixture import MODELS
 from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.source_ids import SourceLocator
 from data_sync_etl.ports.source import ResourceGradeLevelRelation, ResourceSubjectRelation
 from data_sync_etl.ports.source_catalogs import SourceCatalogError
 from data_sync_etl.ports.source_files import SourceVersionMetadata, SourceVersionPage
@@ -122,7 +123,15 @@ class SnapshotReader:
 
 class PostgreSQLSourceAdapter:
     source_origin = 'POSTGRESQL'
-    def __init__(self, url=None, *, engine=None, replay_seconds=300):
+    source_backend = 'postgresql'
+    source_namespace = 'postgresql:learning'
+    def __init__(self, url=None, *, engine=None, replay_seconds=300, namespace='postgresql:learning'):
+        try:
+            SourceLocator(backend=self.source_backend, namespace=namespace,
+                          entity_type='resources', source_record_id='validation')
+        except ValueError:
+            raise DomainError('BLOCKED_SOURCE_IDENTITY') from None
+        self.source_namespace = namespace
         if engine is None:
             if not url or make_url(url).get_backend_name() != "postgresql":
                 raise DomainError("BLOCKED_SOURCE_MAPPING: PostgreSQL SOURCE_DATABASE_URL required")
@@ -131,6 +140,14 @@ class PostgreSQLSourceAdapter:
             raise DomainError("BLOCKED_SOURCE_MAPPING: invalid PostgreSQL source configuration")
         self.engine = engine
         self.replay_seconds = replay_seconds
+
+    def locator(self, entity_type: str, source_record_id: str) -> SourceLocator:
+        return SourceLocator(
+            backend=self.source_backend,
+            namespace=self.source_namespace,
+            entity_type=entity_type,
+            source_record_id=source_record_id,
+        )
 
     @contextmanager
     def snapshot(self, *, catalog=False):
@@ -344,6 +361,7 @@ class PostgreSQLSourceAdapter:
         """Exact private identity lookup; includes roots, no inferred parent."""
         with self.snapshot() as reader:
             connection = reader.connection
+            connection.execute(text("SELECT set_config('statement_timeout','3000',true)"))
             if not connection.scalar(text(
                 "SELECT has_table_privilege(current_user, 'resource_versions', 'SELECT')"
             )) or connection.scalar(text(
@@ -354,7 +372,8 @@ class PostgreSQLSourceAdapter:
                 "SELECT v.id AS source_version_id,v.resource_id,v.version_number AS source_version_number, "
                 "v.parent_version_id,v.source_hash,v.storage_bucket,v.storage_object_key,v.updated_at, "
                 "v.lifecycle_status::text AS source_lifecycle_status, "
-                "r.is_active AS resource_active,r.deleted_at AS resource_deleted_at "
+                "r.is_active AS resource_active,r.deleted_at AS resource_deleted_at, "
+                "r.publication_status::text AS resource_publication_status "
                 "FROM resource_versions v JOIN learning_resources r ON r.id=v.resource_id WHERE v.id=:id"
             ), {"id": source_version_id}).mappings().one_or_none()
             return cast(SourceVersionMetadata, dict(row)) if row else None

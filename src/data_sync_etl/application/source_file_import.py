@@ -34,6 +34,11 @@ class SourceImportNotFound(DomainError):
     pass
 
 
+METADATA_ONLY_BUCKET = "__SOURCE_METADATA_ONLY__"
+METADATA_ONLY_KEY_PREFIX = "__SOURCE_METADATA_ONLY__/"
+METADATA_ONLY_ERROR = "SOURCE_METADATA_ONLY"
+
+
 class SourceFileImportService:
     def __init__(self, source: ReadOnlySourceVersionPort, files: ReadOnlySourceFilePort,
                  storage, uow: UnitOfWork, process, retry_processing, settings, formats=None):
@@ -47,6 +52,53 @@ class SourceFileImportService:
     def _media_processing_enabled(self):
         return (not self.settings.source_metadata_media_enabled
                 and self.settings.source_reference_enabled and self.settings.source_temporary_files_enabled)
+
+    def _metadata_only_policy(self):
+        """External SOURCE is metadata-only until both read gates are explicit."""
+        return not (self.settings.source_reference_enabled and self.settings.source_temporary_files_enabled)
+
+    @staticmethod
+    def _metadata_locator(source_version_id, source_object_key=None):
+        # Preserve only a bounded format hint for metadata filtering; never
+        # persist the SOURCE filename/path itself.
+        suffix = ''
+        if isinstance(source_object_key, str) and '.' in source_object_key:
+            candidate = source_object_key.rsplit('.', 1)[-1].lower()
+            if candidate in {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv',
+                             'png', 'jpg', 'jpeg', 'mp3', 'mp4'}:
+                suffix = f'.{candidate}'
+        return METADATA_ONLY_BUCKET, f"{METADATA_ONLY_KEY_PREFIX}{source_version_id}{suffix}"
+
+    def _ensure_metadata_version(self, repo, row, source):
+        """Register a searchable metadata version without copying or exposing SOURCE paths."""
+        if row.get("target_version_id"):
+            return row["target_version_id"]
+        collision = repo.find("resource_versions", {
+            "resource_id": row["resource_id"], "version_number": row["source_version_number"]}, limit=1)
+        if collision:
+            raise SourceFileError("BLOCKED_SOURCE_MAPPING")
+        parent = None
+        parent_id = source.get("parent_version_id")
+        if parent_id:
+            parent_rows = repo.find("source_file_imports", {
+                "source_system": row["source_system"], "source_version_id": parent_id}, limit=1)
+            if parent_rows and parent_rows[0].get("target_version_id"):
+                parent = repo.get("resource_versions", parent_rows[0]["target_version_id"])
+                if parent is not None:
+                    if parent['resource_id'] != row['resource_id']:
+                        raise SourceFileError('BLOCKED_SOURCE_MAPPING')
+                    parent = parent["id"]
+        bucket, key = self._metadata_locator(row["source_version_id"], source.get('storage_object_key'))
+        version = repo.insert("resource_versions", {
+            "resource_id": row["resource_id"], "version_number": row["source_version_number"],
+            "parent_version_id": parent, "storage_bucket": bucket, "storage_object_key": key,
+            "source_hash": row["source_hash"].lower(), "lifecycle_status": "METADATA_ONLY",
+        })
+        repo.update("source_file_imports", row["id"], {
+            "target_version_id": version["id"], "status": "METADATA_ONLY",
+            "last_error_code": METADATA_ONLY_ERROR, "updated_at": now(),
+        })
+        return version["id"]
 
     def availability(self):
         storage_error = None
@@ -110,8 +162,7 @@ class SourceFileImportService:
     def _resume_metadata_media(self, repo, row, source):
         if (not self._media_processing_enabled() or row['status'] != 'METADATA_ONLY'
                 or not row['target_version_id'] or row['processing_job_id'] is not None
-                or row['last_error_code'] not in (None, 'UNSUPPORTED_SOURCE_FORMAT')
-                or not row['storage_object_key'].lower().endswith(('.mp3', '.mp4'))
+                or row['last_error_code'] not in (None, METADATA_ONLY_ERROR, 'UNSUPPORTED_SOURCE_FORMAT')
                 or not source.get('resource_active', True) or source.get('resource_deleted_at') is not None
                 or source['source_lifecycle_status'] not in self.settings.source_file_allowed_statuses):
             return
@@ -120,7 +171,7 @@ class SourceFileImportService:
         if (resource is None or not resource['is_active'] or resource_deleted(resource)
                 or resource.get('source_origin') != 'POSTGRESQL' or target is None
                 or target['resource_id'] != row['resource_id']
-                or target['lifecycle_status'] not in ('INGESTED', 'APPROVED', 'PUBLISHED')
+                or target['lifecycle_status'] not in ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED')
                 or target['source_hash'].lower() != row['source_hash'].lower()):
             return
         # Preserve the target, retry counters and historical jobs. The existing
@@ -130,9 +181,13 @@ class SourceFileImportService:
             'status': 'PENDING', 'last_error_code': None, 'next_retry_at': None,
             'claim_token': None, 'lease_expires_at': None, 'updated_at': now(),
         })
+        repo.update('resource_versions', target['id'], {
+            'storage_bucket': source['storage_bucket'], 'storage_object_key': source['storage_object_key'],
+        })
 
     def _discover(self, repo, source):
         unsupported_media = False  # MP3/MP4 now share the normal processing pipeline.
+        metadata_only = self._metadata_only_policy()
         existing = repo.find("source_file_imports", {
             "source_system": "postgresql", "source_version_id": source["source_version_id"]}, limit=1)
         if existing:
@@ -147,9 +202,29 @@ class SourceFileImportService:
                 lineage_changed = target is None or (expected is None and target["parent_version_id"] is not None) or (
                     expected is not None and (not parent or parent[0]["source_version_id"] != expected
                                              or parent[0]["resource_id"] != row["resource_id"]))
-            if lineage_changed or (row["source_hash"].lower(), row["resource_id"], row["source_version_number"], row['storage_bucket'], row['storage_object_key']) != (
+                if metadata_only and target is not None and expected is not None:
+                    # A metadata page can arrive before its parent. Keep the
+                    # searchable child and attach the parent when its mapping
+                    # becomes available; do not expose a false mutation.
+                    parent_rows = repo.find("source_file_imports", {
+                        "source_system": row["source_system"], "source_version_id": expected}, limit=1)
+                    if parent_rows and parent_rows[0].get("target_version_id"):
+                        parent_target = repo.get("resource_versions", parent_rows[0]["target_version_id"])
+                        if parent_target and target["parent_version_id"] != parent_target["id"]:
+                            repo.update("resource_versions", target["id"], {"parent_version_id": parent_target["id"]})
+                        lineage_changed = False
+                    elif target["parent_version_id"] is None:
+                        lineage_changed = False
+            raw_changed = (row["source_hash"].lower(), row["resource_id"], row["source_version_number"], row['storage_bucket'], row['storage_object_key']) != (
                 source["source_hash"].lower(), source["resource_id"], source["source_version_number"], source['storage_bucket'], source['storage_object_key']
-            ):
+            )
+            metadata_changed = (row["source_hash"].lower(), row["resource_id"], row["source_version_number"]) != (
+                source["source_hash"].lower(), source["resource_id"], source["source_version_number"])
+            # A synthetic metadata locator was never a SOURCE storage snapshot.
+            # Enabling explicit content access must resolve its real locator,
+            # while still rejecting changed resource/version/hash/lineage.
+            placeholder = row['storage_bucket'] == METADATA_ONLY_BUCKET and row['status'] == 'METADATA_ONLY'
+            if lineage_changed or metadata_changed or (raw_changed and not metadata_only and not placeholder):
                 repo.update("source_file_imports", row["id"], {
                     "status": "FAILED", "last_error_code": "SOURCE_VERSION_MUTATED",
                     "claim_token": None, "lease_expires_at": None, "updated_at": now(),
@@ -159,25 +234,33 @@ class SourceFileImportService:
                 if (self.settings.source_metadata_media_enabled and row['last_error_code'] == 'UNSUPPORTED_SOURCE_FORMAT'
                         and row['target_version_id'] is None and row['status'] == 'FAILED'):
                     repo.update('source_file_imports', row['id'], {'status': 'PENDING', 'last_error_code': None})
-                repo.update("source_file_imports", row["id"], {
+                fields = {
                     "resource_title": source["resource_title"],
                     "source_lifecycle_status": source["source_lifecycle_status"],
                     "source_resource_active": source.get("resource_active", True) and source.get("resource_deleted_at") is None,
                     "source_updated_at": source["updated_at"], "updated_at": now(),
-                    "storage_bucket": source["storage_bucket"], "storage_object_key": source["storage_object_key"],
-                })
+                }
+                if not metadata_only:
+                    fields.update({"storage_bucket": source["storage_bucket"], "storage_object_key": source["storage_object_key"]})
+                repo.update("source_file_imports", row["id"], fields)
+                if metadata_only:
+                    self._ensure_metadata_version(repo, repo.get("source_file_imports", row["id"]), source)
             return
-        repo.insert("source_file_imports", {
-            "status": "FAILED" if unsupported_media else "PENDING",
-            "last_error_code": "UNSUPPORTED_SOURCE_FORMAT" if unsupported_media else None,
+        bucket, key = self._metadata_locator(source["source_version_id"], source.get('storage_object_key')) if metadata_only else (
+            source["storage_bucket"], source["storage_object_key"])
+        inserted = repo.insert("source_file_imports", {
+            "status": "METADATA_ONLY" if metadata_only else ("FAILED" if unsupported_media else "PENDING"),
+            "last_error_code": METADATA_ONLY_ERROR if metadata_only else ("UNSUPPORTED_SOURCE_FORMAT" if unsupported_media else None),
             "source_system": "postgresql", "source_version_id": source["source_version_id"],
             "resource_id": source["resource_id"], "resource_title": source["resource_title"],
             "source_version_number": source["source_version_number"],
             "source_lifecycle_status": source["source_lifecycle_status"],
             "source_resource_active": source.get("resource_active", True) and source.get("resource_deleted_at") is None,
             "source_updated_at": source["updated_at"], "source_hash": source["source_hash"].lower(),
-            "storage_bucket": source["storage_bucket"], "storage_object_key": source["storage_object_key"],
+            "storage_bucket": bucket, "storage_object_key": key,
         })
+        if metadata_only:
+            self._ensure_metadata_version(repo, inserted, source)
 
     def claim(self, worker_id=None):
         stamp = now()
@@ -222,6 +305,8 @@ class SourceFileImportService:
 
     def execute(self, claimed):
         try:
+            if claimed.get('status') == 'METADATA_ONLY':
+                return
             self.resolver._enabled()
             self.resolver.files = self.files
             media = claimed['storage_object_key'].lower().endswith(('.mp3', '.mp4'))
@@ -238,6 +323,9 @@ class SourceFileImportService:
                 reference = self.resolver.resolve(claimed['target_version_id'])
                 with self.resolver.temporary_path(reference):
                     pass
+                with self.uow() as repo:
+                    row = self._owned(repo, claimed)
+                    repo.update('resource_versions', row['target_version_id'], {'lifecycle_status': 'INGESTED'})
             with self.uow() as repo:
                 row = self._owned(repo, claimed)
                 self._master(repo, row["resource_id"])

@@ -37,8 +37,19 @@ class MasterLearningResource(Base):
     source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
     source_state_hash = Column(String(64), nullable=True)
     source_missing_at = Column(DateTime(timezone=True), nullable=True)
+    source_identity_version = Column(SmallInteger, nullable=True)
+    source_backend = Column(String(64), nullable=True)
+    source_namespace = Column(String(255), nullable=True)
+    source_entity_type = Column(String(64), nullable=True)
+    source_record_key = Column(String(255), nullable=True)
+    source_identity_hash = Column(String(64), nullable=True)
     __tablename__ = "master_learning_resources"
-    __table_args__ = (Index('uq_master_learning_resources_mongo_id', 'mongo_id', unique=True),)
+    __table_args__ = (
+        Index('uq_master_learning_resources_mongo_id', 'mongo_id', unique=True),
+        Index('uq_master_learning_resources_source_identity',
+              'source_namespace', 'source_backend', 'source_entity_type', 'source_record_key',
+              unique=True),
+    )
     mongo_id = Column(String(30), nullable=True)
     id = Column(String(30), primary_key=True, default=new_id)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
@@ -71,8 +82,19 @@ class MasterUser(Base):
     source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
     source_state_hash = Column(String(64), nullable=True)
     source_missing_at = Column(DateTime(timezone=True), nullable=True)
+    source_identity_version = Column(SmallInteger, nullable=True)
+    source_backend = Column(String(64), nullable=True)
+    source_namespace = Column(String(255), nullable=True)
+    source_entity_type = Column(String(64), nullable=True)
+    source_record_key = Column(String(255), nullable=True)
+    source_identity_hash = Column(String(64), nullable=True)
     __tablename__ = "master_users"
-    __table_args__ = (Index('uq_master_users_mongo_id', 'mongo_id', unique=True),)
+    __table_args__ = (
+        Index('uq_master_users_mongo_id', 'mongo_id', unique=True),
+        Index('uq_master_users_source_identity',
+              'source_namespace', 'source_backend', 'source_entity_type', 'source_record_key',
+              unique=True),
+    )
     mongo_id = Column(String(30), nullable=True)
     id = Column(String(30), primary_key=True, default=new_id)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
@@ -99,7 +121,18 @@ class MasterGradeLevel(Base):
     source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
     source_state_hash = Column(String(64), nullable=True)
     source_missing_at = Column(DateTime(timezone=True), nullable=True)
+    source_identity_version = Column(SmallInteger, nullable=True)
+    source_backend = Column(String(64), nullable=True)
+    source_namespace = Column(String(255), nullable=True)
+    source_entity_type = Column(String(64), nullable=True)
+    source_record_key = Column(String(255), nullable=True)
+    source_identity_hash = Column(String(64), nullable=True)
     __tablename__ = "master_grade_levels"
+    __table_args__ = (
+        Index('uq_master_grade_levels_source_identity',
+              'source_namespace', 'source_backend', 'source_entity_type', 'source_record_key',
+              unique=True),
+    )
     grade_mongo_id = Column(String(24), nullable=True)
     id = Column(String(30), primary_key=True, default=new_id)
     education_level_id = Column(String(30), nullable=False)
@@ -127,11 +160,20 @@ class Subject(Base):
     source_origin = Column(String(30), nullable=False, default='UNKNOWN', server_default='UNKNOWN')
     source_state_hash = Column(String(64), nullable=True)
     source_missing_at = Column(DateTime(timezone=True), nullable=True)
+    source_identity_version = Column(SmallInteger, nullable=True)
+    source_backend = Column(String(64), nullable=True)
+    source_namespace = Column(String(255), nullable=True)
+    source_entity_type = Column(String(64), nullable=True)
+    source_record_key = Column(String(255), nullable=True)
+    source_identity_hash = Column(String(64), nullable=True)
     __tablename__ = "subjects"
     __table_args__ = (
         Index("ix_subject_grade_active_deleted", "grade_id", "is_active", "deleted_at"),
         Index("ix_subjects_name", "subject_name"),
         Index("ix_subjects_slug", "subject_slug"),
+        Index('uq_subjects_source_identity',
+              'source_namespace', 'source_backend', 'source_entity_type', 'source_record_key',
+              unique=True),
     )
     id = Column(String(30), primary_key=True, default=new_id)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
@@ -553,6 +595,7 @@ MODELS = {
         EtlStageRun,
         ContentUnitText,
         SourceFileImport,
+        ReconciliationAuditJob,
         SyncReconciliationRun,
         SyncReconciliationDiscrepancy,
     ]

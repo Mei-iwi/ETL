@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from data_sync_etl.adapters.source.aggregate import build_aggregate
 from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.source_ids import SourceLocator
 from data_sync_etl.ports.source import (
     EducationLevel,
     GradeLevel,
@@ -41,9 +42,20 @@ MODELS = {
 class JsonFixtureSourceAdapter:
     """Bounded-memory reference adapter. Files must remain immutable during a sync run."""
 
+    source_backend = 'json-fixture'
+    source_namespace = 'fixture:source'
+
     def __init__(self, root):
         self.root = Path(root)
         self.lookup = lru_cache(maxsize=256)(self._lookup)
+
+    def locator(self, entity_type: str, source_record_id: str) -> SourceLocator:
+        return SourceLocator(
+            backend=self.source_backend,
+            namespace=self.source_namespace,
+            entity_type=entity_type,
+            source_record_id=source_record_id,
+        )
 
     def records(self, name):
         try:

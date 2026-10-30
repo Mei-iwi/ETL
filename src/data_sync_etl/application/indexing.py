@@ -179,6 +179,9 @@ class IndexingService:
                     return self._queued(version_id, inflight, 'IN_PROGRESS')
                 raise IndexingError('INDEX_ALREADY_RUNNING')
             with self.uow() as repo:
+                version = repo.get('resource_versions', version_id)
+                if version and version.get('lifecycle_status') == 'METADATA_ONLY':
+                    raise IndexingError('CONTENT_NOT_AVAILABLE', 409)
                 snapshot = self._snapshot(repo, version_id)
                 self._roots(snapshot)
                 runs = self._runs(repo, version_id)
@@ -293,7 +296,8 @@ class IndexingService:
 
     def status(self, version_id):
         with self.uow() as repo:
-            _, processing = self._version(repo, version_id)
+            version, processing = self._version(repo, version_id)
+            metadata_only = bool(version and version.get('lifecycle_status') == 'METADATA_ONLY')
             runs = self._runs(repo, version_id)
             try:
                 snapshot = self._snapshot(repo, version_id) if processing == 'CONTENT_READY' else None
@@ -337,6 +341,7 @@ class IndexingService:
         count = sum(1 for _ in self._preview(snapshot)) if snapshot else 0
         return {
             'resource_version_id': version_id, 'processing_status': processing, 'index_status': status,
+            'metadata_only': metadata_only,
             'auto_enabled': self.settings.index_auto_enabled, 'latest_run_id': latest['id'] if latest else None,
             'published_run_id': published, 'chunk_count': count, 'chunk_preview_count': count,
             'representation_unit': 'content_bag', 'chunk_storage': 'transient', 'bag_count': len(summaries), 'bags': summaries,

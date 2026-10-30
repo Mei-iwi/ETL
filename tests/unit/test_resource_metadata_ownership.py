@@ -26,6 +26,9 @@ def owned(container, origin='POSTGRESQL'):
         for row in repo.find('master_learning_resources'):
             repo.update('master_learning_resources', row['id'], {
                 'source_origin': origin, 'source_state_hash': state_hash(row) if origin == 'POSTGRESQL' else None})
+            if origin == 'POSTGRESQL':
+                repo.sync_upsert('master_learning_resources', row, source_origin=origin,
+                                 source_locator=container.source.locator('resources', row['id']))
 
 
 def snapshot(container):
@@ -126,6 +129,12 @@ class SourceReplay:
 
     def __init__(self, aggregates):
         self.aggregates = aggregates
+
+    def locator(self, stream, record_id):
+        from data_sync_etl.domain.source_ids import SourceLocator
+
+        return SourceLocator(backend='json-fixture', namespace='fixture:source',
+                             entity_type=stream, source_record_id=record_id)
 
     def batches(self, stream, cursor, size):
         yield self.aggregates

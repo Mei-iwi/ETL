@@ -28,7 +28,7 @@ class ResourceDeletion:
                 if resource['source_origin'] == 'POSTGRESQL' and resource['source_state_hash'] != state_hash(resource):
                     raise AuthError('RESOURCE_RESTORE_SOURCE_RESTRICTED', 409)
                 versions = repo.find('resource_versions', {'resource_id': resource_id}, order=('-version_number',), limit=1)
-                if versions and versions[0]['lifecycle_status'] not in ('INGESTED', 'APPROVED', 'PUBLISHED'):
+                if versions and versions[0]['lifecycle_status'] not in ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED'):
                     raise AuthError('RESOURCE_RESTORE_VERSION_NOT_READY', 409)
             if deleted == (not restore):
                 return {'resource_id': resource_id, 'deleted': deleted, 'revision': revision, 'changed': False}
