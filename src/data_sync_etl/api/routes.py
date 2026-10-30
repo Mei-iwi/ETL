@@ -73,6 +73,7 @@ from data_sync_etl.api.search_schemas import (
     search_error,
 )
 from data_sync_etl.api.source_file_response import SourceFileResponse, source_file_error
+from data_sync_etl.api.source_resolution_schemas import SourceResolutionResponse
 from data_sync_etl.api.subject_schemas import (
     RecommendedSubjectListResponse,
     SubjectListResponse,
@@ -85,6 +86,7 @@ from data_sync_etl.application.create_resource_version import (
     ResourceVersionNotFound as NewResourceVersionNotFound,
 )
 from data_sync_etl.application.source_file_import import SourceImportConflict, SourceImportNotFound
+from data_sync_etl.application.source_resolution import SourceResolutionError
 from data_sync_etl.application.update_resource_metadata import (
     InvalidResourceMetadata,
     ResourceMetadataNotFound,
@@ -700,6 +702,28 @@ def get_resource(id: ResourceId, request: Request) -> ResourceDetailResponse:
         return ResourceDetailResponse.model_validate(data)
     except ResourceNotFound:
         raise HTTPException(status_code=404, detail="Resource not found") from None
+
+
+@router.get(
+    "/api/v1/resources/{id}/source-resolution",
+    tags=[TAG_MASTER],
+    response_model=SourceResolutionResponse,
+    summary="Resolve học liệu qua MASTER tới metadata SOURCE bằng ID chính xác",
+    responses=SEARCH_ERROR_RESPONSES,
+)
+def source_resolution(id: ResourceId, request: Request,
+                      version_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None) -> SourceResolutionResponse:
+    try:
+        access = search_access(request)
+        result = request.app.state.container.source_resolution.resolve(id, access, version_id)
+        return SourceResolutionResponse.model_validate(result)
+    except SourceResolutionError as exc:
+        if exc.status == 404:
+            raise HTTPException(status_code=404, detail={'code': exc.code, 'message': 'Resource not found'}) from None
+        raise HTTPException(status_code=exc.status,
+                            detail={'code': exc.code, 'message': 'Source resolution is restricted'}) from None
+    except Exception as exc:
+        raise search_error(exc) from None
 
 
 @router.get(

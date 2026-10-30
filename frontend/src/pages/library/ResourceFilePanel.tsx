@@ -15,6 +15,7 @@ import { mediaPreviewType } from './libraryFileFormats'
 import { startVisiblePolling } from '../system/visiblePolling'
 
 type Version = { id: string; version_number: number; created_at: string }
+type SourceResolution = { resolution_status: 'available' | 'unavailable' | 'stale' | 'blocked'; content_availability: 'metadata-only' | 'authorized-indexed'; source_record_available: boolean }
 
 type FilePanelProps = {
     resourceId: string; versionId: string | null; contextId: string | null; sourceOwned?: boolean
@@ -34,6 +35,7 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
     const [attempt, setAttempt] = useState(0)
     const [sourceInfo, setSourceInfo] = useState<{ id: string; value: SourceInfo } | null>(null)
     const [sourceError, setSourceError] = useState<{ id: string; message: string } | null>(null)
+    const [resolution, setResolution] = useState<SourceResolution | null>(null)
     useEffect(() => {
         const controller = new AbortController()
         void fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/versions`, { signal: controller.signal })
@@ -53,13 +55,26 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
     const url = `/api/v1/resource-versions/${encodeURIComponent(selected)}/file`
     const status = readiness?.id === selected ? readiness.status : null
     const metadataOnly = status?.metadata_only === true
-    const ready = valid && !metadataOnly && canOpenFile(status) && statusError?.id !== selected
+    const sourceResolutionReady = !sourceOwned || resolution?.resolution_status === 'available'
+    const ready = valid && sourceResolutionReady && !metadataOnly && canOpenFile(status) && statusError?.id !== selected
     const original = sourceInfo?.id === selected ? originalSourceUrl(sourceInfo.value) : null
     const externalLinkReason = !ready ? 'Tệp chưa sẵn sàng để truy cập.'
         : sourceError?.id === selected ? sourceError.message
             : sourceInfo?.id !== selected ? 'Đang kiểm tra liên kết nguồn…'
                 : sourceInfo.value.provider !== 'google_drive' ? 'Nguồn hiện tại không cung cấp liên kết mở bên ngoài.'
                     : 'Nguồn chưa cung cấp liên kết mở trực tiếp cho tệp này.'
+    useEffect(() => {
+        if (!sourceOwned || !selected) { setResolution(null); return }
+        const controller = new AbortController()
+        void fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/source-resolution?version_id=${encodeURIComponent(selected)}`, { signal: controller.signal })
+            .then(async response => {
+                if (!response.ok) throw new Error('Nguồn chưa sẵn sàng.')
+                const value: SourceResolution = await response.json()
+                if (!controller.signal.aborted) setResolution(value)
+            })
+            .catch(() => { if (!controller.signal.aborted) setResolution(null) })
+        return () => controller.abort()
+    }, [resourceId, selected, sourceOwned])
     useEffect(() => {
         if (!ready || !sourceOwned) return
         const controller = new AbortController()
@@ -137,6 +152,8 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
             <span className={status?.index_status === 'READY' ? styles.ready : styles.pending}>
                 Chỉ mục {status?.index_status === 'READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}</span>
             {metadataOnly && <span className={styles.pending}>Chỉ có metadata; chưa được phép đọc nội dung</span>}
+            {sourceOwned && resolution && resolution.resolution_status !== 'available' &&
+                <span className={styles.pending}>Nguồn {resolution.resolution_status === 'stale' ? 'đã thay đổi' : 'chưa sẵn sàng'}</span>}
         </div>}
         {statusError?.id === selected && <p role="alert" className={styles.error}>{statusError.message}</p>}
         {sourceOwned && valid && !metadataOnly && !(ready && original) && <p id="external-source-link-status" className={styles.message}>{externalLinkReason}</p>}

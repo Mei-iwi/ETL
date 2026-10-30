@@ -62,6 +62,7 @@ from data_sync_etl.application.semantic import SemanticService
 from data_sync_etl.application.source_file_import import SourceFileImportService
 from data_sync_etl.application.source_file_resolver import SourceFileResolver
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
+from data_sync_etl.application.source_resolution import SourceResolutionService
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
 from data_sync_etl.config import Settings
@@ -134,6 +135,7 @@ class Container:
         self.resource_listing = ListResources(self.uow)
         self.resource_lookups = ListResourceLookups(self.uow, self.source if isinstance(self.source, PostgreSQLSourceAdapter) else None)
         self.resource_detail = GetResourceDetail(self.uow)
+        self.source_resolution = SourceResolutionService(self.uow, self.source, self.settings)
         self.resource_versions = ListResourceVersions(self.uow)
         self.processing_job_detail = GetProcessingJob(self.uow)
         self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
