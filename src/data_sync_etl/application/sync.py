@@ -131,7 +131,11 @@ class MasterSync:
                                 raise DomainError('INVALID_REPAIR_SCOPE')
                             seen.add(aggregate.cursor.id)
                         if getattr(self.source, 'source_origin', None) == 'POSTGRESQL':
-                            action = repo.sync_upsert(STREAMS[stream], aggregate.values, source_origin='POSTGRESQL')
+                            locator = self.source.locator(stream, aggregate.cursor.id)
+                            action = repo.sync_upsert(
+                                STREAMS[stream], aggregate.values,
+                                source_origin='POSTGRESQL', source_locator=locator,
+                            )
                         else:
                             action = repo.sync_upsert(STREAMS[stream], aggregate.values)
                         if stream == "resources":

@@ -20,8 +20,17 @@ def test_nullable_unique_references_and_other_ten_tables_unchanged(container):
               'resource_versions': 20, 'content_units': 13, 'ocr_jobs': 12, 'ocr_page_tasks': 14}
     for table, count in counts.items():
         additions = {'source_file_size', 'storage_file_size'} if table == 'resource_versions' else set()
+        if table in {'master_learning_resources', 'master_users', 'master_grade_levels', 'subjects'}:
+            additions |= {
+                'source_identity_version', 'source_backend', 'source_namespace',
+                'source_entity_type', 'source_record_key', 'source_identity_hash',
+            }
         if table == 'master_learning_resources':
             additions = {'master_deleted_at', 'master_deleted_by', 'master_deletion_reason', 'deletion_revision'}
+            additions |= {
+                'source_identity_version', 'source_backend', 'source_namespace',
+                'source_entity_type', 'source_record_key', 'source_identity_hash',
+            }
         physical = {column['name'] for column in inspector.get_columns(table)}
         assert physical == set(MODELS[table].__table__.columns.keys())
         assert len(physical - additions) == count and additions <= physical

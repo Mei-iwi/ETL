@@ -35,6 +35,7 @@ from data_sync_etl.db.models import (
 )
 from data_sync_etl.domain.core import DomainError, new_id, now
 from data_sync_etl.domain.resource_deletion import LOCAL_DELETION_FIELDS
+from data_sync_etl.domain.source_ids import SourceLocator, source_identity_hash
 from data_sync_etl.domain.source_ownership import state_hash
 
 STREAMS = {
@@ -453,13 +454,15 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
                 .on_conflict_do_nothing(index_elements=["stream_name"])
             )
 
-    def sync_upsert(self, table, values, *, source_origin=None):
+    def sync_upsert(self, table, values, *, source_origin=None, source_locator: SourceLocator | None = None):
         # Private comparison path may read the hash; public repository reads never return it.
         model = MODELS[table]
         referenced = table in ('master_users', 'master_learning_resources')
         row = self.session.get(model, values['id'], with_for_update=referenced or source_origin is not None, populate_existing=True)
         values = {k: v for k, v in values.items() if k not in
-                  {'source_origin', 'source_state_hash', 'source_missing_at'} | LOCAL_DELETION_FIELDS}
+                  {'source_origin', 'source_state_hash', 'source_missing_at',
+                   'source_identity_version', 'source_backend', 'source_namespace',
+                   'source_entity_type', 'source_record_key', 'source_identity_hash'} | LOCAL_DELETION_FIELDS}
         if source_origin is not None:
             if source_origin != 'POSTGRESQL':
                 raise DomainError('BLOCKED_SOURCE_OWNERSHIP')
@@ -474,6 +477,22 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
                 updated = 'grade_updated_at' if table == 'master_grade_levels' else 'updated_at'
                 if values.get(updated) is not None and utc(values[updated]) < utc(getattr(row, updated)):
                     return 'SKIPPED'  # An older SOURCE event cannot undo newer lifecycle state.
+            if source_locator is not None:
+                identity = {
+                    'source_identity_version': source_locator.version,
+                    'source_backend': source_locator.backend.casefold(),
+                    'source_namespace': source_locator.namespace,
+                    'source_entity_type': source_locator.entity_type.casefold(),
+                    'source_record_key': source_locator.source_record_id,
+                    'source_identity_hash': source_identity_hash(source_locator),
+                }
+                if row is not None:
+                    existing = {key: getattr(row, key) for key in identity}
+                    if any(value is None for value in existing.values()):
+                        raise DomainError('BLOCKED_SOURCE_IDENTITY')
+                    if existing != identity:
+                        raise DomainError('BLOCKED_SOURCE_IDENTITY')
+                values.update(identity)
         if table == 'master_grade_levels' and values.get('grade_mongo_id') is None:
             values = {k: v for k, v in values.items() if k != 'grade_mongo_id'}
         if referenced:

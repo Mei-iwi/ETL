@@ -11,6 +11,7 @@ from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError
 from data_sync_etl.adapters.source.aggregate import build_aggregate
 from data_sync_etl.adapters.source.json_fixture import MODELS
 from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.source_ids import SourceLocator
 from data_sync_etl.ports.source import ResourceGradeLevelRelation, ResourceSubjectRelation
 from data_sync_etl.ports.source_catalogs import SourceCatalogError
 from data_sync_etl.ports.source_files import SourceVersionMetadata, SourceVersionPage
@@ -122,6 +123,8 @@ class SnapshotReader:
 
 class PostgreSQLSourceAdapter:
     source_origin = 'POSTGRESQL'
+    source_backend = 'postgresql'
+    source_namespace = 'postgresql:learning'
     def __init__(self, url=None, *, engine=None, replay_seconds=300):
         if engine is None:
             if not url or make_url(url).get_backend_name() != "postgresql":
@@ -131,6 +134,14 @@ class PostgreSQLSourceAdapter:
             raise DomainError("BLOCKED_SOURCE_MAPPING: invalid PostgreSQL source configuration")
         self.engine = engine
         self.replay_seconds = replay_seconds
+
+    def locator(self, entity_type: str, source_record_id: str) -> SourceLocator:
+        return SourceLocator(
+            backend=self.source_backend,
+            namespace=self.source_namespace,
+            entity_type=entity_type,
+            source_record_id=source_record_id,
+        )
 
     @contextmanager
     def snapshot(self, *, catalog=False):
