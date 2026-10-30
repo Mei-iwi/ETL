@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { canOpenFile, fileErrorMessage, fileResponseError } from '../src/pages/library/fileReadiness.ts'
+import { canOpenFile, embeddedSourceUrl, fileErrorMessage, fileResponseError } from '../src/pages/library/fileReadiness.ts'
+
+test('source preview uses the supplied embed link or the Drive preview endpoint', () => {
+    const file = { access_status: 'ALLOWED', viewer_url: 'https://drive.google.com/file/d/source-file/view' }
+    assert.equal(embeddedSourceUrl(file), 'https://drive.google.com/file/d/source-file/preview')
+    assert.equal(embeddedSourceUrl({ ...file, embedded_url: 'https://docs.google.com/document/d/source-file/preview' }),
+        'https://docs.google.com/document/d/source-file/preview')
+    assert.equal(embeddedSourceUrl({ ...file, access_status: 'DENIED' }), null)
+    for (const viewer_url of ['javascript:alert(1)', 'http://drive.google.com/file/d/source-file/view',
+        'https://drive.google.com.evil.test/file/d/source-file/view', 'https://example.com/book',
+        'https://drive.google.com/file/d/source-file/view?token=secret']) {
+        assert.equal(embeddedSourceUrl({ ...file, viewer_url }), null)
+    }
+})
 
 test('503 distinguishes disabled feature, temporary policy and upstream outage', async () => {
     const messages = []

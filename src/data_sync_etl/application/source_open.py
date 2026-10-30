@@ -3,7 +3,7 @@
 from ipaddress import ip_address
 from urllib.parse import parse_qsl, urlsplit
 
-from data_sync_etl.application.source_resolution import SourceResolutionError
+from data_sync_etl.application.source_resolution import SourceResolutionError, same_import_snapshot
 from data_sync_etl.domain.metadata_search import metadata_allowed
 from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search_access import denied
@@ -11,9 +11,10 @@ from data_sync_etl.domain.source_file_reference import SourceFileReference
 
 
 class SourceOpenResolver:
-    def __init__(self, uow, registry, router, source_resolution):
+    def __init__(self, uow, registry, router, source_resolution, file_sources=None):
         self.uow, self.registry, self.router = uow, registry, router
         self.source_resolution = source_resolution
+        self.file_sources = file_sources
 
     @staticmethod
     def _allowed_viewer(url, hosts):
@@ -25,7 +26,8 @@ class SourceOpenResolver:
             if (parsed.scheme != 'https' or not host or parsed.username or parsed.password
                     or parsed.port not in (None, 443) or parsed.fragment or host not in hosts
                     or any(key.casefold() in {'token', 'access_token', 'auth', 'authorization',
-                                              'signature', 'sig', 'credential', 'key', 'jwt', 'session'}
+                                              'signature', 'sig', 'credential', 'key', 'jwt', 'session',
+                                              'authkey', 'resourcekey'}
                            for key, _ in parse_qsl(parsed.query, keep_blank_values=True))):
                 return False
             ip_address(host)
@@ -38,7 +40,8 @@ class SourceOpenResolver:
                         and not parsed.password and parsed.port in (None, 443)
                         and not parsed.fragment and host in hosts
                         and not any(key.casefold() in {'token', 'access_token', 'auth', 'authorization',
-                                                       'signature', 'sig', 'credential', 'key', 'jwt', 'session'}
+                                                       'signature', 'sig', 'credential', 'key', 'jwt', 'session',
+                                                       'authkey', 'resourcekey'}
                                     for key, _ in parse_qsl(parsed.query, keep_blank_values=True)))
             except ValueError:
                 return False
@@ -48,7 +51,7 @@ class SourceOpenResolver:
         if not access.internal:
             raise SourceResolutionError('SEARCH_ACCESS_RESTRICTED', 403)
         # Reuse the established publication, ACL, identity and exact-version checks.
-        resolved = self.source_resolution.resolve(resource_id, access, version_id)
+        resolved = self.source_resolution.resolve(resource_id, access, version_id, verify_content=False)
         result = {
             'master_resource_id': resource_id,
             'version_id': resolved.get('version_id'),
@@ -113,14 +116,35 @@ class SourceOpenResolver:
                                 if source_version.get('source_auth_required') else 'METADATA_ONLY')
             return result
         list_refs = getattr(adapter, 'list_file_references', None)
-        if not callable(list_refs):
-            result['status'] = 'SOURCE_OPEN_UNSUPPORTED'
-            return result
-        try:
-            raw_files = list_refs(source_version_id)
-        except Exception:
-            result['status'] = 'SOURCE_UNAVAILABLE'
-            return result
+        if callable(list_refs):
+            try:
+                raw_files = list_refs(source_version_id)
+            except Exception:
+                result['status'] = 'SOURCE_UNAVAILABLE'
+                return result
+        else:
+            viewer_lookup = getattr(self.file_sources, 'viewer_reference', None)
+            bucket, object_key = source_version.get('storage_bucket'), source_version.get('storage_object_key')
+            if not callable(viewer_lookup) or not isinstance(bucket, str) or not isinstance(object_key, str):
+                result['status'] = 'SOURCE_OPEN_UNSUPPORTED'
+                return result
+            try:
+                viewer = viewer_lookup(bucket, object_key)
+            except Exception as exc:
+                code = getattr(exc, 'code', '')
+                result['status'] = ('ACCESS_DENIED' if code in ('DRIVE_PERMISSION_DENIED', 'PERMISSION_DENIED')
+                                    else 'VERSION_STALE' if code in ('DRIVE_FILE_NOT_FOUND', 'FILE_NOT_FOUND', 'DRIVE_FILE_CHANGED')
+                                    else 'SOURCE_UNAVAILABLE')
+                return result
+            if viewer is None:
+                raw_files = []
+            else:
+                raw_files = [{
+                    'source_resource_id': route.locator.source_record_id,
+                    'source_version_id': source_version_id,
+                    **viewer,
+                    'access_status': 'ALLOWED',
+                }]
         if not isinstance(raw_files, (list, tuple)) or len(raw_files) > 100:
             result['status'] = 'SOURCE_OPEN_UNSUPPORTED'
             return result
@@ -152,9 +176,14 @@ class SourceOpenResolver:
             elif not self._allowed_viewer(reference.viewer_url, hosts):
                 result['status'] = 'SOURCE_OPEN_UNSUPPORTED'
                 return result
+            if (reference.embedded_url is not None
+                    and not self._allowed_viewer(reference.embedded_url, hosts)):
+                result['status'] = 'SOURCE_OPEN_UNSUPPORTED'
+                return result
             safe_file = reference.model_dump(exclude={'source_resource_id', 'source_version_id'})
             if reference.access_status != 'ALLOWED':
                 safe_file['viewer_url'] = None
+                safe_file['embedded_url'] = None
             files.append(safe_file)
         if files and all(row['access_status'] == 'ALLOWED' for row in files):
             result['status'] = 'EXTERNAL_VIEWER_AVAILABLE'
@@ -186,7 +215,8 @@ class SourceOpenResolver:
             except Exception:
                 current_route = None
             if (not metadata_allowed(current, current_version, access) or current != resource
-                    or current_version != version or current_imports != imports or current_route is None
+                    or current_version != version or len(current_imports) != 1
+                    or not same_import_snapshot(current_imports[0], imported) or current_route is None
                     or current_route.locator != route.locator or current_route.adapter is not adapter):
                 result.update(status='VERSION_STALE', files=[])
         return result

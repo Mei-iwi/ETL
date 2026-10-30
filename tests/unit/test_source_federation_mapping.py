@@ -92,6 +92,20 @@ def test_external_viewer_registration_requires_explicit_host_allowlist():
         'https://other.example/open/1', {'viewer.school-a.edu'})
     assert not SourceOpenResolver._allowed_viewer(
         'http://viewer.school-a.edu/open/1', {'viewer.school-a.edu'})
+    assert not SourceOpenResolver._allowed_viewer(
+        'https://drive.google.com/file/d/1/view?resourcekey=private', {'drive.google.com'})
+
+
+def test_default_drive_viewer_capability_requires_explicit_drive_configuration(container):
+    disabled = create_source_registry(container.settings, container.source).registrations()[0]
+    assert disabled.capabilities.file_reference_lookup is False
+    assert disabled.capabilities.external_viewer is False
+    settings = container.settings.model_copy(update={
+        'source_drive_enabled': True, 'source_drive_buckets': {'DRIVE': 'root'}})
+    enabled = create_source_registry(settings, container.source).registrations()[0]
+    assert enabled.capabilities.file_reference_lookup is True
+    assert enabled.capabilities.external_viewer is True
+    assert set(enabled.viewer_hosts) == {'drive.google.com', 'docs.google.com'}
 
 
 def test_federated_source_file_worker_cannot_discover_or_claim_downloads(container, monkeypatch):
@@ -102,7 +116,7 @@ def test_federated_source_file_worker_cannot_discover_or_claim_downloads(contain
     monkeypatch.setattr(service.resolver, 'temporary_path', lambda *args, **kwargs: calls.append('temporary_path'), raising=False)
     assert service._metadata_only_policy() is True
     assert service._media_processing_enabled() is False
-    assert service.availability()['file_sync_error'] == 'EXTERNAL_SOURCE_METADATA_ONLY'
+    assert service.availability()['file_sync_error'] == 'SOURCE_ORIGINAL_IMPORT_DISABLED'
     assert service.discover_once() == 0
     assert service.claim('federated-worker') is None
     with pytest.raises(SourceFileError, match='EXTERNAL_SOURCE_CONTENT_DISABLED'):
@@ -217,6 +231,37 @@ def test_source_version_sync_namespaces_colliding_ids_and_reuses_existing_tables
     assert 'source_resource_id' not in open_a['files'][0] and 'source_version_id' not in open_a['files'][0]
     assert open_a['files'][0]['viewer_url'] == 'https://viewer.school-a.edu/open/VER001'
     assert open_b['files'][0]['viewer_url'] == 'https://viewer.school-b.edu/open/VER001'
+    source_a.rows[0].update(storage_bucket='DRIVE', storage_object_key='files/blob/book.pdf')
+    source_a.list_file_references = None
+    source_a_registration = SourceRegistration(
+        source_id='SRC_A', backend='postgresql', namespace='school-a', adapter_type='test',
+        capabilities=SourceCapabilities(exact_resource_lookup=True, exact_version_lookup=True,
+                                        file_reference_lookup=True, external_viewer=True),
+        viewer_hosts=('drive.google.com',))
+    drive_registry = ConfiguredSourceRegistry([(source_a_registration, source_a)])
+    drive_router = SourceRouter(drive_registry, SQLAlchemySourceIdentityMappingStore(container.uow, drive_registry))
+    drive_resolution = SourceResolutionService(container.uow, source_a, container.settings, router=drive_router)
+
+    class DriveReferenceReader:
+        def viewer_reference(self, bucket, object_key):
+            assert (bucket, object_key) == ('DRIVE', 'files/blob/book.pdf')
+            # A concurrent metadata poll must not invalidate the same file.
+            with container.uow() as repo:
+                imported = repo.find('source_file_imports', {'target_version_id': versions_a['VER001']['id']})[0]
+                repo.update('source_file_imports', imported['id'], {'updated_at': datetime.now(UTC)})
+            return {'source_file_id': 'blob', 'file_name': 'book.pdf', 'mime_type': 'application/pdf',
+                    'revision': 'drive-revision-7',
+                    'viewer_url': 'https://drive.google.com/file/d/blob/view',
+                    'embedded_url': 'https://drive.google.com/file/d/blob/preview'}
+
+    drive_opener = SourceOpenResolver(container.uow, drive_registry, drive_router,
+                                      drive_resolution, file_sources=DriveReferenceReader())
+    drive_resolution.content_authorizer = lambda *a, **k: pytest.fail('Viewer must not require INDEX_READY')
+    drive_open = drive_opener.resolve('resource-1', SearchAccess(scope='authenticated_admin'),
+                                      versions_a['VER001']['id'])
+    assert drive_open['status'] == 'EXTERNAL_VIEWER_AVAILABLE'
+    assert drive_open['files'][0]['viewer_url'] == 'https://drive.google.com/file/d/blob/view'
+    assert drive_open['files'][0]['embedded_url'] == 'https://drive.google.com/file/d/blob/preview'
     b_files = source_b.list_file_references
     source_b.list_file_references = lambda version_id: [
         {**b_files(version_id)[0], 'access_status': 'AUTH_REQUIRED'}]

@@ -241,7 +241,7 @@ def test_source_import_is_metadata_only_for_supported_formats(container, tmp_pat
         assert version['lifecycle_status'] == 'METADATA_ONLY'
         assert not repo.find('ocr_jobs', {})
     from data_sync_etl.domain.core import SourceFileError
-    with pytest.raises(SourceFileError, match='EXTERNAL_SOURCE_CONTENT_DISABLED'):
+    with pytest.raises(SourceFileError, match='SOURCE_CAPABILITY_BLOCKED'):
         with container.source_resolver.open_verified_stream(container.source_resolver.resolve(version['id'])):
             pass
     assert not list((container.storage.root / 'resources').rglob('*'))

@@ -40,10 +40,12 @@ METADATA_ONLY_ERROR = "SOURCE_METADATA_ONLY"
 
 class SourceFileImportService:
     def __init__(self, source: ReadOnlySourceVersionPort, files: ReadOnlySourceFilePort,
-                 storage, uow: UnitOfWork, process, retry_processing, settings, formats=None):
+                 storage, uow: UnitOfWork, process, retry_processing, settings, formats=None,
+                 source_registry=None):
         self.source, self.files, self.storage, self.uow = source, files, storage, uow
         self.process, self.retry_processing, self.settings = process, retry_processing, settings
         self.formats = formats or FormatValidatorRegistry()
+        self.source_registry = source_registry
         self.validator = self.formats.find_validator('source.pdf')
         self._media_policy_scan_started = False
         self._file_count_cache = {}
@@ -105,9 +107,17 @@ class SourceFileImportService:
         with self.uow() as repo:
             worker = repo.get("sync_checkpoints", "source-file-worker")
         healthy = bool(worker and worker["updated_at"] > now() - timedelta(seconds=30))
+        registrations = self.source_registry.registrations() if self.source_registry is not None else ()
+        remote_processing = any(item.enabled and item.capabilities.read_content
+                                and item.capabilities.process_content for item in registrations)
+        derived_indexing = any(item.enabled and item.capabilities.read_content
+                               and item.capabilities.process_content
+                               and item.capabilities.index_derived_content for item in registrations)
         return {
             'file_sync_supported': False,
-            'file_sync_error': 'EXTERNAL_SOURCE_METADATA_ONLY',
+            'file_sync_error': 'SOURCE_ORIGINAL_IMPORT_DISABLED',
+            'remote_content_processing_supported': remote_processing,
+            'derived_content_index_supported': derived_indexing,
             'file_backends': {},
             'file_worker_healthy': healthy,
         }
@@ -139,7 +149,7 @@ class SourceFileImportService:
                 # A restart with processing enabled must revisit terminal
                 # metadata-only imports, even without a new SOURCE delta or
                 # automatic Master Sync. Reuse the bounded discovery cursor.
-                policy_scan = self._media_processing_enabled() and not self._media_policy_scan_started
+                policy_scan = not self._media_policy_scan_started
                 if not (active_scan or new_master or due or policy_scan):
                     return 0
                 after = checkpoint["last_id"] if active_scan and not policy_scan else None
@@ -257,9 +267,20 @@ class SourceFileImportService:
                                        "claim_token": None, "lease_expires_at": None,
                                        "next_retry_at": None, "updated_at": now()})
                     if target is not None:
+                        # Storage ownership and processing readiness are independent.
+                        # A metadata refresh must not erase an existing OCR/index run.
+                        lifecycle = target['lifecycle_status']
+                        jobs = repo.find('ocr_jobs', {'resource_version_id': target['id']},
+                                         order=('-created_at', '-id'), limit=1)
+                        if (jobs and lifecycle in ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED')
+                                and row['last_error_code'] not in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING')):
+                            if lifecycle == 'METADATA_ONLY':
+                                lifecycle = 'INGESTED'
+                            fields.update(status='PROCESSING', last_error_code=None,
+                                          processing_job_id=jobs[0]['id'])
                         repo.update('resource_versions', target['id'], {
                             'storage_bucket': bucket, 'storage_object_key': key,
-                            'lifecycle_status': 'METADATA_ONLY',
+                            'lifecycle_status': lifecycle,
                         })
                 else:
                     fields.update({"storage_bucket": source["storage_bucket"], "storage_object_key": source["storage_object_key"]})

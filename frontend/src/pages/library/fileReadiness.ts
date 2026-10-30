@@ -6,7 +6,7 @@ export type SourceOpen = {
         | 'SOURCE_OPEN_UNSUPPORTED' | 'VERSION_STALE' | 'ACCESS_DENIED'
     files: { source_file_id: string; file_name: string | null; mime_type: string | null
         revision: string | null; access_status: 'ALLOWED' | 'AUTH_REQUIRED' | 'DENIED' | 'UNAVAILABLE' | 'METADATA_ONLY'
-        viewer_url: string | null }[]
+        viewer_url: string | null; embedded_url?: string | null }[]
 }
 export function trustedViewerHref(value: string | null | undefined) {
     if (!value) return null
@@ -14,6 +14,17 @@ export function trustedViewerHref(value: string | null | undefined) {
         const url = new URL(value)
         return url.protocol === 'https:' && !url.username && !url.password ? url.href : null
     } catch { return null }
+}
+export function embeddedSourceUrl(file: Pick<SourceOpen['files'][number], 'access_status' | 'viewer_url' | 'embedded_url'>) {
+    if (file.access_status !== 'ALLOWED') return null
+    const embedded = trustedViewerHref(file.embedded_url)
+    if (embedded) return embedded
+    const viewer = trustedViewerHref(file.viewer_url)
+    if (!viewer) return null
+    const url = new URL(viewer)
+    const driveFile = /^\/file\/d\/([A-Za-z0-9_-]+)\/(?:view|preview)\/?$/.exec(url.pathname)
+    if (url.hostname !== 'drive.google.com' || url.port || url.search || url.hash || !driveFile) return null
+    return `https://drive.google.com/file/d/${driveFile[1]}/preview`
 }
 export function sourceResolutionAllowsFile(resolution: SourceResolution | null, selected: string) {
     return resolution?.version_id === selected && resolution.resolution_status === 'available'

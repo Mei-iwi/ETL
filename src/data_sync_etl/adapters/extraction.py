@@ -5,7 +5,9 @@ in result_metadata preserve provenance without duplicating text or adding tables
 """
 
 import csv
+import zipfile
 from datetime import date, datetime
+from io import BytesIO, TextIOWrapper
 from time import monotonic
 
 from data_sync_etl.domain.core import DomainError
@@ -36,6 +38,58 @@ class NativeDocumentExtractor:
         started = monotonic()
         try:
             for text, title, locator in parsers[extension](path):
+                if monotonic() - started > MAX_SECONDS:
+                    raise DomainError('EXTRACTION_LIMIT_EXCEEDED')
+                if not text.strip():
+                    continue
+                for start in range(0, len(text), MAX_UNIT_CHARS):
+                    part = text[start:start + MAX_UNIT_CHARS]
+                    if not part.strip():
+                        continue
+                    if len(units) >= MAX_UNITS or offset + len(part) > MAX_TEXT_CHARS:
+                        raise DomainError('EXTRACTION_LIMIT_EXCEEDED')
+                    units.append({'start': offset, 'end': offset + len(part),
+                                  'title': title[:500], 'locator': {**locator, 'char_offset': start}})
+                    texts.append(part)
+                    offset += len(part) + 2
+            if not texts:
+                raise DomainError('EMPTY_EXTRACTED_CONTENT')
+            return OCRResult('\n\n'.join(texts), engine_name='native_' + extension[1:],
+                             metadata={'source_type': extension[1:], 'logical_units': units,
+                                       **({'structure_version': 'docx-outline-v1'} if extension == '.docx' else {})})
+        except DomainError:
+            raise
+        except UnicodeError:
+            raise DomainError('UNSUPPORTED_TEXT_ENCODING') from None
+        except Exception:
+            raise DomainError('INVALID_DOCUMENT_CONTENT') from None
+
+    def extract_bytes(self, filename, data, *, max_uncompressed_bytes=128 * 1024 * 1024):
+        """Extract supported source documents from bounded RAM without staging a file."""
+        from pathlib import PurePosixPath
+        extension = PurePosixPath(filename).suffix.lower()
+        parsers = {'.docx': self.docx, '.xlsx': self.xlsx, '.txt': self.txt,
+                   '.csv': self.csv, '.pptx': self.pptx}
+        if extension not in parsers:
+            raise DomainError('UNSUPPORTED_PROCESSING_FORMAT')
+        if extension in ('.docx', '.xlsx', '.pptx'):
+            try:
+                with zipfile.ZipFile(BytesIO(data)) as archive:
+                    entries = archive.infolist()
+                    expanded = sum(item.file_size for item in entries)
+                    if (len(entries) > 10000 or expanded > max_uncompressed_bytes
+                            or any(item.file_size > 32 * 1024 * 1024
+                                   or item.file_size > 1024 * max(item.compress_size, 1)
+                                   for item in entries)):
+                        raise DomainError('EXTRACTION_LIMIT_EXCEEDED')
+            except DomainError:
+                raise
+            except (OSError, zipfile.BadZipFile):
+                raise DomainError('INVALID_OPENXML_CONTAINER') from None
+        texts, units, offset = [], [], 0
+        started = monotonic()
+        try:
+            for text, title, locator in parsers[extension](BytesIO(data)):
                 if monotonic() - started > MAX_SECONDS:
                     raise DomainError('EXTRACTION_LIMIT_EXCEEDED')
                 if not text.strip():
@@ -105,10 +159,15 @@ class NativeDocumentExtractor:
     @staticmethod
     def xlsx(path):
         from openpyxl import load_workbook
-        cached = load_workbook(path, read_only=True, data_only=True, keep_links=False)
+        if hasattr(path, 'getvalue'):
+            raw = path.getvalue()
+            cached_input, formula_input = BytesIO(raw), BytesIO(raw)
+        else:
+            cached_input = formula_input = path
+        cached = load_workbook(cached_input, read_only=True, data_only=True, keep_links=False)
         formulas = None
         try:
-            formulas = load_workbook(path, read_only=True, data_only=False, keep_links=False)
+            formulas = load_workbook(formula_input, read_only=True, data_only=False, keep_links=False)
             if len(cached.worksheets) > MAX_SHEETS:
                 raise DomainError('EXTRACTION_LIMIT_EXCEEDED')
             cell_count = 0
@@ -142,18 +201,25 @@ class NativeDocumentExtractor:
             cached.close()
             if formulas is not None:
                 formulas.close()
+            if hasattr(path, 'getvalue'):
+                cached_input.close()
+                formula_input.close()
 
     @staticmethod
     def txt(path):
-        with path.open(encoding='utf-8-sig', newline='') as stream:
+        stream = TextIOWrapper(path if hasattr(path, 'read') else path.open('rb'), encoding='utf-8-sig', newline='')
+        try:
             for line_no, line in enumerate(stream, 1):
                 if line_no > MAX_ROWS:
                     raise DomainError('EXTRACTION_LIMIT_EXCEEDED')
                 yield line, f'TXT · Dòng {line_no}', {'line': line_no}
+        finally:
+            stream.detach()
 
     @staticmethod
     def csv(path):
-        with path.open(encoding='utf-8-sig', newline='') as stream:
+        stream = TextIOWrapper(path if hasattr(path, 'read') else path.open('rb'), encoding='utf-8-sig', newline='')
+        try:
             sample = stream.read(8192)
             stream.seek(0)
             try:
@@ -176,6 +242,8 @@ class NativeDocumentExtractor:
                             'delimiter': dialect.delimiter}
             except csv.Error:
                 raise DomainError('INVALID_CSV') from None
+        finally:
+            stream.detach()
 
     @staticmethod
     def pptx(path):

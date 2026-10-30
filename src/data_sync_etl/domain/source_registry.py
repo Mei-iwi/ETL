@@ -5,6 +5,8 @@ class SourceCapabilities(BaseModel):
     model_config = ConfigDict(frozen=True, extra='forbid')
     read_metadata: bool = True
     read_content: bool = False
+    process_content: bool = False
+    index_derived_content: bool = False
     exact_resource_lookup: bool = True
     exact_version_lookup: bool = False
     file_reference_lookup: bool = False

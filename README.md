@@ -1,6 +1,6 @@
 # ETL — Kho học liệu số
 
-Đồng bộ SOURCE → MASTER, trích xuất PDF/Office/ảnh/MP3/MP4 và tìm kiếm BoW, BGE-M3 Vector, Hybrid. Backend FastAPI, frontend React/TypeScript, PostgreSQL và MongoDB. Tệp **SOURCE chỉ lưu tham chiếu**, đọc tạm từ nguồn khi xử lý/xem/tải; tệp **LOCAL** dùng storage riêng.
+SOURCE ? MASTER ??? OCR, tr?ch xu?t v? l?p ch? m?c n?i dung SOURCE ch? ch?y khi ??ng k? ngu?n c?p ri?ng c? ba quy?n `read_content`, `process_content`, `index_derived_content`; m?c ??nh t?t. Byte g?c ???c ??c v?o RAM c? gi?i h?n, kh?ng ghi th?nh t?p trong ETL. T?p LOCAL d?ng storage ri?ng.
 
 Hướng dẫn theo thứ tự **local trước, Docker sau**. Cài mới nên dùng `single_admin` và BGE-M3 1024 chiều. Sau khi đồng bộ users ổn định mới chuyển sang `master_users`. Không có mật khẩu đăng nhập mặc định.
 
@@ -218,7 +218,7 @@ TRANSLATION_TARGET_LANGUAGE=vi
 
 Thay password thật, percent-encode ký tự đặc biệt trong URL PostgreSQL/MongoDB. Với Compose ở gốc, nên dùng password owner chỉ gồm chữ/số để các URL migration nội suy không bị sai; có thể tự tạo bằng `python -c "import secrets; print(secrets.token_hex(24))"`, dùng hai giá trị khác nhau cho hai owner. `SOURCE_MIGRATION_DATABASE_URL` chỉ dùng owner của DB nguồn riêng mới/trống; bỏ dòng này khi dùng SOURCE có sẵn/remote. `SOURCE_ADAPTER=json` chỉ đọc fixture, không đọc PostgreSQL.
 
-Tệp thuộc SOURCE (kể cả nguồn local-source/Drive cũ) chỉ đồng bộ metadata; ETL không tải, sao chép, OCR hay tạo chỉ mục nội dung từ tệp SOURCE. `SOURCE_METADATA_MEDIA_ENABLED` không bật xử lý nội dung SOURCE. Tệp LOCAL tải lên giao diện vẫn chạy pipeline kiểm tra, OCR và lập chỉ mục bình thường. Mở nguồn ngoài chỉ khả dụng qua API viewer đã xác minh chính xác phiên bản và quyền; thiếu hợp đồng viewer thì trả metadata-only.
+T?p SOURCE m?c ??nh ch? ??ng b? metadata. Mu?n OCR, tr?ch xu?t v? l?p ch? m?c n?i dung, t?ng ??ng k? ngu?n ph?i c?p ?? `read_content`, `process_content`, `index_derived_content`; thi?u b?t k? quy?n n?o th? t? ch?i. Byte g?c ???c ??c c? gi?i h?n trong RAM, kh?ng l?u v?o t?p t?m, managed storage hay object storage. T?p SOURCE g?c v?n kh?ng ???c ETL t?i xu?ng ho?c ph?c v? qua preview/view API. T?p LOCAL gi? pipeline hi?n t?i. SOURCE mode ch?a h? tr? MP3/MP4.
 
 ### 2.4.1. Write-back metadata hai chiều (mặc định tắt)
 
@@ -755,7 +755,7 @@ Start tự chạy Check trước khi khởi động; Check riêng dùng để ch
 
 Docker Desktop có thể hiển thị nhóm database và nhóm ứng dụng riêng. Bộ `docker-compose.yml` ở gốc dùng cho database local, không khởi động 4 worker ứng dụng. Dùng launcher ở mục này để chạy nhóm ứng dụng; các job `master-migrate`, `source-migrate`, `mongo-init` không phải worker chạy liên tục.
 
-Dùng Drive: thêm **`-Drive` vào mọi lệnh launcher PowerShell**, Linux đặt `export ETL_WITH_DRIVE=true`; cấu hình ở4.2. Media tự chọn từ env, Drive cần lựa chọn launcher riêng.
+Dùng Drive: đặt `SOURCE_DRIVE_ENABLED=true` trong `docker.env`; launcher PowerShell tự nạp overlay Drive cho Build/Check/Start. Có thể dùng `-Drive` để bật tường minh. Linux đặt `export ETL_WITH_DRIVE=true`.
 
 **Có overlay tùy chỉnh hoặc dùng CLI:** khai báo APP một lần trong terminal Git Bash/Bash; bỏ comment đúng những dòng cần dùng:
 
@@ -790,7 +790,7 @@ APP=(docker compose --env-file docker.env -f deploy/compose.app.yml -f deploy/co
 "${APP[@]}" --profile workers stop reconciliation-worker
 ```
 
-Các tên service đúng là `master-sync-worker`, `source-file-worker`, `ocr-worker`, `reconciliation-worker`. Hai launcher Start với `-Workers`/`--workers` đã chạy đủ bốn service này. Dùng `-Drive`/`ETL_WITH_DRIVE=true` khi nguồn là Drive, kể cả khi chỉ chạy đối soát tệp. Build chỉ tạo image; cần Start/`up -d` để chạy code mới.
+Các tên service đúng là `master-sync-worker`, `source-file-worker`, `ocr-worker`, `reconciliation-worker`. Hai launcher Start với `-Workers`/`--workers` đã chạy đủ bốn service này. PowerShell tự nạp overlay Drive khi `SOURCE_DRIVE_ENABLED=true` trong env file; Bash dùng `ETL_WITH_DRIVE=true`. Build chỉ tạo image; cần Start/`up -d` để chạy code mới.
 
 Không dùng đồng thời overlay source-neon và remote-db. Bộ tùy chỉnh dùng cùng APP cho build/start/stop, tránh mất mount/env.
 
@@ -862,7 +862,7 @@ bash deploy/scripts/etl-docker.sh start --workers
 bash deploy/scripts/etl-docker.sh status
 ```
 
-Nếu dùng Drive, thêm `-Drive` vào cả ba lệnh PowerShell; Bash đặt `export ETL_WITH_DRIVE=true` trước khi chạy. `DATABASE_MODE=source-neon` hoặc `remote` trong `docker.env` được launcher tự chọn; media tự chọn qua `MEDIA_ENABLED=true`. Profile auth tùy chỉnh phải giữ cùng `-AuthProfile` hoặc `ETL_AUTH_PROFILE` ở mọi lệnh.
+Nếu dùng Drive, đặt `SOURCE_DRIVE_ENABLED=true` trong `docker.env`; PowerShell tự chọn overlay cho Build/Check/Start. Bash đặt `export ETL_WITH_DRIVE=true` trước khi chạy. `DATABASE_MODE=source-neon` hoặc `remote` trong `docker.env` được launcher tự chọn; media tự chọn qua `MEDIA_ENABLED=true`. Profile auth tùy chỉnh phải giữ cùng `-AuthProfile` hoặc `ETL_AUTH_PROFILE` ở mọi lệnh.
 
 Nếu dùng mảng APP tùy chỉnh ở mục 3.6, giữ nguyên các overlay và chạy:
 
@@ -1003,7 +1003,7 @@ Docker dùng `"${APP[@]}" run --rm --no-deps api semantic-schema`/semantic-statu
 | Hoàn tất cài đặt | DB/schema đúng, model verify+encode PASS, API health OK, login được, 4 worker chạy nếu dùng lịch đối soát; thử 1 tệp tới CONTENT_READY/index READY rồi tìm bằng 3 chế độ |
 | Thiếu argon2/pymongo… | Kiểm tra venv: `python -c "import sys; print(sys.executable)"`; cài đúng extra, pip check |
 | SOURCE_REFERENCE_DISABLED | Sửa đúng .env/docker.env và restart/recreate đúng tiến trình |
-| SOURCE ở METADATA_ONLY | Đây là chính sách metadata-only: ETL không tải/OCR/chỉ mục tệp SOURCE. Kiểm tra viewer bằng API `/api/v1/resources/{id}/open`; nếu chưa có hợp đồng viewer được allowlist thì nội dung nguồn chưa thể mở từ ETL. Tệp LOCAL vẫn dùng pipeline OCR thông thường |
+| SOURCE ? METADATA_ONLY | M?c ??nh l? metadata-only. Ch? c?c ngu?n ???c c?p ?? `read_content`, `process_content`, `index_derived_content` m?i ???c t? ??ng ??c byte trong RAM ?? OCR/tr?ch xu?t/l?p ch? m?c; byte g?c kh?ng ???c l?u th?nh t?p v? API t?i/preview v?n b? ch?n. MP3/MP4 ch?a ???c h? tr? trong SOURCE mode |
 | AUTH_MASTER_STALE | Kiểm tra Auto users/interval/heartbeat/lần COMPLETED; không chỉ watermark |
 | Docs trắng/OpenAPI403 | Đăng nhập qua frontend proxy3000/8080; không gọi backend để bỏ boundary |
 | SOURCE_HASH_MISMATCH / SOURCE_VERSION_MUTATED | Xác minh bytes/hash/phiên bản ở nguồn; không bỏ kiểm tra hoặc ghi đè lịch sử |

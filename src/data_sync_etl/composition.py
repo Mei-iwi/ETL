@@ -103,12 +103,15 @@ def create_source_registry(settings, source, supplied_adapters=None):
     registrations = settings.source_registry_config
     if not registrations:
         locator = source.locator('resources', '__registry_probe__')
+        drive_viewer_enabled = bool(settings.source_drive_enabled and settings.source_drive_buckets)
         registrations = [SourceRegistration(
             source_id='SRC_DEFAULT', backend=locator.backend, namespace=locator.namespace,
             adapter_type=type(source).__name__, enabled=True,
-            capabilities=SourceCapabilities(read_metadata=True,
-                read_content=callable(getattr(source, 'get_version', None)),
-                exact_version_lookup=callable(getattr(source, 'get_version', None)), write_metadata=False),
+            capabilities=SourceCapabilities(read_metadata=True, read_content=False,
+                exact_version_lookup=callable(getattr(source, 'get_version', None)),
+                file_reference_lookup=drive_viewer_enabled, external_viewer=drive_viewer_enabled,
+                write_metadata=False),
+            viewer_hosts=('drive.google.com', 'docs.google.com') if drive_viewer_enabled else (),
         )]
         adapters['SRC_DEFAULT'] = source
     entries = []
@@ -189,16 +192,19 @@ class Container:
         self.resource_detail = GetResourceDetail(self.uow)
         if source_registry is not None:
             self.source_registry = source_registry
-        elif self.settings.source_federation_enabled:
+        elif self.settings.source_federation_enabled or self.settings.source_registry_config:
             self.source_registry = create_source_registry(self.settings, self.source, source_adapters)
         else:
             source_locator = self.source.locator('resources', '__registry_probe__')
+            drive_viewer_enabled = bool(self.settings.source_drive_enabled and self.settings.source_drive_buckets)
             registration = SourceRegistration(
                 source_id='SRC_DEFAULT', backend=source_locator.backend, namespace=source_locator.namespace,
                 adapter_type=type(self.source).__name__, enabled=True,
-                capabilities=SourceCapabilities(read_metadata=True,
-                    read_content=callable(getattr(self.source, 'get_version', None)),
-                    exact_version_lookup=callable(getattr(self.source, 'get_version', None)), write_metadata=False),
+                capabilities=SourceCapabilities(read_metadata=True, read_content=False,
+                    exact_version_lookup=callable(getattr(self.source, 'get_version', None)),
+                    file_reference_lookup=drive_viewer_enabled, external_viewer=drive_viewer_enabled,
+                    write_metadata=False),
+                viewer_hosts=('drive.google.com', 'docs.google.com') if drive_viewer_enabled else (),
             )
             self.source_registry = ConfiguredSourceRegistry([(registration, self.source)])
         mapping_store = (SQLAlchemySourceIdentityMappingStore(self.uow, self.source_registry)
@@ -444,6 +450,7 @@ class Container:
         if self.settings.source_drive_enabled or self.settings.source_drive_buckets or self.settings.source_local_buckets:
             self.source_files = SourceFileDispatcher(self.source_files, SourceGoogleDriveFileReader(self.settings),
                                                      local_buckets=self.settings.source_local_buckets)
+        self.source_open.file_sources = self.source_files
         self.source_file_import = SourceFileImportService(
             self.source, self.source_files, self.storage, self.uow,
             self.process_version, self.retry_processing_job, self.settings,
@@ -451,12 +458,15 @@ class Container:
                                              media_processing=not self.settings.source_metadata_media_enabled,
                                              media_probe=lambda path, extension: probe(path, self.settings, extension),
                                              media_max_size_bytes=self.settings.media_max_size_bytes),
+            source_registry=self.source_registry,
         )
         self.source_resolver = SourceFileResolver(
             self.uow, self.source, self.source_files, self.storage, self.source_file_import.formats,
-            self.settings, SourceTemporaryFiles(self.settings, self.storage.root),
+            self.settings, SourceTemporaryFiles(self.settings, self.storage.root), self.source_registry,
         )
         self.source_file_import.resolver = self.source_resolver
+        self.search.source_content_authorizer = self.source_resolver.derived_index_authorized
+        self.indexing.source_content_authorizer = self.source_resolver.derived_index_authorized
         self.reconciliation_engine.source_resolver = self.source_resolver
         self.reconciliation_engine.file_read_budget_seconds = self.settings.source_read_timeout_seconds
         self.reconciliation_engine.audit_settings = self.settings

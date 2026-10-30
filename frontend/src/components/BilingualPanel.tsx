@@ -104,6 +104,8 @@ export function BilingualPanel({ versionId, refreshKey }: { versionId: string; r
             {entry.warnings?.length ? ` · Cảnh báo: ${entry.warnings.join(', ')}` : ''}
         </p>)}
         {view && <p><a href={view.original_file_url} target="_blank" rel="noreferrer">Mở tệp gốc</a>{' · '}
+            {view.source_backed && <><button type="button" aria-controls="processing-source-preview" aria-expanded={playerVisible}
+                onClick={() => setPlayerVisible(current => !current)}>{playerVisible ? 'Đóng tệp' : 'Xem tệp'}</button>{' · '}</>}
             <a href={`/api/v1/resource-versions/${versionId}/exports/json`}>JSON kèm nguồn</a>{' · '}
             {total > 0 && <a href={`/api/v1/resource-versions/${versionId}/exports/txt`}>TXT nguyên ngữ</a>}{' · '}
             {hasTranslation && <a href={`/api/v1/resource-versions/${versionId}/exports/txt?translated=true`}>TXT bản dịch</a>}{' · '}
@@ -112,7 +114,10 @@ export function BilingualPanel({ versionId, refreshKey }: { versionId: string; r
             {hasTimedTranslation && <>{' · '}<a href={`/api/v1/resource-versions/${versionId}/exports/srt?translated=true`}>SRT bản dịch</a>{' · '}
                 <a href={`/api/v1/resource-versions/${versionId}/exports/vtt?translated=true`}>VTT bản dịch</a></>}
         </p>}
-        {playerVisible && view && <video ref={player} src={view.original_file_url} controls preload="metadata"
+        {playerVisible && view?.source_backed && <iframe id="processing-source-preview" title="Xem tệp từ nguồn" src={`${view.original_file_url}?embedded=true`}
+            className={styles.player} style={{ minHeight: 560, width: '100%' }}
+            referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />}
+        {playerVisible && view && !view.source_backed && <video ref={player} src={view.original_file_url} controls preload="metadata"
             onLoadedMetadata={() => { if (player.current && pendingSeek.current != null) player.current.currentTime = pendingSeek.current }}
             className={styles.player} />}
         <details onToggle={event => { setExpanded(event.currentTarget.open); if (!event.currentTarget.open) { setPageData(null); setPageError(null) } }}>

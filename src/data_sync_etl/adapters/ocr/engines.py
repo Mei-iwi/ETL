@@ -80,6 +80,25 @@ class TesseractOCREngine:
     def recognize(self, image_path):
         return self._recognize(image_path)
 
+    def recognize_bytes(self, image_bytes):
+        """Run Tesseract through stdin; this path creates no image/temp file."""
+        if self._version is None:
+            self._runtime()
+        try:
+            executable = str(Path(shutil.which(self.executable) or self.executable).resolve())
+            result = subprocess.run(
+                [executable, 'stdin', 'stdout', '-l', self.languages],
+                input=image_bytes, capture_output=True, text=False,
+                timeout=self.timeout, check=True,
+            )
+            text = result.stdout.decode('utf-8', errors='replace')
+        except subprocess.TimeoutExpired:
+            raise DomainError('Tesseract OCR timed out') from None
+        except (OSError, subprocess.CalledProcessError):
+            raise DomainError('Tesseract OCR failed') from None
+        return OCRResult(text, engine_name='tesseract', engine_version=self._version,
+                         metadata={'languages': self.languages, 'input_mode': 'stdin'})
+
     def recognize_scoped(self, image_path, *, directory):
         """Keep SOURCE subprocess scratch inside the caller's leased attempt."""
         return self._recognize(image_path, directory=directory)

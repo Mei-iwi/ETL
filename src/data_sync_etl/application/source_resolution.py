@@ -15,6 +15,13 @@ class SourceResolutionError(DomainError):
         self.code, self.status = code, status
 
 
+def same_import_snapshot(current, observed):
+    """Discovery's poll timestamp is not a file identity or access grant."""
+    return (current is not None and observed is not None
+            and {key: value for key, value in current.items() if key != 'updated_at'}
+            == {key: value for key, value in observed.items() if key != 'updated_at'})
+
+
 class SourceResolutionService:
     """Resolve a permitted MASTER candidate through one exact source ID.
 
@@ -60,7 +67,7 @@ class SourceResolutionService:
             'source_identity': identity if isinstance(identity, str) and re.fullmatch('[0-9a-f]{64}', identity) else None,
         }
 
-    def resolve(self, resource_id, access, version_id=None):
+    def resolve(self, resource_id, access, version_id=None, *, verify_content=True):
         if not access.internal:
             raise SourceResolutionError('SEARCH_ACCESS_RESTRICTED', 403)
         with self.uow() as repo:
@@ -92,7 +99,8 @@ class SourceResolutionService:
                     result.update(resolution_status='blocked', source_record_available=False,
                                   content_availability='metadata-only')
                 else:
-                    result['content_availability'] = self._verified_content(version, access)
+                    if verify_content:
+                        result['content_availability'] = self._verified_content(version, access)
                 return result
             try:
                 if self.router is not None:
@@ -191,11 +199,12 @@ class SourceResolutionService:
                     mapping_changed = (current_route.locator != locator or current_route.adapter is not source_adapter)
                 except Exception:
                     mapping_changed = True
-            if (current_resource != resource or current_version != version or current_import != import_row
+            if (current_resource != resource or current_version != version or not same_import_snapshot(current_import, import_row)
                     or mapping_changed):
                 result.update(resolution_status='stale', source_record_available=False,
                               content_availability='metadata-only')
                 return result
         result['source_record_available'] = True
-        result['content_availability'] = self._verified_content(version, access)
+        if verify_content:
+            result['content_availability'] = self._verified_content(version, access)
         return result

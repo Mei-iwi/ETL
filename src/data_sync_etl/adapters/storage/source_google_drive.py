@@ -1,11 +1,11 @@
-"""Read-only Drive blobs, bounded disk staging, explicit folder allowlist; no export."""
+"""Read-only Drive blobs, bounded in-memory reads, explicit folder allowlist; no export."""
 
 import json
 import random
 import re
-import tempfile
 import time
 from contextlib import contextmanager
+from io import BytesIO
 
 from data_sync_etl.adapters.media import probe
 from data_sync_etl.domain.core import SourceFileError
@@ -202,7 +202,9 @@ class SourceGoogleDriveFileReader:
         if not isinstance(size, str) or not size.isascii() or not size.isdecimal() or len(size) > 15:
             raise SourceFileError('INVALID_DRIVE_METADATA')
         size = int(size)
-        if not 0 < size <= validator.max_size_bytes:
+        max_size = min(validator.max_size_bytes,
+                       getattr(self.settings, 'source_content_max_bytes', 32 * 1024 * 1024))
+        if not 0 < size <= max_size:
             raise SourceFileError('FILE_TOO_LARGE' if size else 'INVALID_SOURCE_FILE')
         if not isinstance(metadata.get('version'), str) or not metadata['version']:
             raise SourceFileError('INVALID_DRIVE_METADATA')
@@ -223,7 +225,7 @@ class SourceGoogleDriveFileReader:
             raise SourceFileError('DRIVE_BUCKET_NOT_ALLOWED')
         file_id, filename = self._reference(object_key)
         deadline = self.clock() + self.settings.source_drive_total_seconds
-        temporary = tempfile.TemporaryFile(mode='w+b')
+        memory = BytesIO()
         try:
             with self._session() as session:
                 before = self._metadata(session, file_id, deadline, cancelled)
@@ -242,7 +244,7 @@ class SourceGoogleDriveFileReader:
                         downloaded += len(block)
                         if downloaded > size:
                             raise SourceFileError('DRIVE_SIZE_MISMATCH')
-                        temporary.write(block)
+                        memory.write(block)
                     if downloaded != size:
                         raise SourceFileError('DRIVE_SIZE_MISMATCH', transient=True)
                 finally:
@@ -252,10 +254,10 @@ class SourceGoogleDriveFileReader:
                     raise SourceFileError('DRIVE_FILE_CHANGED')
                 self._validate_blob(after, filename)
                 self._inside_root(session, after, self.roots[bucket], deadline, cancelled)
-            temporary.seek(0)
-            return temporary  # ImportService still verifies SOURCE SHA-256 before publication.
+            memory.seek(0)
+            return memory
         except BaseException:
-            temporary.close()
+            memory.close()
             raise
 
     def revision(self, bucket, object_key, *, cancelled=None):
@@ -275,3 +277,50 @@ class SourceGoogleDriveFileReader:
             raise SourceFileError('DRIVE_BUCKET_NOT_ALLOWED')
         file_id, _ = self._reference(object_key)
         return f'https://drive.google.com/file/d/{file_id}/view'
+
+    def viewer_reference(self, bucket, object_key):
+        """Return Drive's view link without downloading the file contents."""
+        if bucket not in self.roots:
+            raise SourceFileError('DRIVE_BUCKET_NOT_ALLOWED')
+        file_id, filename = self._reference(object_key)
+        deadline = self.clock() + self.settings.source_drive_total_seconds
+        with self._session() as session:
+            before = self._metadata(session, file_id, deadline)
+            self._validate_viewer_file(before, filename)
+            self._inside_root(session, before, self.roots[bucket], deadline)
+            after = self._metadata(session, file_id, deadline)
+            self._validate_viewer_file(after, filename)
+            self._inside_root(session, after, self.roots[bucket], deadline)
+        if any(before.get(key) != after.get(key)
+               for key in ('version', 'name', 'size', 'mimeType', 'parents')):
+            raise SourceFileError('DRIVE_FILE_CHANGED')
+        return {
+            'source_file_id': file_id,
+            'file_name': after['name'],
+            'mime_type': after['mimeType'],
+            'revision': after['version'],
+            'viewer_url': f'https://drive.google.com/file/d/{file_id}/view',
+            'embedded_url': f'https://drive.google.com/file/d/{file_id}/preview',
+        }
+
+    def _validate_viewer_file(self, metadata, filename):
+        mime = metadata.get('mimeType')
+        if mime == FOLDER or mime == 'application/vnd.google-apps.shortcut':
+            raise SourceFileError('DRIVE_SHORTCUT_FORBIDDEN')
+        if not isinstance(mime, str) or not mime:
+            raise SourceFileError('INVALID_DRIVE_METADATA')
+        try:
+            validator = self.formats.find_validator(filename)
+        except Exception:
+            raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT') from None
+        if mime not in validator.mime_types:
+            raise SourceFileError('DRIVE_MIME_MISMATCH')
+        expected_name = self.filename_aliases.get(f"files/{metadata.get('id')}/{filename}", filename)
+        if self.filename_policy == 'exact' and metadata.get('name') != expected_name:
+            raise SourceFileError('DRIVE_FILENAME_MISMATCH')
+        if self.filename_policy == 'canonical_id':
+            _, actual_name = self._reference(f"files/{metadata.get('id')}/{metadata.get('name')}")
+            if actual_name.rsplit('.', 1)[-1].lower() != filename.rsplit('.', 1)[-1].lower():
+                raise SourceFileError('DRIVE_FILENAME_MISMATCH')
+        if not isinstance(metadata.get('version'), str) or not metadata['version']:
+            raise SourceFileError('INVALID_DRIVE_METADATA')

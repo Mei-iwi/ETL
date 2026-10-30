@@ -39,6 +39,8 @@ class OCRWorker:
                 self._tasks_since_reconcile = 0
                 if self.reconcile():
                     return True
+            if self.pipeline.schedule_authorized_source_job():
+                return True
             task = self.pipeline.claim(worker_id)
 
             if task is None:

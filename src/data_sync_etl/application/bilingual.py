@@ -349,6 +349,7 @@ class BilingualService:
             version = repo.get("resource_versions", version_id)
             if not version:
                 raise DomainError("Resource version not found")
+            resource = repo.get('master_learning_resources', version['resource_id'])
             jobs = repo.find(
                 "ocr_jobs",
                 {"resource_version_id": version_id},
@@ -397,6 +398,7 @@ class BilingualService:
         result = {
             "resource_version_id": version_id,
             "resource_id": version["resource_id"],
+            "source_backed": bool(resource and resource.get('source_origin') == 'POSTGRESQL'),
             "source_hash": version["source_hash"],
             "original_filename": (version.get("processing_options") or {}).get("original_filename"),
             "original_file_url": f"/api/v1/resource-versions/{version_id}/processing-source",

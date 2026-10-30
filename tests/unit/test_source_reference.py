@@ -72,7 +72,7 @@ def test_cleanup_failure_and_no_legacy_fallback(importing):
 def test_source_mutates_during_processing_blocks_results(importing):
     c, rows, _ = importing
     row = discover_and_import(c)
-    with pytest.raises(Exception, match='CONTENT_NOT_AVAILABLE'):
+    with pytest.raises(Exception, match='SOURCE_CAPABILITY_BLOCKED'):
         c.ocr.create_job(row['target_version_id'])
     rows[0]['source_hash'] = '0' * 64
     with pytest.raises(SourceFileError, match='SOURCE_VERSION_MUTATED'):
@@ -108,6 +108,15 @@ def source_viewer(searchable, tmp_path, monkeypatch):
                   parent_version_id=None, storage_bucket='books', storage_object_key='test.pdf', source_hash=version['source_hash'],
                   source_lifecycle_status='APPROVED', updated_at=now())
     monkeypatch.setattr(c.source, 'get_version', lambda _: dict(source), raising=False)
+    from data_sync_etl.adapters.source.registry import ConfiguredSourceRegistry
+    from data_sync_etl.domain.source_registry import SourceCapabilities, SourceRegistration
+    locator = c.source.locator('resources', '__registry_probe__')
+    registration = SourceRegistration(source_id='SRC_DEFAULT', backend=locator.backend,
+        namespace=locator.namespace, adapter_type=type(c.source).__name__,
+        capabilities=SourceCapabilities(read_metadata=True, exact_resource_lookup=True,
+                                        exact_version_lookup=True))
+    c.source_registry = ConfiguredSourceRegistry([(registration, c.source)])
+    c.source_resolver.source_registry = c.source_registry
     with c.uow() as repo:
         repo.update('master_learning_resources', version['resource_id'], {'source_origin': 'POSTGRESQL'})
         repo.insert('source_file_imports', {**{k: v for k, v in source.items() if k not in ('parent_version_id', 'updated_at')},
@@ -259,7 +268,7 @@ def test_new_source_concurrent_read_microbenchmark(importing, tmp_path):
     c, _, _ = importing
     row = discover_and_import(c)
     ref = c.source_resolver.resolve(row['target_version_id'])
-    with pytest.raises(SourceFileError, match='EXTERNAL_SOURCE_CONTENT_DISABLED'):
+    with pytest.raises(SourceFileError, match='SOURCE_CAPABILITY_BLOCKED'):
         with c.source_resolver.open_verified_stream(ref):
             pass
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
@@ -307,7 +316,7 @@ def test_external_source_is_never_ocr_processed(importing):
     from data_sync_etl.domain.core import DomainError
     c, _, _ = importing
     row = discover_and_import(c)
-    with pytest.raises(DomainError, match='CONTENT_NOT_AVAILABLE'):
+    with pytest.raises(DomainError, match='SOURCE_CAPABILITY_BLOCKED'):
         c.ocr.create_job(row['target_version_id'])
     with c.uow() as repo:
         assert repo.count('ocr_jobs', {}) == 0
@@ -359,7 +368,7 @@ async def test_source_response_fails_before_opening_or_spooling_bytes(source_vie
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
 
-def test_drive_cancel_closes_transport_and_spool(monkeypatch):
+def test_drive_cancel_closes_transport_and_memory_buffer(monkeypatch):
     from threading import Event
 
     from test_source_google_drive import DriveHTTP, reader
@@ -368,12 +377,12 @@ def test_drive_cancel_closes_transport_and_spool(monkeypatch):
     http = DriveHTTP(b'fixture text', name='sample.txt', mime='text/plain')
     cancelled = Event()
     get = http.get
-    temporary_file = module.tempfile.TemporaryFile
-    spools = []
-    def temporary(*args, **kwargs):
-        spool = temporary_file(*args, **kwargs)
-        spools.append(spool)
-        return spool
+    memory_factory = module.BytesIO
+    buffers = []
+    def memory_buffer(*args, **kwargs):
+        buffer = memory_factory(*args, **kwargs)
+        buffers.append(buffer)
+        return buffer
     def response(*args, **kwargs):
         result = get(*args, **kwargs)
         if kwargs['params'].get('alt') == 'media':
@@ -384,11 +393,11 @@ def test_drive_cancel_closes_transport_and_spool(monkeypatch):
                     yield block
             result.iter_content = interrupted
         return result
-    monkeypatch.setattr(module.tempfile, 'TemporaryFile', temporary)
+    monkeypatch.setattr(module, 'BytesIO', memory_buffer)
     http.get = response
     with pytest.raises(SourceFileError, match='SOURCE_REQUEST_CANCELLED'):
         reader(http).open_stream('DRIVE', 'files/blob/sample.txt', cancelled=cancelled)
-    assert spools and all(spool.closed for spool in spools)
+    assert buffers and all(buffer.closed for buffer in buffers)
     assert http.closed and all(response.closed for response in http.responses)
 
 
@@ -422,8 +431,63 @@ def test_source_info_disabled_reports_policy_code_without_source_io(source_viewe
 def test_source_tesseract_scratch_stays_in_leased_attempt(importing, monkeypatch):
     c, rows, original = importing
     row = discover_and_import(c)
-    with pytest.raises(Exception, match='CONTENT_NOT_AVAILABLE'):
+    with pytest.raises(Exception, match='SOURCE_CAPABILITY_BLOCKED'):
         c.ocr.create_job(row['target_version_id'])
     assert not original.with_name('sample.png').exists()
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
     assert not list((c.storage.root / 'resources').rglob('*'))
+
+
+def test_source_viewer_and_ocr_routes_use_verified_links_and_derived_text(source_viewer):
+    from types import SimpleNamespace
+
+    from data_sync_etl.adapters.source.registry import ConfiguredSourceRegistry
+    from data_sync_etl.domain.source_ids import source_identity
+    from data_sync_etl.domain.source_registry import SourceCapabilities
+    from tests.unit.test_resource_file import client
+
+    c, version, _, _ = source_viewer
+    identity = source_identity(c.source.locator('resources', version['resource_id']))
+    with c.uow() as repo:
+        repo.update('master_learning_resources', version['resource_id'], {
+            'source_identity_version': identity.locator.version, 'source_backend': identity.locator.backend,
+            'source_namespace': identity.locator.namespace, 'source_entity_type': identity.locator.entity_type,
+            'source_record_key': identity.locator.source_record_id, 'source_identity_hash': identity.digest})
+        imported = repo.find('source_file_imports', {'target_version_id': version['id']})[0]
+        repo.update('source_file_imports', imported['id'], {'source_system': 'SRC_DEFAULT'})
+    registration = c.source_registry.registrations()[0].model_copy(update={
+        'capabilities': SourceCapabilities(read_metadata=True, read_content=True,
+            process_content=True, index_derived_content=True, exact_resource_lookup=True,
+            exact_version_lookup=True, file_reference_lookup=True, external_viewer=True),
+        'viewer_hosts': ('drive.google.com',),
+    })
+    registry = ConfiguredSourceRegistry([(registration, c.source)])
+    c.source_registry = c.source_open.registry = c.source_router.registry = registry
+    c.source_resolver.source_registry = registry
+    c.search.source_content_authorizer = c.source_resolver.derived_index_authorized
+    c.indexing.source_content_authorizer = c.source_resolver.derived_index_authorized
+    c.source_open.file_sources = SimpleNamespace(viewer_reference=lambda *a: {
+        'source_file_id': 'verified-file', 'file_name': 'test.pdf', 'mime_type': 'application/pdf',
+        'viewer_url': 'https://drive.google.com/file/d/verified-file/view',
+        'embedded_url': 'https://drive.google.com/file/d/verified-file/preview',
+    })
+    with client(c) as api:
+        for suffix in ('file', 'processing-source'):
+            response = api.get(f"/api/v1/resource-versions/{version['id']}/{suffix}", follow_redirects=False)
+            assert response.status_code == 307, response.text
+            assert response.headers['location'].endswith('/view')
+        response = api.get(f"/api/v1/resource-versions/{version['id']}/processing-source?embedded=true", follow_redirects=False)
+        assert response.status_code == 307 and response.headers['location'].endswith('/preview')
+        response = api.get(f"/api/v1/resource-versions/{version['id']}/source-info")
+        assert response.status_code == 200 and response.json()['can_open_original'] is True
+        assert response.json()['original_url'].endswith('/view')
+        response = api.get(f"/api/v1/resource-versions/{version['id']}/bilingual?include_items=false")
+        assert response.status_code == 200, response.text
+        assert response.json()['source_backed'] is True
+        assert response.json()['summary']['total'] > 0
+        response = api.get(f"/api/v1/resource-versions/{version['id']}/file?view=text")
+        assert response.status_code == 200 and response.text
+        with c.uow() as repo:
+            repo.update('master_learning_resources', version['resource_id'], {'is_active': False})
+        response = api.get(f"/api/v1/resource-versions/{version['id']}/file", follow_redirects=False)
+        assert response.status_code == 404 and 'location' not in response.headers

@@ -73,6 +73,8 @@ class SourceBackendStatus(BaseModel):
 class MasterSyncStatusResponse(BaseModel):
     file_sync_supported: bool = False
     file_sync_error: str | None = "BLOCKED_SOURCE_STORAGE"
+    remote_content_processing_supported: bool = False
+    derived_content_index_supported: bool = False
     file_worker_healthy: bool = False
     file_backends: dict[str, SourceBackendStatus] = Field(default_factory=dict)
     auto_supported: bool
@@ -130,6 +132,8 @@ class SourceSyncFilesResponse(BaseModel):
     total_pages: int | None = None
     file_sync_supported: bool = False
     file_sync_error: str | None = "BLOCKED_SOURCE_STORAGE"
+    remote_content_processing_supported: bool = False
+    derived_content_index_supported: bool = False
     file_worker_healthy: bool = False
     file_backends: dict[str, SourceBackendStatus] = Field(default_factory=dict)
 

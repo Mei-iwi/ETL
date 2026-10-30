@@ -3,6 +3,7 @@ from hashlib import sha256
 import pymupdf
 import pytest
 
+from data_sync_etl.adapters.source.registry import ConfiguredSourceRegistry
 from data_sync_etl.adapters.storage.source_local import SourceFileError, SourceLocalFileReader
 from data_sync_etl.application.source_file_import import (
     METADATA_ONLY_BUCKET,
@@ -10,6 +11,7 @@ from data_sync_etl.application.source_file_import import (
     SourceImportConflict,
 )
 from data_sync_etl.domain.core import now
+from data_sync_etl.domain.source_registry import SourceCapabilities, SourceRegistration
 from data_sync_etl.main import create_app
 from tests.local_admin_client import TestClient
 
@@ -49,6 +51,16 @@ def importing(container, tmp_path, monkeypatch):
     monkeypatch.setattr(container.source, "version_page", page, raising=False)
     monkeypatch.setattr(container.source, "get_version", lambda id: next(
         (dict(r) for r in rows if r["source_version_id"] == id), None), raising=False)
+    # The fake exact-version reader is an explicit test grant; production defaults fail closed.
+    locator = container.source.locator('resources', '__registry_probe__')
+    registration = SourceRegistration(
+        source_id='SRC_DEFAULT', backend=locator.backend, namespace=locator.namespace,
+        adapter_type=type(container.source).__name__, capabilities=SourceCapabilities(
+            read_metadata=True, exact_resource_lookup=True, exact_version_lookup=True))
+    registry = ConfiguredSourceRegistry([(registration, container.source)])
+    container.source_registry = registry
+    container.source_resolver.source_registry = registry
+    container.source_file_import.source_registry = registry
     yield container, rows, path
 
 
@@ -332,7 +344,7 @@ def test_ocr_manual_retry_keeps_file_and_job(importing, monkeypatch):
     assert before['processing_job_id'] is None and not before['retry_eligible']
     with pytest.raises(SourceImportConflict, match='EXTERNAL_SOURCE_CONTENT_DISABLED'):
         c.source_file_import.retry(row['id'])
-    with pytest.raises(Exception, match='CONTENT_NOT_AVAILABLE'):
+    with pytest.raises(SourceFileError, match='SOURCE_CAPABILITY_BLOCKED'):
         c.ocr.create_job(row['target_version_id'])
     after = c.source_file_import.list_files()["items"][0]
     assert after['import_status'] == 'METADATA_ONLY' and not after['retry_eligible']

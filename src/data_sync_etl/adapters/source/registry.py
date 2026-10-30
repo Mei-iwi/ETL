@@ -52,7 +52,7 @@ class ConfiguredSourceRegistry:
             raise DomainError('SOURCE_REGISTRY_NAMESPACE_UNKNOWN')
         if not match.enabled:
             raise DomainError('SOURCE_REGISTRY_SOURCE_DISABLED')
-        if capability not in ('read_metadata', 'read_content', 'exact_resource_lookup',
+        if capability not in ('read_metadata', 'read_content', 'process_content', 'index_derived_content', 'exact_resource_lookup',
                                'exact_version_lookup', 'file_reference_lookup', 'external_viewer',
                                'remote_search', 'write_metadata'):
             raise DomainError('SOURCE_CAPABILITY_INVALID')
@@ -66,7 +66,7 @@ class ConfiguredSourceRegistry:
             raise DomainError('SOURCE_REGISTRY_NAMESPACE_UNKNOWN')
         if not match.enabled:
             raise DomainError('SOURCE_REGISTRY_SOURCE_DISABLED')
-        if capability not in ('read_metadata', 'read_content', 'exact_resource_lookup',
+        if capability not in ('read_metadata', 'read_content', 'process_content', 'index_derived_content', 'exact_resource_lookup',
                                'exact_version_lookup', 'file_reference_lookup', 'external_viewer',
                                'remote_search', 'write_metadata'):
             raise DomainError('SOURCE_CAPABILITY_INVALID')

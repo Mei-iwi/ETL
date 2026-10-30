@@ -6,6 +6,8 @@ canonical SOURCE eligibility; HTTP additionally retains SearchAccess/index gates
 
 import re
 from contextlib import contextmanager
+from hashlib import sha256
+from io import BytesIO
 from pathlib import PurePosixPath
 
 from data_sync_etl.domain.core import DomainError, SourceFileError
@@ -16,20 +18,36 @@ SOURCE_METADATA_ONLY_BUCKET = '__SOURCE_METADATA_ONLY__'
 
 
 class SourceFileResolver:
-    def __init__(self, uow, source, files, storage, formats, settings, temporary):
+    def __init__(self, uow, source, files, storage, formats, settings, temporary, source_registry=None):
         self.uow, self.source, self.files = uow, source, files
         self.storage, self.formats, self.settings, self.temporary = storage, formats, settings, temporary
+        self.source_registry = source_registry
 
     def _enabled(self):
         if not self.settings.source_reference_enabled:
             raise SourceFileError('SOURCE_REFERENCE_DISABLED')
 
+    def _source_adapter(self, source_id):
+        if self.source_registry is None:
+            return self.source
+        registrations = self.source_registry.registrations()
+        resolved = source_id
+        if resolved == 'postgresql' and len(registrations) == 1:
+            resolved = registrations[0].source_id
+        if resolved in {item.source_id for item in registrations}:
+            try:
+                return self.source_registry.adapter_for_source_id(resolved, 'exact_version_lookup')
+            except DomainError:
+                raise SourceFileError('SOURCE_CAPABILITY_BLOCKED') from None
+        return self.source
+
     def _canonical(self, row):
         self._enabled()
-        if row['source_system'] != 'postgresql' or not hasattr(self.source, 'get_version'):
+        adapter = self._source_adapter(row['source_system'])
+        if not hasattr(adapter, 'get_version'):
             raise SourceFileError('BLOCKED_SOURCE_MAPPING')
         try:
-            source = self.source.get_version(row['source_version_id'])
+            source = adapter.get_version(row['source_version_id'])
         except SourceFileError:
             raise
         except Exception:
@@ -46,10 +64,11 @@ class SourceFileResolver:
     def _canonical_metadata(self, row):
         """Validate source version metadata without resolving/storing its file path."""
         self._enabled()
-        if row['source_system'] != 'postgresql' or not hasattr(self.source, 'get_version'):
+        adapter = self._source_adapter(row['source_system'])
+        if not hasattr(adapter, 'get_version'):
             raise SourceFileError('BLOCKED_SOURCE_MAPPING')
         try:
-            source = self.source.get_version(row['source_version_id'])
+            source = adapter.get_version(row['source_version_id'])
         except SourceFileError:
             raise
         except Exception:
@@ -70,6 +89,7 @@ class SourceFileResolver:
         """Require the bounded SOURCE ancestry and MASTER parent chain to match."""
         current_source = source
         current_version = version
+        adapter = self._source_adapter(row['source_system'])
         seen = {source.get('source_version_id')}
         for _ in range(128):
             source_parent_id = current_source.get('parent_version_id')
@@ -82,7 +102,7 @@ class SourceFileResolver:
                 raise SourceFileError('BLOCKED_SOURCE_MAPPING')
             seen.add(source_parent_id)
             try:
-                parent = self.source.get_version(source_parent_id)
+                parent = adapter.get_version(source_parent_id)
             except SourceFileError:
                 raise
             except Exception:
@@ -112,6 +132,10 @@ class SourceFileResolver:
         source = (self._canonical_metadata(row) if metadata_only else self._canonical(row)) if row else None
         bucket = row['storage_bucket'] if row else version['storage_bucket']
         key = row['storage_object_key'] if row else version['storage_object_key']
+        if metadata_only and source:
+            bucket, key = source.get('storage_bucket'), source.get('storage_object_key')
+            if not isinstance(bucket, str) or not bucket or not isinstance(key, str) or not key:
+                raise SourceFileError('SOURCE_FILE_REFERENCE_UNAVAILABLE')
         if '://' in bucket or '://' in key:
             raise SourceFileError('INVALID_SOURCE_LINK')
         if not re.fullmatch('[0-9a-fA-F]{64}', version['source_hash']):
@@ -131,8 +155,72 @@ class SourceFileResolver:
             provider=provider, bucket=bucket, opaque_locator=key,
             filename=PurePosixPath(key).name,
             mime='text/csv' if validator.extension == '.csv' else sorted(validator.mime_types)[0],
-            expected_sha256=version['source_hash'].lower(), source_snapshot=source,
+            expected_sha256=version['source_hash'].lower(),
+            source_id=row['source_system'] if row else None, source_snapshot=source,
         )
+
+    def _capability_source_id(self, ref):
+        source_id = ref.source_id
+        if self.source_registry is None:
+            raise SourceFileError('SOURCE_CAPABILITY_BLOCKED')
+        registrations = self.source_registry.registrations()
+        if source_id in {item.source_id for item in registrations}:
+            return source_id
+        if source_id == 'postgresql' and len(registrations) == 1:
+            return registrations[0].source_id
+        raise SourceFileError('SOURCE_CAPABILITY_BLOCKED')
+
+    def require_content_capabilities(self, ref, *, index=False):
+        if ref.ownership != 'SOURCE_BACKED':
+            return
+        self._enabled()
+        source_id = self._capability_source_id(ref)
+        try:
+            for capability in ('read_content', 'process_content'):
+                self.source_registry.adapter_for_source_id(source_id, capability)
+            if index:
+                self.source_registry.adapter_for_source_id(source_id, 'index_derived_content')
+        except DomainError as exc:
+            code = str(exc).split(':', 1)[0]
+            raise SourceFileError(code if code.startswith('SOURCE_') else 'SOURCE_CAPABILITY_BLOCKED') from None
+
+    def derived_index_authorized(self, version_id, *, access):
+        """Check retrieval grants, SOURCE eligibility and current registry policy."""
+        from data_sync_etl.domain.metadata_search import metadata_allowed
+        from data_sync_etl.domain.search_access import denied
+        with self.uow() as repo:
+            version = repo.get('resource_versions', version_id)
+            resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+            if not version or not resource:
+                return False
+            if resource.get('source_origin') == 'LOCAL':
+                return True
+            rows = repo.find('source_file_imports', {'target_version_id': version_id}, limit=2)
+            if (resource.get('source_origin') != 'POSTGRESQL'
+                    or resource.get('publication_status') != 'PUBLISHED'
+                    or not resource.get('is_active') or resource_deleted(resource)
+                    or denied(resource) or denied(version)
+                    or not metadata_allowed(resource, version, access)
+                    or len(rows) != 1
+                    or rows[0].get('status') not in ('PROCESSING', 'IMPORTED', 'METADATA_ONLY')
+                    or rows[0].get('resource_id') != resource['id']
+                    or rows[0].get('source_hash', '').lower() != version.get('source_hash', '').lower()
+                    or not rows[0].get('source_resource_active', True)
+                    or rows[0].get('source_lifecycle_status') not in self.settings.source_file_allowed_statuses
+                    or rows[0].get('last_error_code') in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING')):
+                return False
+            source_id = rows[0]['source_system']
+        reference = ResolvedFileReference(
+            ownership='SOURCE_BACKED', target_version_id=version_id, resource_id=resource['id'],
+            source_version_id=rows[0]['source_version_id'], provider='external', bucket='',
+            opaque_locator='', filename='', mime='', expected_sha256=version['source_hash'].lower(),
+            source_id=source_id,
+        )
+        try:
+            self.require_content_capabilities(reference, index=True)
+            return True
+        except SourceFileError:
+            return False
 
     def resolve(self, version_id):
         with self.uow() as repo:
@@ -176,7 +264,7 @@ class SourceFileResolver:
 
     def _recheck(self, ref):
         if ref.ownership == 'SOURCE_BACKED':
-            row = {**ref.source_snapshot, 'source_system': 'postgresql'}
+            row = {**ref.source_snapshot, 'source_system': ref.source_id or 'postgresql'}
             current = self._canonical(row)
             if current != ref.source_snapshot:
                 raise SourceFileError('SOURCE_VERSION_MUTATED')
@@ -203,10 +291,51 @@ class SourceFileResolver:
                 raise SourceFileError('FILE_NOT_FOUND')
             yield self.storage.get_local_path(ref.bucket, ref.opaque_locator)
             return
-        # External SOURCE files are metadata-only. Keep this guard at the
-        # shared byte-access boundary so legacy HTTP, preview, OCR, and import
-        # callers cannot reach provider streams or temporary files.
+        # SOURCE bytes must never be materialized as a local file.
         raise SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED')
+
+    @contextmanager
+    def open_verified_stream(self, ref, *, cancelled=None, index=False):
+        if ref.ownership == 'LOCAL_OWNED':
+            with self.temporary_path(ref, cancelled=cancelled) as path, path.open('rb') as stream:
+                yield stream
+            return
+        self.require_content_capabilities(ref, index=index)
+        self._recheck(ref)
+        validator = self.formats.find_validator(ref.filename)
+        maximum = min(validator.max_size_bytes, self.settings.source_content_max_bytes)
+        before = self._revision(ref, cancelled)
+        source = ref.source_snapshot or {}
+        expected_size = source.get('source_file_size')
+        if expected_size is not None and (type(expected_size) is not int or not 0 < expected_size <= maximum):
+            raise SourceFileError('FILE_TOO_LARGE' if isinstance(expected_size, int) else 'INVALID_SOURCE_METADATA')
+        stream = self.files.open_stream(ref.bucket, ref.opaque_locator,
+                                        **({'cancelled': cancelled} if cancelled is not None else {}))
+        buffer = BytesIO()
+        try:
+            observed = 0
+            while True:
+                self._check_cancelled(cancelled)
+                block = stream.read(min(256 * 1024, maximum + 1 - observed))
+                if not block:
+                    break
+                observed += len(block)
+                if observed > maximum:
+                    raise SourceFileError('FILE_TOO_LARGE')
+                buffer.write(block)
+            if expected_size is not None and observed != expected_size:
+                raise SourceFileError('SOURCE_SIZE_MISMATCH')
+            if sha256(buffer.getbuffer()).hexdigest() != ref.expected_sha256:
+                raise SourceFileError('SOURCE_HASH_MISMATCH')
+            after = self._revision(ref, cancelled)
+            if before is not None and after is not None and before != after:
+                raise SourceFileError('SOURCE_VERSION_MUTATED')
+            self._recheck(ref)
+            buffer.seek(0)
+            yield buffer
+        finally:
+            stream.close()
+            buffer.close()
 
     def display_reference(self, ref):
         if ref.ownership != 'LOCAL_OWNED':
@@ -216,8 +345,3 @@ class SourceFileResolver:
         self._recheck(ref)
         return {'ownership': ref.ownership, 'provider': ref.provider,
                 'availability': 'UNKNOWN', 'can_open_original': False, 'original_url': None}
-
-    @contextmanager
-    def open_verified_stream(self, ref):
-        with self.temporary_path(ref) as path, path.open('rb') as stream:
-            yield stream

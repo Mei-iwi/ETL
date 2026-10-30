@@ -17,6 +17,7 @@ class SourceFileReference(BaseModel):
     revision: str | None = Field(default=None, max_length=255)
     access_status: Literal['ALLOWED', 'AUTH_REQUIRED', 'DENIED', 'UNAVAILABLE', 'METADATA_ONLY']
     viewer_url: str | None = Field(default=None, max_length=2048, repr=False)
+    embedded_url: str | None = Field(default=None, max_length=2048, repr=False)
 
     @field_validator('file_name')
     @classmethod

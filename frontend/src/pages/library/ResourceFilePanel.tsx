@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { FileText, Eye, X, Download, ExternalLink, RotateCw, Check } from 'lucide-react'
+import { FileText, Eye, X, Download, ExternalLink, RotateCw, Check, LoaderCircle } from 'lucide-react'
 import styles from './LibraryResourceDetailPage.module.css'
 import { SearchContext } from '../search/SearchContext'
-import { canOpenFile, fileResponseError, trustedViewerHref } from './fileReadiness'
+import { canOpenFile, embeddedSourceUrl, fileResponseError, trustedViewerHref } from './fileReadiness'
 import type { FileIndexStatus, SourceOpen } from './fileReadiness'
 import { MEDIA_PREVIEW_MAX_BYTES, readPreviewBlob } from './previewBody'
 import { SpreadsheetPreview } from './SpreadsheetPreview'
@@ -30,7 +30,9 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
     const [readiness, setReadiness] = useState<{ id: string; status: FileIndexStatus } | null>(null)
     const [statusError, setStatusError] = useState<{ id: string; message: string } | null>(null)
     const [attempt, setAttempt] = useState(0)
-    const [sourceOpen, setSourceOpen] = useState<{ id: string; value: SourceOpen } | null>(null)
+    const [sourceOpen, setSourceOpen] = useState<{ id: string; attempt: number; value: SourceOpen } | null>(null)
+    const [sourceOpenError, setSourceOpenError] = useState<{ id: string; attempt: number; message: string } | null>(null)
+    const [sourceViewer, setSourceViewer] = useState<{ id: string; url: string } | null>(null)
     useEffect(() => {
         const controller = new AbortController()
         void fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/versions`, { signal: controller.signal })
@@ -51,16 +53,33 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
     const status = readiness?.id === selected ? readiness.status : null
     const metadataOnly = status?.metadata_only === true
     const ready = !sourceOwned && valid && !metadataOnly && canOpenFile(status) && statusError?.id !== selected
+    const currentSourceOpen = sourceOpen?.id === selected && sourceOpen.attempt === attempt ? sourceOpen.value : null
+    const currentSourceError = sourceOpenError?.id === selected && sourceOpenError.attempt === attempt ? sourceOpenError.message : null
+    const sourcePending = sourceOwned && valid && !currentSourceOpen && !currentSourceError
+    const sourceFiles = currentSourceOpen?.status === 'EXTERNAL_VIEWER_AVAILABLE'
+        ? currentSourceOpen.files.filter(file => file.access_status === 'ALLOWED' && trustedViewerHref(file.viewer_url)) : []
+    const activeSourceFile = valid && sourceViewer?.id === selected
+        ? sourceFiles.find(file => embeddedSourceUrl(file) === sourceViewer.url) : null
     useEffect(() => {
         if (!sourceOwned || !selected) { setSourceOpen(null); return }
         const controller = new AbortController()
-        void fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/open?version_id=${encodeURIComponent(selected)}`, { signal: controller.signal })
+        void fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/open?version_id=${encodeURIComponent(selected)}`, {
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]),
+        })
             .then(async response => {
-                if (!response.ok) throw new Error('Không thể kiểm tra khả năng mở tại kho nguồn.')
+                if (!response.ok) throw new Error(await fileResponseError(response))
                 const value: SourceOpen = await response.json()
-                if (!controller.signal.aborted && value.version_id === selected)
-                    setSourceOpen({ id: selected, value })
-            }).catch(() => { if (!controller.signal.aborted) setSourceOpen(null) })
+                if (value.version_id !== selected) throw new Error('Link xem tệp không khớp phiên bản được chọn. Hãy kiểm tra lại.')
+                if (!controller.signal.aborted) {
+                    setSourceOpen({ id: selected, attempt, value })
+                    setSourceOpenError(null)
+                }
+            }).catch(reason => { if (!controller.signal.aborted) {
+                setSourceOpen(null)
+                setSourceOpenError({ id: selected, attempt, message: reason instanceof Error && reason.name === 'TimeoutError'
+                    ? 'Quá thời gian tải link xem tệp. Hãy kiểm tra lại.'
+                    : reason instanceof Error ? reason.message : 'Không thể mở tệp nguồn.' })
+            } })
         return () => controller.abort()
     }, [resourceId, selected, sourceOwned, attempt])
     useEffect(() => {
@@ -102,7 +121,7 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
                 : 'Chưa có tệp học liệu.'}</p>}
         {versions.length > 0 && <div className={styles.fileToolbar}>
             <label>Phiên bản <select aria-label="Phiên bản tệp" value={selected}
-                onChange={event => { setSelected(event.target.value); setOpen(false) }}>
+                onChange={event => { setSelected(event.target.value); setOpen(false); setSourceViewer(null) }}>
                 {versions.map(row => <option value={row.id} key={row.id}>Phiên bản {row.version_number} · {new Date(row.created_at).toLocaleDateString('vi-VN')}</option>)}
             </select></label>
             <div className={styles.fileActions}>
@@ -110,29 +129,46 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
                 onClick={() => setOpen(value => !value)}>
                 {open ? <X size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{open ? 'Đóng tệp' : 'Xem tệp'}</button>}
             {ready && <a className={styles.secondaryButton} href={`${url}?download=true`} download><Download size={15} aria-hidden="true" />Tải tệp</a>}
-            {sourceOwned && sourceOpen?.id === selected && sourceOpen.value.status === 'EXTERNAL_VIEWER_AVAILABLE'
-                && sourceOpen.value.files.map(file => {
+            {sourceOwned && valid && sourceFiles.length === 0 && <button className={styles.historyLink} type="button" disabled
+                aria-busy={sourcePending} title={sourcePending ? 'Đang lấy link xem tệp từ nguồn' : 'Chưa có link xem tệp được xác minh từ nguồn'}>
+                {sourcePending ? <LoaderCircle size={15} className={styles.loadingSpinner} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
+                {sourcePending ? 'Đang tải…' : 'Xem tệp'}</button>}
+            {sourceOwned && sourceFiles.map(file => {
                     const href = trustedViewerHref(file.viewer_url)
-                    return href ? <a className={styles.secondaryButton} href={href} key={file.source_file_id}
-                        target="_blank" rel="noopener noreferrer">
-                        <ExternalLink size={15} aria-hidden="true" />{file.file_name || 'Mở tại kho nguồn'}
-                    </a> : null
+                    const embeddedHref = embeddedSourceUrl(file)
+                    return href ? <span className={styles.fileActions} key={file.source_file_id}>
+                        <button className={styles.historyLink} type="button" disabled={!embeddedHref}
+                            aria-controls="source-file-preview"
+                            aria-expanded={Boolean(activeSourceFile && sourceViewer?.url === embeddedHref)}
+                            onClick={() => { if (embeddedHref) setSourceViewer(current => current?.id === selected && current.url === embeddedHref
+                                ? null : { id: selected, url: embeddedHref }) }}>
+                            <Eye size={15} aria-hidden="true" />{activeSourceFile && sourceViewer?.url === embeddedHref
+                                ? 'Đóng tệp' : 'Xem tệp'}
+                        </button>
+                        <a className={styles.secondaryButton} href={href} target="_blank" rel="noopener noreferrer" title={file.file_name || undefined}>
+                            <ExternalLink size={15} aria-hidden="true" />Xem tệp bên ngoài
+                        </a>
+                    </span> : null
                 })}
-            {valid && <button className={styles.secondaryButton} onClick={() => setAttempt(n => n + 1)}><RotateCw size={14} aria-hidden="true" />Kiểm tra lại</button>}
+            {valid && <button className={styles.secondaryButton} disabled={sourcePending}
+                onClick={() => { setSourceViewer(null); setAttempt(n => n + 1) }}><RotateCw size={14} aria-hidden="true" />Kiểm tra lại</button>}
             </div>
         </div>}
         {valid && <div role="status" className={styles.fileStatus}>
             <span className={styles.ready}><Check size={14} aria-hidden="true" />Đã tiếp nhận</span>
-            {sourceOwned ? <span className={styles.pending}>Tệp thuộc kho nguồn; ETL chỉ giữ metadata và không tải nội dung</span> : <>
+            <>
                 <span className={status?.processing_status === 'CONTENT_READY' ? styles.ready : styles.pending}>
                     Nội dung {status?.processing_status === 'CONTENT_READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}</span>
                 <span className={status?.index_status === 'READY' ? styles.ready : styles.pending}>
                     Chỉ mục {status?.index_status === 'READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}</span>
-            </>}
-            {metadataOnly && <span className={styles.pending}>Chỉ có metadata; chưa được phép đọc nội dung</span>}
+            </>
+            {sourceOwned && currentSourceOpen?.status === 'METADATA_ONLY'
+                && <span className={styles.pending}>Chỉ có metadata; kho nguồn chưa cấp quyền hoặc link xem tệp</span>}
+            {metadataOnly && <span className={styles.pending}>Nội dung đang chờ xử lý</span>}
         </div>}
+        {currentSourceError && <p role="alert" className={styles.error}>{currentSourceError}</p>}
         {statusError?.id === selected && <p role="alert" className={styles.error}>{statusError.message}</p>}
-        {sourceOwned && valid && sourceOpen?.id === selected && sourceOpen.value.status !== 'EXTERNAL_VIEWER_AVAILABLE'
+        {sourceOwned && valid && currentSourceOpen && currentSourceOpen.status !== 'EXTERNAL_VIEWER_AVAILABLE'
             && <p role="status" className={styles.message}>{({
                 SOURCE_AUTH_REQUIRED: 'Cần đăng nhập tại kho nguồn để mở học liệu.',
                 METADATA_ONLY: 'Nguồn chỉ cung cấp metadata hoặc chưa có viewer được xác minh.',
@@ -140,7 +176,12 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
                 SOURCE_OPEN_UNSUPPORTED: 'Kho nguồn chưa hỗ trợ mở học liệu từ hệ thống này.',
                 VERSION_STALE: 'Phiên bản nguồn đã thay đổi; hãy đồng bộ lại trước khi mở.',
                 ACCESS_DENIED: 'Kho nguồn từ chối quyền truy cập học liệu.',
-            } as Record<SourceOpen['status'], string>)[sourceOpen.value.status]}</p>}
+            } as Record<SourceOpen['status'], string>)[currentSourceOpen.status]}</p>}
+        {sourceOwned && activeSourceFile && sourceViewer && <div className={styles.filePreview}>
+            <p className={styles.subtitle}>{activeSourceFile.file_name || 'Nội dung học liệu'}</p>
+            <iframe id="source-file-preview" title="Xem tệp từ nguồn" src={sourceViewer.url} loading="lazy"
+                referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />
+        </div>}
         {open && ready && <FilePreview key={selected} url={url} />}
         {contextId && selected === versionId && <div className={styles.fileContext}><SearchContext id={contextId} evidence={contextEvidence} /></div>}
     </section>

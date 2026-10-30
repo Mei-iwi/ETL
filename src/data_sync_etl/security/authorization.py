@@ -60,7 +60,7 @@ def authorize(request, principal):
     if ((path in ('/api/v1/search', '/api/v1/search/page') and method == 'POST')
             or (path.startswith('/api/v1/chunks/') and path.endswith('/context') and method == 'GET')):
         return  # SearchAccess verifies explicit resource grants and eligibility.
-    if method == 'GET' and re.fullmatch(r'/api/v1/resources/[^/]+/source-resolution', path):
+    if method == 'GET' and re.fullmatch(r'/api/v1/resources/[^/]+/(source-resolution|open)', path):
         return  # SourceResolutionService validates the same published metadata policy as search.
     if ('/source-writeback' in path or path == '/api/v1/source-writeback/status'):
         # Only independently granted operators may reach the service. The
@@ -79,8 +79,7 @@ def authorize(request, principal):
             resource = repo.get('master_learning_resources', row['resource_id'])
             granted = row['resource_id'] in principal.resource_ids and owns_resource(principal, resource)
         if not granted:
-            metadata_status = (method == 'GET' and version[2] == 'index-status'
-                               and row.get('lifecycle_status') == 'METADATA_ONLY'
+            metadata_status = (method == 'GET' and version[2] in ('index-status', 'file', 'source-info', 'processing-source')
                                and row['id'] in public_metadata_version_ids(request.app.state.container, row['resource_id']))
             if not (metadata_status or (method == 'GET' and version[2] in ('file', 'source-info', 'index-status')
                     and can_read_public_file(request.app.state.container, row['id']))):

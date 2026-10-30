@@ -18,6 +18,7 @@ from data_sync_etl.domain.meaning_bags import VERSION as MEANING_VERSION
 from data_sync_etl.domain.meaning_bags import verify_meanings
 from data_sync_etl.domain.mongo_documents import normalize_keywords
 from data_sync_etl.domain.resource_deletion import resource_deleted
+from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.ports.indexing import IndexContentPort, IndexEmbeddingPort
 from data_sync_etl.ports.mongo_foundation import (
     ContentBagPort,
@@ -30,6 +31,13 @@ class IndexingService:
                  *, bags: ContentBagPort | None = None, extractor: KeywordExtractorPort | None = None):
         self.uow, self.reader, self.embedding, self.settings = uow, reader, embedding, settings
         self.bags, self.extractor = bags, extractor or UnigramKeywords()
+        self.source_content_authorizer = None
+
+    def _authorize_source_index(self, version_id):
+        if (self.source_content_authorizer is not None
+                and not self.source_content_authorizer(
+                    version_id, access=SearchAccess(scope='authenticated_admin'))):
+            raise IndexingError('SOURCE_CAPABILITY_BLOCKED', 403)
 
     def _version(self, repo, version_id):
         version = repo.get('resource_versions', version_id)
@@ -170,6 +178,7 @@ class IndexingService:
         return result
 
     def enqueue(self, version_id, *, force=False):
+        self._authorize_source_index(version_id)
         with self.uow.processing_lock(version_id) as acquired:
             if not acquired:
                 with self.uow() as repo:
@@ -213,6 +222,15 @@ class IndexingService:
             runs = (repo.index_candidates() if version_id is None else
                     [run for run in self._runs(repo, version_id) if run['status'] in ('PENDING', 'RUNNING')])
         for run in runs:
+            try:
+                self._authorize_source_index(run['resource_version_id'])
+            except IndexingError as exc:
+                with self.uow() as repo:
+                    current = repo.get('etl_stage_runs', run['id'], lock=True)
+                    if current and current['status'] in ('PENDING', 'RUNNING'):
+                        repo.update('etl_stage_runs', run['id'], {
+                            'status': 'FAILED', 'finished_at': now(), 'error_message': exc.code})
+                continue
             with self.uow.processing_lock(run['resource_version_id']) as acquired:
                 if not acquired:
                     continue

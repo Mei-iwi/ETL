@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     source_temporary_files_enabled: bool = False
     source_temp_root: Path | None = Field(default=None, repr=False)
     source_read_timeout_seconds: int = Field(default=120, ge=1, le=600)
+    source_content_max_bytes: int = Field(default=32 * 1024 * 1024, ge=1024, le=256 * 1024 * 1024)
+    source_content_max_uncompressed_bytes: int = Field(default=128 * 1024 * 1024, ge=1024, le=512 * 1024 * 1024)
     source_temp_max_concurrency: int = Field(default=4, ge=1, le=32)
     source_temp_orphan_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
     office_pdf_executable: Path | None = Field(default=None, repr=False)

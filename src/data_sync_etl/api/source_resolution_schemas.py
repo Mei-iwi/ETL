@@ -39,3 +39,4 @@ class SourceFileReferenceResponse(BaseModel):
     revision: str | None = None
     access_status: Literal['ALLOWED', 'AUTH_REQUIRED', 'DENIED', 'UNAVAILABLE', 'METADATA_ONLY']
     viewer_url: str | None = None
+    embedded_url: str | None = None
