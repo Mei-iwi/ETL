@@ -54,6 +54,16 @@ def test_bm25_expected_tf_df_length_and_nonmatching_corpus():
         'rare', {'short': docs['b'], 'long': long})['long']
 
 
+def test_bm25_explicit_corpus_df_keeps_candidate_shortlists_authorized():
+    candidate = {'hit': lexical_document(['rare'])}
+    score = bm25('rare', candidate, corpus=(3, 3, {'rare': 2}))['hit']
+    expected = math.log1p((3 - 2 + .5) / (2 + .5))
+    assert score == pytest.approx(expected)
+    assert score < bm25('rare', candidate, corpus=(3, 3, {'rare': 1}))['hit']
+    with pytest.raises(ValueError, match='document frequencies'):
+        bm25('rare', candidate, corpus=(3, 3, {'rare': 4}))
+
+
 def test_title_weight_and_exact_phrase_do_not_cross_leaf_boundaries():
     docs = {'title': lexical_document(['filler'], 'rare'),
             'body': lexical_document(['rare filler'])}

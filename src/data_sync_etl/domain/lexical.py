@@ -4,6 +4,7 @@ import math
 import re
 import unicodedata
 from collections import Counter
+from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -13,7 +14,7 @@ from data_sync_etl.domain.indexing import digest
 
 ANALYZER_VERSION = 'underthesea-8.3.0-nfc-surface-compound-alnum-v2'
 REPRESENTATION_VERSION = 'bag-lexical-tf-v1'
-RANKING_VERSION = 'bm25-concept-core-evidence-v5'
+RANKING_VERSION = 'bm25-concept-core-evidence-v6-corpus-df'
 TOKEN = re.compile(r'c\+\+|c#|\.net\b|\d+(?:\.\d+)+|[^\W_]+', re.IGNORECASE)
 SPECIAL = re.compile(r'(c\+\+|c#|\.net\b)', re.IGNORECASE)
 _ANALYSIS = ContextVar('lexical_request_analysis', default=None)
@@ -206,12 +207,26 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         for mention in expansion.recognized:
             if mention.concept_id in groups:
                 terms.difference_update(surface_tokens(mention.phrase))
-    n, total_length = (len(documents), sum(doc.length for doc in documents.values())) if corpus is None else corpus
+    corpus_df = None
+    if corpus is None:
+        n, total_length = len(documents), sum(doc.length for doc in documents.values())
+    else:
+        if (not isinstance(corpus, tuple) or len(corpus) not in (2, 3)):
+            raise ValueError('Invalid authorized BM25 corpus statistics')
+        n, total_length = corpus[:2]
+        if len(corpus) == 3:
+            corpus_df = corpus[2]
+            if not isinstance(corpus_df, Mapping):
+                raise ValueError('Invalid authorized BM25 document frequencies')
+            corpus_df = Counter(corpus_df)
     if (type(n) is not int or type(total_length) is not int or n < len(documents)
             or total_length < sum(doc.length for doc in documents.values())):
         raise ValueError('Invalid authorized BM25 corpus statistics')
+    if corpus_df is not None and any(type(value) is not int or value < 0 or value > n
+                                     for value in corpus_df.values()):
+        raise ValueError('Invalid authorized BM25 document frequencies')
     avgdl = total_length / n or 1
-    df = Counter(term for doc in documents.values() for term in doc.terms)
+    df = corpus_df if corpus_df is not None else Counter(term for doc in documents.values() for term in doc.terms)
     observed = {}
     for key, doc in documents.items():
         # Longest dictionary matches prevent a qualified phrase from becoming

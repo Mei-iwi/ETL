@@ -1067,3 +1067,9 @@ python -m data_sync_etl.cli.concepts health --root "$ETL_HOME/concept-offline-ex
 ```
 
 Bỏ `--loop` để chạy một tick; bỏ `--apply` ở `run-worker` để xem dry-run. Chế độ `--live` hiện trả `BLOCKED_LIVE`; ví dụ offline không chứng minh từ điển live đã sẵn sàng.
+
+### BoW/BM25
+
+Mỗi `ContentBag` lưu TF của từ bề mặt, độ dài tài liệu, TF riêng của tiêu đề và các đoạn theo ranh giới `ContentUnit`. BoW dùng các TF này để tính BM25 tự cài đặt (k1=1.2, b=0.75); IDF tính theo số tài liệu chứa thuật ngữ và title chỉ là phần tăng trọng số có kiểm soát. Nguồn thống kê nằm trong tập đã xác thực quyền, gồm cả tài liệu không khớp truy vấn. Khi metadata search dùng shortlist ứng viên, N, độ dài trung bình và DF vẫn lấy từ toàn bộ corpus được phép, không lấy riêng shortlist.
+
+Đây là triển khai BM25 nền tảng cùng các kiểm tra/ràng buộc của nhóm (Unicode NFC, ranh giới Bag, phrase evidence, ACL và fingerprint), không phải phát minh thuật toán BM25. Khi hợp đồng xếp hạng thay đổi, `RANKING_VERSION` được tăng; tài liệu/chỉ mục cũ không tự động được coi là đã reindex.

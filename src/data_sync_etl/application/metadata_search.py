@@ -153,6 +153,7 @@ class MetadataSearchService:
                 break
             after = cursor
         ready, lengths = set(), {field: 0 for field in SEARCH_FIELDS}
+        document_frequencies = {field: {} for field in SEARCH_FIELDS}
         for key, (_, snap) in result.items():
             row = headers.get(key, {})
             if (row.get('status') != 'READY' or row.get('template') != TEMPLATE
@@ -163,8 +164,11 @@ class MetadataSearchService:
                 continue
             ready.add(key)
             for field in SEARCH_FIELDS:
+                tokens = set(surface_tokens(snap['fields'].get(field, '')))
                 lengths[field] += len(surface_tokens(snap['fields'].get(field, '')))
-        result.ready_keys, result.lengths = ready, lengths
+                for token in tokens:
+                    document_frequencies[field][token] = document_frequencies[field].get(token, 0) + 1
+        result.ready_keys, result.lengths, result.document_frequencies = ready, lengths, document_frequencies
         result.index_fingerprint = digest(headers)
         return result
 
@@ -296,7 +300,8 @@ class MetadataSearchService:
             fields = []
             for field in SEARCH_FIELDS:
                 documents = {key: LexicalDocument.model_validate(row['lexical'][field]) for key, row in verified.items()}
-                corpus = (len(snapshots.ready_keys), snapshots.lengths[field]) if indexed else None
+                corpus = ((len(snapshots.ready_keys), snapshots.lengths[field],
+                           snapshots.document_frequencies[field]) if indexed else None)
                 scores = bm25(query, documents, dictionary=dictionary, policy=policy,
                     domain=filters.get('domain'), corpus=corpus,
                     accent_insensitive=not indexed and self.settings.search_corpus_accent_candidates_enabled,
