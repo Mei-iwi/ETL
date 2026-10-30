@@ -40,7 +40,8 @@ class DriveHTTP:
     def __init__(self, payload=b'content', name='sample.txt', mime='text/plain'):
         self.payload = payload
         self.metadata = {'blob': dict(id='blob', name=name, mimeType=mime, size=str(len(payload)),
-                                     version='1', parents=['root'], trashed=False, capabilities={'canDownload': True}),
+                                     version='1', parents=['root'], trashed=False,
+                                     capabilities={'canDownload': True}),
                          'root': dict(id='root', mimeType=FOLDER, trashed=False)}
         self.calls, self.responses, self.statuses = [], [], []
         self.after = None
@@ -85,6 +86,18 @@ def test_blob_disk_stream_closed_by_caller_and_no_secret_or_url_transport():
         assert sha256(stream.read()).hexdigest() == sha256(http.payload).hexdigest()
     assert stream.closed and http.closed and all(response.closed for response in http.responses)
     assert all(call[0] in (API + 'blob', API + 'root') for call in http.calls)
+
+
+def test_viewer_reference_returns_drive_preview_without_fetching_file_bytes():
+    http = DriveHTTP(name='book.pdf', mime='application/pdf')
+    reference = reader(http).viewer_reference('DRIVE', 'files/blob/book.pdf')
+    assert reference == {
+        'source_file_id': 'blob', 'file_name': 'book.pdf', 'mime_type': 'application/pdf',
+        'revision': '1', 'viewer_url': 'https://drive.google.com/file/d/blob/view',
+        'embedded_url': 'https://drive.google.com/file/d/blob/preview',
+    }
+    assert all(params.get('alt') != 'media' for _, params in http.calls)
+    assert all(response.closed for response in http.responses)
 
 
 def test_explicit_filename_alias_is_bound_to_file_id_and_source_name():
@@ -191,24 +204,24 @@ def test_transient_recovery_timeout_and_download_cancellation_cleanup(monkeypatc
         reader(http).open_stream('DRIVE', 'files/blob/sample.txt')
     assert len(http.calls) == 3
     import data_sync_etl.adapters.storage.source_google_drive as module
-    original = module.tempfile.TemporaryFile
-    staged = []
-    def temporary(*args, **kwargs):
+    original = module.BytesIO
+    buffers = []
+    def memory_buffer(*args, **kwargs):
         result = original(*args, **kwargs)
-        staged.append(result)
+        buffers.append(result)
         return result
-    monkeypatch.setattr(module.tempfile, 'TemporaryFile', temporary)
+    monkeypatch.setattr(module, 'BytesIO', memory_buffer)
     http = DriveHTTP()
     http.download_fault = KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
         reader(http).open_stream('DRIVE', 'files/blob/sample.txt')
-    assert staged[-1].closed and http.closed and all(r.closed for r in http.responses)
+    assert buffers[-1].closed and http.closed and all(r.closed for r in http.responses)
     r = reader(DriveHTTP())
     tick = iter([0, 1000])
     r.clock = lambda: next(tick)
     with pytest.raises(SourceFileError, match='DRIVE_TIMEOUT'):
         r.open_stream('DRIVE', 'files/blob/sample.txt')
-    assert staged[-1].closed
+    assert buffers[-1].closed
 
 
 @pytest.mark.parametrize('after', [{'version': '2'}, {'parents': ['elsewhere']}, {'trashed': True}])
@@ -219,19 +232,19 @@ def test_changed_during_download_is_not_published(after):
         reader(http).open_stream('DRIVE', 'files/blob/sample.txt')
 
 
-def test_interrupted_download_is_transient_and_temp_is_closed(monkeypatch):
+def test_interrupted_download_is_transient_and_ram_buffer_is_closed(monkeypatch):
     import data_sync_etl.adapters.storage.source_google_drive as module
-    original, staged = module.tempfile.TemporaryFile, []
-    def temporary(*args, **kwargs):
+    original, buffers = module.BytesIO, []
+    def memory_buffer(*args, **kwargs):
         result = original(*args, **kwargs)
-        staged.append(result)
+        buffers.append(result)
         return result
-    monkeypatch.setattr(module.tempfile, 'TemporaryFile', temporary)
+    monkeypatch.setattr(module, 'BytesIO', memory_buffer)
     http = DriveHTTP()
     http.download_fault = ConnectionError('PRIVATE_TOKEN')
     with pytest.raises(SourceFileError, match='DRIVE_UNAVAILABLE') as error:
         reader(http).open_stream('DRIVE', 'files/blob/sample.txt')
-    assert error.value.transient and staged[-1].closed
+    assert error.value.transient and buffers[-1].closed
     assert http.closed and all(r.closed for r in http.responses)
 
 

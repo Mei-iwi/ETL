@@ -21,7 +21,7 @@ def media_payload(extension):
 
 @pytest.mark.parametrize('extension', ['.mp3', '.mp4'])
 @pytest.mark.parametrize('invalid', [False, True])
-def test_source_media_registration_keeps_validation_no_ocr(importing, extension, invalid, monkeypatch):
+def test_source_media_registration_is_metadata_only(importing, extension, invalid, monkeypatch):
     c, rows, path = importing
     c.settings.source_metadata_media_enabled = True
     formats = FormatValidatorRegistry(media_registration=True)
@@ -31,29 +31,23 @@ def test_source_media_registration_keeps_validation_no_ocr(importing, extension,
     media.write_bytes(payload)
     rows[0].update(storage_object_key=media.name, source_hash=sha256(payload).hexdigest())
     def forbidden(*args, **kwargs):
-        pytest.fail('Media registration queued content processing')
+        pytest.fail('SOURCE media bytes must not be read or processed')
     monkeypatch.setattr(c.process_version, 'run', forbidden)
+    monkeypatch.setattr(c.source_files, 'open_stream', forbidden)
     c.source_file_import.discover_once()
     claimed = c.source_file_import.claim()
-    assert claimed is not None
-    c.source_file_import.execute(claimed)
+    assert claimed is None
     with c.uow() as repo:
-        row = repo.get('source_file_imports', claimed['id'])
+        row = repo.find('source_file_imports', {'source_version_id': rows[0]['source_version_id']})[0]
         assert row['processing_job_id'] is None
         assert not repo.find('ocr_jobs', {})
-        if invalid:
-            assert row['status'] == 'FAILED' and row['target_version_id'] is None
-            return
-        assert row['status'] == 'METADATA_ONLY' and row['last_error_code'] == 'UNSUPPORTED_SOURCE_FORMAT'
+        assert row['status'] == 'METADATA_ONLY'
         version = repo.get('resource_versions', row['target_version_id'])
-        assert version['lifecycle_status'] == 'INGESTED'
+        assert version['lifecycle_status'] == 'METADATA_ONLY'
         assert version['source_hash'] == sha256(payload).hexdigest()
         assert not repo.find('content_units', {'resource_version_id': version['id']})
-    assert c.source_file_import.claim() is None
     assert media.read_bytes() == payload
-    # The validation step above may read bytes under the existing source policy.
-    # Metadata indexing/search must NEVER call the resolver or source reader.
-    monkeypatch.setattr(c.source_files, 'open_stream', forbidden)
+    # Metadata indexing/search must never call the resolver or source reader.
     monkeypatch.setattr(c.source_resolver, 'temporary_path', forbidden)
     service = MetadataSearchService(c.uow, None, Store(), Embedding(), c.settings)
     assert service.reconcile(apply=True)['ready'] == 1
@@ -64,7 +58,7 @@ def test_source_media_registration_keeps_validation_no_ocr(importing, extension,
 
 
 @pytest.mark.parametrize('extension', ['.mp3', '.mp4'])
-def test_media_hash_failure_never_creates_version(importing, extension):
+def test_media_hash_is_identity_not_permission_to_read(importing, extension, monkeypatch):
     c, rows, path = importing
     c.settings.source_metadata_media_enabled = True
     formats = FormatValidatorRegistry(media_registration=True)
@@ -72,9 +66,15 @@ def test_media_hash_failure_never_creates_version(importing, extension):
     media = path.with_suffix(extension)
     media.write_bytes(media_payload(extension))
     rows[0].update(storage_object_key=media.name, source_hash='a' * 64)
+    monkeypatch.setattr(c.source_files, 'open_stream', lambda *_a, **_k: pytest.fail('No SOURCE media read'))
     c.source_file_import.discover_once()
     claim = c.source_file_import.claim()
-    c.source_file_import.execute(claim)
+    assert claim is None
     with c.uow() as repo:
-        row = repo.get('source_file_imports', claim['id'])
-        assert row['last_error_code'] == 'SOURCE_HASH_MISMATCH' and row['target_version_id'] is None
+        row = repo.find('source_file_imports', {'source_version_id': rows[0]['source_version_id']})[0]
+        assert row['status'] == 'METADATA_ONLY' and row['source_hash'] == 'a' * 64
+        assert row['target_version_id'] is not None
+        version = repo.get('resource_versions', row['target_version_id'])
+        assert version['lifecycle_status'] == 'METADATA_ONLY'
+        assert version['source_hash'] == 'a' * 64
+        assert repo.count('ocr_jobs', {}) == 0

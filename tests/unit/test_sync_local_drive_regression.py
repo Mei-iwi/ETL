@@ -1,92 +1,68 @@
 """Phase 03 regression: real fixture bytes, mocked Drive/auth, isolated SQLite/files."""
 
 import json
-from datetime import timedelta
 from unittest.mock import Mock
 
 import pytest
 from test_multiformat import FORMATS, sample
 from test_source_file_import import discover_and_import
 from test_source_file_import import importing as importing
-from test_source_google_drive import DriveHTTP, assert_source_format_pipeline, reader
+from test_source_google_drive import DriveHTTP, reader
 
 from data_sync_etl.adapters.storage.source_google_drive import SCOPE, SourceGoogleDriveFileReader
-from data_sync_etl.application.search import SearchService
 from data_sync_etl.config import Settings
-from data_sync_etl.domain.core import SourceFileError, now
+from data_sync_etl.domain.core import SourceFileError
 from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.main import create_app
 from tests.local_admin_client import TestClient
 
 
 @pytest.mark.parametrize("revocation", ["source_rejected", "source_inactive", "master_inactive"])
-def test_retry_of_already_copied_file_rechecks_policy(importing, monkeypatch, revocation):
-    c, _, source_path = importing
-    process = Mock(side_effect=RuntimeError("isolated queue outage"))
+def test_metadata_only_file_never_enters_retry_or_content_pipeline(importing, monkeypatch, revocation):
+    c, rows, source_path = importing
+    forbidden = Mock(side_effect=AssertionError("SOURCE bytes are metadata-only"))
+    monkeypatch.setattr(c.source_files, "open_stream", forbidden)
+    process = Mock(side_effect=AssertionError("SOURCE metadata cannot queue OCR"))
     monkeypatch.setattr(c.source_file_import.process, "run", process)
     item = discover_and_import(c)
-    assert item["target_version_id"] and not item["processing_job_id"]
+    assert item["status"] == "METADATA_ONLY" and item["target_version_id"]
     with c.uow() as repo:
-        version = repo.get("resource_versions", item["target_version_id"])
-        repo.update(
-            "source_file_imports",
-            item["id"],
-            {
-                "next_retry_at": now() - timedelta(seconds=1),
-                **(
-                    {"source_lifecycle_status": "REJECTED"}
-                    if revocation == "source_rejected"
-                    else {"source_resource_active": False}
-                    if revocation == "source_inactive"
-                    else {}
-                ),
-            },
-        )
-        if revocation == "master_inactive":
+        if revocation == "source_rejected":
+            rows[0]["source_lifecycle_status"] = "REJECTED"
+        elif revocation == "source_inactive":
+            rows[0]["resource_active"] = False
+        else:
             repo.update("master_learning_resources", item["resource_id"], {"is_active": False})
-    c.source_file_import.execute(c.source_file_import.claim())
-    assert process.call_count == 1
-    with c.uow() as repo:
-        current = repo.get("source_file_imports", item["id"])
-        assert current["target_version_id"] == version["id"]
-        assert repo.count("ocr_jobs", {}) == 0 and repo.count("resource_versions", {}) == 1
-        assert current["last_error_code"] == (
-            "WAITING_FOR_MASTER" if revocation == "master_inactive" else "BLOCKED_SOURCE_POLICY"
-        )
+    if revocation != "master_inactive":
+        c.source_file_import.discover_once()
+        with pytest.raises(SourceFileError, match="BLOCKED_SOURCE_POLICY"):
+            c.source_resolver.resolve(item["target_version_id"])
+    else:
+        with pytest.raises(SourceFileError, match="FILE_NOT_FOUND"):
+            c.source_resolver.resolve(item["target_version_id"])
+    assert c.source_file_import.claim() is None
     assert not c.source_file_import.list_files()["items"][0]["retry_eligible"]
+    process.assert_not_called()
+    forbidden.assert_not_called()
     assert source_path.exists()
     assert not list((c.storage.root / 'resources').rglob('*'))
 
 
-def test_revocation_during_copy_does_not_register_version_and_can_recover(importing, monkeypatch):
+def test_revocation_during_metadata_discovery_never_copies_or_recovers_content(importing, monkeypatch):
     c, rows, path = importing
-    original = c.source_files.open_stream
-
-    def revoke_after_copy(*args, **kwargs):
-        result = original(*args, **kwargs)
-        with c.uow() as repo:
-            item = repo.find("source_file_imports")[0]
-            repo.update("source_file_imports", item["id"], {"source_lifecycle_status": "REJECTED"})
-        return result
-
-    monkeypatch.setattr(c.source_files, "open_stream", revoke_after_copy)
+    forbidden = Mock(side_effect=AssertionError("SOURCE bytes must not be opened"))
+    monkeypatch.setattr(c.source_files, "open_stream", forbidden)
     item = discover_and_import(c)
-    assert item["last_error_code"] == "BLOCKED_SOURCE_POLICY"
-    with c.uow() as repo:
-        assert (
-            not item["target_version_id"]
-            and repo.count("resource_versions", {}) == repo.count("ocr_jobs", {}) == 0
-        )
-    # Reapproval is only a fixture SOURCE metadata update, never a fabricated target status.
-    with c.uow() as repo:
-        c.source_file_import._discover(repo, rows[0])
-    monkeypatch.setattr(c.source_files, "open_stream", original)
-    c.source_file_import.retry(item["id"])
-    c.source_file_import.execute(c.source_file_import.claim())
+    assert item["status"] == "METADATA_ONLY"
     with c.uow() as repo:
         restored = repo.get("source_file_imports", item["id"])
-        assert restored["status"] == "PROCESSING"
-        assert repo.count("resource_versions", {}) == repo.count("ocr_jobs", {}) == 1
+        assert restored["status"] == "METADATA_ONLY"
+        assert repo.count("resource_versions", {}) == 1
+        assert repo.count("ocr_jobs", {}) == 0
+    assert c.source_file_import.claim() is None
+    with pytest.raises(Exception, match="EXTERNAL_SOURCE_CONTENT_DISABLED"):
+        c.source_file_import.retry(item["id"])
+    forbidden.assert_not_called()
     assert path.exists()
 
 
@@ -112,53 +88,33 @@ def test_drive_200_html_error_page_is_rejected_without_retry_or_content_leak(con
     assert sum(params.get("alt") == "media" for _, params in http.calls) == 1
 
 
-@pytest.mark.parametrize("provider", ["local", "google_drive"])
 @pytest.mark.parametrize("extension", FORMATS)
-def test_file_viewer_reads_source_bytes_for_supported_sources(
-    importing, monkeypatch, extension, provider
-):
+def test_legacy_source_file_viewer_is_metadata_only_for_supported_formats(importing, monkeypatch, extension):
     payload = sample(extension)
-    assert_source_format_pipeline(importing, extension, provider, payload)
-    c, _, _ = importing
-    c.search = SearchService(c.indexing, c.settings, c.indexing.bags)
-    # Explicit policy double for this API transport test; real denial/launch guards
-    # remain covered by test_resource_file.py and test_search.py.
+    c, rows, source_path = importing
+    source_path.write_bytes(payload)
+    rows[0]["storage_object_key"] = f"test{extension}"
+    from hashlib import sha256
+    rows[0]["source_hash"] = sha256(payload).hexdigest()
+    item = discover_and_import(c)
+    with c.uow() as repo:
+        version = repo.get("resource_versions", item["target_version_id"])
+    c.search.file_version = lambda version_id, access=None: version
+    no_source_io = Mock(side_effect=AssertionError("No SOURCE byte access"))
+    monkeypatch.setattr(c.source_files, "open_stream", no_source_io)
+    monkeypatch.setattr(c.storage, "get_local_path", no_source_io)
+    monkeypatch.setattr(c.storage, "exists", no_source_io)
     monkeypatch.setattr(
         "data_sync_etl.api.routes.search_access", lambda request: SearchAccess("local_demo")
     )
-    with c.uow() as repo:
-        version = repo.find("resource_versions")[0]
-    # The viewer must read SOURCE, never the old managed copy or path.
-    monkeypatch.setattr(
-        c.storage,
-        "get_local_path",
-        Mock(side_effect=AssertionError("No managed fallback")),
-    )
     with TestClient(create_app(c)) as api:
         url = f"/api/v1/resource-versions/{version['id']}/file"
-        response = api.get(url)
-        assert response.status_code == 200 and response.content == payload
-        expected_mime = {
-            ".pdf": "application/pdf",
-            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            ".txt": "text/plain",
-            ".csv": "text/csv",
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-        }
-        assert response.headers["content-type"].split(";", 1)[0] == expected_mime[extension]
-        assert response.headers["content-disposition"].startswith("inline")
-        assert response.headers["x-content-type-options"] == "nosniff"
-        assert "storage" not in response.headers["content-disposition"]
-        downloaded = api.get(url + "?download=true")
-        assert downloaded.content == payload and downloaded.headers[
-            "content-disposition"
-        ].startswith("attachment")
-        partial = api.get(url, headers={"Range": "bytes=0-7"})
-        assert partial.status_code == 206 and partial.content == payload[:8]
+        for suffix in ("", "?download=true", "?view=preview", "?view=text"):
+            response = api.get(url + suffix)
+            assert response.status_code == 409
+            assert response.json()["detail"]["code"] == "EXTERNAL_SOURCE_CONTENT_DISABLED"
+    no_source_io.assert_not_called()
+    assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
 
 @pytest.mark.parametrize("fault", ["refresh_expired", "requests_timeout"])

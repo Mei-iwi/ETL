@@ -58,6 +58,9 @@ def search_access(request):
             source_resolution = (request.method == 'GET'
                                  and request.url.path.startswith('/api/v1/resources/')
                                  and request.url.path.endswith('/source-resolution'))
+            source_open = (request.method == 'GET'
+                           and request.url.path.startswith('/api/v1/resources/')
+                           and request.url.path.endswith('/open'))
             # Authenticated readers may read published resources, including the
             # default UNREVIEWED extraction state. Domain restrictions and live
             # index validation still apply; management grants stay owner-scoped.
@@ -66,7 +69,7 @@ def search_access(request):
                                 (request.url.path in ('/api/v1/search', '/api/v1/search/page') and request.method == 'POST')
                                 or (request.method == 'GET' and request.url.path.startswith('/api/v1/chunks/')
                                     and request.url.path.endswith('/context'))
-                                or source_resolution))
+                                or source_resolution or source_open))
             return SearchAccess('authenticated_admin' if principal.role == 'ADMIN' else 'authenticated_user',
                                 frozenset(principal.resource_ids), principal.id,
                                 principal.id.removeprefix('master:')
@@ -75,13 +78,13 @@ def search_access(request):
                                 or (request.url.path.startswith('/api/v1/chunks/')
                                     and request.url.path.endswith('/context') and request.method == 'GET')
                                 or (request.method == 'GET' and request.url.path.startswith('/api/v1/resource-versions/')
-                                    and request.url.path.rsplit('/', 1)[-1] in ('file', 'source-info'))
-                                or source_resolution,
+                                    and request.url.path.rsplit('/', 1)[-1] in ('file', 'source-info', 'processing-source'))
+                                or source_resolution or source_open,
                                 allow_shared_unreviewed=True,
                                 allow_owned_unreviewed=owner_search or (request.method == 'GET'
                                     and request.url.path.startswith('/api/v1/resource-versions/')
-                                    and request.url.path.rsplit('/', 1)[-1] in ('file', 'source-info'))
-                                or source_resolution)
+                                    and request.url.path.rsplit('/', 1)[-1] in ('file', 'source-info', 'processing-source'))
+                                or source_resolution or source_open)
         return SearchAccess('authenticated_admin' if principal.mode == 'single_admin' else 'local_demo',
                             actor_id=principal.id)
     if not settings.search_internal_dev_enabled:

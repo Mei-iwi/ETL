@@ -1,5 +1,31 @@
 export type FileIndexStatus = { processing_status: string; index_status: string; metadata_only?: boolean }
 export type SourceResolution = { version_id: string; resolution_status: 'available' | 'unavailable' | 'stale' | 'blocked'; content_availability: 'metadata-only' | 'authorized-indexed'; source_record_available: boolean }
+export type SourceOpen = {
+    master_resource_id: string; version_id: string | null
+    status: 'EXTERNAL_VIEWER_AVAILABLE' | 'SOURCE_AUTH_REQUIRED' | 'METADATA_ONLY' | 'SOURCE_UNAVAILABLE'
+        | 'SOURCE_OPEN_UNSUPPORTED' | 'VERSION_STALE' | 'ACCESS_DENIED'
+    files: { source_file_id: string; file_name: string | null; mime_type: string | null
+        revision: string | null; access_status: 'ALLOWED' | 'AUTH_REQUIRED' | 'DENIED' | 'UNAVAILABLE' | 'METADATA_ONLY'
+        viewer_url: string | null; embedded_url?: string | null }[]
+}
+export function trustedViewerHref(value: string | null | undefined) {
+    if (!value) return null
+    try {
+        const url = new URL(value)
+        return url.protocol === 'https:' && !url.username && !url.password ? url.href : null
+    } catch { return null }
+}
+export function embeddedSourceUrl(file: Pick<SourceOpen['files'][number], 'access_status' | 'viewer_url' | 'embedded_url'>) {
+    if (file.access_status !== 'ALLOWED') return null
+    const embedded = trustedViewerHref(file.embedded_url)
+    if (embedded) return embedded
+    const viewer = trustedViewerHref(file.viewer_url)
+    if (!viewer) return null
+    const url = new URL(viewer)
+    const driveFile = /^\/file\/d\/([A-Za-z0-9_-]+)\/(?:view|preview)\/?$/.exec(url.pathname)
+    if (url.hostname !== 'drive.google.com' || url.port || url.search || url.hash || !driveFile) return null
+    return `https://drive.google.com/file/d/${driveFile[1]}/preview`
+}
 export function sourceResolutionAllowsFile(resolution: SourceResolution | null, selected: string) {
     return resolution?.version_id === selected && resolution.resolution_status === 'available'
         && resolution.source_record_available === true && resolution.content_availability === 'authorized-indexed'
@@ -50,6 +76,8 @@ export async function fileResponseError(response: Response): Promise<string> {
         PERMISSION_DENIED: 'Nguồn đã từ chối quyền truy cập.',
         DRIVE_CREDENTIALS_EXPIRED: 'Quyền kết nối nguồn đã hết hạn. Vui lòng liên hệ người quản trị.',
     }
+    if (code === 'EXTERNAL_SOURCE_CONTENT_DISABLED')
+        return 'Tài liệu nằm tại kho nguồn; ETL chỉ hỗ trợ metadata và viewer đã được nguồn xác minh.'
     return typeof code === 'string' && messages[code] ? messages[code] : fileErrorMessage(response.status)
 }
 

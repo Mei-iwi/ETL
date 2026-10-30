@@ -25,6 +25,7 @@ def source_file_error(error):
     elif code in {'UNSUPPORTED_SOURCE_FORMAT', 'INVALID_SOURCE_FILE', 'INVALID_PDF', 'PREVIEW_INVALID_FILE', 'PREVIEW_EXTERNAL_CONTENT'}:
         status = 415
     message = {
+        'EXTERNAL_SOURCE_CONTENT_DISABLED': 'Nguồn ngoài chỉ cho phép truy cập metadata; ETL không tải nội dung tài liệu.',
         'SOURCE_REFERENCE_DISABLED': 'Chức năng truy xuất tệp nguồn chưa được bật.',
         'SOURCE_TEMP_POLICY_REQUIRED': 'Truy xuất tệp nguồn đang bị chặn bởi chính sách tệp tạm.',
     }.get(code, 'Không thể truy xuất tệp từ nguồn.')

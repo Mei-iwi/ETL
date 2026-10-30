@@ -6,6 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 SyncStream = Literal["all", "resources", "users", "grades", "subjects"]
 
 SYNC_ERRORS = {
+    'SOURCE_ID_REQUIRED': (422, 'Chá»n SOURCE Ä‘Ã£ Ä‘Æ°á»£c Ä‘Äƒng kÃ½ Ä‘á»ƒ Ä‘á»“ng bá»™.'),
+    'SOURCE_FEDERATION_DISABLED': (409, 'Multi-source federation Ä‘ang táº¯t.'),
+    'SOURCE_REGISTRY_NAMESPACE_UNKNOWN': (404, 'SOURCE chÆ°a Ä‘Æ°á»£c Ä‘Äƒng kÃ½.'),
+    'SOURCE_REGISTRY_SOURCE_DISABLED': (409, 'SOURCE Ä‘ang bá»‹ táº¯t.'),
+    'SOURCE_REGISTRY_ADAPTER_UNAVAILABLE': (503, 'SOURCE Ä‘Æ°á»£c chá»n hiá»‡n khÃ´ng kháº£ dá»¥ng.'),
+    'SOURCE_REGISTRY_UNAVAILABLE': (503, 'KhÃ´ng thá»ƒ Ä‘á»c Source Registry.'),
+    'SOURCE_MAPPING_UNAVAILABLE': (503, 'Báº£ng Ã¡nh xáº¡ SOURCE chÆ°a kháº£ dá»¥ng.'),
     'BLOCKED_SOURCE_IDENTITY': (409, 'SOURCE và MASTER có cùng ID nhưng khác thời điểm tạo. Cần đối soát nguồn đã được tạo lại trước khi đồng bộ.'),
     'BLOCKED_SOURCE_OWNERSHIP': (409, 'Bản ghi MASTER không thuộc nguồn PostgreSQL hiện tại. Cần đối soát nguồn sở hữu trước khi đồng bộ.'),
     'BLOCKED_LOCAL_SOURCE_CHANGE': (409, 'Bản ghi nguồn trong MASTER đã bị sửa cục bộ. Cần đối soát thay đổi trước khi đồng bộ.'),
@@ -19,6 +26,7 @@ class MasterSyncRequest(BaseModel):
 
     stream: SyncStream = "all"
     full: bool = False
+    source_id: str | None = Field(default=None, min_length=1, max_length=30)
 
 
 class MasterSyncRunResult(BaseModel):
@@ -31,12 +39,24 @@ class MasterSyncRunResult(BaseModel):
 
 
 class MasterSyncRunStatus(MasterSyncRunResult):
+    source_id: str | None = None
     stream_name: SyncStream
     sync_mode: Literal["FULL", "INCREMENTAL", "REPAIR"] | None = None
     status: Literal["RUNNING", "COMPLETED", "FAILED"]
     started_at: datetime
     finished_at: datetime | None = None
     error_message: str | None = None
+
+
+class SourceSyncCheckpointStatus(BaseModel):
+    source_id: str
+    stream: str
+    status: str
+    retry_count: int
+    safe_error_code: str | None = None
+    last_updated_at: datetime | None = None
+    last_id: str | None = None
+    updated_at: datetime
 
 
 class MasterSyncAutoStream(BaseModel):
@@ -53,6 +73,8 @@ class SourceBackendStatus(BaseModel):
 class MasterSyncStatusResponse(BaseModel):
     file_sync_supported: bool = False
     file_sync_error: str | None = "BLOCKED_SOURCE_STORAGE"
+    remote_content_processing_supported: bool = False
+    derived_content_index_supported: bool = False
     file_worker_healthy: bool = False
     file_backends: dict[str, SourceBackendStatus] = Field(default_factory=dict)
     auto_supported: bool
@@ -66,6 +88,7 @@ class MasterSyncStatusResponse(BaseModel):
     auto_all_enabled: bool
     auto_streams: list[MasterSyncAutoStream]
     runs: list[MasterSyncRunStatus]
+    source_checkpoints: list[SourceSyncCheckpointStatus] = Field(default_factory=list)
 
 
 class MasterSyncAutoRequest(BaseModel):
@@ -109,6 +132,8 @@ class SourceSyncFilesResponse(BaseModel):
     total_pages: int | None = None
     file_sync_supported: bool = False
     file_sync_error: str | None = "BLOCKED_SOURCE_STORAGE"
+    remote_content_processing_supported: bool = False
+    derived_content_index_supported: bool = False
     file_worker_healthy: bool = False
     file_backends: dict[str, SourceBackendStatus] = Field(default_factory=dict)
 

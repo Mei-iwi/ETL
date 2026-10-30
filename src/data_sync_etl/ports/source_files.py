@@ -10,6 +10,7 @@ class ReadOnlySourceFilePort(Protocol):
     def open_stream(self, bucket: str, object_key: str, *, cancelled=None) -> BinaryIO: ...
     def revision(self, bucket: str, object_key: str, *, cancelled=None) -> tuple: ...
     def original_url(self, bucket: str, object_key: str) -> str | None: ...
+    def viewer_reference(self, bucket: str, object_key: str) -> dict | None: ...
 
 
 class SourceVersionMetadata(TypedDict):
@@ -51,6 +52,7 @@ class ResolvedFileReference:
     filename: str
     mime: str
     expected_sha256: str
+    source_id: str | None = None
     source_snapshot: dict | None = field(default=None, repr=False)
 
 

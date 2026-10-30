@@ -186,6 +186,9 @@
 .fileToolbar select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 12px; background: white; color: #334155; max-width: 100%; }
 .fileToolbar button { font-family: inherit; cursor: pointer; }
 .fileToolbar button:disabled { opacity: .5; cursor: not-allowed; }
+.loadingSpinner { animation: fileButtonSpin 1s linear infinite; }
+@keyframes fileButtonSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .loadingSpinner { animation: none; } }
 .secondaryButton { display: inline-flex; padding: 8px 14px; min-height: 38px; align-items: center; border: 1px solid #cbd5e1; border-radius: 8px; color: #1e3a8a; font-size: 14px; text-decoration: none; }
 .filePreview { margin-top: 18px; }
 .mediaPreview { width: 100%; margin: 16px 0; }

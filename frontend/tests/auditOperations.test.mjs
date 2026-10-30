@@ -115,6 +115,7 @@ function render(overrides = {}, apiOverrides = {}) {
             getAuditJobs: async () => ({ items: [{ job_id: 'new-job', status: 'PENDING' }] }),
             getDiscrepancies: async () => ({ items: [], total: 0, total_pages: 0 }),
             getAuditCoverage: async () => null,
+            getSourceWriteBackStatus: async () => null,
             ...apiOverrides,
         }
         if (name.includes('reconciliationDisplay')) return {

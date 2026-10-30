@@ -34,6 +34,10 @@ async function page() {
     vm.runInNewContext(ts.transpileModule(fs.readFileSync(new URL('../../frontend/src/services/processingPreferences.ts', import.meta.url), 'utf8'), {
         compilerOptions: { module: ts.ModuleKind.CommonJS },
     }).outputText, preferencesModule)
+    const libraryFormatsModule = { exports: {} }
+    vm.runInNewContext(ts.transpileModule(fs.readFileSync(new URL('../../frontend/src/pages/library/libraryFileFormats.ts', import.meta.url), 'utf8'), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS },
+    }).outputText, libraryFormatsModule)
     const modules = {
         react,
         'react/jsx-runtime': { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
@@ -50,6 +54,8 @@ async function page() {
         },
         '../../components/ProcessingPreferences': { ProcessingPreferences: () => null },
         './LibraryCreatePages.module.css': {},
+        './libraryFileFormats': libraryFormatsModule.exports,
+        './MediaFilePreview': { SelectedMediaPreview: () => null },
     }
     class FormDataFromForm extends FormData {
         constructor(form) {

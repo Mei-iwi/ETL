@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from data_sync_etl.domain.audit_calendar import DEFAULT_TIMEZONE
 
@@ -22,6 +22,8 @@ class ReconcileTriggerRequest(BaseModel):
         default="INCREMENTAL",
         description="Chế độ đối soát: INCREMENTAL (chỉ file mới/thay đổi) hoặc FULL (toàn bộ kho)",
     )
+    source_id: str | None = Field(default=None, min_length=1, max_length=30)
+    fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class AllAuditJobRequest(BaseModel):
@@ -104,6 +106,10 @@ class ReconcileTriggerResponse(BaseModel):
     execution_time_ms: float = 0.0
     total_streams: int
     reports: list[ReconciliationRunReport]
+    source_id: str | None = None
+    fingerprint: str | None = None
+    candidate_count: int | None = None
+    sample_master_ids: list[str] = Field(default_factory=list)
 
 
 class DiscrepancyItemResponse(BaseModel):

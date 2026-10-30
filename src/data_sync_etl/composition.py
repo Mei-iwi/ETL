@@ -1,3 +1,4 @@
+import os
 from dataclasses import replace
 
 from pymongo import MongoClient
@@ -19,11 +20,16 @@ from data_sync_etl.adapters.ocr.engines import (
     TesseractOCREngine,
     UnconfiguredOCREngine,
 )
+from data_sync_etl.adapters.persistence.reconciled_sync import SQLAlchemyReconciledSync
+from data_sync_etl.adapters.persistence.source_identity_mapping import (
+    SQLAlchemySourceIdentityMappingStore,
+)
 from data_sync_etl.adapters.persistence.sqlalchemy import SQLAlchemyUnitOfWork
 from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectReader
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.source.mongo_metadata import MongoMetadataSourceReader
 from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
+from data_sync_etl.adapters.source.registry import ConfiguredSourceRegistry
 from data_sync_etl.adapters.source.writeback import DisabledSourceMetadataWriter
 from data_sync_etl.adapters.storage.evaluation_store import EvaluationFileStore
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
@@ -56,6 +62,7 @@ from data_sync_etl.application.process_version import ProcessResourceVersion
 from data_sync_etl.application.processing_finalizer import ProcessingFinalizer
 from data_sync_etl.application.recommend_subjects_use_case import RecommendSubjectsUseCase
 from data_sync_etl.application.reconcile_master import ReconcileMaster
+from data_sync_etl.application.reconciled_sync import ReconciledSync
 from data_sync_etl.application.reconciliation_engine import ReconciliationEngine
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
@@ -64,13 +71,16 @@ from data_sync_etl.application.source_file_import import SourceFileImportService
 from data_sync_etl.application.source_file_resolver import SourceFileResolver
 from data_sync_etl.application.source_metadata_writeback import SourceMetadataWriteBackService
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
+from data_sync_etl.application.source_open import SourceOpenResolver
 from data_sync_etl.application.source_resolution import SourceResolutionService
+from data_sync_etl.application.source_router import SourceRouter
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
 from data_sync_etl.config import Settings
 from data_sync_etl.db.session import make_engine, sessions
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.format_validation import FormatValidatorRegistry
+from data_sync_etl.domain.source_registry import SourceCapabilities, SourceRegistration
 from data_sync_etl.domain.subject import GradeBasedSubjectRecommendationPolicy
 from data_sync_etl.workers.master_sync import MasterSyncWorker
 from data_sync_etl.workers.ocr import OCRWorker
@@ -83,9 +93,51 @@ def create_source(settings):
     if settings.source_adapter in {"postgresql", "production"}:
         return PostgreSQLSourceAdapter(
             settings.source_database_url, replay_seconds=settings.source_replay_seconds,
-            namespace=settings.source_namespace,
+            namespace=settings.source_namespace, timeout_seconds=settings.source_read_timeout_seconds,
         )
     raise DomainError("BLOCKED_SOURCE_MAPPING: production source adapter is not configured")
+
+
+def create_source_registry(settings, source, supplied_adapters=None):
+    adapters = dict(supplied_adapters or {})
+    registrations = settings.source_registry_config
+    if not registrations:
+        locator = source.locator('resources', '__registry_probe__')
+        drive_viewer_enabled = bool(settings.source_drive_enabled and settings.source_drive_buckets)
+        registrations = [SourceRegistration(
+            source_id='SRC_DEFAULT', backend=locator.backend, namespace=locator.namespace,
+            adapter_type=type(source).__name__, enabled=True,
+            capabilities=SourceCapabilities(read_metadata=True, read_content=False,
+                exact_version_lookup=callable(getattr(source, 'get_version', None)),
+                file_reference_lookup=drive_viewer_enabled, external_viewer=drive_viewer_enabled,
+                write_metadata=False),
+            viewer_hosts=('drive.google.com', 'docs.google.com') if drive_viewer_enabled else (),
+        )]
+        adapters['SRC_DEFAULT'] = source
+    entries = []
+    for raw in registrations:
+        registration = (raw if isinstance(raw, SourceRegistration)
+                        else SourceRegistration.model_validate(raw))
+        if len(f'{registration.source_id}:resources'.encode('utf-8')) > 30:
+            raise DomainError('BLOCKED_SOURCE_CHECKPOINT_KEY')
+        adapter = adapters.get(registration.source_id)
+        if adapter is None:
+            current = source.locator('resources', '__registry_probe__')
+            if (current.backend.casefold() == registration.backend.casefold()
+                    and current.namespace == registration.namespace):
+                adapter = source
+            elif registration.enabled and registration.adapter_type.casefold() in ('postgresql', 'postgres'):
+                reference = registration.connection_ref
+                url = os.environ.get(reference[4:]) if reference else None
+                if not url:
+                    raise DomainError('SOURCE_REGISTRY_ADAPTER_UNAVAILABLE')
+                adapter = PostgreSQLSourceAdapter(
+                    url, replay_seconds=settings.source_replay_seconds, namespace=registration.namespace,
+                    timeout_seconds=registration.timeout_seconds)
+            elif registration.enabled:
+                raise DomainError('SOURCE_REGISTRY_ADAPTER_UNAVAILABLE')
+        entries.append((registration, adapter))
+    return ConfiguredSourceRegistry(entries)
 
 
 def create_ocr_engine(settings):
@@ -114,7 +166,7 @@ class Container:
             self.source_mongo_client.close()
         self.engine.dispose()
 
-    def __init__(self, settings=None, engine=None, documents=None):
+    def __init__(self, settings=None, engine=None, documents=None, *, source_registry=None, source_adapters=None):
         self.settings = settings or Settings()
         if self.settings.master_mongo_identity_projection and (
                 self.settings.app_environment not in ('development', 'test')
@@ -138,7 +190,30 @@ class Container:
         self.resource_listing = ListResources(self.uow)
         self.resource_lookups = ListResourceLookups(self.uow, self.source if isinstance(self.source, PostgreSQLSourceAdapter) else None)
         self.resource_detail = GetResourceDetail(self.uow)
-        self.source_resolution = SourceResolutionService(self.uow, self.source, self.settings)
+        if source_registry is not None:
+            self.source_registry = source_registry
+        elif self.settings.source_federation_enabled or self.settings.source_registry_config:
+            self.source_registry = create_source_registry(self.settings, self.source, source_adapters)
+        else:
+            source_locator = self.source.locator('resources', '__registry_probe__')
+            drive_viewer_enabled = bool(self.settings.source_drive_enabled and self.settings.source_drive_buckets)
+            registration = SourceRegistration(
+                source_id='SRC_DEFAULT', backend=source_locator.backend, namespace=source_locator.namespace,
+                adapter_type=type(self.source).__name__, enabled=True,
+                capabilities=SourceCapabilities(read_metadata=True, read_content=False,
+                    exact_version_lookup=callable(getattr(self.source, 'get_version', None)),
+                    file_reference_lookup=drive_viewer_enabled, external_viewer=drive_viewer_enabled,
+                    write_metadata=False),
+                viewer_hosts=('drive.google.com', 'docs.google.com') if drive_viewer_enabled else (),
+            )
+            self.source_registry = ConfiguredSourceRegistry([(registration, self.source)])
+        mapping_store = (SQLAlchemySourceIdentityMappingStore(self.uow, self.source_registry)
+                         if self.settings.source_federation_enabled else None)
+        self.source_router = SourceRouter(self.source_registry, mapping_store)
+        self.source_resolution = SourceResolutionService(
+            self.uow, self.source, self.settings, router=self.source_router)
+        self.source_open = SourceOpenResolver(
+            self.uow, self.source_registry, self.source_router, self.source_resolution)
         # A real SOURCE writer is intentionally not constructed by production
         # composition. Tests/demo may inject an isolated writer capability.
         self.source_metadata_writer = DisabledSourceMetadataWriter()
@@ -170,16 +245,23 @@ class Container:
             ),
         )
         self.sync = MasterSync(self.source, self.uow, self.settings.sync_batch_size,
-                               skip_shared_metadata_validation=self.settings.mongo_metadata_mode == 'shared')
+                               skip_shared_metadata_validation=self.settings.mongo_metadata_mode == 'shared',
+                               source_registry=self.source_registry,
+                               federation_enabled=self.settings.source_federation_enabled)
         self.reconcile_master = ReconcileMaster(self.source, self.uow,
             batch_size=min(1000, self.settings.sync_batch_size),
-            max_affected=self.settings.reconcile_max_affected, max_ratio=self.settings.reconcile_max_ratio)
+            max_affected=self.settings.reconcile_max_affected, max_ratio=self.settings.reconcile_max_ratio,
+            source_registry=self.source_registry,
+            federation_enabled=self.settings.source_federation_enabled)
         self.reconciliation_engine = ReconciliationEngine(
             self.uow,
             source_adapter=self.source,
             storage_root=self.settings.storage_root,
             max_ratio=self.settings.reconcile_max_ratio,
             batch_size=min(1000, self.settings.sync_batch_size),
+        )
+        self.reconciled_sync = ReconciledSync(
+            SQLAlchemyReconciledSync(self.reconciliation_engine, self.sync, self.settings)
         )
         self.auto_sync = AutoSyncCoordinator(
             self.uow,
@@ -368,6 +450,7 @@ class Container:
         if self.settings.source_drive_enabled or self.settings.source_drive_buckets or self.settings.source_local_buckets:
             self.source_files = SourceFileDispatcher(self.source_files, SourceGoogleDriveFileReader(self.settings),
                                                      local_buckets=self.settings.source_local_buckets)
+        self.source_open.file_sources = self.source_files
         self.source_file_import = SourceFileImportService(
             self.source, self.source_files, self.storage, self.uow,
             self.process_version, self.retry_processing_job, self.settings,
@@ -375,12 +458,15 @@ class Container:
                                              media_processing=not self.settings.source_metadata_media_enabled,
                                              media_probe=lambda path, extension: probe(path, self.settings, extension),
                                              media_max_size_bytes=self.settings.media_max_size_bytes),
+            source_registry=self.source_registry,
         )
         self.source_resolver = SourceFileResolver(
             self.uow, self.source, self.source_files, self.storage, self.source_file_import.formats,
-            self.settings, SourceTemporaryFiles(self.settings, self.storage.root),
+            self.settings, SourceTemporaryFiles(self.settings, self.storage.root), self.source_registry,
         )
         self.source_file_import.resolver = self.source_resolver
+        self.search.source_content_authorizer = self.source_resolver.derived_index_authorized
+        self.indexing.source_content_authorizer = self.source_resolver.derived_index_authorized
         self.reconciliation_engine.source_resolver = self.source_resolver
         self.reconciliation_engine.file_read_budget_seconds = self.settings.source_read_timeout_seconds
         self.reconciliation_engine.audit_settings = self.settings

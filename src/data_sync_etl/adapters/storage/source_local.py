@@ -12,6 +12,9 @@ class SourceLocalFileReader:
     def original_url(self, bucket, object_key):
         return None
 
+    def viewer_reference(self, bucket, object_key):
+        return None
+
     def revision(self, bucket, object_key, *, cancelled=None):
         if cancelled is not None and cancelled.is_set():
             raise SourceFileError('SOURCE_REQUEST_CANCELLED')

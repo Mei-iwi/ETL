@@ -16,7 +16,13 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 
 from data_sync_etl.api.admin_access import require_local_admin
 from data_sync_etl.api.evaluation_schemas import (
@@ -73,7 +79,7 @@ from data_sync_etl.api.search_schemas import (
     search_error,
 )
 from data_sync_etl.api.source_file_response import SourceFileResponse, source_file_error
-from data_sync_etl.api.source_resolution_schemas import SourceResolutionResponse
+from data_sync_etl.api.source_resolution_schemas import SourceOpenResponse, SourceResolutionResponse
 from data_sync_etl.api.source_writeback_schemas import (
     SourceWriteBackRequest,
     SourceWriteBackResponse,
@@ -458,22 +464,45 @@ def chunk_context(context_id: Annotated[str, Path(min_length=1, max_length=256)]
     except Exception as exc:
         raise search_error(exc) from None
 
+def source_view_response(container, version_id, access, *, embedded=False):
+    """Open the exact SOURCE viewer; original bytes stay with its provider."""
+    with container.uow() as repo:
+        version = repo.get('resource_versions', version_id)
+        resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+    if not resource or resource.get('source_origin') != 'POSTGRESQL':
+        return None
+    if not access.internal:
+        raise HTTPException(404, 'File not found')
+    try:
+        opened = container.source_open.resolve(resource['id'], access, version_id)
+    except SourceResolutionError as exc:
+        raise HTTPException(exc.status, detail={'code': exc.code, 'message': 'Không thể mở tệp nguồn.'}) from None
+    if opened['status'] != 'EXTERNAL_VIEWER_AVAILABLE' or len(opened['files']) != 1:
+        raise HTTPException(409, detail={'code': opened['status'], 'message': 'Kho nguồn chưa cung cấp link xem hợp lệ.'})
+    file = opened['files'][0]
+    url = (file.get('embedded_url') if embedded else None) or file['viewer_url']
+    return RedirectResponse(url, status_code=307, headers={'Cache-Control': 'private, no-store'})
+
+
 @router.get('/api/v1/resource-versions/{id}/file', tags=[TAG_MASTER],
             responses=SEARCH_ERROR_RESPONSES,
             summary='Xem hoặc tải tệp học liệu được phép truy xuất')
 def resource_file(id: ResourceId, request: Request, download: bool = False, view: Literal['file', 'text', 'preview'] = 'file'):
     container = request.app.state.container
+    access = search_access(request)
+    if view != 'text':
+        source_response = source_view_response(container, id, access, embedded=view == 'preview')
+        if source_response is not None:
+            return source_response
     try:
-        version = container.search.file_version(id, access=search_access(request), include_text=view == 'text')
+        version = container.search.file_version(id, access=search_access(request))
     except Exception as exc:
         raise search_error(exc) from None
     if view == 'text':
         try:
             reference = container.source_resolver.resolve(id)
-            if reference.ownership == 'SOURCE_BACKED':
-                with container.source_resolver.temporary_path(reference):
-                    pass
-                version = container.search.file_version(id, access=search_access(request), include_text=True)
+            # This is derived OCR text, not a copy of the original SOURCE file.
+            version = container.search.file_version(id, access=search_access(request), include_text=True)
         except SourceFileError as exc:
             return source_file_error(exc)
         except Exception as exc:
@@ -484,7 +513,9 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
         reference = container.source_resolver.resolve(id)
     except SourceFileError as exc:
         return source_file_error(exc)
-    if reference.ownership == 'SOURCE_BACKED' or (view == 'preview' and not download):
+    if reference.ownership == 'SOURCE_BACKED':
+        return source_file_error(SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED'))
+    if view == 'preview' and not download:
         return SourceFileResponse(container.source_resolver, reference,
                                   lambda: container.search.file_version(id, access=search_access(request)), download=download,
                                   preview=container.file_previews if view == 'preview' and not download else None)
@@ -522,9 +553,15 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
             summary='Tham chiếu nguồn được phép, không công khai locator nội bộ')
 def resource_source_info(id: ResourceId, request: Request):
     container = request.app.state.container
+    source_response = source_view_response(container, id, search_access(request))
+    if source_response is not None:
+        return {'ownership': 'SOURCE_BACKED', 'provider': 'external', 'availability': 'AVAILABLE',
+                'can_open_original': True, 'original_url': source_response.headers['location']}
     try:
         container.search.file_version(id, access=search_access(request))
         reference = container.source_resolver.resolve(id)
+        if reference.ownership == 'SOURCE_BACKED':
+            return container.source_resolver.display_reference(reference)
         info = container.source_resolver.display_reference(reference)
         container.search.file_version(id, access=search_access(request))
         return info
@@ -730,6 +767,47 @@ def source_resolution(id: ResourceId, request: Request,
                             detail={'code': exc.code, 'message': 'Source resolution is restricted'}) from None
     except Exception as exc:
         raise search_error(exc) from None
+
+
+@router.get(
+    "/api/v1/resources/{id}/open",
+    tags=[TAG_MASTER],
+    response_model=SourceOpenResponse,
+    summary="Resolve an exact external SOURCE viewer without downloading the file",
+    responses=SEARCH_ERROR_RESPONSES,
+)
+def source_open(id: ResourceId, request: Request,
+                version_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None) -> SourceOpenResponse:
+    access = search_access(request)
+    try:
+        result = request.app.state.container.source_open.resolve(id, access, version_id)
+        return SourceOpenResponse.model_validate(result)
+    except SourceResolutionError as exc:
+        if exc.status == 404:
+            raise HTTPException(status_code=404, detail={'code': exc.code, 'message': 'Resource not found'}) from None
+        raise HTTPException(status_code=exc.status,
+                            detail={'code': exc.code, 'message': 'Source opening is restricted'}) from None
+    except Exception as exc:
+        raise search_error(exc) from None
+
+
+@router.get('/api/v1/source-federation/health', tags=[TAG_SYSTEM], summary='Trạng thái từng nguồn đã đăng ký')
+def source_federation_health(request: Request):
+    access = search_access(request)
+    if not access.internal:
+        raise HTTPException(status_code=403, detail='Authentication required')
+    registry = services(request).source_registry
+    sources = []
+    for registration in registry.registrations():
+        status = registry.health(registration.source_id)
+        sources.append({
+            'source_id': registration.source_id,
+            'backend': registration.backend,
+            'namespace': registration.namespace,
+            'enabled': registration.enabled,
+            'health': status,
+        })
+    return {'sources': sources}
 
 
 @router.get(
@@ -1065,7 +1143,12 @@ def retry_processing_job(
 )
 def sync_master_data(body: MasterSyncRequest, request: Request):
     try:
-        return services(request).sync.run(body.stream, body.full)
+        container = services(request)
+        if container.settings.source_federation_enabled:
+            return container.sync.run(body.stream, body.full, source_id=body.source_id)
+        if body.source_id is not None:
+            raise DomainError('SOURCE_FEDERATION_DISABLED')
+        return container.sync.run(body.stream, body.full)
     except SyncAlreadyRunning:
         raise HTTPException(409, "A Master Data sync is already running") from None
     except DomainError as exc:
@@ -1218,6 +1301,11 @@ def create_job(id: ResourceId, request: Request, body: JobInput | None = None):
     services(request)
     if body and body.triggered_by is not None:
         raise HTTPException(400, "triggered_by requires an authenticated identity")
+    with services(request).uow() as repo:
+        version = repo.get('resource_versions', id)
+        resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+    if resource and resource.get('source_origin') not in ('LOCAL', None):
+        services(request).search.authorize_source_processing_version(id, access=search_access(request))
     return services(request).ocr.create_job(id, body.triggered_by if body else None)
 
 
@@ -1320,6 +1408,10 @@ def bilingual_access(request, version_id):
         resource = repo.get('master_learning_resources', version['resource_id']) if version else None
     if not resource or not resource['is_active'] or resource.get('deleted_at'):
         raise HTTPException(404, 'Resource version not found')
+    if (resource.get('source_origin') != 'LOCAL'
+            and not container.source_resolver.derived_index_authorized(version_id, access=search_access(request))):
+        raise HTTPException(403, detail={'code': 'SOURCE_CAPABILITY_BLOCKED',
+                                        'message': 'Nguồn chưa cấp quyền đọc nội dung đã xử lý.'})
     return container
 
 
@@ -1373,12 +1465,17 @@ def bilingual_export(id: ResourceId, format: Literal['json', 'txt', 'srt', 'vtt'
 
 
 @router.get('/api/v1/resource-versions/{id}/processing-source', tags=[TAG_PROCESSING])
-def bilingual_source(id: ResourceId, request: Request):
+def bilingual_source(id: ResourceId, request: Request, embedded: bool = False):
+    source_response = source_view_response(services(request), id, search_access(request), embedded=embedded)
+    if source_response is not None:
+        return source_response
     container = bilingual_access(request, id)
     try:
         reference = container.source_resolver.resolve(id)
     except SourceFileError as exc:
         return source_file_error(exc)
+    if reference.ownership == 'SOURCE_BACKED':
+        return source_file_error(SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED'))
     return SourceFileResponse(container.source_resolver, reference,
                               lambda: bilingual_access(request, id), download=False)
 

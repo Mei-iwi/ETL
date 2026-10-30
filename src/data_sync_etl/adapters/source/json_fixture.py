@@ -1,7 +1,3 @@
-import json
-import sqlite3
-import tempfile
-from contextlib import closing
 from functools import lru_cache
 from heapq import nsmallest
 from pathlib import Path
@@ -78,28 +74,24 @@ class JsonFixtureSourceAdapter:
             "grades": ["education_levels"],
             "subjects": [],
         }
-        # Disk-backed validation keeps RAM bounded and detects duplicates across ALL batches,
-        # including rows behind the incremental cursor. This is scratch data, not the master DB.
-        with tempfile.TemporaryDirectory(prefix="etl-source-keys-") as temporary:
-            with closing(sqlite3.connect(str(Path(temporary) / "keys.db"))) as index:
-                index.execute("PRAGMA cache_size=-512")
-                index.execute(
-                    "CREATE TABLE source_keys (scope TEXT, key TEXT, PRIMARY KEY(scope,key))"
-                )
-                for name in [stream, *dependencies[stream]]:
-                    for row in self.records(name):
-                        if name == "resource_subjects":
-                            key = [row.resource_id, row.subject_id]
-                        elif name == "resource_grades":
-                            key = [row.resource_id, row.grade_level_id]
-                        else:
-                            key = row.id
-                        try:
-                            index.execute(
-                                "INSERT INTO source_keys VALUES (?, ?)", (name, json.dumps(key))
-                            )
-                        except sqlite3.IntegrityError:
-                            raise DomainError("Duplicate source identifier or relation") from None
+        # JSON fixtures are a bounded local-test adapter. Keep validation in memory
+        # so it never creates a helper database or table outside the MASTER schema.
+        seen = {name: set() for name in [stream, *dependencies[stream]]}
+        total = 0
+        for name in seen:
+            for row in self.records(name):
+                if name == "resource_subjects":
+                    key = (row.resource_id, row.subject_id)
+                elif name == "resource_grades":
+                    key = (row.resource_id, row.grade_level_id)
+                else:
+                    key = row.id
+                total += 1
+                if total > 250_000:
+                    raise DomainError("Fixture validation exceeds in-memory safety limit")
+                if key in seen[name]:
+                    raise DomainError("Duplicate source identifier or relation")
+                seen[name].add(key)
 
     def _lookup(self, name, source_id):
         for row in self.records(name):

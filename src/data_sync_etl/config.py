@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     source_fixture_root: Path = Path("fixtures/source")
     source_adapter: Literal["json", "postgresql", "production"] = "json"
     source_namespace: str = Field(default='postgresql:learning', min_length=1, max_length=255)
+    # N-source registrations are server-owned JSON with env: references only; never client input.
+    source_registry_config: list[dict[str, object]] = Field(default_factory=list, repr=False)
+    source_federation_enabled: bool = False
     source_database_url: str | None = Field(default=None, repr=False)
     source_migration_database_url: str | None = Field(default=None, repr=False)
     source_replay_seconds: int = Field(default=300, ge=0)
@@ -75,6 +78,8 @@ class Settings(BaseSettings):
     source_temporary_files_enabled: bool = False
     source_temp_root: Path | None = Field(default=None, repr=False)
     source_read_timeout_seconds: int = Field(default=120, ge=1, le=600)
+    source_content_max_bytes: int = Field(default=32 * 1024 * 1024, ge=1024, le=256 * 1024 * 1024)
+    source_content_max_uncompressed_bytes: int = Field(default=128 * 1024 * 1024, ge=1024, le=512 * 1024 * 1024)
     source_temp_max_concurrency: int = Field(default=4, ge=1, le=32)
     source_temp_orphan_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
     office_pdf_executable: Path | None = Field(default=None, repr=False)

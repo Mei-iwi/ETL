@@ -25,29 +25,12 @@ def test_import_resource_order_capacity_and_recovery(container):
     c = container
     c.settings.source_file_import_max_active = 2
     rows = seed_imports(c.uow, 2, 3)
-    first = c.source_file_import.claim('a')
-    second = c.source_file_import.claim('b')
-    assert first['resource_id'] != second['resource_id']
-    assert first['claim_token'] != second['claim_token']
+    assert c.source_file_import.claim('a') is None
+    assert c.source_file_import.claim('b') is None
     assert c.source_file_import.claim('c') is None
     with c.uow() as repo:
-        repo.update('source_file_imports', first['id'], {
-            'lease_expires_at': now() - timedelta(seconds=1)})
-    recovered = c.source_file_import.claim('c')
-    assert recovered['id'] == first['id']
-    assert recovered['claim_token'] != first['claim_token']
-    from data_sync_etl.application.source_file_import import SourceImportConflict
-    with pytest.raises(SourceImportConflict):
-        c.source_file_import.heartbeat(first)
-    c.source_file_import.heartbeat(recovered)
-    with c.uow() as repo:
-        # A failed terminal mapping is visible to _parent; it is never retried forever.
-        repo.update('source_file_imports', recovered['id'], {'status': 'FAILED'})
-    third = c.source_file_import.claim('c')
-    assert third['source_version_number'] == 2
-    with c.uow() as repo:
-        untouched = repo.get('source_file_imports', rows[2]['id'])
-        assert untouched['attempts'] == 0
+        assert all(row['status'] == 'PENDING' and row['claim_token'] is None for row in repo.find('source_file_imports'))
+        assert all(row['attempts'] == 0 for row in rows)
 
 
 def test_import_retry_wait_does_not_spend_child_attempts(container):
@@ -115,21 +98,14 @@ def test_expired_import_cannot_create_processing_job(importing, monkeypatch):
     c, _, _ = importing
     c.source_file_import.discover_once()
     claim = c.source_file_import.claim('old')
-    original = c.ocr._create_job
-    def expired(*args, **kwargs):
-        with c.uow() as repo:
-            repo.update('source_file_imports', claim['id'], {
-                'lease_expires_at': now() - timedelta(seconds=1)})
-        return original(*args, **kwargs)
-    monkeypatch.setattr(c.ocr, '_create_job', expired)
-    c.source_file_import.execute(claim)
+    assert claim is None
     with c.uow() as repo:
         assert repo.count('ocr_jobs', {}) == 0
         assert repo.count('ocr_page_tasks', {}) == 0
-        assert repo.get('source_file_imports', claim['id'])['target_version_id']
+        row, = repo.find('source_file_imports')
+        assert row['target_version_id'] and row['status'] == 'METADATA_ONLY'
     recovered = c.source_file_import.claim('new')
-    assert recovered['id'] == claim['id']
-    assert recovered['claim_token'] != claim['claim_token']
+    assert recovered is None
 
 
 @pytest.mark.parametrize('operation', ['create', 'retry'])

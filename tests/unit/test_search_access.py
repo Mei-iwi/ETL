@@ -15,6 +15,29 @@ def local_client(c):
     return TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000))
 
 
+def test_authenticated_reader_can_resolve_source_viewer_for_published_shared_resource():
+    from types import SimpleNamespace
+
+    from starlette.requests import Request
+
+    from data_sync_etl.api.search_access import search_access
+    from data_sync_etl.domain.metadata_search import metadata_allowed
+
+    principal = SimpleNamespace(mode='master_users', role='USER', id='master:reader',
+                                resource_ids=frozenset(), must_change_password=False)
+    app = SimpleNamespace(state=SimpleNamespace(
+        container=SimpleNamespace(settings=SimpleNamespace(auth_mode='master_users')),
+        auth=SimpleNamespace(principal=lambda request: principal)))
+    request = Request({'type': 'http', 'method': 'GET', 'path': '/api/v1/resources/shared/open',
+                       'headers': [], 'query_string': b'', 'app': app})
+    access = search_access(request)
+    resource = {'id': 'shared', 'created_by': 'another-user', 'is_active': True,
+                'publication_status': 'PUBLISHED', 'source_origin': 'POSTGRESQL'}
+    version = {'id': 'v1', 'resource_id': 'shared', 'lifecycle_status': 'METADATA_ONLY'}
+    assert access.internal and access.allow_public and access.allow_shared_unreviewed
+    assert metadata_allowed(resource, version, access)
+
+
 @pytest.mark.parametrize('searchable', [{'unreviewed': True}], indirect=True)
 def test_demo_three_methods_no_credentials_allowlist_or_writes(searchable):
     c, version = searchable

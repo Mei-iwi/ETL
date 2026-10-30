@@ -28,6 +28,7 @@ if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) { throw 'Docker env f
 $EnvFile = (Resolve-Path -LiteralPath $EnvFile).Path
 $databaseMode = 'same-host'
 $mediaEnabled = 'false'
+$driveEnabled = 'false'
 foreach ($line in Get-Content -LiteralPath $EnvFile) {
     if ($line -match '^\s*MEDIA_ENABLED\s*=') {
         if ($line -notmatch '^\s*MEDIA_ENABLED\s*=\s*["'']?(true|false)["'']?\s*(?:#.*)?$') { throw 'Invalid MEDIA_ENABLED in Docker env file.' }
@@ -37,12 +38,21 @@ foreach ($line in Get-Content -LiteralPath $EnvFile) {
         if ($line -notmatch '^\s*DATABASE_MODE\s*=\s*["'']?(same-host|remote|source-neon)["'']?\s*(?:#.*)?$') { throw 'Invalid DATABASE_MODE in Docker env file.' }
         $databaseMode = $Matches[1]
     }
+    if ($line -match '^\s*SOURCE_DRIVE_ENABLED\s*=') {
+        if ($line -notmatch '^\s*SOURCE_DRIVE_ENABLED\s*=\s*["'']?(true|false)["'']?\s*(?:#.*)?$') { throw 'Invalid SOURCE_DRIVE_ENABLED in Docker env file.' }
+        $driveEnabled = $Matches[1]
+    }
 }
 if ($env:DATABASE_MODE) { $databaseMode = $env:DATABASE_MODE }
 if ($databaseMode -notin @('same-host','remote','source-neon')) { throw 'Invalid DATABASE_MODE.' }
 if (($RemoteDatabase -and $databaseMode -eq 'source-neon') -or ($SourceNeon -and $databaseMode -eq 'remote')) { throw 'Database switch conflicts with DATABASE_MODE.' }
 if ($databaseMode -eq 'source-neon') { $SourceNeon = $true }
 if ($databaseMode -eq 'remote') { $RemoteDatabase = $true }
+if ($env:SOURCE_DRIVE_ENABLED) {
+    if ($env:SOURCE_DRIVE_ENABLED -cnotin @('true','false')) { throw 'Invalid SOURCE_DRIVE_ENABLED environment override.' }
+    $driveEnabled = $env:SOURCE_DRIVE_ENABLED
+}
+$Drive = $Drive -or ($driveEnabled -eq 'true')
 Write-Output "Docker env: $EnvFile"
 Write-Output "Database profile: $(if ($SourceNeon) {'source-neon'} elseif ($RemoteDatabase) {'remote'} else {'same-host'})"
 $composeArgs = @('compose','--env-file',$EnvFile,'-f',(Join-Path $deployDir 'compose.app.yml'))

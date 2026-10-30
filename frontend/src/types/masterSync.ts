@@ -29,6 +29,8 @@ export type MasterSyncRunStatus = MasterSyncRunResult & {
 export type MasterSyncStatusResponse = {
     file_sync_supported: boolean
     file_sync_error: string | null
+    remote_content_processing_supported: boolean
+    derived_content_index_supported: boolean
     file_worker_healthy: boolean
     auto_supported: boolean
     auto_enabled: boolean
@@ -71,6 +73,8 @@ export type SourceSyncFilesResponse = {
     next_cursor: string | null
     file_sync_supported: boolean
     file_sync_error: string | null
+    remote_content_processing_supported: boolean
+    derived_content_index_supported: boolean
     file_worker_healthy: boolean
 }
 

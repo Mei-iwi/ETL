@@ -351,6 +351,18 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             return self.session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         return [self._dict(row) for row in self.session.scalars(stmt.order_by(key).limit(size))]
 
+    def source_imports_by_system_page(self, source_system, after=None, size=100):
+        if not isinstance(source_system, str) or not source_system or not 1 <= size <= 1000:
+            raise ValueError('Invalid source import mapping page')
+        key = SourceFileImport.source_version_id
+        if self.session.bind.dialect.name == 'postgresql':
+            key = key.collate('C')
+        stmt = select(SourceFileImport).where(SourceFileImport.source_system == source_system)
+        if after is not None:
+            stmt = stmt.where(key > after)
+        rows = self.session.scalars(stmt.order_by(key).limit(size))
+        return [self._dict(row) for row in rows]
+
     def claim_source_import(self, stamp, token, expires_at, max_active=1):
         admission_lock(self.session, 'source-import')
         duration = expires_at - stamp
@@ -536,6 +548,222 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             row.source_state_hash = state_hash(self._dict(row))
             self.session.flush()
         return "UPDATED"
+
+    @staticmethod
+    def _federation_target(table):
+        return {
+            'master_learning_resources': ('resources', 'master_resource_id'),
+            'master_users': ('users', 'master_user_id'),
+            'master_grade_levels': ('grades', 'master_grade_level_id'),
+            'subjects': ('subjects', 'master_subject_id'),
+        }[table]
+
+    def _federated_mapping(self, source_id, locator):
+        digest = source_identity_hash(locator)
+        stream = locator.entity_type.casefold()
+        table = STREAMS.get(stream)
+        if table is None:
+            raise DomainError('BLOCKED_SOURCE_MAPPING')
+        model = MODELS[table]
+        row = self.session.scalar(select(model).where(
+            model.source_backend == locator.backend.casefold(),
+            model.source_namespace == locator.namespace,
+            model.source_entity_type == stream,
+            model.source_record_key == locator.source_record_id))
+        if row is None:
+            return None
+        if row.source_identity_version != locator.version or row.source_identity_hash != digest:
+            raise DomainError('BLOCKED_SOURCE_MAPPING')
+        return row.id
+
+    def federated_master_id(self, source_id, locator):
+        """Look up an existing internal MASTER ID for a related source identity."""
+        mapping = self._federated_mapping(source_id, locator)
+        if mapping is not None:
+            return mapping
+        table = STREAMS.get(locator.entity_type)
+        if table is None:
+            raise DomainError('BLOCKED_SOURCE_MAPPING')
+        model = MODELS[table]
+        row = self.session.scalar(select(model).where(
+            model.source_backend == locator.backend.casefold(),
+            model.source_namespace == locator.namespace,
+            model.source_entity_type == locator.entity_type.casefold(),
+            model.source_record_key == locator.source_record_id,
+        ).limit(1))
+        if row is None:
+            raise DomainError('BLOCKED_SOURCE_MAPPING')
+        return row.id
+
+    def sync_upsert_federated(self, table, values, *, source_id, source_locator, allow_legacy_id=False):
+        """Upsert metadata using the identity columns already on the MASTER row."""
+        stream, _ = self._federation_target(table)
+        if source_locator.entity_type.casefold() != stream:
+            raise DomainError('SOURCE_MAPPING_REGISTRY_MISMATCH')
+        digest = source_identity_hash(source_locator)
+        master_id = self._federated_mapping(source_id, source_locator)
+        model = MODELS[table]
+        if master_id is None:
+            existing = self.session.scalar(select(model).where(
+                model.source_backend == source_locator.backend.casefold(),
+                model.source_namespace == source_locator.namespace,
+                model.source_entity_type == stream,
+                model.source_record_key == source_locator.source_record_id,
+            ).limit(1))
+            if existing is not None:
+                master_id = existing.id
+            else:
+                legacy = self.session.get(model, source_locator.source_record_id)
+                legacy_identity = (None if legacy is None else (
+                    legacy.source_identity_version, legacy.source_backend, legacy.source_namespace,
+                    legacy.source_entity_type, legacy.source_record_key, legacy.source_identity_hash))
+                if (allow_legacy_id and legacy is not None and legacy.source_origin == 'POSTGRESQL'
+                        and legacy_identity is not None and all(value is None for value in legacy_identity)):
+                    master_id = source_locator.source_record_id
+                else:
+                    master_id = 'F' + digest[:29]
+            collision = self.session.get(model, master_id)
+            if collision is not None:
+                current = (collision.source_identity_version, collision.source_backend, collision.source_namespace,
+                           collision.source_entity_type, collision.source_record_key, collision.source_identity_hash)
+                expected = (source_locator.version, source_locator.backend.casefold(), source_locator.namespace,
+                            stream, source_locator.source_record_id, digest)
+                if any(value is not None for value in current) and current != expected:
+                    raise DomainError('BLOCKED_SOURCE_MAPPING')
+        federated_values = {**values, 'id': master_id}
+        action = self.sync_upsert(table, federated_values, source_origin='POSTGRESQL',
+                                  source_locator=source_locator)
+        return action, master_id
+
+    def source_checkpoint(self, source_id, stream):
+        key = self._source_checkpoint_key(source_id, stream)
+        row = self.session.get(SyncCheckpoint, key)
+        return ({'last_updated_at': row.last_updated_at, 'last_id': row.last_id,
+                 'updated_at': row.updated_at} if row else None)
+
+    def source_checkpoints(self):
+        rows = self.session.scalars(select(SyncCheckpoint).where(
+            SyncCheckpoint.stream_name.contains(':')).order_by(SyncCheckpoint.stream_name))
+        runs = self.session.scalars(select(MODELS['sync_runs']).where(
+            MODELS['sync_runs'].stream_name.contains(':')).order_by(
+                MODELS['sync_runs'].started_at.desc(), MODELS['sync_runs'].id.desc())).all()
+        latest, retries, retry_streak_ended = {}, {}, set()
+        for run in runs:
+            key = run.stream_name
+            if key not in latest:
+                latest[key] = run
+                retries[key] = 0
+            if key in retry_streak_ended:
+                continue
+            if run.status == 'FAILED':
+                retries[key] += 1
+            else:
+                retry_streak_ended.add(key)
+        result = []
+        for row in rows:
+            source_id, stream = row.stream_name.split(':', 1)
+            latest_run = latest.get(row.stream_name)
+            result.append({'source_id': source_id, 'stream': stream,
+                           'status': latest_run.status if latest_run else 'IDLE',
+                           'retry_count': retries.get(row.stream_name, 0),
+                           'safe_error_code': (latest_run.error_message if latest_run and
+                                               latest_run.status == 'FAILED' and
+                                               latest_run.error_message and
+                                               latest_run.error_message.isupper() else None),
+                           'last_updated_at': row.last_updated_at, 'last_id': row.last_id,
+                           'updated_at': row.updated_at})
+        return result
+
+    @staticmethod
+    def _source_checkpoint_key(source_id, stream):
+        if (not isinstance(source_id, str) or not source_id or ':' in source_id
+                or stream not in ('resources', 'users', 'grades', 'subjects')):
+            raise DomainError('BLOCKED_SOURCE_CHECKPOINT_KEY')
+        key = f'{source_id}:{stream}'
+        if len(key.encode('utf-8')) > 30:
+            raise DomainError('BLOCKED_SOURCE_CHECKPOINT_KEY')
+        return key
+
+    def federated_mapping_page(self, source_id, stream, *, source_backend, source_namespace,
+                               after=None, size=1000):
+        if not 1 <= size <= 1000:
+            raise DomainError('BLOCKED_SOURCE_COVERAGE')
+        target = STREAMS.get(stream)
+        if target is None:
+            raise DomainError('BLOCKED_SOURCE_MAPPING')
+        model = MODELS[target]
+        column = model.source_record_key.collate('C') if self.session.bind.dialect.name == 'postgresql' else model.source_record_key
+        query = select(model).where(
+            model.source_origin == 'POSTGRESQL', model.source_backend == source_backend.casefold(),
+            model.source_namespace == source_namespace, model.source_entity_type == stream,
+            model.source_record_key.is_not(None), model.source_missing_at.is_(None))
+        if after is not None:
+            query = query.where(column > after)
+        rows = self.session.scalars(query.order_by(column).limit(size))
+        return [{'source_id': source_id, 'stream': stream,
+                 'source_record_key': row.source_record_key, 'source_namespace': row.source_namespace,
+                 'source_backend': row.source_backend, 'source_identity_hash': row.source_identity_hash,
+                 'master_id': row.id} for row in rows]
+
+    def count_federated_mappings(self, source_id, stream, *, source_backend, source_namespace):
+        target = STREAMS.get(stream)
+        if target is None:
+            raise DomainError('BLOCKED_SOURCE_MAPPING')
+        model = MODELS[target]
+        return self.session.scalar(select(func.count()).select_from(model).where(
+            model.source_origin == 'POSTGRESQL', model.source_backend == source_backend.casefold(),
+            model.source_namespace == source_namespace, model.source_entity_type == stream,
+            model.source_record_key.is_not(None), model.source_missing_at.is_(None))) or 0
+
+    def mark_federated_source_missing(self, source_id, stream, source_record_key, stamp, *,
+                                      source_backend, source_namespace):
+        target = {'resources': 'master_learning_resources', 'users': 'master_users',
+                  'grades': 'master_grade_levels', 'subjects': 'subjects'}.get(stream)
+        if target is None:
+            raise DomainError('BLOCKED_SOURCE_MAPPING')
+        table = MODELS[target]
+        row = self.session.scalar(select(table).where(
+            table.source_origin == 'POSTGRESQL', table.source_backend == source_backend.casefold(),
+            table.source_namespace == source_namespace, table.source_entity_type == stream,
+            table.source_record_key == source_record_key, table.source_missing_at.is_(None)
+        ).with_for_update())
+        if row is None:
+            raise DomainError('BLOCKED_SOURCE_MAPPING')
+        if (row.source_origin != 'POSTGRESQL'
+                or row.source_identity_hash != source_identity_hash(SourceLocator(
+                    version=row.source_identity_version, backend=source_backend, namespace=source_namespace,
+                    entity_type=stream, source_record_id=source_record_key))
+                or not row.source_state_hash or row.source_state_hash != state_hash(self._dict(row))):
+            raise DomainError('BLOCKED_LOCAL_SOURCE_CHANGE')
+        active_field, deleted_field = (('grade_is_active', 'grade_deleted_at') if stream == 'grades'
+                                       else ('is_active', 'deleted_at'))
+        values = {active_field: False, 'source_missing_at': stamp}
+        if getattr(row, deleted_field) is None:
+            values[deleted_field] = stamp
+        self.update(target, row.id, values)
+        row = self.session.get(table, row.id, populate_existing=True)
+        row.source_state_hash = state_hash(self._dict(row))
+        self.session.flush()
+        return row.id
+
+    def ensure_source_checkpoint(self, source_id, stream):
+        key = self._source_checkpoint_key(source_id, stream)
+        row = self.session.get(SyncCheckpoint, key)
+        if row is None:
+            row = SyncCheckpoint(stream_name=key, last_updated_at=None, last_id=None, updated_at=now())
+            self.session.add(row)
+            self.session.flush()
+        return row
+
+    def update_source_checkpoint(self, source_id, stream, values):
+        row = self.ensure_source_checkpoint(source_id, stream)
+        if 'last_id' in values and values['last_id'] is not None and len(values['last_id']) > 30:
+            raise DomainError('BLOCKED_SOURCE_CHECKPOINT_ID')
+        for key in ('last_updated_at', 'last_id'):
+            if key in values:
+                setattr(row, key, values[key])
+        row.updated_at = now()
+        self.session.flush()
 
     def reconciliation_page(self, table, after=None, size=100):
         if table not in STREAMS.values() or not 1 <= size <= 1000:

@@ -7,7 +7,7 @@ export type BilingualSegment = {
     frame_url?: string; generated: boolean
 }
 export type BilingualView = {
-    resource_version_id: string; items: BilingualSegment[]; original_file_url: string; original_filename?: string
+    resource_version_id: string; items: BilingualSegment[]; original_file_url: string; original_filename?: string; source_backed?: boolean
     options: Partial<ProcessingPreferencesValue> & { translation_pending?: boolean; translation_state?: string }
     extraction: { extraction_status?: string; warnings?: string[]; media?: { audio_status?: string; visual_status?: string; selected_video_track?: number | null; frame_ocr_status?: string } }[]
     summary: { total: number; translated_count: number; timed_count: number; timed_translated_count: number; revision: string }

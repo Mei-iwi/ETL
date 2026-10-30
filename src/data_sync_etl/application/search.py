@@ -30,9 +30,10 @@ from data_sync_etl.domain.lexical import (
     snippet_text,
 )
 from data_sync_etl.domain.meaning_bags import match_meaning
+from data_sync_etl.domain.query_planner import PLANNER_VERSION, lexical_plan_variants, plan_query
 from data_sync_etl.domain.query_variants import VERSION as ACCENT_VARIANT_VERSION
 from data_sync_etl.domain.query_variants import approved_accent_variant
-from data_sync_etl.domain.query_planner import PLANNER_VERSION, lexical_plan_variants, plan_query
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.retrieval_fusion import version_rrf
 from data_sync_etl.domain.search import SearchError, bounded_query, cosine, normalize_query, rrf
 from data_sync_etl.domain.search_access import SearchAccess, denied
@@ -83,6 +84,7 @@ class SearchService:
         self.metadata = metadata
         self.dictionary = empty_dictionary()
         self.concept_resolver = concept_resolver
+        self.source_content_authorizer = None
 
         self._http_inference = SearchInferenceQueue()
         # Retain worker leases after HTTP timeout: repeated cancellations cannot
@@ -571,6 +573,8 @@ class SearchService:
                 self._deadline(started)
         with self.indexing.uow() as repo:
             metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
+        if self.source_content_authorizer is not None:
+            metadata = [row for row in metadata if self.source_content_authorizer(row['version_id'], access=access)]
         if len(metadata) > self.settings.search_max_bags:
             raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
         by_version = {row['version_id']: row for row in metadata}
@@ -956,6 +960,9 @@ class SearchService:
         access = access or SearchAccess()
         if not access.internal:
             raise SearchError('FILE_NOT_FOUND', 404)
+        if (self.source_content_authorizer is not None
+                and not self.source_content_authorizer(version_id, access=access)):
+            raise SearchError('FILE_NOT_FOUND', 404)
         with self.indexing.uow() as repo:
             try:
                 version, state = self.indexing._version(repo, version_id)
@@ -971,10 +978,28 @@ class SearchService:
             except IndexingError:
                 raise SearchError('FILE_NOT_FOUND', 404) from None
 
+    def authorize_source_processing_version(self, version_id, *, access=None):
+        """Require current authenticated resource visibility before a SOURCE job is created."""
+        from data_sync_etl.domain.metadata_search import metadata_allowed
+        access = access or SearchAccess()
+        if not access.internal:
+            raise SearchError('FILE_NOT_FOUND', 404)
+        with self.indexing.uow() as repo:
+            version = repo.get('resource_versions', version_id)
+            resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+            if (not version or not resource or resource.get('source_origin') not in ('POSTGRESQL', 'SOURCE')
+                    or resource.get('publication_status') != 'PUBLISHED' or not resource.get('is_active')
+                    or resource_deleted(resource) or denied(resource) or denied(version)
+                    or not metadata_allowed(resource, version, access)):
+                raise SearchError('FILE_NOT_FOUND', 404)
+
     def file_version(self, version_id, *, access=None, include_text=False):
         """A whole file requires permission for every unit, including parents."""
         access = access or SearchAccess()
         if not access.internal:
+            raise SearchError('FILE_NOT_FOUND', 404)
+        if (self.source_content_authorizer is not None
+                and not self.source_content_authorizer(version_id, access=access)):
             raise SearchError('FILE_NOT_FOUND', 404)
         with self.indexing.uow() as repo:
             snapshot = self._ready_snapshot(repo, version_id)

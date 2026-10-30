@@ -125,21 +125,26 @@ class PostgreSQLSourceAdapter:
     source_origin = 'POSTGRESQL'
     source_backend = 'postgresql'
     source_namespace = 'postgresql:learning'
-    def __init__(self, url=None, *, engine=None, replay_seconds=300, namespace='postgresql:learning'):
+    def __init__(self, url=None, *, engine=None, replay_seconds=300, namespace='postgresql:learning',
+                 timeout_seconds=15):
         try:
             SourceLocator(backend=self.source_backend, namespace=namespace,
                           entity_type='resources', source_record_id='validation')
         except ValueError:
             raise DomainError('BLOCKED_SOURCE_IDENTITY') from None
         self.source_namespace = namespace
+        if not 1 <= timeout_seconds <= 600:
+            raise DomainError('BLOCKED_SOURCE_MAPPING: invalid PostgreSQL source timeout')
         if engine is None:
             if not url or make_url(url).get_backend_name() != "postgresql":
                 raise DomainError("BLOCKED_SOURCE_MAPPING: PostgreSQL SOURCE_DATABASE_URL required")
-            engine = create_engine(url, hide_parameters=True, connect_args={"connect_timeout": 5})
+            engine = create_engine(url, hide_parameters=True,
+                                   connect_args={"connect_timeout": timeout_seconds})
         if engine.dialect.name != "postgresql" or replay_seconds < 0:
             raise DomainError("BLOCKED_SOURCE_MAPPING: invalid PostgreSQL source configuration")
         self.engine = engine
         self.replay_seconds = replay_seconds
+        self.timeout_seconds = timeout_seconds
 
     def locator(self, entity_type: str, source_record_id: str) -> SourceLocator:
         return SourceLocator(
@@ -158,8 +163,12 @@ class PostgreSQLSourceAdapter:
                 ) as connection,
                 connection.begin(),
             ):
+                statement_timeout_ms = str(min(self.timeout_seconds * 1000, 600_000))
+                connection.execute(text(
+                    "SELECT set_config('statement_timeout', :timeout_ms, true)"),
+                    {'timeout_ms': statement_timeout_ms})
                 if catalog:
-                    connection.execute(text("SELECT set_config('statement_timeout','3000',true)"))
+                    connection.execute(text("SELECT set_config('lock_timeout','3000',true)"))
                 role = connection.execute(
                     text(
                     "SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls AS privileged "

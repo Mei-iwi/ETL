@@ -29,6 +29,11 @@ class SourceFileDispatcher:
         reader = self.drive if self.provider(bucket) == 'google_drive' else self.local
         return reader.original_url(bucket, object_key)
 
+    def viewer_reference(self, bucket, object_key):
+        reader = self.drive if self.provider(bucket) == 'google_drive' else self.local
+        lookup = getattr(reader, 'viewer_reference', None)
+        return lookup(bucket, object_key) if callable(lookup) else None
+
     def readiness(self, *, probe=False):
         result = {}
         for provider, reader in (('local', self.local), ('google_drive', self.drive)):

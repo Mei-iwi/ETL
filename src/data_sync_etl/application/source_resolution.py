@@ -15,6 +15,13 @@ class SourceResolutionError(DomainError):
         self.code, self.status = code, status
 
 
+def same_import_snapshot(current, observed):
+    """Discovery's poll timestamp is not a file identity or access grant."""
+    return (current is not None and observed is not None
+            and {key: value for key, value in current.items() if key != 'updated_at'}
+            == {key: value for key, value in observed.items() if key != 'updated_at'})
+
+
 class SourceResolutionService:
     """Resolve a permitted MASTER candidate through one exact source ID.
 
@@ -23,8 +30,9 @@ class SourceResolutionService:
     dependency cannot take down search or leak connection details.
     """
 
-    def __init__(self, uow, source, settings):
+    def __init__(self, uow, source, settings, *, router=None):
         self.uow, self.source, self.settings = uow, source, settings
+        self.router = router
         self.content_authorizer = None
 
     @staticmethod
@@ -59,7 +67,7 @@ class SourceResolutionService:
             'source_identity': identity if isinstance(identity, str) and re.fullmatch('[0-9a-f]{64}', identity) else None,
         }
 
-    def resolve(self, resource_id, access, version_id=None):
+    def resolve(self, resource_id, access, version_id=None, *, verify_content=True):
         if not access.internal:
             raise SourceResolutionError('SEARCH_ACCESS_RESTRICTED', 403)
         with self.uow() as repo:
@@ -91,14 +99,28 @@ class SourceResolutionService:
                     result.update(resolution_status='blocked', source_record_available=False,
                                   content_availability='metadata-only')
                 else:
-                    result['content_availability'] = self._verified_content(version, access)
+                    if verify_content:
+                        result['content_availability'] = self._verified_content(version, access)
                 return result
             try:
-                locator = mapped_source_locator(resource)
-                expected_locator = self.source.locator('resources', locator.source_record_id)
-                if locator != expected_locator or locator.source_record_id != resource_id:
-                    raise ValueError('mapping mismatch')
-            except (DomainError, AttributeError, ValueError):
+                if self.router is not None:
+                    route = self.router.route_resource(resource)
+                    source_adapter, locator = route.adapter, route.locator
+                    if route.legacy_id_match and locator.source_record_id != resource_id:
+                        raise DomainError('BLOCKED_SOURCE_MAPPING')
+                else:
+                    source_adapter = self.source
+                    locator = mapped_source_locator(resource)
+                    expected_locator = source_adapter.locator('resources', locator.source_record_id)
+                    if locator != expected_locator or locator.source_record_id != resource_id:
+                        raise ValueError('mapping mismatch')
+            except DomainError as exc:
+                code = str(exc)
+                status = 'unavailable' if code.startswith('SOURCE_REGISTRY_') or code == 'SOURCE_MAPPING_UNAVAILABLE' else 'blocked'
+                result.update(resolution_status=status, source_record_available=False,
+                              content_availability='metadata-only')
+                return result
+            except (AttributeError, ValueError):
                 result.update(resolution_status='blocked', source_record_available=False,
                               content_availability='metadata-only')
                 return result
@@ -114,7 +136,10 @@ class SourceResolutionService:
             import_row = imports[0]
             result['content_availability'] = self._content_availability(repo, version, import_row)
             source_id = import_row.get('source_version_id')
-            if (import_row.get('source_system') != 'postgresql'
+            expected_source_system = route.source_id if self.router is not None else 'postgresql'
+            legacy_source_system = (self.router is not None and route.legacy_id_match
+                                    and import_row.get('source_system') == 'postgresql')
+            if (import_row.get('source_system') != expected_source_system and not legacy_source_system
                     or import_row.get('status') not in ('METADATA_ONLY', 'IMPORTED', 'PROCESSING')
                     or import_row.get('last_error_code') not in (None, 'SOURCE_METADATA_ONLY', 'UNSUPPORTED_SOURCE_FORMAT')):
                 result.update(resolution_status='blocked', source_record_available=False,
@@ -125,10 +150,22 @@ class SourceResolutionService:
                     or import_row.get('source_version_number') != version.get('version_number')):
                 result.update(resolution_status='stale', source_record_available=False)
                 return result
-        getter = getattr(self.source, 'get_version', None)
+        getter = getattr(source_adapter, 'get_version', None)
         if getter is None:
             result.update(resolution_status='unavailable', source_record_available=False)
             return result
+        if self.router is not None and getattr(self.settings, 'source_federation_enabled', False):
+            try:
+                source_adapter = self.router.registry.adapter_for_source_id(
+                    route.source_id, 'exact_version_lookup')
+            except DomainError:
+                result.update(resolution_status='unavailable', source_record_available=False,
+                              content_availability='metadata-only')
+                return result
+            getter = getattr(source_adapter, 'get_version', None)
+            if not callable(getter):
+                result.update(resolution_status='unavailable', source_record_available=False)
+                return result
         try:
             source = getter(source_id)
         except Exception:
@@ -137,7 +174,7 @@ class SourceResolutionService:
         if not isinstance(source, dict):
             result.update(resolution_status='unavailable', source_record_available=False)
             return result
-        if (source.get('source_version_id') != source_id or source.get('resource_id') != resource_id
+        if (source.get('source_version_id') != source_id or source.get('resource_id') != locator.source_record_id
                 or source.get('source_version_number') != version.get('version_number')
                 or not self._hash_matches(source.get('source_hash'), version.get('source_hash'))):
             result.update(resolution_status='stale', source_record_available=False)
@@ -155,10 +192,19 @@ class SourceResolutionService:
             if not metadata_allowed(current_resource, current_version, access):
                 raise SourceResolutionError('RESOURCE_NOT_FOUND', 404)
             current_import = repo.get('source_file_imports', import_row['id'])
-            if (current_resource != resource or current_version != version or current_import != import_row):
+            mapping_changed = False
+            if self.router is not None and current_resource is not None:
+                try:
+                    current_route = self.router.route_resource(current_resource)
+                    mapping_changed = (current_route.locator != locator or current_route.adapter is not source_adapter)
+                except Exception:
+                    mapping_changed = True
+            if (current_resource != resource or current_version != version or not same_import_snapshot(current_import, import_row)
+                    or mapping_changed):
                 result.update(resolution_status='stale', source_record_available=False,
                               content_availability='metadata-only')
                 return result
         result['source_record_available'] = True
-        result['content_availability'] = self._verified_content(version, access)
+        if verify_content:
+            result['content_availability'] = self._verified_content(version, access)
         return result

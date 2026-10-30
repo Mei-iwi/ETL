@@ -121,6 +121,8 @@ class BilingualService:
                 resource = repo.get("master_learning_resources", version["resource_id"])
                 if not resource or not resource["is_active"] or resource.get("deleted_at"):
                     raise DomainError("Resource version not found")
+                if resource.get('source_origin') != 'LOCAL':
+                    raise DomainError('EXTERNAL_SOURCE_PROCESSING_DISABLED')
                 jobs = repo.find("ocr_jobs", {"resource_version_id": version_id}, limit=1)
                 if any(job["status"] in ("PENDING", "RUNNING") for job in jobs):
                     raise DomainError("PROCESSING_BUSY")
@@ -154,6 +156,9 @@ class BilingualService:
             with self.uow() as repo:
                 version = repo.get("resource_versions", version_id)
                 if not version:
+                    return False
+                resource = repo.get('master_learning_resources', version['resource_id'])
+                if not resource or resource.get('source_origin') != 'LOCAL':
                     return False
                 options = version.get("processing_options") or {}
                 jobs = repo.find(
@@ -344,6 +349,7 @@ class BilingualService:
             version = repo.get("resource_versions", version_id)
             if not version:
                 raise DomainError("Resource version not found")
+            resource = repo.get('master_learning_resources', version['resource_id'])
             jobs = repo.find(
                 "ocr_jobs",
                 {"resource_version_id": version_id},
@@ -392,6 +398,7 @@ class BilingualService:
         result = {
             "resource_version_id": version_id,
             "resource_id": version["resource_id"],
+            "source_backed": bool(resource and resource.get('source_origin') == 'POSTGRESQL'),
             "source_hash": version["source_hash"],
             "original_filename": (version.get("processing_options") or {}).get("original_filename"),
             "original_file_url": f"/api/v1/resource-versions/{version_id}/processing-source",

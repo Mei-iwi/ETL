@@ -1,3 +1,5 @@
+import pytest
+
 from data_sync_etl.application.source_file_import import (
     METADATA_ONLY_BUCKET,
     METADATA_ONLY_ERROR,
@@ -31,7 +33,7 @@ def test_source_discovery_is_metadata_only_by_default(importing, monkeypatch):
     assert container.source_file_import.claim() is None
 
 
-def test_metadata_only_can_transition_to_explicit_source_content(importing):
+def test_metadata_only_never_transitions_to_external_source_content(importing, monkeypatch):
     c, _, _ = importing
     c.settings.source_reference_enabled = c.settings.source_temporary_files_enabled = False
     assert c.source_file_import.discover_once() == 1
@@ -39,17 +41,13 @@ def test_metadata_only_can_transition_to_explicit_source_content(importing):
         original, = repo.find('source_file_imports')
     c.settings.source_reference_enabled = c.settings.source_temporary_files_enabled = True
     c.source_file_import._media_policy_scan_started = False
-    assert c.source_file_import.discover_once() == 1
+    monkeypatch.setattr(c.source_files, 'open_stream', lambda *_a, **_k: pytest.fail('No SOURCE read'))
+    assert c.source_file_import.discover_once() == 0
     with c.uow() as repo:
         row = repo.get('source_file_imports', original['id'])
-        assert row['status'] == 'PENDING' and row['target_version_id'] == original['target_version_id']
-        assert row['storage_bucket'] == 'books'
-    claimed = c.source_file_import.claim()
-    assert claimed is not None
-    c.source_file_import.execute(claimed)
-    with c.uow() as repo:
-        row = repo.get('source_file_imports', original['id'])
-        assert row['status'] == 'PROCESSING'
+        assert row['status'] == 'METADATA_ONLY' and row['target_version_id'] == original['target_version_id']
+        assert row['storage_bucket'] == METADATA_ONLY_BUCKET
+    assert c.source_file_import.claim() is None
 
 
 def test_metadata_only_mutation_cannot_resume(importing):
