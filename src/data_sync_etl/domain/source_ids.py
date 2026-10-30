@@ -86,6 +86,19 @@ def source_identity(locator: SourceLocator) -> SourceIdentity:
     return SourceIdentity(locator=locator, digest=source_identity_hash(locator))
 
 
+def mapped_source_locator(resource: dict) -> SourceLocator:
+    """Validate the complete stored identity before any external resolution/write."""
+    try:
+        locator = SourceLocator(
+            version=resource['source_identity_version'], backend=resource['source_backend'],
+            namespace=resource['source_namespace'], entity_type=resource['source_entity_type'],
+            source_record_id=resource['source_record_key'])
+        SourceIdentity(locator=locator, digest=resource['source_identity_hash'])
+        return locator
+    except (KeyError, TypeError, ValueError):
+        raise DomainError('BLOCKED_SOURCE_IDENTITY') from None
+
+
 def validate_counter_key(prefix: str, period: str) -> None:
     if (
         not isinstance(prefix, str)

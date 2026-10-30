@@ -719,8 +719,8 @@ def get_resource(id: ResourceId, request: Request) -> ResourceDetailResponse:
 )
 def source_resolution(id: ResourceId, request: Request,
                       version_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None) -> SourceResolutionResponse:
+    access = search_access(request)
     try:
-        access = search_access(request)
         result = request.app.state.container.source_resolution.resolve(id, access, version_id)
         return SourceResolutionResponse.model_validate(result)
     except SourceResolutionError as exc:
@@ -766,8 +766,11 @@ def source_writeback(id: ResourceId, body: SourceWriteBackRequest,
                      request: Request) -> SourceWriteBackResponse:
     container = services(request)
     principal = getattr(request.state, 'auth_principal', None)
-    actor_id = getattr(principal, 'id', None) or 'local-admin'
-    role = getattr(principal, 'role', None) or 'ADMIN'
+    local_admin = container.settings.auth_mode == 'legacy_local'
+    actor_id = getattr(principal, 'id', None) or ('local-admin' if local_admin else None)
+    role = getattr(principal, 'role', None) or ('ADMIN' if local_admin else None)
+    if not actor_id or not role:
+        raise HTTPException(403, detail={'code': 'SOURCE_WRITEBACK_FORBIDDEN'})
     owner_id = actor_id.removeprefix('master:') if actor_id.startswith('master:') else None
     fields = body.model_dump(exclude={'expected_source_state_hash', 'idempotency_key', 'approve', 'dry_run'},
                              exclude_none=True)
@@ -802,7 +805,10 @@ def list_resource_versions(id: ResourceId, request: Request) -> list[dict]:
             with container.uow() as repo:
                 resource = repo.get('master_learning_resources', id)
             if id not in principal.resource_ids or not owns_resource(principal, resource):
-                versions = [row for row in versions if can_read_public_file(container, row['id'])]
+                from data_sync_etl.security.authorization import public_metadata_version_ids
+
+                metadata_ids = public_metadata_version_ids(container, id)
+                versions = [row for row in versions if row['id'] in metadata_ids or can_read_public_file(container, row['id'])]
                 readable_ids = {row['id'] for row in versions}
                 versions = [{**row, 'parent_version_id': row['parent_version_id']
                              if row['parent_version_id'] in readable_ids else None} for row in versions]
@@ -1111,7 +1117,11 @@ def source_sync_files(
 ):
     container = source_file_admin(request)
     from data_sync_etl.adapters.persistence.scheduled_audit import recent_file_evidence
-    from data_sync_etl.db.models import MasterLearningResource, ReconciliationFileState, ResourceVersion
+    from data_sync_etl.db.models import (
+        MasterLearningResource,
+        ReconciliationFileState,
+        ResourceVersion,
+    )
     evidence_cache = {}
     def evidence_reader(repo, item):
         version_id = item['target_version_id']
@@ -1224,7 +1234,7 @@ def index_status(id: ResourceId, request: Request, response: Response, include_b
         result = request.app.state.container.indexing.status(id)
         # Keep the same live artifact verification; only omit optional wire details.
         if bag_limit is not None:
-            from data_sync_etl.domain.indexing import digest, IndexingError
+            from data_sync_etl.domain.indexing import IndexingError, digest
 
             # Integrity requires the complete artifact. Paging reduces wire JSON,
             # not verification or Mongo/PG I/O.

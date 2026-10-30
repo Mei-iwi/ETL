@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { FileText, Eye, X, Download, ExternalLink, RotateCw, Check } from 'lucide-react'
 import styles from './LibraryResourceDetailPage.module.css'
 import { SearchContext } from '../search/SearchContext'
-import { canOpenFile, fileResponseError } from './fileReadiness'
-import type { FileIndexStatus } from './fileReadiness'
+import { canOpenFile, fileResponseError, sourceResolutionAllowsFile } from './fileReadiness'
+import type { FileIndexStatus, SourceResolution } from './fileReadiness'
 import { MEDIA_PREVIEW_MAX_BYTES, readPreviewBlob } from './previewBody'
 import { originalSourceUrl } from './sourceReference'
 import type { SourceInfo } from './sourceReference'
@@ -15,7 +15,6 @@ import { mediaPreviewType } from './libraryFileFormats'
 import { startVisiblePolling } from '../system/visiblePolling'
 
 type Version = { id: string; version_number: number; created_at: string }
-type SourceResolution = { resolution_status: 'available' | 'unavailable' | 'stale' | 'blocked'; content_availability: 'metadata-only' | 'authorized-indexed'; source_record_available: boolean }
 
 type FilePanelProps = {
     resourceId: string; versionId: string | null; contextId: string | null; sourceOwned?: boolean
@@ -55,7 +54,7 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
     const url = `/api/v1/resource-versions/${encodeURIComponent(selected)}/file`
     const status = readiness?.id === selected ? readiness.status : null
     const metadataOnly = status?.metadata_only === true
-    const sourceResolutionReady = !sourceOwned || resolution?.resolution_status === 'available'
+    const sourceResolutionReady = !sourceOwned || sourceResolutionAllowsFile(resolution, selected)
     const ready = valid && sourceResolutionReady && !metadataOnly && canOpenFile(status) && statusError?.id !== selected
     const original = sourceInfo?.id === selected ? originalSourceUrl(sourceInfo.value) : null
     const externalLinkReason = !ready ? 'Tệp chưa sẵn sàng để truy cập.'
@@ -74,7 +73,7 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
             })
             .catch(() => { if (!controller.signal.aborted) setResolution(null) })
         return () => controller.abort()
-    }, [resourceId, selected, sourceOwned])
+    }, [resourceId, selected, sourceOwned, attempt])
     useEffect(() => {
         if (!ready || !sourceOwned) return
         const controller = new AbortController()

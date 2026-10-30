@@ -85,6 +85,8 @@ class SourceFileImportService:
             if parent_rows and parent_rows[0].get("target_version_id"):
                 parent = repo.get("resource_versions", parent_rows[0]["target_version_id"])
                 if parent is not None:
+                    if parent['resource_id'] != row['resource_id']:
+                        raise SourceFileError('BLOCKED_SOURCE_MAPPING')
                     parent = parent["id"]
         bucket, key = self._metadata_locator(row["source_version_id"], source.get('storage_object_key'))
         version = repo.insert("resource_versions", {
@@ -218,7 +220,11 @@ class SourceFileImportService:
             )
             metadata_changed = (row["source_hash"].lower(), row["resource_id"], row["source_version_number"]) != (
                 source["source_hash"].lower(), source["resource_id"], source["source_version_number"])
-            if lineage_changed or metadata_changed or (raw_changed and not metadata_only):
+            # A synthetic metadata locator was never a SOURCE storage snapshot.
+            # Enabling explicit content access must resolve its real locator,
+            # while still rejecting changed resource/version/hash/lineage.
+            placeholder = row['storage_bucket'] == METADATA_ONLY_BUCKET and row['status'] == 'METADATA_ONLY'
+            if lineage_changed or metadata_changed or (raw_changed and not metadata_only and not placeholder):
                 repo.update("source_file_imports", row["id"], {
                     "status": "FAILED", "last_error_code": "SOURCE_VERSION_MUTATED",
                     "claim_token": None, "lease_expires_at": None, "updated_at": now(),

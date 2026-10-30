@@ -29,3 +29,35 @@ def test_source_discovery_is_metadata_only_by_default(importing, monkeypatch):
         assert version['storage_bucket'] == METADATA_ONLY_BUCKET
         assert version['storage_object_key'] == row['storage_object_key']
     assert container.source_file_import.claim() is None
+
+
+def test_metadata_only_can_transition_to_explicit_source_content(importing):
+    c, _, _ = importing
+    c.settings.source_reference_enabled = c.settings.source_temporary_files_enabled = False
+    assert c.source_file_import.discover_once() == 1
+    with c.uow() as repo:
+        original, = repo.find('source_file_imports')
+    c.settings.source_reference_enabled = c.settings.source_temporary_files_enabled = True
+    c.source_file_import._media_policy_scan_started = False
+    assert c.source_file_import.discover_once() == 1
+    with c.uow() as repo:
+        row = repo.get('source_file_imports', original['id'])
+        assert row['status'] == 'PENDING' and row['target_version_id'] == original['target_version_id']
+        assert row['storage_bucket'] == 'books'
+    claimed = c.source_file_import.claim()
+    assert claimed is not None
+    c.source_file_import.execute(claimed)
+    with c.uow() as repo:
+        row = repo.get('source_file_imports', original['id'])
+        assert row['status'] == 'PROCESSING'
+
+
+def test_metadata_only_mutation_cannot_resume(importing):
+    c, source, _ = importing
+    c.settings.source_reference_enabled = c.settings.source_temporary_files_enabled = False
+    c.source_file_import.discover_once()
+    source[0]['source_hash'] = 'b' * 64
+    with c.uow() as repo:
+        c.source_file_import._discover(repo, source[0])
+        row, = repo.find('source_file_imports')
+        assert row['status'] == 'FAILED' and row['last_error_code'] == 'SOURCE_VERSION_MUTATED'

@@ -14,7 +14,7 @@ from data_sync_etl.domain.indexing import digest
 
 ANALYZER_VERSION = 'underthesea-8.3.0-nfc-surface-compound-alnum-v2'
 REPRESENTATION_VERSION = 'bag-lexical-tf-v1'
-RANKING_VERSION = 'bm25-concept-core-evidence-v6-corpus-df'
+RANKING_VERSION = 'bm25-concept-core-evidence-v7-authorized-lexical-stats'
 TOKEN = re.compile(r'c\+\+|c#|\.net\b|\d+(?:\.\d+)+|[^\W_]+', re.IGNORECASE)
 SPECIAL = re.compile(r'(c\+\+|c#|\.net\b)', re.IGNORECASE)
 _ANALYSIS = ContextVar('lexical_request_analysis', default=None)
@@ -176,7 +176,7 @@ def contains_phrase(tokens, query):
 
 def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
          dictionary=None, policy=None, domain=None, contextual=True, expansion=None, min_coverage=0., corpus=None,
-         focus_query=None, accent_insensitive=False):
+         focus_query=None, accent_insensitive=False, statistics_documents=None):
     """Weighted BM25, maximum alternative per concept (no alias stacking).
 
     N, avgdl and DF cover ALL authorized verified bags including nonhits.
@@ -225,10 +225,16 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
     if corpus_df is not None and any(type(value) is not int or value < 0 or value > n
                                      for value in corpus_df.values()):
         raise ValueError('Invalid authorized BM25 document frequencies')
+    observed_df = Counter(term for doc in documents.values() for term in doc.terms)
+    if corpus_df is not None and any(corpus_df[term] < count for term, count in observed_df.items()):
+        raise ValueError('Invalid authorized BM25 document frequencies')
     avgdl = total_length / n or 1
     df = corpus_df if corpus_df is not None else Counter(term for doc in documents.values() for term in doc.terms)
     observed = {}
-    for key, doc in documents.items():
+    evidence_documents = documents if statistics_documents is None else statistics_documents
+    if not documents.keys() <= evidence_documents.keys():
+        raise ValueError('Incomplete authorized BM25 evidence corpus')
+    for key, doc in evidence_documents.items():
         # Longest dictionary matches prevent a qualified phrase from becoming
         # evidence for a shorter, different sense. Passage boundaries are kept.
         counts, title = Counter(), Counter()
@@ -255,7 +261,7 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
     anchors = set()
     if not focus_ids and 3 <= len(exact) <= 12:
         informative_query = set(exact) - QUERY_STOPWORDS - AUXILIARY_MATCH_TERMS
-        for doc in documents.values():
+        for doc in evidence_documents.values():
             if len(informative_query.intersection(doc.terms)) < 2:
                 continue
             for tokens in [doc.title_tokens, *doc.passages]:
@@ -309,7 +315,7 @@ def bm25(query, documents, *, k1=1.2, b=0.75, expand_concepts=True,
         if variant is not None:
             assisted = bm25(variant, documents, k1=k1, b=b, expand_concepts=expand_concepts,
                             dictionary=dictionary, policy=policy, domain=domain, contextual=contextual,
-                            min_coverage=min_coverage, corpus=corpus)
+                            min_coverage=min_coverage, corpus=corpus, statistics_documents=statistics_documents)
             result = {key: max(result.get(key, 0.), .8 * assisted.get(key, 0.))
                       for key in result.keys() | assisted.keys()}
     return result

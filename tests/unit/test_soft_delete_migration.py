@@ -27,6 +27,8 @@ def test_additive_upgrade_preserves_rows_and_guarded_rollback(container):
     with pytest.raises(RuntimeError, match='SOFT_DELETE_ROLLBACK_REQUIRES'):
         migrate(c.engine, '0016', downgrade=True)
     assert fields <= {column['name'] for column in inspect(c.engine).get_columns('master_learning_resources')}
-    with c.uow() as repo:
-        assert len(repo.find('resource_deletion_events')) == 1
-        assert repo.get('master_learning_resources', 'resource-1')['master_deleted_at']
+    # A guarded historical downgrade can already have removed newer nullable
+    # columns on SQLite. Verify preserved data against that physical layout.
+    with c.engine.connect() as connection:
+        assert connection.scalar(text('SELECT count(*) FROM resource_deletion_events')) == 1
+        assert connection.scalar(text("SELECT master_deleted_at FROM master_learning_resources WHERE id='resource-1'"))

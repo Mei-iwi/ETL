@@ -16,7 +16,7 @@ class ResourceVisibilityBoundary:
         if scope['type'] != 'http':
             return await self.app(scope, receive, send)
         path = scope['path']
-        resource_match = re.fullmatch(r'/api/v1/resources/([^/]+)(?:/(versions(?:/ingest)?|metadata|description))?', path)
+        resource_match = re.fullmatch(r'/api/v1/resources/([^/]+)(?:/(versions(?:/ingest)?|metadata|description|source-resolution))?', path)
         version_match = re.fullmatch(
             r'/api/v1/resource-versions/([^/]+)/(?:[^/]+|translations/retry|exports/(?:json|txt|srt|vtt)|segments/[^/]+/frame)',
             path,

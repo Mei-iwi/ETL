@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     translation_max_retries: int = Field(default=3, ge=1, le=10)
     source_fixture_root: Path = Path("fixtures/source")
     source_adapter: Literal["json", "postgresql", "production"] = "json"
+    source_namespace: str = Field(default='postgresql:learning', min_length=1, max_length=255)
     source_database_url: str | None = Field(default=None, repr=False)
     source_migration_database_url: str | None = Field(default=None, repr=False)
     source_replay_seconds: int = Field(default=300, ge=0)

@@ -4,6 +4,8 @@ from typing import Annotated, Protocol
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from data_sync_etl.domain.source_ids import SourceLocator
+
 Id = Annotated[str, Field(min_length=1, max_length=30)]
 
 
@@ -142,9 +144,11 @@ class SourceMetadataWriter(Protocol):
     supported: bool
 
     def write_metadata(
-        self, *, record_id: str, fields: dict, expected_source_state_hash: str,
+        self, *, locator: SourceLocator, fields: dict, expected_source_state_hash: str,
         idempotency_key: str,
     ) -> dict: ...
+
+    def supports(self, locator: SourceLocator) -> bool: ...
 
 
 class ReconciliationSnapshot(Protocol):

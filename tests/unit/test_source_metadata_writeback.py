@@ -2,10 +2,12 @@ import pytest
 
 from data_sync_etl.adapters.source.writeback import InMemorySourceMetadataWriter
 from data_sync_etl.application.source_metadata_writeback import SourceWriteBackError
+from data_sync_etl.domain.source_ids import SourceLocator, source_identity_hash
 from data_sync_etl.domain.source_ownership import state_hash
 
 
 def prepare_writeback(container):
+    container.source_writeback.settings = container.settings
     container.sync.run(full=True)
     with container.uow() as repo:
         repo.update('master_learning_resources', 'resource-1', {
@@ -14,6 +16,9 @@ def prepare_writeback(container):
             'source_record_key': 'resource-1', 'source_identity_version': 1,
         })
         resource = repo.get('master_learning_resources', 'resource-1')
+        locator = SourceLocator(backend='fixture', namespace='fixture:source',
+                                entity_type='resources', source_record_id='resource-1')
+        repo.update('master_learning_resources', 'resource-1', {'source_identity_hash': source_identity_hash(locator)})
         repo.update('master_learning_resources', 'resource-1', {'source_state_hash': state_hash(resource)})
         resource = repo.get('master_learning_resources', 'resource-1')
     writer = InMemorySourceMetadataWriter({
@@ -21,6 +26,7 @@ def prepare_writeback(container):
     })
     container.settings.source_metadata_writeback_enabled = True
     container.source_writeback.writer = writer
+    container.source_writeback.permission = lambda **grant: grant['actor_id'] == 'local-admin'
     return resource, writer
 
 

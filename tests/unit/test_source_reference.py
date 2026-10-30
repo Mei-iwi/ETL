@@ -27,15 +27,24 @@ def test_import_reference_no_managed_copy_and_source_readonly(importing):
 
 
 def test_flags_fail_closed_never_copy(importing):
-    c, _, _ = importing
+    c, source, _ = importing
     c.settings.source_reference_enabled = False
-    row = discover_and_import(c)
-    assert row['last_error_code'] == 'SOURCE_REFERENCE_DISABLED'
-    assert not row['target_version_id']
+    c.source_file_import.discover_once()
+    assert c.source_file_import.claim() is None
+    with c.uow() as repo:
+        row, = repo.find('source_file_imports')
+        version = repo.get('resource_versions', row['target_version_id'])
+    assert row['status'] == version['lifecycle_status'] == 'METADATA_ONLY'
+    with pytest.raises(SourceFileError, match='SOURCE_REFERENCE_DISABLED'):
+        c.source_resolver.import_reference(row)
     c.settings.source_reference_enabled = True
     c.settings.source_temporary_files_enabled = False
+    # An explicit canonical reference still cannot open bytes while temp
+    # access is disabled. The persisted metadata-only placeholder is untouched.
+    canonical = {**row, 'storage_bucket': source[0]['storage_bucket'],
+                 'storage_object_key': source[0]['storage_object_key']}
     with pytest.raises(SourceFileError, match='SOURCE_TEMP_POLICY_REQUIRED'):
-        ref = c.source_resolver.import_reference(row)
+        ref = c.source_resolver.import_reference(canonical)
         with c.source_resolver.temporary_path(ref):
             pass
     assert not list((c.storage.root / 'resources').rglob('*'))

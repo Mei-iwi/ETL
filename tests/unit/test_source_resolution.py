@@ -1,5 +1,6 @@
 from data_sync_etl.domain.core import now
 from data_sync_etl.domain.search_access import SearchAccess
+from data_sync_etl.domain.source_ids import source_identity_hash
 
 
 def seed_source_mapping(container):
@@ -12,9 +13,13 @@ def seed_source_mapping(container):
         'storage_bucket': 'hidden', 'storage_object_key': 'private/file.pdf',
     }
     with container.uow() as repo:
+        locator = container.source.locator('resources', 'resource-1')
         repo.update('master_learning_resources', 'resource-1', {
             'source_origin': 'POSTGRESQL', 'publication_status': 'PUBLISHED',
-            'source_identity_hash': 'b' * 64,
+            'source_identity_hash': source_identity_hash(locator),
+            'source_identity_version': locator.version, 'source_backend': locator.backend,
+            'source_namespace': locator.namespace, 'source_entity_type': locator.entity_type,
+            'source_record_key': locator.source_record_id,
         })
         version = repo.insert('resource_versions', {
             'resource_id': 'resource-1', 'version_number': 1, 'lifecycle_status': 'METADATA_ONLY',
@@ -48,7 +53,7 @@ def test_source_resolution_uses_exact_id_without_file_access(container, monkeypa
     assert result['resolution_status'] == 'available'
     assert result['content_availability'] == 'metadata-only'
     assert result['source_record_available'] is True
-    assert result['source_identity'] == 'b' * 64
+    assert result['source_identity'] == source_identity_hash(container.source.locator('resources', 'resource-1'))
     assert calls == [source['source_version_id']]
     assert 'storage_bucket' not in result and 'storage_object_key' not in result
 

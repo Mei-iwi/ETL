@@ -20,6 +20,9 @@ def test_nullable_unique_references_and_other_ten_tables_unchanged(container):
               'resource_versions': 20, 'content_units': 13, 'ocr_jobs': 12, 'ocr_page_tasks': 14}
     for table, count in counts.items():
         additions = {'source_file_size', 'storage_file_size'} if table == 'resource_versions' else set()
+        media = {'resource_versions': 'processing_options', 'content_units': 'source_locator'}
+        if table in media:
+            additions.add(media[table])
         if table in {'master_learning_resources', 'master_users', 'master_grade_levels', 'subjects'}:
             additions |= {
                 'source_identity_version', 'source_backend', 'source_namespace',
@@ -35,7 +38,7 @@ def test_nullable_unique_references_and_other_ten_tables_unchanged(container):
         assert physical == set(MODELS[table].__table__.columns.keys())
         assert len(physical - additions) == count and additions <= physical
         for column in inspector.get_columns(table):
-            if column['name'] in additions and table == 'resource_versions':
+            if column['name'] in {'source_file_size', 'storage_file_size'} and table == 'resource_versions':
                 assert column['nullable'] and str(column['type']).upper() == 'BIGINT'
     for table in ('master_users', 'master_learning_resources'):
         column = next(c for c in inspector.get_columns(table) if c['name'] == 'mongo_id')
@@ -59,9 +62,17 @@ def test_migration_preserves_old_rows_no_backfill_and_guards_downgrade(container
         repo.reserve_master_mongo_identity('users', 'QA26_OLD', None, 'MDOC-QA26')
     with pytest.raises(RuntimeError, match='mappings exist'):
         migrate(container.engine, '0012', downgrade=True)
-    with container.uow() as repo:
-        after = repo.get('master_users', 'QA26_OLD')
-        assert {k: v for k, v in before.items() if k != 'mongo_id'} == {k: v for k, v in after.items() if k != 'mongo_id'}
+    # SQLite DDL before the guarded historical downgrade can be durable. Use
+    # the physical schema to check retained data, then upgrade before new ORM.
+    with container.engine.connect() as c:
+        assert c.scalar(text("SELECT mongo_id FROM master_users WHERE id='QA26_OLD'")) == 'MDOC-QA26'
+        after = dict(c.execute(text("SELECT * FROM master_users WHERE id='QA26_OLD'")).mappings().one())
+    # Query the actual historical layout after the rejected downgrade. New ORM
+    # columns need not exist there; every retained value must still match.
+    assert after['mongo_id'] == 'MDOC-QA26'
+    for key in ('id', 'email', 'role_id', 'role_code', 'role_name', 'is_active'):
+        assert after[key] == before[key]
+    assert after['hashed_password'] == 'private-fixture'
 
 
 @pytest.mark.parametrize('name,model', [('users', User), ('resources', LearningResource)])

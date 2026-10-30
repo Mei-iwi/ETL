@@ -82,7 +82,8 @@ def create_source(settings):
         return JsonFixtureSourceAdapter(settings.source_fixture_root)
     if settings.source_adapter in {"postgresql", "production"}:
         return PostgreSQLSourceAdapter(
-            settings.source_database_url, replay_seconds=settings.source_replay_seconds
+            settings.source_database_url, replay_seconds=settings.source_replay_seconds,
+            namespace=settings.source_namespace,
         )
     raise DomainError("BLOCKED_SOURCE_MAPPING: production source adapter is not configured")
 
@@ -328,6 +329,7 @@ class Container:
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
                                     query_cache_runtime=self.indexing.embedding, semantic=self.semantic,
                                     metadata=self.metadata_search)
+        self.source_resolution.content_authorizer = self.search.file_version
         # No live adapter can attest all PG/Mongo/provider writers yet. A flag
         # alone must never mint authority or enable stale result replay.
         self.search_sessions = None

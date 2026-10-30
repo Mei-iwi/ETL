@@ -280,7 +280,8 @@ export function DataReconciliationPage() {
                     <strong>Write-back metadata:</strong>{' '}
                     {writebackStatus.enabled && writebackStatus.writer_supported
                         ? `Có thể đề nghị/duyệt các trường: ${writebackStatus.fields.join(', ')}`
-                        : 'Đang tắt mặc định; hệ thống chỉ đồng bộ SOURCE → MASTER và không ghi SOURCE.'}
+                        : writebackStatus.enabled ? 'Chưa có writer hoặc quyền ghi SOURCE được cấp.'
+                            : 'Đang tắt mặc định; hệ thống chỉ đồng bộ SOURCE → MASTER và không ghi SOURCE.'}
                 </div>}
 
                 {/* THÔNG BÁO / CẢNH BÁO */}

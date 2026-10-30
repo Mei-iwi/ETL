@@ -125,7 +125,13 @@ class PostgreSQLSourceAdapter:
     source_origin = 'POSTGRESQL'
     source_backend = 'postgresql'
     source_namespace = 'postgresql:learning'
-    def __init__(self, url=None, *, engine=None, replay_seconds=300):
+    def __init__(self, url=None, *, engine=None, replay_seconds=300, namespace='postgresql:learning'):
+        try:
+            SourceLocator(backend=self.source_backend, namespace=namespace,
+                          entity_type='resources', source_record_id='validation')
+        except ValueError:
+            raise DomainError('BLOCKED_SOURCE_IDENTITY') from None
+        self.source_namespace = namespace
         if engine is None:
             if not url or make_url(url).get_backend_name() != "postgresql":
                 raise DomainError("BLOCKED_SOURCE_MAPPING: PostgreSQL SOURCE_DATABASE_URL required")
@@ -355,6 +361,7 @@ class PostgreSQLSourceAdapter:
         """Exact private identity lookup; includes roots, no inferred parent."""
         with self.snapshot() as reader:
             connection = reader.connection
+            connection.execute(text("SELECT set_config('statement_timeout','3000',true)"))
             if not connection.scalar(text(
                 "SELECT has_table_privilege(current_user, 'resource_versions', 'SELECT')"
             )) or connection.scalar(text(
@@ -365,7 +372,8 @@ class PostgreSQLSourceAdapter:
                 "SELECT v.id AS source_version_id,v.resource_id,v.version_number AS source_version_number, "
                 "v.parent_version_id,v.source_hash,v.storage_bucket,v.storage_object_key,v.updated_at, "
                 "v.lifecycle_status::text AS source_lifecycle_status, "
-                "r.is_active AS resource_active,r.deleted_at AS resource_deleted_at "
+                "r.is_active AS resource_active,r.deleted_at AS resource_deleted_at, "
+                "r.publication_status::text AS resource_publication_status "
                 "FROM resource_versions v JOIN learning_resources r ON r.id=v.resource_id WHERE v.id=:id"
             ), {"id": source_version_id}).mappings().one_or_none()
             return cast(SourceVersionMetadata, dict(row)) if row else None

@@ -1,52 +1,58 @@
-"""Opt-in SOURCE metadata writers.
-
-The production PostgreSQL adapter intentionally implements only SourceDataReader.
-The in-memory writer is an isolated demo/test double and never writes fixture files
-or a live SOURCE database.
-"""
+"""Isolated fake writer; production composition always injects the disabled writer."""
 
 from hashlib import sha256
+from threading import Lock
 
 from data_sync_etl.domain.core import DomainError, now
+from data_sync_etl.domain.source_ownership import validate_source_writeback_fields
 
 
 class DisabledSourceMetadataWriter:
     supported = False
+
+    def supports(self, locator):
+        return False
 
     def write_metadata(self, **kwargs):
         raise DomainError('SOURCE_WRITEBACK_DISABLED')
 
 
 class InMemorySourceMetadataWriter:
-    """Bounded fake writer with compare-and-swap and replay protection."""
+    """Thread-safe demo CAS and payload-bound replay within one process."""
 
     supported = True
 
-    def __init__(self, records=None):
-        self.records = {
-            str(key): {'title': value.get('title'), 'source_state_hash': value.get('source_state_hash')}
-            for key, value in (records or {}).items()
-        }
+    def __init__(self, records=None, *, backend='fixture', namespace='fixture:source'):
+        self.backend, self.namespace = backend, namespace
+        self.records = {str(key): dict(value) for key, value in (records or {}).items()}
         self._replays = {}
+        self._lock = Lock()
 
-    @staticmethod
-    def _state_hash(record_id, title):
-        return sha256(f'ETL-SOURCE-DEMO|{record_id}|{title}'.encode()).hexdigest()
+    def supports(self, locator):
+        return (locator.backend == self.backend and locator.namespace == self.namespace
+                and locator.entity_type == 'resources')
 
-    def write_metadata(self, *, record_id, fields, expected_source_state_hash, idempotency_key):
-        if idempotency_key in self._replays:
-            return dict(self._replays[idempotency_key])
-        current = self.records.get(record_id)
-        if current is None:
-            raise DomainError('SOURCE_RECORD_NOT_FOUND')
-        if current.get('source_state_hash') != expected_source_state_hash:
-            raise DomainError('SOURCE_WRITEBACK_CONFLICT')
-        title = fields['title']
-        updated = {
-            'status': 'APPLIED',
-            'source_updated_at': now().isoformat(),
-            'source_state_hash': self._state_hash(record_id, title),
-        }
-        current.update(title=title, source_state_hash=updated['source_state_hash'])
-        self._replays[idempotency_key] = dict(updated)
-        return updated
+    def write_metadata(self, *, locator, fields, expected_source_state_hash, idempotency_key):
+        fields = validate_source_writeback_fields(fields)
+        if not self.supports(locator):
+            raise DomainError('SOURCE_WRITEBACK_BLOCKED')
+        payload = (locator.canonical_payload(), tuple(sorted(fields.items())), expected_source_state_hash)
+        with self._lock:
+            if idempotency_key in self._replays:
+                before, result = self._replays[idempotency_key]
+                if before != payload:
+                    raise DomainError('SOURCE_WRITEBACK_IDEMPOTENCY_REUSED')
+                return dict(result)
+            current = self.records.get(locator.source_record_id)
+            if current is None:
+                raise DomainError('SOURCE_RECORD_NOT_FOUND')
+            if (current.get('is_active', True) is not True or current.get('deleted_at')
+                    or current.get('publication_status') == 'ARCHIVED'):
+                raise DomainError('SOURCE_WRITEBACK_BLOCKED')
+            if current.get('source_state_hash') != expected_source_state_hash:
+                raise DomainError('SOURCE_WRITEBACK_CONFLICT')
+            result = {'status': 'APPLIED', 'source_updated_at': now().isoformat(),
+                      'source_state_hash': sha256(repr((payload, fields['title'])).encode()).hexdigest()}
+            current.update(fields, source_state_hash=result['source_state_hash'])
+            self._replays[idempotency_key] = (payload, dict(result))
+            return result

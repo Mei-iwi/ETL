@@ -61,6 +61,18 @@ def metadata_allowed(resource, version, access):
                 or (version.get('final_approved_by') and version.get('final_approved_at')))
 
 
+def metadata_mapping_allowed(resource, version, imports, allowed_statuses):
+    if resource.get('source_origin') == 'POSTGRESQL':
+        return (len(imports) == 1 and imports[0]['status'] in ('METADATA_ONLY', 'IMPORTED', 'PROCESSING')
+                and imports[0]['last_error_code'] in (None, 'SOURCE_METADATA_ONLY', 'UNSUPPORTED_SOURCE_FORMAT')
+                and imports[0]['source_resource_active']
+                and imports[0]['source_lifecycle_status'] in allowed_statuses
+                and imports[0]['resource_id'] == resource['id']
+                and imports[0]['source_version_number'] == version['version_number']
+                and imports[0]['source_hash'] == version['source_hash'])
+    return resource.get('source_origin') == 'LOCAL' and not imports
+
+
 def clean(value, limit):
     if not isinstance(value, str) or len(value) > limit:
         raise IndexingError('METADATA_FIELD_INVALID', 422)

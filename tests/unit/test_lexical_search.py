@@ -62,6 +62,26 @@ def test_bm25_explicit_corpus_df_keeps_candidate_shortlists_authorized():
     assert score < bm25('rare', candidate, corpus=(3, 3, {'rare': 1}))['hit']
     with pytest.raises(ValueError, match='document frequencies'):
         bm25('rare', candidate, corpus=(3, 3, {'rare': 4}))
+    with pytest.raises(ValueError, match='document frequencies'):
+        bm25('rare', candidate, corpus=(3, 3, {}))
+    assert bm25('rare', {}) == {}
+    assert bm25('rare', {'empty': lexical_document([''])}) == {}
+
+
+def test_bm25_concept_statistics_also_use_full_authorized_corpus(tmp_path):
+    from collections import Counter
+
+    from tests.corpus_dictionary_support import reviewed_dictionary
+    docs = {'a': lexical_document(['zircon lattice']),
+            'b': lexical_document(['réseau cristallin']),
+            'c': lexical_document(['unrelated material'])}
+    corpus = (len(docs), sum(doc.length for doc in docs.values()),
+              Counter(term for doc in docs.values() for term in doc.terms))
+    with reviewed_dictionary(tmp_path, 'en: zircon lattice | fr: réseau cristallin', 'zircon lattice') as dictionary:
+        expected = bm25('zircon lattice', docs, dictionary=dictionary)['a']
+        actual = bm25('zircon lattice', {'a': docs['a']}, dictionary=dictionary,
+                      corpus=corpus, statistics_documents=docs)['a']
+        assert actual == pytest.approx(expected)
 
 
 def test_title_weight_and_exact_phrase_do_not_cross_leaf_boundaries():

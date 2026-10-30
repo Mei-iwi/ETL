@@ -488,9 +488,15 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
                 }
                 if row is not None:
                     existing = {key: getattr(row, key) for key in identity}
-                    if any(value is None for value in existing.values()):
+                    # Old rows acquire the additive mapping only after the
+                    # ownership/state/creation checks above. Partial identities
+                    # are evidence of drift and cannot be silently replaced.
+                    if all(value is None for value in existing.values()):
+                        if values.get(created) is None:
+                            raise DomainError('BLOCKED_SOURCE_IDENTITY')
+                    elif any(value is None for value in existing.values()):
                         raise DomainError('BLOCKED_SOURCE_IDENTITY')
-                    if existing != identity:
+                    elif existing != identity:
                         raise DomainError('BLOCKED_SOURCE_IDENTITY')
                 values.update(identity)
         if table == 'master_grade_levels' and values.get('grade_mongo_id') is None:
