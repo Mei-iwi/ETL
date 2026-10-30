@@ -52,7 +52,8 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
     const valid = versions.some(row => row.id === selected)
     const url = `/api/v1/resource-versions/${encodeURIComponent(selected)}/file`
     const status = readiness?.id === selected ? readiness.status : null
-    const ready = valid && canOpenFile(status) && statusError?.id !== selected
+    const metadataOnly = status?.metadata_only === true
+    const ready = valid && !metadataOnly && canOpenFile(status) && statusError?.id !== selected
     const original = sourceInfo?.id === selected ? originalSourceUrl(sourceInfo.value) : null
     const externalLinkReason = !ready ? 'Tệp chưa sẵn sàng để truy cập.'
         : sourceError?.id === selected ? sourceError.message
@@ -118,13 +119,13 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
                 {versions.map(row => <option value={row.id} key={row.id}>Phiên bản {row.version_number} · {new Date(row.created_at).toLocaleDateString('vi-VN')}</option>)}
             </select></label>
             <div className={styles.fileActions}>
-            <button className={styles.historyLink} disabled={!ready} aria-expanded={open && ready}
+            {!metadataOnly && <button className={styles.historyLink} disabled={!ready} aria-expanded={open && ready}
                 onClick={() => setOpen(value => !value)}>
-                {open ? <X size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{open ? 'Đóng tệp' : 'Xem tệp'}</button>
+                {open ? <X size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{open ? 'Đóng tệp' : 'Xem tệp'}</button>}
             {ready && <a className={styles.secondaryButton} href={`${url}?download=true`} download><Download size={15} aria-hidden="true" />Tải tệp</a>}
             {ready && original && <a className={styles.secondaryButton} href={original}
                 target="_blank" rel="noopener noreferrer" title="Xem tệp trực tiếp tại nguồn trong tab mới"><ExternalLink size={15} aria-hidden="true" />Xem tệp bên ngoài</a>}
-            {sourceOwned && valid && !(ready && original) && <button className={styles.secondaryButton}
+            {sourceOwned && valid && !metadataOnly && !(ready && original) && <button className={styles.secondaryButton}
                 disabled title={externalLinkReason} aria-describedby="external-source-link-status"><ExternalLink size={15} aria-hidden="true" />Xem tệp bên ngoài</button>}
             {valid && <button className={styles.secondaryButton} onClick={() => setAttempt(n => n + 1)}><RotateCw size={14} aria-hidden="true" />Kiểm tra lại</button>}
             </div>
@@ -135,9 +136,10 @@ function VersionFilePanel({ resourceId, versionId, contextId, contextEvidence, s
                 Nội dung {status?.processing_status === 'CONTENT_READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}</span>
             <span className={status?.index_status === 'READY' ? styles.ready : styles.pending}>
                 Chỉ mục {status?.index_status === 'READY' ? 'sẵn sàng' : 'chưa sẵn sàng'}</span>
+            {metadataOnly && <span className={styles.pending}>Chỉ có metadata; chưa được phép đọc nội dung</span>}
         </div>}
         {statusError?.id === selected && <p role="alert" className={styles.error}>{statusError.message}</p>}
-        {sourceOwned && valid && !(ready && original) && <p id="external-source-link-status" className={styles.message}>{externalLinkReason}</p>}
+        {sourceOwned && valid && !metadataOnly && !(ready && original) && <p id="external-source-link-status" className={styles.message}>{externalLinkReason}</p>}
         {sourceError?.id === selected && <p role="alert" className={styles.error}>{sourceError.message}</p>}
         {open && ready && <FilePreview key={selected} url={url} />}
         {contextId && selected === versionId && <div className={styles.fileContext}><SearchContext id={contextId} evidence={contextEvidence} /></div>}

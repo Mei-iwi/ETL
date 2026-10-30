@@ -91,7 +91,7 @@ class MetadataSearchService:
     def mapping_allowed(self, resource, version, imports):
         if resource.get('source_origin') == 'POSTGRESQL':
             return (len(imports) == 1 and imports[0]['status'] in ('METADATA_ONLY', 'IMPORTED', 'PROCESSING')
-                    and imports[0]['last_error_code'] in (None, 'UNSUPPORTED_SOURCE_FORMAT')
+                    and imports[0]['last_error_code'] in (None, 'SOURCE_METADATA_ONLY', 'UNSUPPORTED_SOURCE_FORMAT')
                     and imports[0]['source_resource_active']
                     and imports[0]['source_lifecycle_status'] in self.settings.source_file_allowed_statuses
                     and imports[0]['resource_id'] == resource['id']

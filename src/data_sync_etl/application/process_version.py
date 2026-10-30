@@ -21,6 +21,8 @@ class ProcessResourceVersion:
 
             if resource is None or not resource["is_active"] or resource_deleted(resource):
                 raise DomainError("Learning resource is unavailable")
+            if version.get("lifecycle_status") == "METADATA_ONLY":
+                raise DomainError("CONTENT_NOT_AVAILABLE")
 
         job = (self.ocr.create_job(version_id, fence=fence) if fence is not None
                else self.ocr.create_job(version_id))

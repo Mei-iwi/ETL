@@ -161,7 +161,7 @@ class SearchRepositoryMixin:
                 MasterGradeLevel.education_is_active.is_(True), MasterGradeLevel.education_deleted_at.is_(None)))
         # INGESTED is the local upload lifecycle. READY processing/index checks are
         # independent and mandatory in the application. Draft/rejected versions never qualify.
-        eligible = ('INGESTED', 'APPROVED', 'PUBLISHED')
+        eligible = ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED')
         ranked = select(v.id.label('version_id'), v.resource_id, v.version_number,
                         func.row_number().over(partition_by=v.resource_id,
                             order_by=(v.version_number.desc(), v.id.desc())).label('position')

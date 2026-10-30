@@ -99,6 +99,7 @@ class IndexStatusResponse(BaseModel):
     resource_version_id: str
     processing_status: str
     index_status: IndexStatus
+    metadata_only: bool = False
     auto_enabled: bool
     latest_run_id: str | None
     published_run_id: str | None

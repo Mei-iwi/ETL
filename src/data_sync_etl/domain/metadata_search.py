@@ -45,7 +45,7 @@ def metadata_allowed(resource, version, access):
     if (not access.internal or not resource or not version
             or resource.get('is_active') is not True or resource.get('publication_status') != 'PUBLISHED'
             or version.get('resource_id') != resource.get('id')
-            or version.get('lifecycle_status') not in ('INGESTED', 'APPROVED', 'PUBLISHED')
+            or version.get('lifecycle_status') not in ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED')
             or denied(resource) or denied(version) or version.get('rejection_reason')):
         return False
     if access.scope != 'authenticated_user':

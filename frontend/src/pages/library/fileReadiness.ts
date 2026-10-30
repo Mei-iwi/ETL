@@ -1,4 +1,4 @@
-export type FileIndexStatus = { processing_status: string; index_status: string }
+export type FileIndexStatus = { processing_status: string; index_status: string; metadata_only?: boolean }
 export function canOpenFile(status: FileIndexStatus | null | undefined) {
     return status?.processing_status === 'CONTENT_READY' && status.index_status === 'READY'
 }
