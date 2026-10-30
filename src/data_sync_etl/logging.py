@@ -21,6 +21,9 @@ FIELDS = {
     "task_id",
     "stage",
     "coverage",
+    "error_type",
+    "error_code",
+    "failure_phase",
 }
 
 

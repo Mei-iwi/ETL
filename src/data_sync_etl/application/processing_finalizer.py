@@ -1,9 +1,26 @@
 from datetime import timedelta
+import re
 
 from data_sync_etl.application.processing_state import processing_state, projection_fingerprint
-from data_sync_etl.domain.core import now
+from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.logging import event
 from data_sync_etl.ports.repositories import UnitOfWork
+
+
+_SAFE_ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,79}$")
+
+
+def _safe_failure_fields(exc: Exception, failure_phase: str) -> dict[str, str]:
+    """Expose stable diagnostics without logging exception messages or payloads."""
+    error_type = type(exc).__name__
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", error_type):
+        error_type = "UnexpectedError"
+    fields = {"error_type": error_type, "failure_phase": failure_phase}
+    if isinstance(exc, DomainError) and exc.args:
+        candidate = exc.args[0]
+        if isinstance(candidate, str) and _SAFE_ERROR_CODE.fullmatch(candidate):
+            fields["error_code"] = candidate
+    return fields
 
 
 class ProcessingFinalizer:
@@ -133,8 +150,10 @@ class ProcessingFinalizer:
             post = posts[0] if posts and posts[0]["status"] == "COMPLETED" else None
 
         event(stage="finalization", job_id=job_id, action="STARTED", run_id=stage["id"])
+        failure_phase = "POSTPROCESS"
         try:
             if post is None:
+                failure_phase = "POSTPROCESS"
                 self.postprocess.run_locked(version_id)
                 with self.uow() as repo:
                     post = repo.find(
@@ -146,7 +165,9 @@ class ProcessingFinalizer:
                         order=("-created_at", "-id"),
                         limit=1,
                     )[0]
+            failure_phase = "MONGO_PROJECTION"
             result = self.projector.project(version_id, job_id, stage["id"], len(attempts) + 1)
+            failure_phase = "MASTER_FINALIZATION"
             with self.uow() as repo:
                 live = repo.get('master_learning_resources', version['resource_id'], lock=True)
                 if resource_deleted(live) or live['deletion_revision'] != resource['deletion_revision']:
@@ -171,8 +192,9 @@ class ProcessingFinalizer:
                         {"status": "COMPLETED", "finished_at": now()},
                     )
                 if self.on_content_ready is not None:
+                    failure_phase = "CONTENT_READY_HOOK"
                     self.on_content_ready(repo, version_id)
-        except Exception:
+        except Exception as exc:
             with self.uow() as repo:
                 repo.update(
                     "etl_stage_runs",
@@ -193,7 +215,13 @@ class ProcessingFinalizer:
                             "error_message": "Manual finalization retry exhausted",
                         },
                     )
-            event(stage="finalization", job_id=job_id, action="FAILED", run_id=stage["id"])
+            event(
+                stage="finalization",
+                job_id=job_id,
+                action="FAILED",
+                run_id=stage["id"],
+                **_safe_failure_fields(exc, failure_phase),
+            )
             raise
         event(stage="finalization", job_id=job_id, action="COMPLETED", run_id=stage["id"])
         return {"status": "CONTENT_READY", "resource_version_id": version_id, **result}
@@ -206,8 +234,13 @@ class ProcessingFinalizer:
         for job in jobs:
             try:
                 result = self.finalize(job["id"])
-            except Exception:
-                event(stage="finalization", job_id=job["id"], action="RECONCILE_FAILED")
+            except Exception as exc:
+                event(
+                    stage="finalization",
+                    job_id=job["id"],
+                    action="RECONCILE_FAILED",
+                    **_safe_failure_fields(exc, "RECONCILE"),
+                )
                 return True
             if result and result["status"] == "CONTENT_READY":
                 return True
