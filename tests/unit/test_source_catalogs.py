@@ -153,7 +153,7 @@ def test_catalog_support_preserves_shared_source_engine_pool_configuration(monke
     monkeypatch.setattr("data_sync_etl.adapters.source.postgresql.create_engine", create)
     PostgreSQLSourceAdapter("postgresql+psycopg://127.0.0.1/etl_test_b04_b09")
     assert len(calls) == 1
-    assert calls[0]["connect_args"] == {"connect_timeout": 5}
+    assert calls[0]["connect_args"] == {"connect_timeout": 15}
     assert "pool_timeout" not in calls[0]
 
 

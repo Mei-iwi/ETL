@@ -124,6 +124,7 @@ from data_sync_etl.domain.resource_metadata import (
 )
 from data_sync_etl.domain.resource_version import CreateResourceVersionCommand
 from data_sync_etl.domain.search import SearchError
+from data_sync_etl.logging import event
 
 #Swagger Tags
 TAG_SYSTEM: str = 'System'
@@ -476,7 +477,12 @@ def source_view_response(container, version_id, access, *, embedded=False):
     try:
         opened = container.source_open.resolve(resource['id'], access, version_id)
     except SourceResolutionError as exc:
-        raise HTTPException(exc.status, detail={'code': exc.code, 'message': 'Không thể mở tệp nguồn.'}) from None
+        event(stage='source_file_access', action='REJECTED',
+              coverage={'error_code': exc.code, 'http_status': exc.status})
+        message = ('Chức năng truy xuất tệp nguồn chưa được bật.'
+                   if exc.code == 'SOURCE_REFERENCE_DISABLED'
+                   else 'Không thể mở tệp nguồn.')
+        raise HTTPException(exc.status, detail={'code': exc.code, 'message': message}) from None
     if opened['status'] != 'EXTERNAL_VIEWER_AVAILABLE' or len(opened['files']) != 1:
         raise HTTPException(409, detail={'code': opened['status'], 'message': 'Kho nguồn chưa cung cấp link xem hợp lệ.'})
     file = opened['files'][0]
@@ -507,6 +513,11 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
             return source_file_error(exc)
         except Exception as exc:
             raise search_error(exc) from None
+        if not isinstance(version.get('preview_text'), str):
+            # A SOURCE reference without authorized derived OCR text must not
+            # become a server-side KeyError/500.  Original bytes remain
+            # provider-owned; report the normal readiness contract instead.
+            raise search_error(SearchError('FILE_NOT_READY', 409)) from None
         return PlainTextResponse(version['preview_text'],
                                  headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
     try:
@@ -757,6 +768,12 @@ def get_resource(id: ResourceId, request: Request) -> ResourceDetailResponse:
 def source_resolution(id: ResourceId, request: Request,
                       version_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None) -> SourceResolutionResponse:
     access = search_access(request)
+    if (access.internal
+            and not getattr(request.app.state.container.settings, 'source_reference_enabled', False)):
+        raise HTTPException(status_code=503, detail={
+            'code': 'SOURCE_REFERENCE_DISABLED',
+            'message': 'Chức năng truy xuất tệp nguồn chưa được bật.',
+        })
     try:
         result = request.app.state.container.source_resolution.resolve(id, access, version_id)
         return SourceResolutionResponse.model_validate(result)

@@ -186,6 +186,19 @@ def create_app(container=None):
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):
+        # SearchAccess raises a typed SearchError before individual routes can
+        # enter their local error-mapping blocks.  Preserve its status/code so
+        # security boundaries return 403/503 instead of the generic 400
+        # DomainError response.
+        if hasattr(exc, 'code') and hasattr(exc, 'status'):
+            try:
+                status = int(exc.status)
+            except (TypeError, ValueError):
+                status = 400
+            if 400 <= status <= 599 and isinstance(exc.code, str):
+                return JSONResponse(status_code=status, content={
+                    'detail': {'code': exc.code, 'message': 'Yêu cầu không được phép hoặc dịch vụ chưa sẵn sàng.'}
+                })
         return JSONResponse(
             status_code=400,
             content={"detail": "Invalid ETL operation; verify resource, source and job state"},

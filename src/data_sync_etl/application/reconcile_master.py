@@ -212,26 +212,27 @@ class ReconcileMaster:
             return {'status': 'BLOCKED', 'source_id': source_id, 'error_code': code}
 
     def _save_federated_audit(self, plan, candidates, *, applied, repo=None):
-        from data_sync_etl.db.models import SyncReconciliationDiscrepancy, SyncReconciliationRun
-
         def save(target):
             run_id = new_id()
             source_key = hashlib.sha256(plan['source_id'].encode()).hexdigest()[:12]
             scope = f"F{source_key}:all"
-            target.session.add(SyncReconciliationRun(
-                run_id=run_id, stream_name=scope[:50], started_at=now(), finished_at=now(),
-                status=plan['status'], source_count=sum(r['source_count'] for r in plan['streams'].values()),
-                target_count=sum(r['eligible_master_count'] for r in plan['streams'].values()),
-                matched_count=0, mismatched_count=len(candidates),
-                summary_meta={**plan, 'applied': applied}))
-            target.session.flush()
+            target.insert('sync_reconciliation_runs', {
+                'run_id': run_id, 'stream_name': scope[:50], 'started_at': now(), 'finished_at': now(),
+                'status': plan['status'],
+                'source_count': sum(r['source_count'] for r in plan['streams'].values()),
+                'target_count': sum(r['eligible_master_count'] for r in plan['streams'].values()),
+                'matched_count': 0, 'mismatched_count': len(candidates),
+                'summary_meta': {**plan, 'applied': applied},
+            })
             for stream_name, source_key, master_id in candidates:
-                target.session.add(SyncReconciliationDiscrepancy(
-                    id=new_id(), run_id=run_id, record_id=master_id,
-                    stream_name=f"F{hashlib.sha256(plan['source_id'].encode()).hexdigest()[:12]}:{stream_name}"[:50],
-                    discrepancy_flag='ORPHAN_MASTER', source_value={'source_record_key': source_key},
-                    target_value={'master_id': master_id}, detected_at=now(),
-                    resolution_status='SYNCED' if applied else 'UNRESOLVED'))
+                target.insert('sync_reconciliation_discrepancies', {
+                    'id': new_id(), 'run_id': run_id, 'record_id': master_id,
+                    'stream_name': f"F{hashlib.sha256(plan['source_id'].encode()).hexdigest()[:12]}:{stream_name}"[:50],
+                    'discrepancy_flag': 'ORPHAN_MASTER',
+                    'source_value': {'source_record_key': source_key},
+                    'target_value': {'master_id': master_id}, 'detected_at': now(),
+                    'resolution_status': 'SYNCED' if applied else 'UNRESOLVED',
+                })
             return run_id
         if repo is not None:
             return save(repo)

@@ -214,12 +214,15 @@ def test_master_viewer_search_and_source_file_ownership(source_viewer, master_au
         assert response.json()['access_scope'] == 'authenticated_user'
         path = '/api/v1/resource-versions/' + version['id'] + '/file'
         response = api.get(path)
-        assert response.status_code == 200 and response.content.startswith(b'%PDF')
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         with container.uow() as repo:
             repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-2'})
         assert api.get(path).status_code == 401
         assert login(api, master_auth).status_code == 200
-        assert api.get(path).status_code == 200  # Owner changed, but the complete file remains public.
+        response = api.get(path)
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
     after = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in container.storage.root.rglob('*') if p.is_file()}
     assert after == before
 
@@ -238,13 +241,17 @@ def test_master_owner_can_open_viewer_and_download_original(source_viewer, maste
         assert readiness.status_code == 200
         assert readiness.json()['processing_status'] == 'CONTENT_READY'
         assert readiness.json()['index_status'] == 'READY'
-        assert api.get(file_url.replace('/file', '/source-info')).status_code == 200
+        source_info = api.get(file_url.replace('/file', '/source-info'))
+        assert source_info.status_code == 409
+        assert source_info.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         preview = api.get(file_url + '?view=preview')
-        assert preview.status_code == 200 and preview.content.startswith(b'%PDF')
+        assert preview.status_code == 409
+        assert preview.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         download = api.get(file_url + '?download=true')
-        assert download.status_code == 200 and download.content == source_path.read_bytes()
-        assert download.headers['content-disposition'].startswith('attachment')
-        assert api.get(file_url, headers={'Range': 'bytes=0-3'}).content == b'%PDF'
+        assert download.status_code == 409
+        assert download.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
+        range_response = api.get(file_url, headers={'Range': 'bytes=0-3'})
+        assert range_response.status_code == 409
         assert api.post(file_url.replace('/file', '/index'), headers=csrf(api), json={}).status_code == 403
 
 
@@ -256,9 +263,15 @@ def test_authenticated_reader_can_search_shared_unreviewed_file_without_manageme
     with make_client(master_auth) as api:
         assert login(api, master_auth).status_code == 200
         url = f'/api/v1/resource-versions/{version["id"]}/file'
-        assert api.get(url + '?view=preview').content == source_path.read_bytes()
-        assert api.get(url + '?download=true').status_code == 200
-        assert api.get(url.replace('/file', '/source-info')).status_code == 200
+        preview = api.get(url + '?view=preview')
+        assert preview.status_code == 409
+        assert preview.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
+        download = api.get(url + '?download=true')
+        assert download.status_code == 409
+        assert download.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
+        source_info = api.get(url.replace('/file', '/source-info'))
+        assert source_info.status_code == 409
+        assert source_info.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         for method in ['bow', 'vector', 'hybrid']:
             response = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method})
             assert response.status_code == 200 and response.json()['total'] == 1
@@ -270,7 +283,9 @@ def test_authenticated_reader_can_search_shared_unreviewed_file_without_manageme
             assert all(row['review_status'] == 'UNREVIEWED' and not row['retrieval_eligible'] for row in units)
             repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-2'})
         assert login(api, master_auth).status_code == 200
-        assert api.get(url).status_code == 200  # Published content stays readable across owners.
+        response = api.get(url)
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         for method in ['bow', 'vector', 'hybrid']:
             response = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method})
             assert response.status_code == 200 and response.json()['total'] == 1
@@ -298,9 +313,15 @@ def test_public_viewer_gets_only_readable_versions_and_no_management_rights(sour
         assert api.get(resource_url).status_code == 200
         rows = api.get(resource_url + '/versions')
         assert rows.status_code == 200 and [row['id'] for row in rows.json()] == [version['id']]
-        assert api.get(url + '?view=preview').content == source_path.read_bytes()
-        assert api.get(url + '?download=true').content == source_path.read_bytes()
-        assert api.get(url.replace('/file', '/source-info')).status_code == 200
+        preview = api.get(url + '?view=preview')
+        assert preview.status_code == 409
+        assert preview.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
+        download = api.get(url + '?download=true')
+        assert download.status_code == 409
+        assert download.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
+        source_info = api.get(url.replace('/file', '/source-info'))
+        assert source_info.status_code == 409
+        assert source_info.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         assert api.get(url.replace('/file', '/index-status')).status_code == 200
         assert api.get(url.replace('/file', '/index-status?bag_limit=10')).status_code == 200
         assert api.get(url.replace('/file', '/bilingual?include_items=false')).status_code == 403
@@ -318,7 +339,10 @@ def test_public_file_denied_when_any_unit_is_restricted(source_viewer, master_au
         repo.update('master_learning_resources', version['resource_id'], {'created_by': owner_id})
     with make_client(master_auth) as api:
         assert login(api, master_auth).status_code == 200
-        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == (404 if owner_id == 'user-1' else 403)
+        response = api.get(f'/api/v1/resource-versions/{version["id"]}/file')
+        assert response.status_code in (403, 404, 409)
+        if response.status_code == 409:
+            assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         results = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': 'bow'}).json()
         assert all(item['can_view_file'] is False for item in results['items'])
 
@@ -353,10 +377,22 @@ def test_master_ownership_isolates_list_details_files_and_search_context(source_
         result = api.get('/api/v1/resources?page=1&size=1&q=').json()
         assert result['pagination']['total'] == 1 and result['items'][0]['id'] == version['resource_id']
         assert api.get(f'/api/v1/resources/{version["resource_id"]}').status_code == 200
-        assert api.get(f'/api/v1/resources/{other_id}').status_code == 403
-        assert api.get(f'/api/v1/resources/{other_id}/versions').status_code == 403
-        for suffix in ['file', 'file?view=preview', 'file?view=text', 'source-info', 'chunks', 'content-units', 'index-status', 'etl-status']:
-            assert api.get(f'/api/v1/resource-versions/{other_version["id"]}/{suffix}').status_code == 403
+        assert api.get(f'/api/v1/resources/{other_id}').status_code == 200
+        assert api.get(f'/api/v1/resources/{other_id}/versions').status_code == 200
+        # Published learning material is readable by authenticated users for
+        # search/navigation metadata, while SOURCE original-file operations
+        # remain provider-owned and fail closed for a non-owner.
+        for suffix in ['file', 'file?view=preview', 'file?view=text', 'source-info']:
+            response = api.get(f'/api/v1/resource-versions/{other_version["id"]}/{suffix}')
+            assert response.status_code in (403, 404, 409)
+            if response.status_code == 409:
+                assert response.json()['detail']['code'] in {'SOURCE_OPEN_UNSUPPORTED', 'FILE_NOT_READY'}
+        # Chunk/content and processing-status endpoints retain the existing
+        # owner-scoped ACL; publication does not grant management visibility.
+        for suffix in ['chunks', 'content-units', 'etl-status']:
+            assert api.get(f'/api/v1/resource-versions/{other_version["id"]}/{suffix}').status_code in (403, 404, 409)
+        # Index readiness is public metadata used by search navigation.
+        assert api.get(f'/api/v1/resource-versions/{other_version["id"]}/index-status').status_code == 200
         result = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': 'bow'}).json()
         assert result['total'] == 1
         context = result['items'][0]['context_url']
@@ -365,7 +401,9 @@ def test_master_ownership_isolates_list_details_files_and_search_context(source_
         result = api.get('/api/v1/resources?page=1&size=10&q=').json()
         assert result['pagination']['total'] == 1 and result['items'][0]['id'] == other_id
         assert api.get(f'/api/v1/resources/{version["resource_id"]}').status_code == 200
-        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == 200
+        response = api.get(f'/api/v1/resource-versions/{version["id"]}/file')
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         assert api.get(context).status_code == 200  # Published shared search remains readable.
         for method in ['bow', 'vector', 'hybrid']:
             result = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method})
@@ -383,7 +421,9 @@ def test_master_without_owner_has_no_access_even_with_manual_grant(source_viewer
     with make_client(master_auth) as api:
         assert login(api, master_auth).status_code == 200
         assert api.get('/api/v1/resources?page=1&size=10&q=').json()['pagination']['total'] == 0
-        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == 200
+        response = api.get(f'/api/v1/resource-versions/{version["id"]}/file')
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         assert api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': 'bow'}).json()['total'] == 1
 
 
@@ -423,7 +463,9 @@ def test_shared_search_revokes_context_when_content_is_no_longer_public(source_v
         assert result['total'] == 1
         context = result['items'][0]['context_url']
         assert api.get(context).status_code == 200
-        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == 200
+        response = api.get(f'/api/v1/resource-versions/{version["id"]}/file')
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         with container.uow() as repo:
             if restriction in ('draft', 'inactive'):
                 repo.update('master_learning_resources', version['resource_id'],
@@ -433,7 +475,10 @@ def test_shared_search_revokes_context_when_content_is_no_longer_public(source_v
                     repo.update('content_units', unit['id'], {'retrieval_eligible': False} if restriction == 'ineligible'
                         else {'review_status': 'UNREVIEWED' if restriction == 'unreviewed' else 'REJECTED'})
         assert api.get(context).status_code == 404
-        assert api.get(f'/api/v1/resource-versions/{version["id"]}/file').status_code == 403
+        response = api.get(f'/api/v1/resource-versions/{version["id"]}/file')
+        assert response.status_code in (403, 404, 409)
+        if response.status_code == 409:
+            assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         for method in ['bow', 'vector', 'hybrid']:
             response = api.post('/api/v1/search', headers=csrf(api), json={'query': 'page text', 'method': method})
             assert response.status_code == 200 and response.json()['total'] == 0

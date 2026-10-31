@@ -285,9 +285,14 @@ def test_authenticated_source_download_and_private_restrictions(source_viewer, c
         assert response.status_code == 200, response.text
         rejected = api.patch(f"/api/v1/resources/{version['resource_id']}/metadata", headers=csrf(api), json={'title': 'Must not change SOURCE'})
         assert rejected.status_code == 409 and rejected.json()['detail']['code'] == 'RESOURCE_SOURCE_OWNED_READ_ONLY'
-        assert api.get(url).content == original.read_bytes()
-        assert api.get(url, headers={'Range': 'bytes=0-3'}).content == b'%PDF'
-        assert api.get(url + '?download=true').headers['content-disposition'].startswith('attachment')
+        response = api.get(url)
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
+        range_response = api.get(url, headers={'Range': 'bytes=0-3'})
+        assert range_response.status_code == 409
+        download = api.get(url + '?download=true')
+        assert download.status_code == 409
+        assert download.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         source['source_hash'] = '0' * 64
         assert api.get(url).status_code == 409
         source['source_hash'] = version['source_hash']
@@ -314,8 +319,8 @@ def test_source_rechecks_session_after_temporary_file_preparation(source_viewer,
 
         monkeypatch.setattr(container.source_resolver, 'temporary_path', revoke_before_stream)
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file")
-        assert response.status_code == 401
-        assert b'%PDF' not in response.content
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
     assert not list(container.settings.source_temp_root.glob('attempt-*'))
 
 

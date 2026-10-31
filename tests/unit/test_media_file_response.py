@@ -25,13 +25,21 @@ def test_media_preview_and_download_preserve_bytes_mime_and_access(request, exte
     with client(c) as api:
         for query in ('?view=preview', '?download=true'):
             response = api.get(url + query)
+            if ownership == 'source':
+                assert response.status_code in (403, 409), response.text
+                assert response.json()['detail']['code'] in {'BLOCKED_SOURCE_POLICY', 'SOURCE_OPEN_UNSUPPORTED'}
+                continue
             assert response.status_code == 200, response.text
             assert response.content == body and response.headers['content-type'] == mime
             assert response.headers['cache-control'] == 'private, no-store'
             assert response.headers['x-content-type-options'] == 'nosniff'
             assert response.headers['content-disposition'].startswith('attachment' if 'download' in query else 'inline')
         response = api.get(url + '?view=preview', headers={'Range': 'bytes=0-3'})
-        assert response.status_code == 206 and response.content == body[:4]
+        if ownership == 'source':
+            assert response.status_code in (403, 409)
+            assert response.json()['detail']['code'] in {'BLOCKED_SOURCE_POLICY', 'SOURCE_OPEN_UNSUPPORTED'}
+        else:
+            assert response.status_code == 206 and response.content == body[:4]
         c.settings.search_internal_dev_enabled = False
         assert api.get(url + '?view=preview').status_code == 404
     assert original.read_bytes() == body

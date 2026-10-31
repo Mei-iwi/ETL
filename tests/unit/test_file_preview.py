@@ -57,7 +57,8 @@ def test_preview_pdf_keeps_original_download_and_cleans_source(source_viewer, mo
         for query in ['?view=preview', '?download=true', '?download=true&view=preview', '?view=text']:
             response = api.get(url + query)
             assert response.status_code == 409
-            assert response.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
+            expected_code = 'FILE_NOT_READY' if query == '?view=text' else 'SOURCE_OPEN_UNSUPPORTED'
+            assert response.json()['detail']['code'] == expected_code
         c.settings.search_internal_dev_enabled = False
         assert api.get(url + '?view=preview').status_code == 404
     assert original.read_bytes() == body
@@ -73,10 +74,10 @@ def test_source_grid_and_original_download(source_viewer, extension):
     with client(c) as api:
         response = api.get(url + '?view=preview')
         assert response.status_code == 409
-        assert response.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         download = api.get(url + '?download=true&view=preview')
         assert download.status_code == 409
-        assert download.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
+        assert download.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
     assert original.read_bytes() == body
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
@@ -88,7 +89,7 @@ def test_preview_failure_has_code_and_no_leaked_path(source_viewer, monkeypatch)
     with client(c) as api:
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file?view=preview")
         assert response.status_code == 409
-        assert response.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         assert str(path) not in response.text
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
@@ -204,7 +205,7 @@ def test_preview_is_blocked_before_source_content_access(source_viewer, monkeypa
     with client(c) as api:
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file?view=preview")
         assert response.status_code == 409
-        assert response.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
 
@@ -227,6 +228,9 @@ def test_source_revoked_during_conversion_never_sends_pdf(source_viewer, monkeyp
     c, version, source, path = source_viewer
     set_format(c, version, path, '.docx', sample('.docx'), source)
     source['source_lifecycle_status'] = 'REJECTED'
+    with c.uow() as repo:
+        imported = repo.find('source_file_imports', {'target_version_id': version['id']})[0]
+        repo.update('source_file_imports', imported['id'], {'source_lifecycle_status': 'REJECTED'})
     monkeypatch.setattr(c.file_previews.converter, 'convert', lambda *_a, **_k: pytest.fail('SOURCE preview disabled'))
     with client(c) as api:
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file?view=preview")

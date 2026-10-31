@@ -11,11 +11,10 @@ from io import BytesIO, TextIOWrapper
 from time import monotonic
 
 from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.extraction_limits import MAX_TEXT_CHARS, MAX_UNIT_CHARS
 from data_sync_etl.ports.processing import OCRResult
 
 MAX_UNITS = 5000
-MAX_TEXT_CHARS = 1_000_000
-MAX_UNIT_CHARS = 16000
 MAX_ROWS = 100000
 MAX_CELLS = 100000
 MAX_COLUMNS = 256

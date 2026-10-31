@@ -4,6 +4,7 @@ from hashlib import sha256
 
 from data_sync_etl.domain.core import DomainError, new_id, now
 from data_sync_etl.domain.source_ids import SourceLocator, source_identity_hash
+from data_sync_etl.domain.source_status import normalize_source_status
 
 _METADATA_BUCKET = '__SOURCE_METADATA_ONLY__'
 
@@ -28,6 +29,9 @@ class SourceVersionSynchronizer:
         for item in items:
             source_version_id = item.get('source_version_id')
             locator = self._version_identity(source, source_id, source_version_id)
+            lifecycle_status = normalize_source_status(item.get('source_lifecycle_status'))
+            if lifecycle_status is None:
+                raise DomainError('BLOCKED_SOURCE_VERSION_STATUS')
             if (not isinstance(item.get('resource_id'), str) or not 1 <= len(item['resource_id']) <= 255
                     or not isinstance(item.get('source_hash'), str)
                     or len(item['source_hash']) != 64
@@ -58,9 +62,10 @@ class SourceVersionSynchronizer:
                     raise DomainError('SOURCE_VERSION_MUTATED')
                 fields = {
                     'resource_title': item.get('resource_title'),
-                    'source_lifecycle_status': item['source_lifecycle_status'],
+                    'source_lifecycle_status': lifecycle_status,
                     'source_resource_active': bool(item.get('resource_active', True)
-                                                    and item.get('resource_deleted_at') is None),
+                                                    and item.get('resource_deleted_at') is None
+                                                    and lifecycle_status not in {'PRIVATE', 'REJECTED', 'DELETED'}),
                     'source_updated_at': item['updated_at'],
                     'updated_at': now(),
                 }
@@ -118,9 +123,10 @@ class SourceVersionSynchronizer:
                 'source_version_id': source_version_id, 'resource_id': master_resource_id,
                 'resource_title': item.get('resource_title'),
                 'source_version_number': item['source_version_number'],
-                'source_lifecycle_status': item['source_lifecycle_status'],
+                'source_lifecycle_status': lifecycle_status,
                 'source_resource_active': bool(item.get('resource_active', True)
-                                                and item.get('resource_deleted_at') is None),
+                                                and item.get('resource_deleted_at') is None
+                                                and lifecycle_status not in {'PRIVATE', 'REJECTED', 'DELETED'}),
                 'source_updated_at': item['updated_at'],
                 'storage_bucket': _METADATA_BUCKET,
                 'storage_object_key': f'{_METADATA_BUCKET}/{key}',

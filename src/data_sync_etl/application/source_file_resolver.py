@@ -12,6 +12,7 @@ from pathlib import PurePosixPath
 
 from data_sync_etl.domain.core import DomainError, SourceFileError
 from data_sync_etl.domain.resource_deletion import resource_deleted
+from data_sync_etl.domain.source_status import source_status_allowed
 from data_sync_etl.ports.source_files import ResolvedFileReference
 
 SOURCE_METADATA_ONLY_BUCKET = '__SOURCE_METADATA_ONLY__'
@@ -42,7 +43,6 @@ class SourceFileResolver:
         return self.source
 
     def _canonical(self, row):
-        self._enabled()
         adapter = self._source_adapter(row['source_system'])
         if not hasattr(adapter, 'get_version'):
             raise SourceFileError('BLOCKED_SOURCE_MAPPING')
@@ -57,13 +57,15 @@ class SourceFileResolver:
         keys = ('source_version_id', 'resource_id', 'source_version_number', 'storage_bucket', 'storage_object_key')
         if any(source.get(k) != row.get(k) for k in keys) or source.get('source_hash', '').lower() != row['source_hash'].lower():
             raise SourceFileError('SOURCE_VERSION_MUTATED')
-        if not source.get('resource_active', True) or source.get('resource_deleted_at') is not None or source.get('source_lifecycle_status') not in self.settings.source_file_allowed_statuses:
+        if (not source.get('resource_active', True)
+                or source.get('resource_deleted_at') is not None
+                or not source_status_allowed(source.get('source_lifecycle_status'),
+                                             self.settings.source_file_allowed_statuses)):
             raise SourceFileError('BLOCKED_SOURCE_POLICY')
         return source
 
     def _canonical_metadata(self, row):
         """Validate source version metadata without resolving/storing its file path."""
-        self._enabled()
         adapter = self._source_adapter(row['source_system'])
         if not hasattr(adapter, 'get_version'):
             raise SourceFileError('BLOCKED_SOURCE_MAPPING')
@@ -81,7 +83,8 @@ class SourceFileResolver:
                 or source.get('source_hash', '').lower() != row.get('source_hash', '').lower()):
             raise SourceFileError('SOURCE_VERSION_MUTATED')
         if (not source.get('resource_active', True) or source.get('resource_deleted_at') is not None
-                or source.get('source_lifecycle_status') not in self.settings.source_file_allowed_statuses):
+                or not source_status_allowed(source.get('source_lifecycle_status'),
+                                             self.settings.source_file_allowed_statuses)):
             raise SourceFileError('BLOCKED_SOURCE_POLICY')
         return source
 
@@ -111,7 +114,8 @@ class SourceFileResolver:
                     or parent.get('resource_id') != source.get('resource_id')):
                 raise SourceFileError('BLOCKED_SOURCE_MAPPING')
             if (not parent.get('resource_active', True) or parent.get('resource_deleted_at') is not None
-                    or parent.get('source_lifecycle_status') not in self.settings.source_file_allowed_statuses):
+                    or not source_status_allowed(parent.get('source_lifecycle_status'),
+                                                 self.settings.source_file_allowed_statuses)):
                 raise SourceFileError('BLOCKED_SOURCE_POLICY')
             with self.uow() as repo:
                 mappings = repo.find('source_file_imports', {
@@ -173,7 +177,6 @@ class SourceFileResolver:
     def require_content_capabilities(self, ref, *, index=False):
         if ref.ownership != 'SOURCE_BACKED':
             return
-        self._enabled()
         source_id = self._capability_source_id(ref)
         try:
             for capability in ('read_content', 'process_content'):
@@ -206,7 +209,8 @@ class SourceFileResolver:
                     or rows[0].get('resource_id') != resource['id']
                     or rows[0].get('source_hash', '').lower() != version.get('source_hash', '').lower()
                     or not rows[0].get('source_resource_active', True)
-                    or rows[0].get('source_lifecycle_status') not in self.settings.source_file_allowed_statuses
+                    or not source_status_allowed(rows[0].get('source_lifecycle_status'),
+                                                 self.settings.source_file_allowed_statuses)
                     or rows[0].get('last_error_code') in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING')):
                 return False
             source_id = rows[0]['source_system']
@@ -256,6 +260,9 @@ class SourceFileResolver:
         return ref
 
     def import_reference(self, row):
+        # Legacy/original import is separately gated; OCR and derived indexing
+        # use resolve/open_verified_stream and must not depend on the viewer flag.
+        self._enabled()
         with self.uow() as repo:
             resource = repo.get('master_learning_resources', row['resource_id'])
             if resource is None or resource.get('source_origin') != 'POSTGRESQL':

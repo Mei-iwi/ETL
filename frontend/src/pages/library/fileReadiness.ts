@@ -1,5 +1,5 @@
 export type FileIndexStatus = { processing_status: string; index_status: string; metadata_only?: boolean }
-export type SourceResolution = { version_id: string; resolution_status: 'available' | 'unavailable' | 'stale' | 'blocked'; content_availability: 'metadata-only' | 'authorized-indexed'; source_record_available: boolean }
+export type SourceResolution = { version_id: string; resolution_status: 'available' | 'unavailable' | 'stale' | 'blocked'; content_availability: 'metadata-only' | 'remote-readable' | 'ocr-processing' | 'content-ready' | 'authorized-indexed' | 'stale' | 'revoked' | 'unsupported'; source_record_available: boolean }
 export type SourceOpen = {
     master_resource_id: string; version_id: string | null
     status: 'EXTERNAL_VIEWER_AVAILABLE' | 'SOURCE_AUTH_REQUIRED' | 'METADATA_ONLY' | 'SOURCE_UNAVAILABLE'
@@ -57,6 +57,13 @@ export async function fileResponseError(response: Response): Promise<string> {
         PREVIEW_EXTERNAL_CONTENT: 'Tệp chứa nội dung liên kết bên ngoài chưa được phép dựng bản xem. Hãy tải file gốc để xem.',
         PREVIEW_INVALID_FILE: 'Không đọc được tệp để tạo bản xem. Hãy kiểm tra file gốc.',
         SOURCE_REFERENCE_DISABLED: 'Chức năng truy xuất tệp nguồn chưa được bật. Vui lòng liên hệ quản trị viên.',
+        SOURCE_CAPABILITY_BLOCKED: 'Nguồn chưa cấp quyền cần thiết cho thao tác này.',
+        SOURCE_CAPABILITY_INVALID: 'Nguồn chưa hỗ trợ capability được yêu cầu.',
+        SOURCE_OPEN_UNSUPPORTED: 'Nguồn chưa cung cấp viewer hợp lệ cho tệp này.',
+        SOURCE_VERSION_STALE: 'Phiên bản nguồn đã thay đổi. Vui lòng đồng bộ lại.',
+        VERSION_STALE: 'Phiên bản nguồn đã thay đổi. Vui lòng đồng bộ lại.',
+        ACCESS_DENIED: 'Nguồn đã từ chối quyền truy cập.',
+        METADATA_ONLY: 'Nguồn mới cung cấp metadata; chưa có nội dung dẫn xuất được phép truy cập.',
         SOURCE_TEMP_POLICY_REQUIRED: 'Truy xuất tệp nguồn đang bị chặn bởi chính sách tệp tạm. Vui lòng liên hệ quản trị viên.',
         SOURCE_UNAVAILABLE: 'Không kết nối được nguồn. Vui lòng kiểm tra lại sau.',
         SOURCE_STORAGE_UNAVAILABLE: 'Kho tệp nguồn hiện không thể truy cập. Vui lòng kiểm tra lại sau.',

@@ -468,10 +468,6 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
             </div>
             {files && !files.file_sync_supported && files.file_sync_error !== 'SOURCE_ORIGINAL_IMPORT_DISABLED'
                 && <p className={styles.notice}>Kho t\u1ec7p ngu\u1ed3n t\u1ea1m th\u1eddi kh\u00f4ng k\u1ebft n\u1ed1i \u0111\u01b0\u1ee3c.</p>}
-            {files?.remote_content_processing_supported && <p className={styles.statusLabel}>
-                C\u00f3 th\u1ec3 tr\u00edch xu\u1ea5t/OCR t\u1eeb xa khi ngu\u1ed3n c\u1ea5p quy\u1ec1n.
-                {files.derived_content_index_supported ? ' Ch\u1ec9 m\u1ee5c d\u1eabn xu\u1ea5t \u0111\u01b0\u1ee3c ph\u00e9p l\u01b0u.' : ' Ch\u01b0a \u0111\u01b0\u1ee3c ph\u00e9p l\u01b0u ch\u1ec9 m\u1ee5c d\u1eabn xu\u1ea5t.'}
-            </p>}
             {files?.file_sync_supported && !files.file_worker_healthy && <p className={styles.notice}>Worker nhập tệp chưa hoạt động.</p>}
             {retryMessage && <p className={styles.statusLabel} role="status">{retryMessage}</p>}
             {loading && <p className={styles.statusLabel}>Đang tải...</p>}

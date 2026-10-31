@@ -9,7 +9,7 @@ def test_source_files_require_admin_and_postgresql(container):
         container.settings.admin_enabled = True
         response = client.get("/api/v1/master-data/sync/files")
         assert response.status_code == 200
-        assert response.json()["file_sync_error"] == "BLOCKED_SOURCE_DATABASE"
+        assert response.json()["file_sync_error"] == "SOURCE_ORIGINAL_IMPORT_DISABLED"
         assert client.get("/api/v1/master-data/sync/files?size=101").status_code == 422
 
 
@@ -36,7 +36,7 @@ def test_source_files_safe_contract(container, monkeypatch):
         assert response.status_code == 200
         assert calls == [("previous", 1)]
         data = response.json()
-        assert data["file_sync_error"] == "BLOCKED_SOURCE_DATABASE"
+        assert data["file_sync_error"] == "SOURCE_ORIGINAL_IMPORT_DISABLED"
         assert data["items"][0]["import_status"] == "UNTRACKED"
         assert data["items"][0]["retry_eligible"] is False
         assert "private-" not in response.text
@@ -44,7 +44,7 @@ def test_source_files_safe_contract(container, monkeypatch):
         assert operation["tags"] == ["Learning Resource Ingestion and Management"]
         status = client.get("/api/v1/master-data/sync/status").json()
         assert status["file_sync_supported"] is False
-        assert status["file_sync_error"] == "BLOCKED_SOURCE_DATABASE"
+        assert status["file_sync_error"] == "SOURCE_ORIGINAL_IMPORT_DISABLED"
 
 
 def test_source_files_error_hides_internal_details(container, monkeypatch):

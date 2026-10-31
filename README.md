@@ -1,6 +1,6 @@
 # ETL — Kho học liệu số
 
-SOURCE ? MASTER ??? OCR, tr?ch xu?t v? l?p ch? m?c n?i dung SOURCE ch? ch?y khi ??ng k? ngu?n c?p ri?ng c? ba quy?n `read_content`, `process_content`, `index_derived_content`; m?c ??nh t?t. Byte g?c ???c ??c v?o RAM c? gi?i h?n, kh?ng ghi th?nh t?p trong ETL. T?p LOCAL d?ng storage ri?ng.
+SOURCE → MASTER chỉ đồng bộ metadata. OCR, trích xuất và lập chỉ mục nội dung SOURCE chỉ chạy khi nguồn được cấp đủ ba quyền `read_content`, `process_content`, `index_derived_content`; mặc định các quyền này tắt. Byte gốc chỉ được đọc trong RAM có giới hạn, không ghi thành tệp trong ETL. Tệp LOCAL dùng storage riêng.
 
 Hướng dẫn theo thứ tự **local trước, Docker sau**. Cài mới nên dùng `single_admin` và BGE-M3 1024 chiều. Sau khi đồng bộ users ổn định mới chuyển sang `master_users`. Không có mật khẩu đăng nhập mặc định.
 
@@ -24,7 +24,7 @@ cd ETL
 | `D:/etl/models/bge-m3/` | BGE-M3, revision marker, manifest checksum |
 | `D:/etl/models/faster-whisper-large-v3/` | Model nhận dạng tiếng nói, nếu bật media |
 | `D:/etl/models/argos/` | Gói dịch offline, nếu cần dịch |
-| `D:/etl/source/`, `source-temp/`, `storage/` | Ba thư mục riêng: nguồn, tệp tạm SOURCE, storage LOCAL |
+| `D:/etl/source/`, `storage/` | Hai thư mục riêng: tham chiếu nguồn và storage LOCAL; staging SOURCE bị tắt theo chính sách |
 
 `D:/etl` là đường dẫn gợi ý Windows. Linux dùng thư mục riêng, ví dụ `/home/<user>/etl-runtime`; thay mọi đường dẫn cấu hình bằng **đường dẫn tuyệt đối thật**, không giữ `<user>`/`YOUR_*`. Không commit env thật, secret, model, dữ liệu. Biến export trong terminal có thể ghi đè env file.
 
@@ -188,7 +188,7 @@ MONGO_DATABASE=etl_content
 MONGO_METADATA_MODE=shared
 SOURCE_MONGO_ENABLED=false
 SOURCE_REFERENCE_ENABLED=true
-SOURCE_TEMPORARY_FILES_ENABLED=true
+SOURCE_TEMPORARY_FILES_ENABLED=false
 SOURCE_FILE_STORAGE_ROOT=D:/etl/source
 SOURCE_TEMP_ROOT=D:/etl/source-temp
 STORAGE_ROOT=D:/etl/storage
@@ -218,7 +218,7 @@ TRANSLATION_TARGET_LANGUAGE=vi
 
 Thay password thật, percent-encode ký tự đặc biệt trong URL PostgreSQL/MongoDB. Với Compose ở gốc, nên dùng password owner chỉ gồm chữ/số để các URL migration nội suy không bị sai; có thể tự tạo bằng `python -c "import secrets; print(secrets.token_hex(24))"`, dùng hai giá trị khác nhau cho hai owner. `SOURCE_MIGRATION_DATABASE_URL` chỉ dùng owner của DB nguồn riêng mới/trống; bỏ dòng này khi dùng SOURCE có sẵn/remote. `SOURCE_ADAPTER=json` chỉ đọc fixture, không đọc PostgreSQL.
 
-T?p SOURCE m?c ??nh ch? ??ng b? metadata. Mu?n OCR, tr?ch xu?t v? l?p ch? m?c n?i dung, t?ng ??ng k? ngu?n ph?i c?p ?? `read_content`, `process_content`, `index_derived_content`; thi?u b?t k? quy?n n?o th? t? ch?i. Byte g?c ???c ??c c? gi?i h?n trong RAM, kh?ng l?u v?o t?p t?m, managed storage hay object storage. T?p SOURCE g?c v?n kh?ng ???c ETL t?i xu?ng ho?c ph?c v? qua preview/view API. T?p LOCAL gi? pipeline hi?n t?i. SOURCE mode ch?a h? tr? MP3/MP4.
+Tệp SOURCE mặc định chỉ đồng bộ metadata. Muốn OCR, trích xuất và lập chỉ mục nội dung, từng đăng ký nguồn phải được cấp đủ `read_content`, `process_content`, `index_derived_content`; thiếu bất kỳ quyền nào thì từ chối. Byte gốc chỉ được đọc trong RAM có giới hạn, không lưu vào tệp tạm, managed storage hoặc object storage. Tệp SOURCE gốc không được sao chép vào ETL; khi `SOURCE_REFERENCE_ENABLED=true`, giao diện chỉ chuyển hướng đến viewer URL HTTPS đã được allowlist và xác minh tại SOURCE. Tệp LOCAL giữ pipeline hiện tại. SOURCE mode chưa hỗ trợ MP3/MP4.
 
 ### 2.4.1. Write-back metadata hai chiều (mặc định tắt)
 
@@ -355,8 +355,8 @@ Mỗi dòng là **một terminal riêng** tại gốc repo. Mỗi terminal Pytho
 | API | `python -m uvicorn data_sync_etl.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers` |
 | React/Vite | `npm.cmd --prefix frontend run dev` |
 | Đồng bộ metadata | `python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-1` |
-| Xác minh nguồn, nhập tham chiếu, tạo job | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
-| Trích xuất/OCR/ASR và hoàn thiện chỉ mục | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
+| Xác minh metadata/tham chiếu nguồn (không import byte gốc) | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
+| Trích xuất/OCR/ASR và hoàn thiện chỉ mục cho LOCAL; SOURCE remote chỉ qua capability RAM | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
 | Đối soát theo lịch đã lưu, đồng bộ đúng ID lệch | `python -m data_sync_etl.workers.reconciliation` |
 
 **Lệnh chạy liên tục cho cả 4 worker** — mỗi lệnh mở trong một terminal riêng, đã kích hoạt venv và đứng tại gốc repo:
@@ -367,12 +367,12 @@ python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-1
 ```
 
 ```bash
-# Terminal worker 2: phát hiện phiên bản nguồn, xác minh tệp và tạo job xử lý.
+# Terminal worker 2: phát hiện phiên bản và xác minh metadata/tham chiếu; không đọc hoặc sao chép byte SOURCE.
 python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1
 ```
 
 ```bash
-# Terminal worker 3: OCR, Office, ASR MP3/MP4 và hoàn thiện chỉ mục.
+# Terminal worker 3: OCR/Office/ASR và hoàn thiện chỉ mục cho LOCAL; SOURCE remote chỉ xử lý khi đủ capability.
 python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1
 ```
 
@@ -494,7 +494,7 @@ INDEX_EMBEDDING_DIMENSION=1024
 INDEX_HISTORICAL_EMBEDDING_DIMENSIONS=[]
 INDEX_AUTO_ENABLED=false
 SOURCE_REFERENCE_ENABLED=true
-SOURCE_TEMPORARY_FILES_ENABLED=true
+SOURCE_TEMPORARY_FILES_ENABLED=false
 AUTH_MODE=single_admin
 AUTH_APP_ENVIRONMENT=production
 ADMIN_ENABLED=true
@@ -1003,7 +1003,7 @@ Docker dùng `"${APP[@]}" run --rm --no-deps api semantic-schema`/semantic-statu
 | Hoàn tất cài đặt | DB/schema đúng, model verify+encode PASS, API health OK, login được, 4 worker chạy nếu dùng lịch đối soát; thử 1 tệp tới CONTENT_READY/index READY rồi tìm bằng 3 chế độ |
 | Thiếu argon2/pymongo… | Kiểm tra venv: `python -c "import sys; print(sys.executable)"`; cài đúng extra, pip check |
 | SOURCE_REFERENCE_DISABLED | Sửa đúng .env/docker.env và restart/recreate đúng tiến trình |
-| SOURCE ? METADATA_ONLY | M?c ??nh l? metadata-only. Ch? c?c ngu?n ???c c?p ?? `read_content`, `process_content`, `index_derived_content` m?i ???c t? ??ng ??c byte trong RAM ?? OCR/tr?ch xu?t/l?p ch? m?c; byte g?c kh?ng ???c l?u th?nh t?p v? API t?i/preview v?n b? ch?n. MP3/MP4 ch?a ???c h? tr? trong SOURCE mode |
+| SOURCE → METADATA_ONLY | Mặc định là metadata-only. Chỉ nguồn được cấp đủ `read_content`, `process_content`, `index_derived_content` mới được đọc byte trong RAM để OCR/trích xuất/lập chỉ mục; byte gốc không được lưu thành tệp trong ETL. Viewer bên ngoài chỉ hoạt động khi `SOURCE_REFERENCE_ENABLED=true` và URL SOURCE vượt qua allowlist; nội dung dẫn xuất chỉ được truy cập khi đã xử lý và được cấp quyền. MP3/MP4 chưa được hỗ trợ trong SOURCE mode |
 | AUTH_MASTER_STALE | Kiểm tra Auto users/interval/heartbeat/lần COMPLETED; không chỉ watermark |
 | Docs trắng/OpenAPI403 | Đăng nhập qua frontend proxy3000/8080; không gọi backend để bỏ boundary |
 | SOURCE_HASH_MISMATCH / SOURCE_VERSION_MUTATED | Xác minh bytes/hash/phiên bản ở nguồn; không bỏ kiểm tra hoặc ghi đè lịch sử |
@@ -1126,4 +1126,38 @@ Mỗi `ContentBag` lưu TF của từ bề mặt, độ dài tài liệu, TF ri�
 
 ## Architecture and SOURCE federation status
 
+### SOURCE reference and derived-content contract
+
+`SOURCE_REFERENCE_ENABLED` gates only external reference/viewer operations. When it is
+`false`, `/api/v1/resources/{id}/open`, external `/file`, and `/source-info` fail closed
+with `503` and `SOURCE_REFERENCE_DISABLED` before SOURCE I/O. Metadata synchronization,
+authorized in-memory content processing, OCR, chunking, and derived indexing keep their
+separate capability checks. A text preview is served only from authorized derived OCR
+content; the original SOURCE bytes are never downloaded into ETL storage.
+
+SOURCE lifecycle values are normalized and checked against the configured
+`SOURCE_FILE_ALLOWED_STATUSES`; unknown, private, rejected, or deleted values fail
+closed. Resolution reports `metadata-only`, `remote-readable`, `ocr-processing`,
+`content-ready`, `authorized-indexed`, `stale`, `revoked`, or `unsupported` from the
+existing import/OCR/index state. Viewer URLs must pass the configured HTTPS host
+allowlist and are never replaced by an ETL download/proxy URL. Production writeback and
+remote search remain disabled without an explicit SOURCE contract.
+
 See [the current architecture, migration governance findings, and SOURCE federation readiness](SOURCE_FEDERATION_READINESS.md). Multi-source resource/version metadata sync is feature-gated and uses existing MASTER identity columns, versions/imports, checkpoints, and reconciliation audit tables; SOURCE registrations are server configuration, not database rows. A fail-closed open-at-SOURCE API and frontend action accept only per-source allowlisted HTTPS viewer links. Production writeback remains disabled; real PostgreSQL/Mongo/API viewer integration, physical SOURCE acceptance, and migration-governance approval remain incomplete.
+
+### Regression verification (2026-10-31)
+
+The focused regression command remains:
+
+```powershell
+$env:PYTHONPATH='tests/unit;tests/integration'
+.\.venv\Scripts\python.exe -m pytest tests/unit/test_five_commit_pipeline.py tests/unit/test_source_pipeline_http.py tests/unit/test_five_commit_regressions.py -q
+```
+
+The SOURCE regression contract is metadata-only: discovery creates MASTER metadata
+versions, while the SOURCE file worker does not claim, copy, preview, download, or
+retry original bytes. Reconciliation reports an unverified SOURCE file when that
+content contract is unavailable. The full unit suite includes environment-dependent
+embedding/OCR and external-integration tests; use `SOURCE_FEDERATION_READINESS.md`
+for the latest PASS/FAIL/BLOCKED/NOT_RUN classification rather than treating a
+partial full-suite run as production acceptance.
