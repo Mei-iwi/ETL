@@ -4,6 +4,7 @@ from ipaddress import ip_address
 from urllib.parse import parse_qsl, urlsplit
 
 from data_sync_etl.application.source_resolution import SourceResolutionError, same_import_snapshot
+from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.metadata_search import metadata_allowed
 from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search_access import denied
@@ -50,6 +51,8 @@ class SourceOpenResolver:
     def resolve(self, resource_id, access, version_id=None):
         if not access.internal:
             raise SourceResolutionError('SEARCH_ACCESS_RESTRICTED', 403)
+        if not getattr(self.source_resolution.settings, 'source_reference_enabled', False):
+            raise SourceResolutionError('SOURCE_REFERENCE_DISABLED', 503)
         # Reuse the established publication, ACL, identity and exact-version checks.
         resolved = self.source_resolution.resolve(resource_id, access, version_id, verify_content=False)
         result = {
@@ -68,7 +71,11 @@ class SourceOpenResolver:
             if resource.get('source_origin') != 'POSTGRESQL' or version is None:
                 result['status'] = 'METADATA_ONLY'
                 return result
-            route = self.router.route_resource(resource)
+            try:
+                route = self.router.route_resource(resource)
+            except DomainError:
+                result['status'] = 'SOURCE_OPEN_UNSUPPORTED'
+                return result
             imports = repo.find('source_file_imports', {'target_version_id': version['id']}, limit=2)
             if len(imports) != 1:
                 result['status'] = 'METADATA_ONLY'
@@ -94,7 +101,11 @@ class SourceOpenResolver:
             if registration is None or not registration.capabilities.exact_version_lookup:
                 result['status'] = 'SOURCE_OPEN_UNSUPPORTED'
                 return result
-            adapter = self.registry.adapter_for_source_id(route.source_id, 'exact_version_lookup')
+            try:
+                adapter = self.registry.adapter_for_source_id(route.source_id, 'exact_version_lookup')
+            except DomainError:
+                result['status'] = 'SOURCE_OPEN_UNSUPPORTED'
+                return result
         getter = getattr(adapter, 'get_version', None)
         if not callable(getter):
             result['status'] = 'SOURCE_OPEN_UNSUPPORTED'

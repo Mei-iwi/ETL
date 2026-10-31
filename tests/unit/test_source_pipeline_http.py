@@ -52,6 +52,7 @@ def test_http_writeback_requires_login_csrf_two_steps_and_strict_fields(configur
 
 def test_viewer_can_resolve_published_metadata_but_cannot_write(master_auth, monkeypatch):
     c, password, _ = master_auth
+    c.settings.source_reference_enabled = True
     source = seed_source_mapping(c)
     with c.uow() as repo:
         repo.update('master_users', 'user-1', {'email': 'master@etl.test',
@@ -71,7 +72,7 @@ def test_viewer_can_resolve_published_metadata_but_cannot_write(master_auth, mon
         version_id = versions.json()[0]['id']
         status = api.get(f'/api/v1/resource-versions/{version_id}/index-status?include_bags=false')
         assert status.status_code == 200 and status.json()['metadata_only']
-        assert api.get(f'/api/v1/resource-versions/{version_id}/file').status_code in (403, 404, 409)
+        assert api.get(f'/api/v1/resource-versions/{version_id}/file').status_code in (403, 404, 409, 503)
         assert api.get('/api/v1/resources/resource-1/source-writeback/status').status_code == 403
         assert api.post('/api/v1/resources/resource-1/source-writeback', headers=csrf(api), json={}).status_code == 403
         with c.uow() as repo:
@@ -92,4 +93,6 @@ def test_metadata_only_file_apis_deny_without_opening_bytes(configured, monkeypa
     with make_client(configured) as api:
         assert login(api, password).status_code == 200
         response = api.get(path.format(id=version['id']))
-        assert response.status_code in (404, 409), response.text
+        assert response.status_code in (404, 409, 503), response.text
+        if response.status_code == 503:
+            assert response.json()['detail']['code'] == 'SOURCE_REFERENCE_DISABLED'

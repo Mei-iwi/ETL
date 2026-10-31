@@ -124,6 +124,7 @@ from data_sync_etl.domain.resource_metadata import (
 )
 from data_sync_etl.domain.resource_version import CreateResourceVersionCommand
 from data_sync_etl.domain.search import SearchError
+from data_sync_etl.logging import event
 
 #Swagger Tags
 TAG_SYSTEM: str = 'System'
@@ -476,7 +477,12 @@ def source_view_response(container, version_id, access, *, embedded=False):
     try:
         opened = container.source_open.resolve(resource['id'], access, version_id)
     except SourceResolutionError as exc:
-        raise HTTPException(exc.status, detail={'code': exc.code, 'message': 'Không thể mở tệp nguồn.'}) from None
+        event(stage='source_file_access', action='REJECTED',
+              coverage={'error_code': exc.code, 'http_status': exc.status})
+        message = ('Chức năng truy xuất tệp nguồn chưa được bật.'
+                   if exc.code == 'SOURCE_REFERENCE_DISABLED'
+                   else 'Không thể mở tệp nguồn.')
+        raise HTTPException(exc.status, detail={'code': exc.code, 'message': message}) from None
     if opened['status'] != 'EXTERNAL_VIEWER_AVAILABLE' or len(opened['files']) != 1:
         raise HTTPException(409, detail={'code': opened['status'], 'message': 'Kho nguồn chưa cung cấp link xem hợp lệ.'})
     file = opened['files'][0]
@@ -757,6 +763,12 @@ def get_resource(id: ResourceId, request: Request) -> ResourceDetailResponse:
 def source_resolution(id: ResourceId, request: Request,
                       version_id: Annotated[str | None, Query(min_length=1, max_length=30)] = None) -> SourceResolutionResponse:
     access = search_access(request)
+    if (access.internal
+            and not getattr(request.app.state.container.settings, 'source_reference_enabled', False)):
+        raise HTTPException(status_code=503, detail={
+            'code': 'SOURCE_REFERENCE_DISABLED',
+            'message': 'Chức năng truy xuất tệp nguồn chưa được bật.',
+        })
     try:
         result = request.app.state.container.source_resolution.resolve(id, access, version_id)
         return SourceResolutionResponse.model_validate(result)

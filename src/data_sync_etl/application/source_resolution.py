@@ -7,6 +7,7 @@ from data_sync_etl.domain.metadata_search import metadata_allowed
 from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search_access import denied
 from data_sync_etl.domain.source_ids import mapped_source_locator
+from data_sync_etl.domain.source_status import normalize_source_status, source_status_allowed
 
 
 class SourceResolutionError(DomainError):
@@ -44,9 +45,37 @@ class SourceResolutionService:
 
     @staticmethod
     def _content_availability(repo, version, import_row):
-        if (version or {}).get('lifecycle_status') == 'METADATA_ONLY' or (import_row or {}).get('status') == 'METADATA_ONLY':
+        """Report derived-content readiness without guessing index validity."""
+        if not version or not import_row:
             return 'metadata-only'
-        return 'metadata-only'
+        lifecycle_status = normalize_source_status(import_row.get('source_lifecycle_status'))
+        if (not import_row.get('source_resource_active', True)
+                or lifecycle_status in {'PRIVATE', 'REJECTED', 'DELETED'}):
+            return 'revoked'
+        error = import_row.get('last_error_code')
+        if error in {'UNSUPPORTED_SOURCE_FORMAT', 'UNSUPPORTED_PROCESSING_FORMAT',
+                     'UNSUPPORTED_SOURCE_IN_MEMORY_FORMAT', 'UNSUPPORTED_MEDIA_FORMAT',
+                     'NO_EXTRACTABLE_CONTENT'}:
+            return 'unsupported'
+        if error in {'SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING',
+                     'SOURCE_PARENT_VERSION_MISSING'}:
+            return 'stale'
+        if (version.get('lifecycle_status') == 'METADATA_ONLY'
+                or import_row.get('status') == 'METADATA_ONLY'):
+            return 'metadata-only'
+        jobs = repo.find('ocr_jobs', {'resource_version_id': version['id']},
+                         order=('-created_at', '-id'), limit=1)
+        if not jobs:
+            return 'remote-readable'
+        from data_sync_etl.application.processing_state import processing_state
+        state = processing_state(repo, jobs[0])
+        if state in {'OCR_PENDING', 'FINALIZATION_PENDING', 'FINALIZING'}:
+            return 'ocr-processing'
+        if state in {'OCR_FAILED', 'FINALIZATION_FAILED', 'NO_EXTRACTABLE_CONTENT'}:
+            return 'unsupported' if state == 'NO_EXTRACTABLE_CONTENT' else 'stale'
+        if state == 'CONTENT_READY':
+            return 'content-ready'
+        return 'remote-readable'
 
     def _verified_content(self, version, access):
         if self.content_authorizer is not None:
@@ -179,10 +208,16 @@ class SourceResolutionService:
                 or not self._hash_matches(source.get('source_hash'), version.get('source_hash'))):
             result.update(resolution_status='stale', source_record_available=False)
             return result
+        source_lifecycle_status = normalize_source_status(source.get('source_lifecycle_status'))
         if (not source.get('resource_active', True) or source.get('resource_deleted_at') is not None
                 or source.get('resource_publication_status', 'PUBLISHED') != 'PUBLISHED'
-                or source.get('source_lifecycle_status') not in self.settings.source_file_allowed_statuses):
+                or not source_status_allowed(source.get('source_lifecycle_status'),
+                                             self.settings.source_file_allowed_statuses)):
             result.update(resolution_status='blocked', source_record_available=False)
+            if (not source.get('resource_active', True)
+                    or source.get('resource_deleted_at') is not None
+                    or source_lifecycle_status in {'PRIVATE', 'REJECTED', 'DELETED'}):
+                result['content_availability'] = 'revoked'
             return result
         # SOURCE I/O runs without a MASTER transaction. A revoked grant,
         # deletion or changed mapping during that call must invalidate the reply.

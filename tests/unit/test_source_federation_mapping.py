@@ -222,6 +222,7 @@ def test_source_version_sync_namespaces_colliding_ids_and_reuses_existing_tables
     ]
     registry = ConfiguredSourceRegistry(registrations)
     router = SourceRouter(registry, SQLAlchemySourceIdentityMappingStore(container.uow, registry))
+    container.settings.source_reference_enabled = True
     resolution = SourceResolutionService(container.uow, source_a, container.settings, router=router)
     opener = SourceOpenResolver(container.uow, registry, router, resolution)
     open_a = opener.resolve('resource-1', SearchAccess(scope='authenticated_admin'), versions_a['VER001']['id'])

@@ -20,6 +20,7 @@ from data_sync_etl.domain.format_validation import (
     ProcessingFormatError,
 )
 from data_sync_etl.domain.resource_deletion import resource_deleted
+from data_sync_etl.domain.source_status import normalize_source_status, source_status_allowed
 from data_sync_etl.logging import event
 from data_sync_etl.ports.repositories import UnitOfWork
 from data_sync_etl.ports.source_files import ReadOnlySourceFilePort, ReadOnlySourceVersionPort
@@ -172,7 +173,8 @@ class SourceFileImportService:
                 or not row['target_version_id'] or row['processing_job_id'] is not None
                 or row['last_error_code'] not in (None, METADATA_ONLY_ERROR, 'UNSUPPORTED_SOURCE_FORMAT')
                 or not source.get('resource_active', True) or source.get('resource_deleted_at') is not None
-                or source['source_lifecycle_status'] not in self.settings.source_file_allowed_statuses):
+                or not source_status_allowed(source.get('source_lifecycle_status'),
+                                             self.settings.source_file_allowed_statuses)):
             return
         resource = repo.get('master_learning_resources', row['resource_id'])
         target = repo.get('resource_versions', row['target_version_id'])
@@ -194,6 +196,10 @@ class SourceFileImportService:
         })
 
     def _discover(self, repo, source):
+        source = dict(source)
+        source['source_lifecycle_status'] = (
+            normalize_source_status(source.get('source_lifecycle_status')) or 'UNKNOWN'
+        )
         unsupported_media = False  # MP3/MP4 now share the normal processing pipeline.
         metadata_only = self._metadata_only_policy()
         existing = repo.find("source_file_imports", {
@@ -341,7 +347,8 @@ class SourceFileImportService:
 
     def _source_allowed(self, row):
         return (row["source_resource_active"]
-                and row["source_lifecycle_status"] in self.settings.source_file_allowed_statuses)
+                and source_status_allowed(row.get("source_lifecycle_status"),
+                                          self.settings.source_file_allowed_statuses))
 
     def execute(self, claimed):
         if not claimed or claimed.get('status') == 'METADATA_ONLY':
@@ -427,7 +434,8 @@ class SourceFileImportService:
                 row["resource_id"], row["source_version_number"], row["source_hash"]):
             raise SourceFileError("SOURCE_VERSION_MUTATED")
         if (not source.get("resource_active", True) or source.get("resource_deleted_at") is not None
-                or source["source_lifecycle_status"] not in self.settings.source_file_allowed_statuses):
+                or not source_status_allowed(source.get("source_lifecycle_status"),
+                                             self.settings.source_file_allowed_statuses)):
             raise SourceFileError("BLOCKED_SOURCE_POLICY")
         parent_id = source["parent_version_id"]
         current, seen = parent_id, {row["source_version_id"]}
@@ -444,7 +452,8 @@ class SourceFileImportService:
             if parent["resource_id"] != row["resource_id"]:
                 raise SourceFileError("PARENT_SOURCE_RESOURCE")
             if (not parent.get("resource_active", True) or parent.get("resource_deleted_at") is not None
-                    or parent["source_lifecycle_status"] not in self.settings.source_file_allowed_statuses):
+                or not source_status_allowed(parent.get("source_lifecycle_status"),
+                                             self.settings.source_file_allowed_statuses)):
                 raise SourceFileError("PARENT_SOURCE_POLICY")
             current = parent["parent_version_id"]
         raise SourceFileError("SOURCE_LINEAGE_DEPTH_LIMIT")

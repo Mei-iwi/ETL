@@ -13,7 +13,10 @@ class SourceResolutionResponse(BaseModel):
     source_label: Literal['LOCAL', 'SOURCE', 'UNKNOWN']
     source_identity: str | None = None
     resolution_status: Literal['available', 'unavailable', 'stale', 'blocked']
-    content_availability: Literal['metadata-only', 'authorized-indexed']
+    content_availability: Literal[
+        'metadata-only', 'remote-readable', 'ocr-processing', 'content-ready',
+        'authorized-indexed', 'stale', 'revoked', 'unsupported',
+    ]
     source_record_available: bool
 
 

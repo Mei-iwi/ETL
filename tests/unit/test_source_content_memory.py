@@ -96,6 +96,15 @@ def test_authorized_source_native_pdf_extraction_uses_existing_ocr_jobs(source_i
         assert container.search.context(context_id, access=access)['chunks']
 
 
+def test_viewer_flag_does_not_disable_authorized_source_ocr(source_importing):
+    container, _, _ = source_importing
+    row = discover_and_import(container)
+    grant_source_content(container)
+    container.settings.source_reference_enabled = False
+    job = container.ocr.create_job(row['target_version_id'])
+    assert job['status'] == 'PENDING'
+
+
 def test_source_scheduler_does_not_starve_existing_jobs(source_importing, monkeypatch):
     container, _, _ = source_importing
     row = discover_and_import(container)

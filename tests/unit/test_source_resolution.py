@@ -1,6 +1,37 @@
+from data_sync_etl.application.source_resolution import SourceResolutionService
 from data_sync_etl.domain.core import now
 from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.domain.source_ids import source_identity_hash
+
+
+class _AvailabilityRepo:
+    def __init__(self, jobs=(), stages=()):
+        self.jobs, self.stages = list(jobs), list(stages)
+
+    def find(self, table, _filters, **_kwargs):
+        if table == 'ocr_jobs':
+            return self.jobs
+        if table == 'etl_stage_runs':
+            return self.stages
+        if table in {'ocr_page_tasks', 'ocr_page_results'}:
+            return []
+        return []
+
+
+def test_content_availability_distinguishes_existing_pipeline_states():
+    version = {'id': 'v1', 'lifecycle_status': 'INGESTED'}
+    base = {'source_resource_active': True, 'source_lifecycle_status': 'APPROVED',
+            'status': 'PROCESSING', 'last_error_code': None}
+    assert SourceResolutionService._content_availability(
+        _AvailabilityRepo(), version, {**base, 'status': 'METADATA_ONLY'}) == 'metadata-only'
+    assert SourceResolutionService._content_availability(
+        _AvailabilityRepo(), version, base) == 'remote-readable'
+    assert SourceResolutionService._content_availability(
+        _AvailabilityRepo(jobs=[{'id': 'job', 'status': 'PENDING'}]), version, base) == 'ocr-processing'
+    assert SourceResolutionService._content_availability(
+        _AvailabilityRepo(), version, {**base, 'source_resource_active': False}) == 'revoked'
+    assert SourceResolutionService._content_availability(
+        _AvailabilityRepo(), version, {**base, 'last_error_code': 'UNSUPPORTED_SOURCE_FORMAT'}) == 'unsupported'
 
 
 def seed_source_mapping(container):

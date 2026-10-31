@@ -11,6 +11,7 @@ from data_sync_etl.domain.lexical import (
     surface_tokens,
 )
 from data_sync_etl.domain.search_access import denied
+from data_sync_etl.domain.source_status import source_status_allowed
 
 TEMPLATE = 'resource-metadata-v1'
 GENERATION = 1
@@ -66,7 +67,7 @@ def metadata_mapping_allowed(resource, version, imports, allowed_statuses):
         return (len(imports) == 1 and imports[0]['status'] in ('METADATA_ONLY', 'IMPORTED', 'PROCESSING')
                 and imports[0]['last_error_code'] in (None, 'SOURCE_METADATA_ONLY', 'UNSUPPORTED_SOURCE_FORMAT')
                 and imports[0]['source_resource_active']
-                and imports[0]['source_lifecycle_status'] in allowed_statuses
+                and source_status_allowed(imports[0].get('source_lifecycle_status'), allowed_statuses)
                 and imports[0]['resource_id'] == resource['id']
                 and imports[0]['source_version_number'] == version['version_number']
                 and imports[0]['source_hash'] == version['source_hash'])

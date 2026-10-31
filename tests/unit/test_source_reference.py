@@ -133,16 +133,19 @@ def test_source_api_range_text_no_legacy_fallback_and_permissions(source_viewer,
         assert api.get(url).status_code == 409
         assert api.get(url, headers={'Range': 'bytes=0-3'}).status_code == 409
         assert api.get(url + '?download=true').status_code == 409
-        assert api.get(url + '?view=text').status_code == 409
-        info = api.get(url.replace('/file', '/source-info')).json()
-        assert not info['can_open_original'] and info['original_url'] is None
-        assert 'books' not in str(info) and 'test.pdf' not in str(info)
+        # SOURCE original bytes remain blocked, but an already authorized
+        # derived OCR preview is a separate read contract.
+        text_response = api.get(url + '?view=text')
+        assert text_response.status_code == 200 and text_response.text
+        info = api.get(url.replace('/file', '/source-info'))
+        assert info.status_code == 409
+        assert info.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         source['source_hash'] = '0' * 64
         assert api.get(url.replace('/file', '/source-info')).status_code == 409
         source['source_hash'] = version['source_hash']
         path.unlink()
         assert api.get(url).status_code == 409
-        assert api.get(url + '?view=text').status_code == 409
+        assert api.get(url + '?view=text').status_code == 200
         c.settings.search_internal_dev_enabled = False
         assert api.get(url).status_code == 404
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
@@ -222,20 +225,9 @@ def test_original_link_checks_master_and_provider_permissions_for_each_file(sour
     url = f"/api/v1/resource-versions/{version['id']}/source-info"
     with client(c) as api:
         response = api.get(url)
-        assert response.status_code == 200, response.text
-        assert response.json()['can_open_original'] is False
-        assert response.json()['original_url'] is None
-        assert response.headers.get('cache-control') == 'private, no-store'
-        calls = len(http.calls)
-        c.settings.search_internal_dev_enabled = False
-        denied = api.get(url)
-        assert denied.status_code == 404 and 'original_url' not in denied.json()
-        assert len(http.calls) == calls
-        c.settings.search_internal_dev_enabled = True
-        http.metadata[file_id]['capabilities']['canDownload'] = False
-        denied = api.get(url)
-        assert denied.status_code == 200 and denied.json()['original_url'] is None
-        assert len(http.calls) == calls
+        assert response.status_code == 409, response.text
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
+        assert not http.calls
 
 
 @pytest.mark.asyncio
@@ -407,8 +399,7 @@ def test_text_preview_rejects_external_source_before_content_read(source_viewer,
     monkeypatch.setattr(c.source_files, 'open_stream', lambda *_a, **_k: pytest.fail('No SOURCE read'))
     with client(c) as api:
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file?view=text")
-        assert response.status_code == 409
-        assert response.json()['detail']['code'] == 'EXTERNAL_SOURCE_CONTENT_DISABLED'
+        assert response.status_code == 200 and response.text
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 
 
@@ -426,6 +417,24 @@ def test_source_info_disabled_reports_policy_code_without_source_io(source_viewe
     assert 'chưa được bật' in response.json()['detail']['message']
     assert 'SOURCE_REFERENCE_DISABLED' in caplog.text
     assert 'source_file_access' in caplog.text
+
+
+def test_source_reference_flag_blocks_open_file_and_info_before_source_io(source_viewer, monkeypatch):
+    from tests.unit.test_resource_file import client
+
+    c, version, *_ = source_viewer
+    c.settings.source_reference_enabled = False
+    monkeypatch.setattr(c.source, 'get_version', lambda *_a, **_k: pytest.fail('SOURCE lookup must be gated'))
+    monkeypatch.setattr(c.source_files, 'revision', lambda *_a, **_k: pytest.fail('SOURCE viewer must be gated'))
+    with client(c) as api:
+        for path in (
+            f'/api/v1/resources/{version["resource_id"]}/open?version_id={version["id"]}',
+            f'/api/v1/resource-versions/{version["id"]}/file',
+            f'/api/v1/resource-versions/{version["id"]}/source-info',
+        ):
+            response = api.get(path, follow_redirects=False)
+            assert response.status_code == 503, (path, response.text)
+            assert response.json()['detail']['code'] == 'SOURCE_REFERENCE_DISABLED'
 
 
 def test_source_tesseract_scratch_stays_in_leased_attempt(importing, monkeypatch):
