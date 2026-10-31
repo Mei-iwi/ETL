@@ -46,7 +46,9 @@ def test_accepted_response_and_durable_progress_do_not_wait_for_source(source_vi
             assert client.post('/api/v1/reconciliation/runs', json={'stream': 'files'}).status_code == 409
             release.set()
             run = finished(c)
-            assert run.matched_count == 1
+            assert run.matched_count == 0
+            assert run.status == 'PARTIAL'
+            assert run.summary_meta['verification_reason_counts'] == {'EXTERNAL_SOURCE_CONTENT_DISABLED': 1}
             assert run.summary_meta['processed_files'] == run.summary_meta['total_files'] == 1
     finally:
         release.set()
@@ -95,7 +97,10 @@ def test_database_fence_prevents_second_api_owner(source_viewer, monkeypatch):
         with pytest.raises(DomainError, match='RECONCILIATION_BUSY'):
             other.start()
         release.set()
-        assert finished(c).matched_count == 1
+        run = finished(c)
+        assert run.matched_count == 0
+        assert run.status == 'PARTIAL'
+        assert run.summary_meta['verification_reason_counts'] == {'EXTERNAL_SOURCE_CONTENT_DISABLED': 1}
     finally:
         release.set()
         c.reconciliation_jobs.close()

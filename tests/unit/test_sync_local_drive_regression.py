@@ -99,7 +99,8 @@ def test_legacy_source_file_viewer_is_metadata_only_for_supported_formats(import
     item = discover_and_import(c)
     with c.uow() as repo:
         version = repo.get("resource_versions", item["target_version_id"])
-    c.search.file_version = lambda version_id, access=None: version
+    c.settings.source_reference_enabled = True
+    c.search.file_version = lambda version_id, access=None, **kwargs: version
     no_source_io = Mock(side_effect=AssertionError("No SOURCE byte access"))
     monkeypatch.setattr(c.source_files, "open_stream", no_source_io)
     monkeypatch.setattr(c.storage, "get_local_path", no_source_io)
@@ -111,8 +112,9 @@ def test_legacy_source_file_viewer_is_metadata_only_for_supported_formats(import
         url = f"/api/v1/resource-versions/{version['id']}/file"
         for suffix in ("", "?download=true", "?view=preview", "?view=text"):
             response = api.get(url + suffix)
-            assert response.status_code == 409
-            assert response.json()["detail"]["code"] == "EXTERNAL_SOURCE_CONTENT_DISABLED"
+            assert response.status_code == 409, response.text
+            expected_code = "FILE_NOT_READY" if suffix == "?view=text" else "SOURCE_OPEN_UNSUPPORTED"
+            assert response.json()["detail"]["code"] == expected_code
     no_source_io.assert_not_called()
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
 

@@ -258,13 +258,14 @@ def test_drive_failure_does_not_block_local_in_same_batch(importing):
     rows[0] = {**rows[0], 'storage_bucket': 'DRIVE', 'storage_object_key': 'files/blob/test.pdf', 'resource_id': 'resource-2'}
     c.settings.sync_batch_size = 100
     c.source_file_import.discover_once()
-    for _ in range(2):
-        c.source_file_import.execute(c.source_file_import.claim())
+    # SOURCE file worker is intentionally disabled: discovery records bounded
+    # metadata only and never downloads either local-backed or Drive bytes.
+    assert c.source_file_worker.once('drive-disabled') is False
     with c.uow() as repo:
         items = repo.find('source_file_imports', order=('source_version_id',))
-        assert items[0]['status'] == 'RETRY_WAIT' and items[0]['last_error_code'] == 'DRIVE_UNAVAILABLE'
-        assert items[1]['status'] == 'PROCESSING'
-        assert repo.count('resource_versions', {}) == 1
+        assert all(item['status'] == 'METADATA_ONLY' and item['last_error_code'] == 'SOURCE_METADATA_ONLY'
+                   for item in items)
+        assert repo.count('resource_versions', {}) == 2
 
 
 def test_dispatcher_never_falls_back_and_local_works_when_drive_disabled(importing):
@@ -286,7 +287,7 @@ def test_dispatcher_never_falls_back_and_local_works_when_drive_disabled(importi
         SourceFileDispatcher(local, drive, local_buckets=['DRIVE'])
 
 
-def test_local_and_drive_same_queue_pipeline_snapshots_and_hash_gate(importing, caplog):
+def test_local_and_drive_same_queue_pipeline_is_metadata_only(importing, caplog):
     caplog.set_level('INFO', logger='etl')
     c, rows, path = importing
     http = DriveHTTP(path.read_bytes(), name='test.pdf', mime='application/pdf')
@@ -305,32 +306,19 @@ def test_local_and_drive_same_queue_pipeline_snapshots_and_hash_gate(importing, 
     with c.uow() as repo:
         imports = repo.find('source_file_imports', order=('source_version_id',))
         versions = repo.find('resource_versions')
-        assert len(imports) == len(versions) == repo.count('ocr_jobs', {}) == 2
-        assert all(i['target_version_id'] and i['processing_job_id'] for i in imports)
-        assert {v['storage_object_key'] for v in versions} == {'test.pdf', 'files/blob/test.pdf'}
-        assert len({v['source_hash'] for v in versions}) == 1
+        assert len(imports) == len(versions) == 2
+        assert all(i['target_version_id'] for i in imports)
+        assert all(i['status'] == 'METADATA_ONLY' and i['last_error_code'] == 'SOURCE_METADATA_ONLY'
+                   for i in imports)
+        assert all(v['lifecycle_status'] == 'METADATA_ONLY' for v in versions)
+        assert repo.count('ocr_jobs', {}) == 0
+        assert not repo.find('content_units')
         assert not list((c.storage.root / 'resources').rglob('*'))
-        assert all(c.orchestrator.status(v['id'])['processing_status'] == 'CONTENT_READY' for v in versions)
-        texts = [[repo.get('content_unit_texts', unit['id'])['text'] for unit in
-                  repo.find('content_units', {'resource_version_id': v['id']}, order=('sequence_no',))]
-                 for v in versions]
-        assert texts[0] == texts[1]
     assert c.source_file_import.claim() is None
     assert path.read_bytes() == http.payload
-    assert any('"provider": "local"' in record.message for record in caplog.records)
-    assert any('"provider": "google_drive"' in record.message for record in caplog.records)
+    assert not any('"provider": "local"' in record.message for record in caplog.records)
+    assert not any('"provider": "google_drive"' in record.message for record in caplog.records)
     assert all('blob/test.pdf' not in record.message and 'PRIVATE' not in record.message for record in caplog.records)
-    # Same Drive file, new version claims a different SHA: no target/job is created.
-    rows.append({**rows[1], 'source_version_id': 'source-version-3', 'source_version_number': 2,
-                 'source_hash': '0' * 64})
-    c.sync.run()
-    c.source_file_import.discover_once()
-    claimed = c.source_file_import.claim()
-    c.source_file_import.execute(claimed)
-    with c.uow() as repo:
-        failure = repo.get('source_file_imports', claimed['id'])
-        assert failure['last_error_code'] == 'SOURCE_HASH_MISMATCH' and failure['status'] == 'FAILED'
-        assert not failure['target_version_id'] and repo.count('resource_versions', {}) == 2
 
 
 def test_settings_hide_private_config_and_defaults_local_only(container):
@@ -361,8 +349,7 @@ def test_composition_local_available_without_optional_auth_runtime(importing, mo
         with runtime.source_files.open_stream('books', 'test.pdf') as stream:
             assert stream.read() == path.read_bytes()
         state = runtime.source_file_import.availability()['file_backends']
-        assert state['local']['status'] == 'LOCAL_READY'
-        assert state['google_drive']['error_code'] == 'DRIVE_CREDENTIALS_UNAVAILABLE'
+        assert state == {}
     finally:
         runtime.close()
 
@@ -381,7 +368,7 @@ def test_xlsx_default_content_type_import_reaches_content_ready(importing, provi
 def assert_source_format_pipeline(importing, extension, provider, payload):
     c, rows, original = importing
     from tests.indexing_support import setup_index
-    index = setup_index(c)
+    setup_index(c)
     path = original.with_name('sample' + extension)
     path.write_bytes(payload)
     rows[0].update(storage_object_key=path.name, source_hash=sha256(payload).hexdigest())
@@ -392,27 +379,15 @@ def assert_source_format_pipeline(importing, extension, provider, payload):
         http = DriveHTTP(payload, name=path.name, mime=mime)
         c.source_file_import.files = SourceFileDispatcher(c.source_files, reader(http))
         rows[0].update(storage_bucket='DRIVE', storage_object_key=f'files/blob/{path.name}')
-    assert c.source_file_worker.once('formats-both-sources')
+    assert c.source_file_import.discover_once() == 1
+    assert c.source_file_worker.once('formats-both-sources') is False
     with c.uow() as repo:
         imported = repo.find('source_file_imports')[0]
-        assert imported['target_version_id'] and imported['status'] == 'PROCESSING'
+        assert imported['target_version_id'] and imported['status'] == 'METADATA_ONLY'
+        assert imported['last_error_code'] == 'SOURCE_METADATA_ONLY'
+        version = repo.get('resource_versions', imported['target_version_id'])
+        assert version['lifecycle_status'] == 'METADATA_ONLY'
         assert not repo.find('content_units', {'resource_version_id': imported['target_version_id']})
-        assert not repo.find('etl_stage_runs', {'resource_version_id': imported['target_version_id'], 'stage': 'INDEX_BUILD'})
-    for _ in range(20):
-        if not c.worker.once('source-format-ocr'):
-            break
-    with c.uow() as repo:
-        item = repo.find('source_file_imports')[0]
-        assert item['target_version_id'] and not item['last_error_code']
-        version = repo.get('resource_versions', item['target_version_id'])
-        assert version['source_hash'] == rows[0]['source_hash']
-        assert c.orchestrator.status(version['id'])['processing_status'] == 'CONTENT_READY'
-    with c.source_resolver.open_verified_stream(c.source_resolver.resolve(version['id'])) as stream:
-        assert stream.read() == payload
+        assert not repo.find('ocr_jobs', {'resource_version_id': imported['target_version_id']})
     assert not list((c.storage.root / 'resources').rglob('*'))
     assert path.read_bytes() == payload
-    assert index.chunks(version['id'])['total'] > 0
-    index.enqueue(version['id'])
-    assert index.once()
-    assert index.status(version['id'])['index_status'] == 'READY'
-    assert index.bags.rows

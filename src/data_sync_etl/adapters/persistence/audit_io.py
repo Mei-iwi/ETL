@@ -57,7 +57,16 @@ class MeteredStream:
                 if self.stream.tell() == os.fstat(self.stream.fileno()).st_size:
                     return b''
             except (OSError, AttributeError):
-                pass
+                # In-memory SOURCE test/adapter streams do not expose a file
+                # descriptor.  When they expose a zero-copy buffer, use its
+                # bounded length to distinguish a clean EOF from an attempted
+                # read beyond the reconciliation budget.
+                try:
+                    buffer = self.stream.getbuffer()
+                    if self.stream.tell() >= len(buffer):
+                        return b''
+                except (AttributeError, OSError, TypeError, ValueError):
+                    pass
             raise SourceFileError('RECONCILIATION_BYTE_BUDGET')
         block = self.stream.read(min(remaining, size) if size >= 0 else remaining)
         self.metrics['bytes_read'] += len(block)

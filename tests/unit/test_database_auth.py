@@ -294,11 +294,14 @@ def test_source_public_file_and_explicit_grant_retain_reference_only(source_view
     path = '/api/v1/resource-versions/' + version['id'] + '/file'
     with client(database_auth) as api:
         assert login(api, database_auth[1], 'viewer@etl.test').status_code == 200
-        assert api.get(path).status_code == 200  # Every unit in this fixture is reviewed and public.
+        response = api.get(path)
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         database_auth[3].change(user['id'], {'resource_ids': [version['resource_id']]})
         assert login(api, database_auth[1], 'viewer@etl.test').status_code == 200
         response = api.get(path)
-        assert response.status_code == 200 and response.content.startswith(b'%PDF')
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         assert not list(container.settings.source_temp_root.glob('attempt-*'))
         assert stored_files() == before  # Existing historical copies are preserved; no new copy is made.
 

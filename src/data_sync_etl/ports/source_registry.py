@@ -1,4 +1,4 @@
-﻿from typing import Protocol
+from typing import Protocol
 
 from data_sync_etl.domain.source_ids import SourceLocator
 from data_sync_etl.domain.source_registry import SourceRegistration

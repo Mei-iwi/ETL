@@ -138,13 +138,15 @@ def test_source_media_missing_file_is_not_misreported_as_unsupported(container, 
     container.settings.source_reference_enabled = True
     container.settings.source_temporary_files_enabled = True
     container.settings.source_temp_root = tmp_path / 'scratch'
-    assert container.source_file_worker.once('excluded-media')
-    item = container.source_file_import.list_files()['items'][0]
-    assert item['import_status'] == 'FAILED'
-    assert item['last_error_code'] != 'UNSUPPORTED_SOURCE_FORMAT'
+    # SOURCE original-file import is intentionally disabled.  Media metadata
+    # may be inventoried, but the legacy worker must not read or queue bytes.
+    assert not container.source_file_worker.once('excluded-media')
+    items = container.source_file_import.list_files()['items']
+    assert all(item['import_status'] == 'METADATA_ONLY' for item in items)
     with container.uow() as repo:
-        assert repo.count('ocr_jobs', {}) == repo.count('resource_versions', {}) == 0
-        assert repo.get('source_file_imports', item['import_job_id'])['next_retry_at'] is None
+        assert repo.count('ocr_jobs', {}) == 0
+        assert repo.count('resource_versions', {}) >= 1
+        assert all(row['next_retry_at'] is None for row in repo.find('source_file_imports'))
 
 
 def test_capabilities_exact_supported_formats(container):

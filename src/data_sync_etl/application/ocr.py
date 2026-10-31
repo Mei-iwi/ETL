@@ -375,7 +375,7 @@ class OCRPipeline:
                 output.close()
                 if not result.text.strip():
                     raise DomainError('EMPTY_EXTRACTED_CONTENT')
-                from data_sync_etl.adapters.extraction import MAX_TEXT_CHARS, MAX_UNIT_CHARS
+                from data_sync_etl.domain.extraction_limits import MAX_TEXT_CHARS, MAX_UNIT_CHARS
                 if len(result.text) > MAX_TEXT_CHARS:
                     raise DomainError('EXTRACTION_LIMIT_EXCEEDED')
                 return OCRResult(result.text, result.confidence, result.engine_name, result.engine_version,

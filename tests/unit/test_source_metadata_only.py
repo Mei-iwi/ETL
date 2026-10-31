@@ -42,7 +42,9 @@ def test_metadata_only_never_transitions_to_external_source_content(importing, m
     c.settings.source_reference_enabled = c.settings.source_temporary_files_enabled = True
     c.source_file_import._media_policy_scan_started = False
     monkeypatch.setattr(c.source_files, 'open_stream', lambda *_a, **_k: pytest.fail('No SOURCE read'))
-    assert c.source_file_import.discover_once() == 0
+    # The policy scan may revisit the metadata page once after a restart; it
+    # must remain a no-op for content and preserve the existing mapping.
+    assert c.source_file_import.discover_once() == 1
     with c.uow() as repo:
         row = repo.get('source_file_imports', original['id'])
         assert row['status'] == 'METADATA_ONLY' and row['target_version_id'] == original['target_version_id']

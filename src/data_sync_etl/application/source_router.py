@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass
+from dataclasses import dataclass
 
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.source_ids import SourceIdentity, SourceLocator, mapped_source_locator

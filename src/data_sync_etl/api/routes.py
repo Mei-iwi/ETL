@@ -513,6 +513,11 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
             return source_file_error(exc)
         except Exception as exc:
             raise search_error(exc) from None
+        if not isinstance(version.get('preview_text'), str):
+            # A SOURCE reference without authorized derived OCR text must not
+            # become a server-side KeyError/500.  Original bytes remain
+            # provider-owned; report the normal readiness contract instead.
+            raise search_error(SearchError('FILE_NOT_READY', 409)) from None
         return PlainTextResponse(version['preview_text'],
                                  headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
     try:

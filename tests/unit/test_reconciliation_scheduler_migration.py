@@ -27,5 +27,8 @@ def test_scheduler_off_does_not_require_new_tables_for_existing_sync(container):
     migrate(container.engine, '0018', downgrade=True)
     assert not container.settings.reconciliation_scheduler_enabled
     assert ScheduledAudit(container.reconciliation_engine, container.settings).schedule() == []
+    # The running application requires the current MASTER schema for sync;
+    # scheduler-disabled mode must not create audit tables on its own.
+    migrate(container.engine)
     assert container.sync.run(full=True)['resources']['inserted'] == 3
     assert container.sync.run(full=False)['resources']['records_read'] == 0

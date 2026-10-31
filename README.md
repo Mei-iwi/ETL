@@ -24,7 +24,7 @@ cd ETL
 | `D:/etl/models/bge-m3/` | BGE-M3, revision marker, manifest checksum |
 | `D:/etl/models/faster-whisper-large-v3/` | Model nhận dạng tiếng nói, nếu bật media |
 | `D:/etl/models/argos/` | Gói dịch offline, nếu cần dịch |
-| `D:/etl/source/`, `source-temp/`, `storage/` | Ba thư mục riêng: nguồn, tệp tạm SOURCE, storage LOCAL |
+| `D:/etl/source/`, `storage/` | Hai thư mục riêng: tham chiếu nguồn và storage LOCAL; staging SOURCE bị tắt theo chính sách |
 
 `D:/etl` là đường dẫn gợi ý Windows. Linux dùng thư mục riêng, ví dụ `/home/<user>/etl-runtime`; thay mọi đường dẫn cấu hình bằng **đường dẫn tuyệt đối thật**, không giữ `<user>`/`YOUR_*`. Không commit env thật, secret, model, dữ liệu. Biến export trong terminal có thể ghi đè env file.
 
@@ -188,7 +188,7 @@ MONGO_DATABASE=etl_content
 MONGO_METADATA_MODE=shared
 SOURCE_MONGO_ENABLED=false
 SOURCE_REFERENCE_ENABLED=true
-SOURCE_TEMPORARY_FILES_ENABLED=true
+SOURCE_TEMPORARY_FILES_ENABLED=false
 SOURCE_FILE_STORAGE_ROOT=D:/etl/source
 SOURCE_TEMP_ROOT=D:/etl/source-temp
 STORAGE_ROOT=D:/etl/storage
@@ -355,8 +355,8 @@ Mỗi dòng là **một terminal riêng** tại gốc repo. Mỗi terminal Pytho
 | API | `python -m uvicorn data_sync_etl.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers` |
 | React/Vite | `npm.cmd --prefix frontend run dev` |
 | Đồng bộ metadata | `python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-1` |
-| Xác minh nguồn, nhập tham chiếu, tạo job | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
-| Trích xuất/OCR/ASR và hoàn thiện chỉ mục | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
+| Xác minh metadata/tham chiếu nguồn (không import byte gốc) | `python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1` |
+| Trích xuất/OCR/ASR và hoàn thiện chỉ mục cho LOCAL; SOURCE remote chỉ qua capability RAM | `python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1` |
 | Đối soát theo lịch đã lưu, đồng bộ đúng ID lệch | `python -m data_sync_etl.workers.reconciliation` |
 
 **Lệnh chạy liên tục cho cả 4 worker** — mỗi lệnh mở trong một terminal riêng, đã kích hoạt venv và đứng tại gốc repo:
@@ -367,12 +367,12 @@ python -m data_sync_etl.cli run-master-sync-worker --worker-id master-sync-1
 ```
 
 ```bash
-# Terminal worker 2: phát hiện phiên bản nguồn, xác minh tệp và tạo job xử lý.
+# Terminal worker 2: phát hiện phiên bản và xác minh metadata/tham chiếu; không đọc hoặc sao chép byte SOURCE.
 python -m data_sync_etl.cli run-source-file-worker --worker-id source-file-1
 ```
 
 ```bash
-# Terminal worker 3: OCR, Office, ASR MP3/MP4 và hoàn thiện chỉ mục.
+# Terminal worker 3: OCR/Office/ASR và hoàn thiện chỉ mục cho LOCAL; SOURCE remote chỉ xử lý khi đủ capability.
 python -m data_sync_etl.cli run-ocr-worker --worker-id ocr-1
 ```
 
@@ -494,7 +494,7 @@ INDEX_EMBEDDING_DIMENSION=1024
 INDEX_HISTORICAL_EMBEDDING_DIMENSIONS=[]
 INDEX_AUTO_ENABLED=false
 SOURCE_REFERENCE_ENABLED=true
-SOURCE_TEMPORARY_FILES_ENABLED=true
+SOURCE_TEMPORARY_FILES_ENABLED=false
 AUTH_MODE=single_admin
 AUTH_APP_ENVIRONMENT=production
 ADMIN_ENABLED=true
@@ -1144,3 +1144,20 @@ allowlist and are never replaced by an ETL download/proxy URL. Production writeb
 remote search remain disabled without an explicit SOURCE contract.
 
 See [the current architecture, migration governance findings, and SOURCE federation readiness](SOURCE_FEDERATION_READINESS.md). Multi-source resource/version metadata sync is feature-gated and uses existing MASTER identity columns, versions/imports, checkpoints, and reconciliation audit tables; SOURCE registrations are server configuration, not database rows. A fail-closed open-at-SOURCE API and frontend action accept only per-source allowlisted HTTPS viewer links. Production writeback remains disabled; real PostgreSQL/Mongo/API viewer integration, physical SOURCE acceptance, and migration-governance approval remain incomplete.
+
+### Regression verification (2026-10-31)
+
+The focused regression command remains:
+
+```powershell
+$env:PYTHONPATH='tests/unit;tests/integration'
+.\.venv\Scripts\python.exe -m pytest tests/unit/test_five_commit_pipeline.py tests/unit/test_source_pipeline_http.py tests/unit/test_five_commit_regressions.py -q
+```
+
+The SOURCE regression contract is metadata-only: discovery creates MASTER metadata
+versions, while the SOURCE file worker does not claim, copy, preview, download, or
+retry original bytes. Reconciliation reports an unverified SOURCE file when that
+content contract is unavailable. The full unit suite includes environment-dependent
+embedding/OCR and external-integration tests; use `SOURCE_FEDERATION_READINESS.md`
+for the latest PASS/FAIL/BLOCKED/NOT_RUN classification rather than treating a
+partial full-suite run as production acceptance.
