@@ -34,7 +34,7 @@ class MeteredFiles:
                 return MeteredResponse(response, metrics, maximum) if kwargs.get('media') else response
 
             drive._get, drive._validate_blob = get, validate
-        elif provider != 'local':
+        elif provider not in ('local', 'external', 'object'):
             raise SourceFileError('AUDIT_PROVIDER_BUDGET_UNSUPPORTED')
 
     def __getattr__(self, name):

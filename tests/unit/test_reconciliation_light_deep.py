@@ -65,6 +65,54 @@ def test_deep_byte_and_time_limits_are_not_verified(local_file):
         assert c.reconciliation_engine.verify_file_blobs(repo.session)[0]['target_value']['reason_code'] == 'RECONCILIATION_READ_BUDGET'
 
 
+def test_deep_cloud_object_uses_provider_head_size_and_stream_hash(local_file):
+    from io import BytesIO
+    from types import SimpleNamespace
+
+    from data_sync_etl.ports.cloud_storage import CloudObject
+
+    c, _, _ = local_file
+    payload = b'cloud learning resource'
+
+    class Cloud:
+        bucket = 'assets'
+
+        def head_object(self, key):
+            assert key == 'uploads/version.pdf'
+            return CloudObject('neon-provider', 'assets', key, len(payload), hashlib.sha256(payload).hexdigest())
+
+        def get_stream(self, key):
+            assert key == 'uploads/version.pdf'
+            return BytesIO(payload)
+
+    class Storage:
+        cloud = Cloud()
+
+        def for_provider(self, provider_id):
+            assert provider_id == 'etl-cloud-current'
+            return self
+
+        def open_stream(self, bucket, key):
+            assert bucket == self.cloud.bucket
+            return self.cloud.get_stream(key)
+
+        @staticmethod
+        def _key(key):
+            return key
+
+    c.reconciliation_engine.storage = Storage()
+    version = SimpleNamespace(id='v-cloud', resource_id='r-cloud', source_hash=hashlib.sha256(payload).hexdigest(),
+        source_file_size=len(payload), storage_file_size=None, storage_bucket='assets',
+        storage_object_key='uploads/version.pdf', version_number=1, parent_version_id=None,
+        processing_options={'storage_provider_id': 'etl-cloud-current'})
+    rows = c.reconciliation_engine.verify_file_snapshot([version], {'r-cloud': 'LOCAL'}, audit_type='DEEP')
+    assert rows[0]['discrepancy_flag'] == 'SYNCED'
+    assert rows[0]['target_value']['storage_file_size'] == len(payload)
+    assert rows[0]['target_value']['verification'] == 'CLOUD_STREAM_SHA256'
+    assert c.reconciliation_engine.file_metrics == {'bytes_read': len(payload), 'sha256_computed_count': 1,
+                                                    'cache_reused_count': 0}
+
+
 def test_light_source_uses_provider_revision_without_download(source_viewer, monkeypatch):
     c, version, source, path = source_viewer
     def forbidden(*args, **kwargs):
@@ -106,6 +154,33 @@ def test_drive_audit_budget_counts_eager_download_and_hash_stream():
     assert metrics['bytes_read'] == 0
     with original.open_stream('DRIVE', 'files/blob/sample.txt') as stream:
         assert stream.read() == b'content'  # Audit policy never mutates the sync reader.
+
+
+@pytest.mark.parametrize('provider', ['external', 'object'])
+def test_cloud_audit_stream_is_metered_and_respects_byte_limit(provider):
+    from contextlib import contextmanager
+    from io import BytesIO
+
+    from data_sync_etl.adapters.persistence.audit_io import MeteredFiles
+    from data_sync_etl.domain.core import SourceFileError
+
+    class ExternalFiles:
+        @contextmanager
+        def open_stream(self, bucket, key, *, cancelled=None):
+            yield BytesIO(b'source bytes')
+
+    metrics = {'bytes_read': 0}
+    with MeteredFiles(ExternalFiles(), metrics, 12, provider).open_stream('assets', 'file.pdf') as stream:
+        assert stream.read() == b'source bytes'
+        assert stream.read() == b''
+    assert metrics['bytes_read'] == 12
+
+    metrics = {'bytes_read': 0}
+    with MeteredFiles(ExternalFiles(), metrics, 11, provider).open_stream('assets', 'file.pdf') as stream:
+        assert stream.read() == b'source byte'
+        with pytest.raises(SourceFileError, match='RECONCILIATION_BYTE_BUDGET'):
+            stream.read()
+    assert metrics['bytes_read'] == 11
 
 
 def test_deep_then_unchanged_light_preserves_proof_but_not_light_hash_credit(local_file):

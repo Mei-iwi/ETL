@@ -337,7 +337,9 @@ class ReconciliationEngine:
                 try:
                     provider_id = (ver.processing_options or {}).get('storage_provider_id')
                     storage = self.storage.for_provider(provider_id)
-                    head = storage.snapshot(bucket, ver.storage_object_key)
+                    if bucket != storage.cloud.bucket:
+                        raise DomainError('CLOUD_STORAGE_BUCKET_MISMATCH')
+                    head = storage.cloud.head_object(storage._key(ver.storage_object_key))
                     expected_size = ver.source_file_size
                     if audit_type == 'LIGHT':
                         size_status = ('SIZE_MATCHED' if expected_size is not None and expected_size == head.size
