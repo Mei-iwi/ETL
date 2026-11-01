@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { webcrypto } from 'node:crypto'
 import test from 'node:test'
 import vm from 'node:vm'
 import ts from '../../frontend/node_modules/typescript/lib/typescript.js'
 
 // Exercise the real component handlers across renders without a browser or API.
 // The ref lifecycle below reproduces the file input unmounting after selection.
-async function page() {
+async function page({ failCreateOnce = false, sourceCreate = false } = {}) {
     const slots = []
     const effects = []
     const requests = []
     const navigations = []
     const savedPreferences = []
+    const processedVersions = []
     let cursor = 0
     let previousRefs = []
     const react = {
@@ -47,7 +49,10 @@ async function page() {
             getProviders: async () => [{ id: 'provider-1', name: 'Provider', provider_type: 'SCHOOL' }],
             getGradeLevels: async () => [], getSubjects: async () => [],
         },
-        '../../services/processingApi': { startProcessing: async () => ({ job_id: 'job-1' }) },
+        '../../services/processingApi': { startProcessing: async version => {
+            processedVersions.push(version)
+            return { job_id: 'job-1' }
+        } },
         '../../services/processingPreferences': {
             ...preferencesModule.exports,
             saveProcessingPreferences: async (_, value) => { savedPreferences.push(value) },
@@ -69,9 +74,24 @@ async function page() {
     } }).outputText
     const context = {
         exports: {}, require(name) { assert.ok(name in modules, name); return modules[name] },
-        AbortController, File, FormData: FormDataFromForm,
+        AbortController, File, FormData: FormDataFromForm, crypto: webcrypto,
+        window: { setTimeout: callback => setTimeout(callback, 0) },
         fetch: async (url, options) => {
             requests.push({ url, options })
+            if (failCreateOnce) {
+                failCreateOnce = false
+                return { ok: false, json: async () => ({ detail: { message: 'Temporary failure' } }) }
+            }
+            if (sourceCreate && url === '/api/v1/resources') {
+                return { ok: true, json: async () => ({ request_id: 'create-job', status: 'SOURCE_CREATE_PENDING' }) }
+            }
+            if (sourceCreate) {
+                return { ok: true, json: async () => ({
+                    request_id: 'create-job', status: 'SOURCE_CREATE_APPLIED',
+                    source_version_id: 'SOURCE_VERSION', master_version_id: 'MASTER_VERSION',
+                    master_reconciliation_status: 'MASTER_RECONCILED',
+                }) }
+            }
             return { ok: true, json: async () => ({ initial_version_id: 'version-1' }) }
         },
     }
@@ -100,7 +120,7 @@ async function page() {
     find(node => node.props?.name === 'provider_id').props.onChange({ target: { value: 'provider-1' } })
     render()
     return {
-        requests, navigations, savedPreferences,
+        requests, navigations, savedPreferences, processedVersions,
         pick(file) { find(node => node.props?.type === 'file').props.onChange({ target: { files: [file] } }); render() },
         drop(file) { find(node => typeof node.props?.onDrop === 'function').props.onDrop({ preventDefault() {}, dataTransfer: { files: [file] } }); render() },
         remove() { find(node => node.props?.['aria-label'] === 'Bỏ tệp đã chọn').props.onClick(); render() },
@@ -185,4 +205,32 @@ test('switching from media to a document does not submit hidden media settings',
     await form.submit()
     assert.equal(form.savedPreferences.length, 1)
     assert.equal(form.savedPreferences[0].source_language, null)
+})
+
+test('resubmitting the same upload after failure reuses its idempotency key', async () => {
+    const form = await page({ failCreateOnce: true })
+    form.pick(new File(['pdf'], 'lesson.pdf', { type: 'application/pdf' }))
+    await form.submit()
+    await form.submit()
+    assert.equal(form.requests.length, 2)
+    assert.equal(form.requests[0].options.body.get('idempotency_key'),
+        form.requests[1].options.body.get('idempotency_key'))
+})
+
+test('SOURCE create starts extraction with the reconciled MASTER version ID', async () => {
+    const form = await page({ sourceCreate: true })
+    form.pick(new File(['pdf'], 'lesson.pdf', { type: 'application/pdf' }))
+    await form.submit()
+    assert.deepEqual(form.processedVersions, ['MASTER_VERSION'])
+    assert.ok(form.navigations[0][0].includes('versionId=MASTER_VERSION'))
+    assert.ok(!form.navigations[0][0].includes('SOURCE_VERSION'))
+    assert.equal(JSON.parse(form.requests[0].options.body.get('processing_options')).target_language, 'vi')
+})
+
+test('selected extraction preferences are part of the initial SOURCE create request', async () => {
+    const form = await page({ sourceCreate: true })
+    form.pick(new File(['audio'], 'lesson.mp3', { type: 'audio/mpeg' }))
+    form.setSource('fr')
+    await form.submit()
+    assert.equal(JSON.parse(form.requests[0].options.body.get('processing_options')).source_language, 'fr')
 })

@@ -13,6 +13,7 @@ MASTER_LOCAL_EXTENSION_FIELDS = frozenset({
 })
 SOURCE_WRITE_BACK_FIELDS = frozenset({
     'title', 'provider_id', 'resource_type_id', 'publication_status',
+    'subject_id', 'grade_level_id',
 })
 
 
@@ -25,7 +26,11 @@ def validate_source_writeback_fields(fields, *, allowed_fields=None):
         raise DomainError('SOURCE_WRITEBACK_FIELD_BLOCKED')
     normalized = {}
     for field, value in fields.items():
-        if field in {'title', 'provider_id', 'resource_type_id'}:
+        if field in {'subject_id', 'grade_level_id'}:
+            if value is not None and (not isinstance(value, str) or not value.strip() or len(value.strip()) > 30):
+                raise DomainError(f'SOURCE_WRITEBACK_{field.upper()}_INVALID')
+            normalized[field] = value.strip() if isinstance(value, str) else None
+        elif field in {'title', 'provider_id', 'resource_type_id'}:
             if not isinstance(value, str) or not value.strip():
                 raise DomainError(f'SOURCE_WRITEBACK_{field.upper()}_INVALID')
             limit = 500 if field == 'title' else 30
@@ -33,7 +38,7 @@ def validate_source_writeback_fields(fields, *, allowed_fields=None):
                 raise DomainError(f'SOURCE_WRITEBACK_{field.upper()}_INVALID')
             normalized[field] = value.strip()
         elif field == 'publication_status':
-            if value not in {'DRAFT', 'PUBLISHED', 'UNPUBLISHED', 'ARCHIVED'}:
+            if value not in {'DRAFT', 'PUBLISHED', 'ARCHIVED'}:
                 raise DomainError('SOURCE_WRITEBACK_PUBLICATION_STATUS_INVALID')
             normalized[field] = value
         else:

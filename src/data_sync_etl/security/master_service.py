@@ -124,7 +124,10 @@ class MasterAuthService(AuthService):
         self.dummy_hash = f'pbkdf2_sha256$120000${salt}${dummy}'
 
     def fingerprint(self, user):
-        return self.digest(json.dumps(user, sort_keys=True, default=str).encode())
+        # Resource ownership is refreshed on every request. Creating a resource
+        # must not revoke the owner's session; identity/role/password changes do.
+        identity = {key: value for key, value in user.items() if key != 'resource_ids'}
+        return self.digest(json.dumps(identity, sort_keys=True, default=str).encode())
 
     def login(self, request, email, password, remember=False, *, provider=None):
         # provider is accepted only for old clients; it cannot select an identity or role.

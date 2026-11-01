@@ -94,6 +94,26 @@ export function LibraryProcessingPage() {
     useEffect(() => () => actionControllerRef.current?.abort(), [])
 
     useEffect(() => {
+        if (!versionId || jobId) return
+        const controller = new AbortController()
+        void fetch(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/etl-status`, {
+            signal: controller.signal,
+        }).then(async response => {
+            if (!response.ok) throw new Error('Không tải được trạng thái xử lý hiện có.')
+            const data = await response.json()
+            if (controller.signal.aborted || !data.ocr_job?.id) return
+            setSearchParams(previous => {
+                const next = new URLSearchParams(previous)
+                next.set('jobId', data.ocr_job.id)
+                return next
+            }, { replace: true })
+        }).catch(reason => {
+            if (!controller.signal.aborted) setStatusError(reason instanceof Error ? reason.message : 'Không tải được trạng thái xử lý.')
+        })
+        return () => controller.abort()
+    }, [versionId, jobId, setSearchParams, statusRefreshKey])
+
+    useEffect(() => {
         if (!jobId || loading) return
 
         let failedAttempts = 0
@@ -277,7 +297,7 @@ export function LibraryProcessingPage() {
                     <strong>{mainStatus.label}</strong>
                 </div>
 
-                {processingNotice && <p className={styles.notice}>{processingNotice}</p>}
+                {processingNotice && !jobId && <p className={styles.notice}>{processingNotice}</p>}
                 {error && <p className={styles.alert} role="alert">{error}</p>}
                 {currentResult?.error_code && <p className={styles.notice}>{mediaErrors[currentResult.error_code] ?? 'Lỗi xử lý nội dung.'}</p>}
                 {statusError && <p className={styles.alert} role="alert">{statusError}</p>}

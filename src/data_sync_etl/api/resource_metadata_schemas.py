@@ -15,7 +15,7 @@ class UpdateResourceMetadataRequest(BaseModel):
     provider_type: str | None = Field(default=None, max_length=30)
     subject_id: str | None = Field(default=None, max_length=30)
     grade_level_id: str | None = Field(default=None, max_length=30)
-    publication_status: Literal["DRAFT", "PUBLISHED", "UNPUBLISHED"] | None = None
+    publication_status: Literal["DRAFT", "PUBLISHED", "UNPUBLISHED", "ARCHIVED"] | None = None
     uploaded_by: str | None = Field(default=None, max_length=30)
 
     @model_validator(mode="before")

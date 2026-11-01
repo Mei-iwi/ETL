@@ -29,6 +29,7 @@ type SourceCreateResponse = {
     source_resource_id?: string | null
     source_version_id?: string | null
     master_resource_id?: string | null
+    master_version_id?: string | null
     master_reconciliation_status?: "NOT_STARTED" | "PENDING_RECONCILIATION" | "MASTER_RECONCILED"
     error_code?: string | null
 }
@@ -45,6 +46,7 @@ export function LibraryCreatePage() {
     const [processingPreferences, setProcessingPreferences] = useState(defaultProcessingPreferences)
     const navigate = useNavigate()
     const submittingRef = useRef(false)
+    const submission = useRef({ fingerprint: '', key: '' })
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     const [submitStage, setSubmitStage] = useState<SubmitStage>("idle")
@@ -235,7 +237,14 @@ export function LibraryCreatePage() {
         // The picker unmounts while the selected-file card is visible.
         // State retains the File for both picker and drag/drop selection.
         formData.set("file", selectedFile, selectedFile.name)
-        formData.set("idempotency_key", `web-${crypto.randomUUID()}`)
+        formData.set("processing_options", JSON.stringify(selectedMediaType ? processingPreferences : defaultProcessingPreferences))
+        const fingerprint = JSON.stringify([...formData.entries()].map(([name, value]) =>
+            [name, value instanceof File ? [value.name, value.size, value.lastModified] : value],
+        ))
+        if (submission.current.fingerprint !== fingerprint) {
+            submission.current = { fingerprint, key: `web-${crypto.randomUUID()}` }
+        }
+        formData.set("idempotency_key", submission.current.key)
 
         try {
             const response = await fetch("/api/v1/resources", {
@@ -278,10 +287,10 @@ export function LibraryCreatePage() {
                     }
                     if (
                         status.status === "SOURCE_CREATE_APPLIED" &&
-                        status.source_version_id &&
+                        status.master_version_id &&
                         status.master_reconciliation_status === "MASTER_RECONCILED"
                     ) {
-                        versionId = status.source_version_id
+                        versionId = status.master_version_id
                         break
                     }
                     await new Promise((resolve) => window.setTimeout(resolve, 750))

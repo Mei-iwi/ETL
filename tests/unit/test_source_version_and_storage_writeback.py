@@ -216,6 +216,7 @@ def test_source_create_file_workflow_checkpoints_object_and_version_before_clean
         'source_user_id': 'USR260100001',
         'source_file': manifest,
         'source_version_idempotency_key': 'srcv-create-file-01',
+        'reserved_at': '2026-01-01T00:00:00+00:00',
     }
     saved = []
 
@@ -228,6 +229,8 @@ def test_source_create_file_workflow_checkpoints_object_and_version_before_clean
                                           persist_checkpoint=persist)
     assert checkpoint['source_bucket'] == 'source-uploads'
     assert checkpoint['source_version_id'] == 'RSV2601000001'
+    assert checkpoint['reserved_at'] == '2026-01-01T00:00:00+00:00'
+    assert checkpoint['version_reserved_at'] != checkpoint['reserved_at']
     assert manifest['path'] and (tmp_path / 'source-create').joinpath(
         __import__('pathlib').Path(manifest['path']).name).exists()
     result = service.apply_for_source_resource(checkpoint=checkpoint, stager=stager,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
 from data_sync_etl.adapters.storage.object import S3CompatibleObjectStorageAdapter
 from data_sync_etl.domain.core import DomainError, SourceFileError
@@ -90,3 +91,10 @@ class SourceObjectStorageReader:
             'viewer_url': viewer,
             'embedded_url': viewer,
         }
+
+    def viewer_hosts(self, bucket):
+        """Only the validated configured endpoint may receive signed URLs."""
+        self._check_bucket(bucket)
+        self.cloud.validate_config()
+        host, _ = self.cloud._target()
+        return (urlsplit('https://' + host).hostname,)

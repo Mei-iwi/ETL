@@ -61,9 +61,39 @@ class SourceWriteBackWorker:
                             self.reconcile_source()
                         except Exception:
                             event(stage='source_writeback', action='SOURCE_VERSION_RECONCILIATION_PENDING')
+                worked = self._recover_reconciliation() or worked
             except Exception:
                 event(stage='source_writeback', action='WRITEBACK_WORKER_UNAVAILABLE')
                 return False
             if worked:
                 event(stage='source_writeback', action='WRITEBACK_JOB_PROCESSED')
             return bool(worked)
+
+    def _recover_reconciliation(self):
+        """Recover SOURCE commit -> MASTER projection after process restarts."""
+        if self.reconcile_source is None:
+            return False
+        uow = getattr(self.service, 'uow', None)
+        if uow is None:
+            return False
+        with uow() as repo:
+            reader = getattr(repo, 'pending_writeback_reconciliations', None)
+            pending = reader() if callable(reader) else []
+        if not pending:
+            return False
+        try:
+            self.reconcile_source()
+            for job in pending:
+                if job['audit_type'] == 'SOURCE_CREATE' and self.create_service is not None:
+                    self.create_service.last_request_id = job['id']
+                    self.create_service.mark_master_reconciled()
+                else:
+                    with uow() as repo:
+                        current = repo.get('reconciliation_audit_jobs', job['id'], lock=True)
+                        cp = dict(current.get('checkpoint') or {})
+                        cp['master_reconciliation_status'] = 'MASTER_RECONCILED'
+                        repo.update('reconciliation_audit_jobs', job['id'], {'checkpoint': cp})
+            return True
+        except Exception:
+            event(stage='source_writeback', action='SOURCE_WRITEBACK_RECONCILIATION_PENDING')
+            return False

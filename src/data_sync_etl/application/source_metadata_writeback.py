@@ -5,6 +5,7 @@ import json
 import re
 from datetime import timedelta
 
+from data_sync_etl.application.source_writeback_state import canonical_source_hash
 from data_sync_etl.domain.core import DomainError, new_id, now
 from data_sync_etl.domain.search_access import denied
 from data_sync_etl.domain.source_ids import mapped_source_locator
@@ -38,7 +39,7 @@ class SourceMetadataWriteBackService:
     def status(self):
         enabled = bool(self.settings.source_metadata_writeback_enabled)
         grant_ready = bool(getattr(self.writer, 'grant_configured', True))
-        contract_fields = set(getattr(self.writer, 'update_columns', None)
+        contract_fields = set(getattr(self.writer, 'update_fields', None) or getattr(self.writer, 'update_columns', None)
                               or getattr(self.writer, 'columns', None) or {'title'})
         return {'enabled': enabled,
                 'writer_supported': bool(enabled and getattr(self.writer, 'supported', False)
@@ -90,7 +91,7 @@ class SourceMetadataWriteBackService:
         if not getattr(self.writer, 'supported', False):
             raise SourceWriteBackError('SOURCE_WRITEBACK_UNSUPPORTED', 409)
         try:
-            allowed_fields = (getattr(self.writer, 'update_columns', None)
+            allowed_fields = (getattr(self.writer, 'update_fields', None) or getattr(self.writer, 'update_columns', None)
                               or getattr(self.writer, 'columns', None) or frozenset({'title'}))
             fields = validate_source_writeback_fields(fields, allowed_fields=allowed_fields)
         except DomainError as exc:
@@ -169,11 +170,16 @@ class SourceMetadataWriteBackService:
                 if resource is None:
                     raise SourceWriteBackError('RESOURCE_NOT_FOUND', 404)
                 locator = self._authorize(resource, actor, role, owner, fields)
-                if resource.get('source_state_hash') != expected_hash:
-                    raise SourceWriteBackError('SOURCE_WRITEBACK_CONFLICT', 409)
+                # SOURCE CAS is authoritative, including a retry after its
+                # commit was already observed by the normal Master sync.
+                canonical_hash = checkpoint.get('expected_canonical_source_hash')
+                if canonical_hash is None:
+                    if resource.get('source_state_hash') != expected_hash:
+                        raise SourceWriteBackError('SOURCE_WRITEBACK_CONFLICT', 409)
+                    canonical_hash = canonical_source_hash(repo, resource, locator)
             result = self.writer.write_metadata(
                 locator=locator, fields=fields,
-                expected_source_state_hash=expected_hash, idempotency_key=key,
+                expected_source_state_hash=canonical_hash, idempotency_key=key,
             )
             if (not isinstance(result, dict) or result.get('status') != 'APPLIED'
                     or not re.fullmatch('[0-9a-f]{64}', result.get('source_state_hash') or '')):
@@ -240,6 +246,7 @@ class SourceMetadataWriteBackService:
                     raise SourceWriteBackError('SOURCE_WRITEBACK_APPROVAL_REQUIRED', 409)
                 cp = {'kind': 'SOURCE_METADATA_WRITEBACK', 'resource_id': resource_id,
                       'fields': fields, 'expected_source_state_hash': expected_hash,
+                      'expected_canonical_source_hash': canonical_source_hash(repo, resource, locator),
                       'fingerprint': fingerprint, 'requested_by': actor,
                       'requested_role': role, 'owner_id': owner, 'idempotency_key': key}
                 if auto_approve:
@@ -278,7 +285,8 @@ class SourceMetadataWriteBackService:
                 if current_locator != locator or current['source_state_hash'] != expected_hash:
                     raise SourceWriteBackError('SOURCE_WRITEBACK_CONFLICT', 409)
             result = self.writer.write_metadata(locator=locator, fields=fields,
-                expected_source_state_hash=expected_hash, idempotency_key=key)
+                expected_source_state_hash=cp.get('expected_canonical_source_hash') or expected_hash,
+                idempotency_key=key)
             if (not isinstance(result, dict) or result.get('status') != 'APPLIED'
                     or not re.fullmatch('[0-9a-f]{64}', result.get('source_state_hash') or '')):
                 raise ValueError('Invalid writer acknowledgement')

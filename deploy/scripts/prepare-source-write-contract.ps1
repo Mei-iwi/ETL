@@ -4,7 +4,9 @@ param(
     [string]$ApplicationRole,
     [string[]]$AllowedActions = @('update'),
     [string[]]$AllowedActorIds = @(),
-    [string[]]$AllowedFields = @('title')
+    [string[]]$AllowedFields = @('title'),
+    [string[]]$UpdateFields = @('title'),
+    [string[]]$RelationFields = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +28,13 @@ if ($normalizedActions.Count -eq 0 -or @($normalizedActions | Where-Object { $_ 
 }
 $normalizedActors = @($AllowedActorIds | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $normalizedFields = @($AllowedFields | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$normalizedUpdates = @($UpdateFields | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if (@($normalizedUpdates | Where-Object { $_ -notin @('title','provider_id','resource_type_id','publication_status') -or $_ -notin $normalizedFields }).Count -gt 0) {
+    throw 'UpdateFields must map explicitly approved resource metadata columns in AllowedFields.'
+}
+if (@($RelationFields | Where-Object { $_ -notin @('subject_id','grade_level_id') }).Count -gt 0) {
+    throw 'RelationFields supports only subject_id and grade_level_id.'
+}
 if ($normalizedFields.Count -eq 0) {
     throw 'AllowedFields must contain at least one explicitly approved SOURCE column.'
 }
@@ -46,9 +55,11 @@ $contract = Get-Content -LiteralPath $examplePath -Raw | ConvertFrom-Json
 $contract.allowed_roles = @($ApplicationRole.Trim().ToUpperInvariant())
 $contract.allowed_actor_ids = $normalizedActors
 $contract.actions = $normalizedActions
+$contract.update_columns = $normalizedUpdates
+$contract | Add-Member -NotePropertyName relation_fields -NotePropertyValue @($RelationFields) -Force
 $contract.columns = @{}
 foreach ($field in $normalizedFields) {
-    $contract.columns | Add-Member -NotePropertyName $field -NotePropertyValue $field -Force
+    $contract.columns[$field] = $field
 }
 
 $parent = Split-Path -Parent $OutputPath

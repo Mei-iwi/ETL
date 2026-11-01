@@ -584,10 +584,15 @@ class SearchService:
         if len(candidates) > self.settings.search_max_bags:
             raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
         phase_reader = getattr(self.bags, 'search_phase', None) if _batch_bags else None
-        initial_phase = (phase_reader(sorted({bag.resource_version_id for bag in candidates}),
-                                     limit=self.settings.search_max_bags + 1,
-                                     max_chars=self.settings.index_max_source_chars)
-                         if phase_reader is not None and candidates else None)
+        initial_phase = None
+        if phase_reader is not None and candidates:
+            version_ids = sorted({bag.resource_version_id for bag in candidates})
+            phase_options = dict(limit=self.settings.search_max_bags + 1,
+                                 max_chars=self.settings.index_max_source_chars)
+            if callable(getattr(type(self.bags), 'search_phase_from_candidates', None)):
+                initial_phase = self.bags.search_phase_from_candidates(version_ids, candidates, **phase_options)
+            else:
+                initial_phase = phase_reader(version_ids, **phase_options)
         candidates_by_version = {}
         for candidate in candidates:
             candidates_by_version.setdefault(candidate.resource_version_id, []).append(candidate)

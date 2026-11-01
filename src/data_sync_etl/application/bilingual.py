@@ -109,8 +109,30 @@ class BilingualService:
     def __init__(self, uow, settings, runner=None):
         self.uow, self.settings = uow, settings
         self.runner = runner
+        self.source_resolver = None
 
     def configure(self, version_id, options, *, retry_translation=False):
+        with self.uow() as repo:
+            initial = repo.get('resource_versions', version_id)
+            resource = repo.get('master_learning_resources', initial['resource_id']) if initial else None
+        if not initial or not resource or not resource['is_active'] or resource.get('deleted_at'):
+            raise DomainError('Resource version not found')
+        if resource.get('source_origin') != 'LOCAL':
+            if self.source_resolver is None:
+                raise DomainError('EXTERNAL_SOURCE_PROCESSING_DISABLED')
+            reference = self.source_resolver.resolve(version_id)
+            self.source_resolver.require_content_capabilities(reference)
+        defaults = {'source_language': None, 'target_language': self.settings.translation_target_language,
+                    'ocr_enabled': True, 'ocr_languages': None, 'visual_enabled': False,
+                    'audio_track': None, 'subtitle_track': None}
+        if not retry_translation:
+            with self.uow() as repo:
+                latest = repo.get('resource_versions', version_id)
+                current = (latest or {}).get('processing_options') or {}
+                if latest and all(current.get(key, defaults.get(key)) == value for key, value in options.items()):
+                    # Idempotent read: do not contend with an OCR job that has
+                    # already started using these exact options.
+                    return {'status': 'unchanged', 'options': current}
         with self.uow.processing_lock(version_id) as acquired:
             if not acquired:
                 raise DomainError("PROCESSING_BUSY")
@@ -121,8 +143,10 @@ class BilingualService:
                 resource = repo.get("master_learning_resources", version["resource_id"])
                 if not resource or not resource["is_active"] or resource.get("deleted_at"):
                     raise DomainError("Resource version not found")
-                if resource.get('source_origin') != 'LOCAL':
-                    raise DomainError('EXTERNAL_SOURCE_PROCESSING_DISABLED')
+                current = version.get('processing_options') or {}
+                if not retry_translation and all(current.get(key, defaults.get(key)) == value
+                                                 for key, value in options.items()):
+                    return {'status': 'unchanged', 'options': current}
                 jobs = repo.find("ocr_jobs", {"resource_version_id": version_id}, limit=1)
                 if any(job["status"] in ("PENDING", "RUNNING") for job in jobs):
                     raise DomainError("PROCESSING_BUSY")
@@ -132,7 +156,6 @@ class BilingualService:
                     key not in ("source_language", "target_language") for key in options
                 ):
                     raise DomainError("TRANSLATION_OPTIONS_ONLY")
-                current = version.get("processing_options") or {}
                 count = current.get("translation_retries", 0) + int(retry_translation)
                 if count > self.settings.translation_max_retries:
                     raise DomainError("TRANSLATION_RETRY_LIMIT")

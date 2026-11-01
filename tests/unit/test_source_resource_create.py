@@ -155,6 +155,25 @@ def test_create_is_durable_and_retries_same_source_id_after_uncertain_commit():
     assert writer.calls == ['RES260100001', 'RES260100001']
 
 
+def test_explicit_failed_create_resubmission_reuses_reserved_identity():
+    uow, writer = Uow(), Writer()
+    service = SourceResourceCreateService(uow, writer, settings())
+    first = service.request(payload(), idempotency_key='failed-resubmit-01',
+                            actor_id='master:master-user-1', role='ADMIN')
+    row = uow.repo.jobs[first['request_id']]
+    row.update(status='SOURCE_CREATE_FAILED', attempts=3, error_code='SOURCE_CREATE_FAILED')
+    row['checkpoint'].update(source_resource_id='RES260100001',
+                             reserved_at=now().isoformat(), error_code='SOURCE_CREATE_FAILED')
+    retried = service.request(payload(), idempotency_key='failed-resubmit-01',
+                              actor_id='master:master-user-1', role='ADMIN')
+    assert retried['request_id'] == first['request_id']
+    assert retried['status'] == PENDING
+    assert retried['source_resource_id'] == 'RES260100001'
+    assert service.process_pending_once(request_id=first['request_id'])
+    assert row['status'] == APPLIED
+    assert len(uow.repo.jobs) == 1
+
+
 def test_worker_recovers_when_counter_fails_before_id_allocation():
     uow, writer = Uow(), Writer()
     service = SourceResourceCreateService(uow, writer, settings())

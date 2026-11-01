@@ -48,6 +48,11 @@ class SourceFileDispatcher:
         lookup = getattr(reader, 'viewer_reference', None)
         return lookup(bucket, object_key) if callable(lookup) else None
 
+    def viewer_hosts(self, bucket):
+        if self.provider(bucket) == 'object':
+            return self.object.viewer_hosts(bucket)
+        return ()
+
     def readiness(self, *, probe=False):
         result = {}
         readers = [('local', self.local), ('google_drive', self.drive)]

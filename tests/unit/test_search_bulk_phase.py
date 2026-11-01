@@ -5,8 +5,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_sync_etl.adapters.mongo.foundation_store import MongoBagStore
+from data_sync_etl.adapters.mongo.foundation_store import MongoBagStore, checked
 from data_sync_etl.domain.core import DomainError
+from data_sync_etl.domain.mongo_documents import ContentBagDocument
 from data_sync_etl.domain.search import SearchError
 from tests.unit.test_search_t2_batch import bag_data
 
@@ -72,3 +73,24 @@ def test_bulk_phase_enforces_content_budget_without_truncating_results():
     store, _, _, _ = store_with_data()
     with pytest.raises(SearchError, match='SEARCH_LIMIT_EXCEEDED'):
         store.search_phase(['v-0', 'v-1'], limit=10, max_chars=1)
+
+
+def test_initial_phase_reuses_fresh_candidates_but_final_read_detects_mutation():
+    store, db, bags, _ = store_with_data()
+    candidates = [checked(ContentBagDocument, row) for row in bags]
+    initial = store.search_phase_from_candidates(['v-0', 'v-1'], candidates, limit=10)
+    assert initial(['root-0'], version_id='v-0', generation=1)['root-0']
+    db.content_bags.find.assert_not_called()
+    assert db.mongo_content_units.find.call_count == 1
+    bags[0]['embedding'] = [0.] * len(bags[0]['embedding'])
+    with pytest.raises(DomainError):
+        store.search_phase(['v-0', 'v-1'], limit=10)
+    assert db.content_bags.find.call_count == 1
+
+
+def test_candidates_read_full_documents_and_reject_hidden_acl_fields():
+    store, db, bags, _ = store_with_data()
+    bags[0]['acl_denied'] = True
+    with pytest.raises(DomainError):
+        store.search_candidates(['v-0', 'v-1'], model='fixture', limit=10)
+    assert len(db.content_bags.find.call_args.args) == 1

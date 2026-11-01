@@ -13,6 +13,7 @@ import re
 from datetime import timedelta
 
 from data_sync_etl.application.source_resource_create import SourceResourceCreateService
+from data_sync_etl.application.source_writeback_state import canonical_source_hash
 from data_sync_etl.domain.core import DomainError, new_id, now
 from data_sync_etl.domain.source_ids import mapped_source_locator
 
@@ -101,6 +102,7 @@ class SourceResourceDeleteService:
                 checkpoint = {
                     'kind': 'SOURCE_DELETE_RESOURCE', 'resource_id': resource_id,
                     'expected_source_state_hash': expected_source_state_hash.lower(),
+                    'expected_canonical_source_hash': canonical_source_hash(repo, resource, locator),
                     'requested_by': actor_id, 'requested_role': role,
                     'source_user_id': source_user_id, 'source_locator': locator.canonical_payload(),
                     'idempotency_key': idempotency_key, 'fingerprint': fingerprint,
@@ -159,7 +161,8 @@ class SourceResourceDeleteService:
                     raise SourceDeleteWriteBackError('SOURCE_DELETE_ACTOR_MAPPING_REQUIRED', 403) from None
             result = self.writer.delete_resource(
                 locator=locator,
-                expected_source_state_hash=checkpoint['expected_source_state_hash'],
+                expected_source_state_hash=checkpoint.get('expected_canonical_source_hash')
+                or checkpoint['expected_source_state_hash'],
                 deleted_by=source_user_id,
                 idempotency_key=checkpoint['idempotency_key'],
             )

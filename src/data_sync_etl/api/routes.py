@@ -1084,7 +1084,7 @@ def update_resource_metadata(
             if not principal or not getattr(principal, 'id', None) or not getattr(principal, 'role', None):
                 raise HTTPException(403, detail={'code': 'SOURCE_WRITEBACK_ACTOR_MAPPING_REQUIRED'})
             source_fields = {}
-            blocked = {'provider_name', 'provider_type', 'resource_type_name_vi', 'subject_id', 'grade_level_id'}
+            blocked = {'provider_name', 'provider_type', 'resource_type_name_vi'}
             if blocked.intersection(fields):
                 raise HTTPException(422, detail={
                     'code': 'SOURCE_WRITEBACK_FIELD_BLOCKED',
@@ -1094,6 +1094,19 @@ def update_resource_metadata(
             for name in ('title', 'provider_id', 'publication_status'):
                 if name in fields:
                     source_fields[name] = fields[name]
+            with container.uow() as repo:
+                for name, table in (('subject_id', 'subjects'), ('grade_level_id', 'master_grade_levels')):
+                    if name not in fields:
+                        continue
+                    if fields[name] is None:
+                        source_fields[name] = None
+                        continue
+                    selected = repo.get(table, fields[name])
+                    if (not selected or selected.get('source_origin') != 'POSTGRESQL'
+                            or not selected.get('source_record_key')
+                            or selected.get('source_namespace') != current.get('source_namespace')):
+                        raise HTTPException(422, detail={'code': 'SOURCE_WRITEBACK_CATALOG_UNAVAILABLE'})
+                    source_fields[name] = selected['source_record_key']
             if 'resource_type_code' in fields:
                 selected = container.resource_lookups.source_selection('types', fields['resource_type_code'])
                 if selected is None:
@@ -1187,6 +1200,7 @@ def create_resource(
     publication_status: str = Form("PUBLISHED", max_length=30),
     uploaded_by: str | None = Form(None, max_length=30),
     idempotency_key: str | None = Form(None, max_length=100),
+    processing_options: str | None = Form(None, max_length=4096),
 ) -> CreateResourceResponse:
     container = services(request)
     try:
@@ -1270,6 +1284,12 @@ def create_resource(
                                         'message': 'Khối lớp chưa có định danh SOURCE hợp lệ'},
                             )
             key = idempotency_key or f'web-{uuid4().hex}'
+            preferences = None
+            if processing_options is not None:
+                try:
+                    preferences = ProcessingOptions.model_validate_json(processing_options).model_dump()
+                except ValueError:
+                    raise HTTPException(422, detail={'code': 'PROCESSING_OPTIONS_INVALID'}) from None
             try:
                 result = container.source_create_stager.stage(
                     stream,
@@ -1278,6 +1298,8 @@ def create_resource(
                     content_type=file.content_type or '',
                     file_size=file_size,
                 )
+                if preferences is not None:
+                    result['processing_preferences'] = preferences
                 payload = {
                     'provider_id': source_provider['id'],
                     'resource_type_id': source_type['id'],

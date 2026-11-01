@@ -140,14 +140,25 @@ class SourceResourceCreateService:
                 if row['status'] == APPLIED:
                     return self._response(row)
                 if row['status'] == FAILED:
-                    raise SourceCreateWriteBackError(
-                        checkpoint.get('error_code') or 'SOURCE_CREATE_FAILED', 409)
+                    # An explicit resubmission retries the same durable intent,
+                    # IDs and verified object, rather than creating a duplicate.
+                    checkpoint = dict(checkpoint)
+                    checkpoint.pop('error_code', None)
+                    repo.update('reconciliation_audit_jobs', row['id'], {
+                        'status': PENDING, 'attempts': 0, 'finished_at': None,
+                        'next_retry_at': None, 'error_code': None,
+                        'claim_token': None, 'lease_expires_at': None,
+                        'checkpoint': checkpoint,
+                    })
+                    return self._response({**row, 'status': PENDING, 'error_code': None,
+                                           'checkpoint': checkpoint})
                 return self._response(row)
             checkpoint = {
                 'kind': 'SOURCE_CREATE_RESOURCE', 'payload': payload,
                 'requested_by': actor_id, 'requested_role': role,
                 'source_user_id': source_user_id, 'idempotency_key': idempotency_key,
                 'fingerprint': fingerprint,
+                'source_namespace': getattr(self.writer, 'namespace', 'postgresql:learning'),
             }
             if source_file is not None:
                 checkpoint.update(
@@ -163,14 +174,17 @@ class SourceResourceCreateService:
             })
             return self._response(row)
 
-    def process_pending_once(self, worker_id='source-create-worker'):
+    def process_pending_once(self, worker_id='source-create-worker', *, request_id=None):
         self.last_source_committed = False
         if not self.settings.source_metadata_writeback_enabled or not getattr(self.writer, 'create_supported', False):
             return False
         stamp = now()
         claim = None
         with self.uow() as repo:
-            candidates = repo.find('reconciliation_audit_jobs', {'audit_type': 'SOURCE_CREATE'},
+            filters = {'audit_type': 'SOURCE_CREATE'}
+            if request_id is not None:
+                filters['id'] = request_id
+            candidates = repo.find('reconciliation_audit_jobs', filters,
                                    order=('created_at',), limit=20, lock=True, skip_locked=True)
             for row in candidates:
                 due = row.get('next_retry_at') is None or row['next_retry_at'] <= stamp
@@ -227,6 +241,10 @@ class SourceResourceCreateService:
             if (not isinstance(result, dict) or result.get('status') != 'APPLIED'
                     or result.get('source_resource_id') != checkpoint['source_resource_id']):
                 raise ValueError('Invalid SOURCE CREATE acknowledgement')
+            checkpoint.update(resource_committed_at=now().isoformat(),
+                              source_state_hash=result.get('source_state_hash'))
+            with self.uow() as repo:
+                repo.update('reconciliation_audit_jobs', claim['id'], {'checkpoint': dict(checkpoint)})
             if checkpoint.get('source_file'):
                 if self.version_service is None or self.stager is None:
                     raise SourceCreateWriteBackError('SOURCE_CREATE_FILE_WORKFLOW_UNAVAILABLE', 409)
@@ -250,6 +268,16 @@ class SourceResourceCreateService:
             code = (candidate if isinstance(exc, DomainError)
                     and re.fullmatch(r'[A-Z][A-Z0-9_]{2,80}', candidate)
                     else 'SOURCE_CREATE_FAILED')
+            original = getattr(exc, 'orig', None)
+            sqlstate = getattr(original, 'sqlstate', None)
+            if isinstance(sqlstate, str) and re.fullmatch('[A-Z0-9]{5}', sqlstate):
+                checkpoint['failure_sqlstate'] = sqlstate
+                code = {
+                    '42501': 'SOURCE_CREATE_PERMISSION_DENIED',
+                    '23503': 'SOURCE_CREATE_REFERENCE_INVALID',
+                    '23505': 'SOURCE_CREATE_IDENTITY_CONFLICT',
+                    '22P02': 'SOURCE_CREATE_VALUE_INVALID',
+                }.get(sqlstate, 'SOURCE_CREATE_DATABASE_FAILED')
             retryable = claim['attempts'] < self.settings.source_metadata_writeback_max_attempts
             self._finish_error(claim, code, terminal=not retryable, checkpoint=checkpoint)
             return True
@@ -257,6 +285,7 @@ class SourceResourceCreateService:
             applied_at=now().isoformat(), source_state_hash=result.get('source_state_hash'),
             idempotent_replay=bool(result.get('idempotent_replay')), reconciliation_required=True,
         )
+        checkpoint.pop('error_code', None)
         with self.uow() as repo:
             repo.update('reconciliation_audit_jobs', claim['id'], {
                 'status': APPLIED, 'checkpoint': checkpoint, 'error_code': None,
@@ -285,8 +314,11 @@ class SourceResourceCreateService:
             'source_resource_id': checkpoint.get('source_resource_id'),
             'source_version_id': checkpoint.get('source_version_id'),
             'master_resource_id': checkpoint.get('master_resource_id'),
+            'master_version_id': checkpoint.get('master_version_id'),
             'workflow': checkpoint.get('workflow', 'SOURCE_RESOURCE_PENDING'),
-            'source_commit_status': ('SOURCE_COMMITTED' if checkpoint.get('source_resource_id') else 'PENDING'),
+            'source_commit_status': ('SOURCE_COMMITTED' if checkpoint.get('resource_committed_at')
+                                     or checkpoint.get('workflow') in {'OBJECT_VERIFIED', 'SOURCE_VERSION_COMMITTED'}
+                                     else 'PENDING'),
             'master_reconciliation_status': (
                 'MASTER_RECONCILED' if checkpoint.get('master_resource_id') else
                 'PENDING_RECONCILIATION' if checkpoint.get('reconciliation_required') else 'NOT_STARTED'),
@@ -308,7 +340,15 @@ class SourceResourceCreateService:
                 )
                 if len(matches) == 1:
                     result['master_resource_id'] = matches[0].get('id')
-                    result['master_reconciliation_status'] = 'MASTER_RECONCILED'
+            if result.get('master_resource_id') and result.get('source_version_id'):
+                mappings = repo.find('source_file_imports', {
+                    'resource_id': result['master_resource_id'],
+                    'source_version_id': result['source_version_id'],
+                }, limit=2)
+                if len(mappings) == 1:
+                    result['master_version_id'] = mappings[0].get('target_version_id')
+                result['master_reconciliation_status'] = (
+                    'MASTER_RECONCILED' if result.get('master_version_id') else 'PENDING_RECONCILIATION')
             return result
 
     def mark_master_reconciled(self):
@@ -328,5 +368,13 @@ class SourceResourceCreateService:
             if len(matches) != 1:
                 return
             checkpoint['master_resource_id'] = matches[0].get('id')
+            if checkpoint.get('source_version_id'):
+                mappings = repo.find('source_file_imports', {
+                    'resource_id': matches[0]['id'],
+                    'source_version_id': checkpoint['source_version_id'],
+                }, limit=2)
+                if len(mappings) != 1 or not mappings[0].get('target_version_id'):
+                    return
+                checkpoint['master_version_id'] = mappings[0]['target_version_id']
             checkpoint['master_reconciliation_status'] = 'MASTER_RECONCILED'
             repo.update('reconciliation_audit_jobs', row['id'], {'checkpoint': checkpoint})

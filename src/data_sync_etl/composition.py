@@ -618,6 +618,8 @@ class Container:
             self.settings, SourceTemporaryFiles(self.settings, source_destination_root), self.source_registry,
         )
         self.source_file_import.resolver = self.source_resolver
+        self.source_resolution.source_status_policy = self.source_resolver._status_allowed
+        self.bilingual.source_resolver = self.source_resolver
         self.search.source_content_authorizer = self.source_resolver.derived_index_authorized
         self.indexing.source_content_authorizer = self.source_resolver.derived_index_authorized
         self.reconciliation_engine.source_resolver = self.source_resolver

@@ -1,7 +1,7 @@
 import pytest
 
 from data_sync_etl.adapters.source.registry import ConfiguredSourceRegistry
-from data_sync_etl.domain.core import SourceFileError
+from data_sync_etl.domain.core import DomainError, SourceFileError
 from data_sync_etl.domain.source_registry import SourceCapabilities, SourceRegistration
 from tests.unit.test_source_file_import import discover_and_import
 
@@ -47,6 +47,31 @@ def test_process_command_allows_authorized_metadata_only_source(source_importing
     with container.uow() as repo:
         version = repo.get('resource_versions', row['target_version_id'])
         assert version['lifecycle_status'] == 'INGESTED'
+
+
+def test_source_processing_options_are_local_and_idempotent_during_ocr(source_importing):
+    container, _, _ = source_importing
+    row = discover_and_import(container)
+    grant_source_content(container)
+    version_id = row['target_version_id']
+    configured = container.bilingual.configure(version_id, {'source_language': 'en'})
+    assert configured['status'] == 'configured'
+    job = container.ocr.create_job(version_id)
+    with container.uow.processing_lock(version_id) as acquired:
+        assert acquired
+        assert container.bilingual.configure(version_id, {'source_language': 'en'})['status'] == 'unchanged'
+    with pytest.raises(DomainError, match='PROCESSING_BUSY'):
+        container.bilingual.configure(version_id, {'source_language': 'fr'})
+    with container.uow() as repo:
+        assert len(repo.find('ocr_jobs', {'resource_version_id': version_id})) == 1
+        assert repo.get('ocr_jobs', job['id'])['status'] == 'PENDING'
+
+
+def test_source_processing_preferences_still_require_content_capabilities(source_importing):
+    container, _, _ = source_importing
+    row = discover_and_import(container)
+    with pytest.raises(SourceFileError, match='SOURCE_CAPABILITY_BLOCKED'):
+        container.bilingual.configure(row['target_version_id'], {'source_language': 'en'})
 
 
 def test_authorized_source_reads_are_bounded_memory_and_never_saved(source_importing, monkeypatch):

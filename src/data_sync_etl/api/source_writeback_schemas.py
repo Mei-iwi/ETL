@@ -9,7 +9,9 @@ class SourceWriteBackRequest(BaseModel):
     title: str | None = Field(default=None, max_length=500)
     provider_id: str | None = Field(default=None, max_length=30)
     resource_type_id: str | None = Field(default=None, max_length=30)
-    publication_status: Literal['DRAFT', 'PUBLISHED', 'UNPUBLISHED', 'ARCHIVED'] | None = None
+    subject_id: str | None = Field(default=None, max_length=30)
+    grade_level_id: str | None = Field(default=None, max_length=30)
+    publication_status: Literal['DRAFT', 'PUBLISHED', 'ARCHIVED'] | None = None
     expected_source_state_hash: str = Field(min_length=64, max_length=64, pattern=r'^[0-9a-fA-F]{64}$')
     idempotency_key: str = Field(min_length=8, max_length=100, pattern=r'^[A-Za-z0-9._:-]+$')
     approve: bool = False
@@ -72,6 +74,7 @@ class SourceCreateResourceResponse(BaseModel):
     source_resource_id: str | None = None
     source_version_id: str | None = None
     master_resource_id: str | None = None
+    master_version_id: str | None = None
     workflow: str = 'SOURCE_RESOURCE_PENDING'
     source_commit_status: Literal['PENDING', 'SOURCE_COMMITTED'] = 'PENDING'
     master_reconciliation_status: Literal['NOT_STARTED', 'PENDING_RECONCILIATION', 'MASTER_RECONCILED'] = 'NOT_STARTED'

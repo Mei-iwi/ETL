@@ -427,7 +427,18 @@ class MongoContentReader:
 
 
 class MongoBagStore:
+    def search_phase_from_candidates(self, version_ids, candidates, *, limit, max_chars=10_000_000):
+        """Initial phase only: candidates are the complete freshly read Bags.
+
+        Content is still read after those Bags. Search must use search_phase
+        independently for final validation; no document survives this request.
+        """
+        return self._search_phase(version_ids, limit=limit, max_chars=max_chars, candidates=candidates)
+
     def search_phase(self, version_ids, *, limit, max_chars=10_000_000):
+        return self._search_phase(version_ids, limit=limit, max_chars=max_chars)
+
+    def _search_phase(self, version_ids, *, limit, max_chars, candidates=None):
         """One bounded fresh read phase, reused only within the calling Search.
 
         Full Bag BSON is read before content fingerprints. The final phase must
@@ -440,12 +451,15 @@ class MongoBagStore:
             raise DomainError('Search phase bounds exceeded')
         documents, content = {}, {version: [] for version in versions}
         selector = {'resource_version_id': {'$in': list(versions)}, 'is_current': True}
-        rows = list(self.database.content_bags.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000))
+        rows = (list(self.database.content_bags.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000))
+                if candidates is None else list(candidates))
         if len(rows) >= limit:
             from data_sync_etl.domain.search import SearchError
             raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
         for raw in rows:
-            doc = checked(ContentBagDocument, raw)
+            if candidates is not None and not isinstance(raw, ContentBagDocument):
+                raise DomainError('Invalid initial search candidates')
+            doc = checked(ContentBagDocument, raw) if candidates is None else raw
             if doc.resource_version_id not in content or doc.id in documents:
                 raise DomainError('Search phase identity mismatch')
             documents[doc.id] = doc
@@ -478,6 +492,7 @@ class MongoBagStore:
             if not records or any(row.get('projection_generation') != generation for row in records):
                 return {key: None for key in ids}
             return {key: doc if (doc is not None and doc.resource_version_id == version_id
+                and doc.is_current
                 and doc.projection_generation == generation
                 and doc.content_fingerprint == fingerprints[version_id]
                 and len(doc.embedding) == self.dimension) else None
@@ -531,9 +546,8 @@ class MongoBagStore:
             raise DomainError('Search candidate bounds exceeded')
         selector = {'resource_version_id': {'$in': [identifier(v) for v in version_ids]},
                     'is_current': True, 'embedding_model': model}
-        fields = {field.alias or key: 1 for key, field in ContentBagDocument.model_fields.items()}
         return [checked(ContentBagDocument, data) for data in
-                self.database.content_bags.find(selector, fields).sort('_id', 1).limit(limit).max_time_ms(5000)]
+                self.database.content_bags.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000)]
 
     def __init__(self, database, dimension: int, *, historical_dimensions=()):
         if type(dimension) is not int or not 1 <= dimension <= 4096:

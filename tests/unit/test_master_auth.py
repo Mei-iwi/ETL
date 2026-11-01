@@ -196,6 +196,19 @@ def test_federated_users_sync_watermark_is_fresh(master_auth):
     assert reader.read(email='master@etl.test') is not None
 
 
+def test_new_owned_resource_does_not_revoke_session(master_auth):
+    container = master_auth[0]
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'created_by': 'user-2'})
+    with make_client(master_auth) as api:
+        assert login(api, master_auth).status_code == 200
+        with container.uow() as repo:
+            repo.update('master_learning_resources', 'resource-1', {'created_by': 'user-1'})
+        response = api.get('/api/v1/auth/me')
+        assert response.status_code == 200, response.text
+        assert response.json()['id'] == 'master:user-1'
+
+
 def test_stale_watermark_is_not_freshness_and_ambiguous_email_denied(master_auth):
     c = master_auth[0]
     reader = MasterIdentityReader(c.settings, engine=c.engine)
@@ -228,7 +241,10 @@ def test_master_viewer_search_and_source_file_ownership(source_viewer, master_au
         assert response.json()['detail']['code'] == 'SOURCE_OPEN_UNSUPPORTED'
         with container.uow() as repo:
             repo.update('master_learning_resources', version['resource_id'], {'created_by': 'user-2'})
-        assert api.get(path).status_code == 401
+        # Ownership grants refresh without logging the viewer out. Published
+        # shared material still follows the existing file capability policy.
+        assert api.get('/api/v1/auth/me').status_code == 200
+        assert api.get(path).status_code == 409
         assert login(api, master_auth).status_code == 200
         response = api.get(path)
         assert response.status_code == 409

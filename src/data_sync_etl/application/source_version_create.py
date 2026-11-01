@@ -118,6 +118,7 @@ class SourceVersionCreateService:
             checkpoint = {
                 'kind': 'SOURCE_CREATE_VERSION', 'resource_id': resource_id,
                 'source_resource_id': locator.source_record_id, 'source_user_id': source_user_id,
+                'source_namespace': locator.namespace,
                 'filename': filename, 'content_type': content_type,
                 'source_bucket': obj.bucket, 'source_object_key': obj.object_key,
                 'source_file_size': obj.size, 'source_hash': obj.sha256.lower(),
@@ -207,7 +208,7 @@ class SourceVersionCreateService:
         if not checkpoint.get('source_version_id'):
             reserved_at = now()
             source_version_id = self.version_writer.reserve_version_id(created_at=reserved_at)
-            checkpoint.update(source_version_id=source_version_id, reserved_at=reserved_at.isoformat())
+            checkpoint.update(source_version_id=source_version_id, version_reserved_at=reserved_at.isoformat())
             persist_checkpoint(checkpoint)
 
         result = self.version_writer.create_version(
@@ -220,7 +221,7 @@ class SourceVersionCreateService:
             storage_object_key=checkpoint['source_object_key'],
             source_hash=checkpoint['source_hash'],
             uploaded_by=source_user_id,
-            created_at=datetime.fromisoformat(checkpoint['reserved_at']),
+            created_at=datetime.fromisoformat(checkpoint.get('version_reserved_at') or checkpoint['reserved_at']),
             idempotency_key=version_key,
         )
         if not isinstance(result, dict) or result.get('status') != 'APPLIED':

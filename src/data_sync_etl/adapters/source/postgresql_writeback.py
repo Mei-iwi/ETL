@@ -83,6 +83,11 @@ class PostgreSQLSourceMetadataWriter:
                                    if field in self.columns}
         else:
             raise DomainError('SOURCE_WRITE_CONTRACT_INVALID')
+        relation_fields = contract.get('relation_fields', [])
+        if not isinstance(relation_fields, list) or not set(relation_fields).issubset({'subject_id', 'grade_level_id'}):
+            raise DomainError('SOURCE_WRITE_CONTRACT_INVALID')
+        self.relation_fields = frozenset(relation_fields)
+        self.update_fields = frozenset(self.update_columns) | self.relation_fields
         idempotency_column = contract.get('idempotency_column')
         self.idempotency_column = (_identifier(idempotency_column, 'SOURCE_WRITE_CONTRACT_INVALID')
                                    if idempotency_column is not None else None)
@@ -129,7 +134,7 @@ class PostgreSQLSourceMetadataWriter:
         """Evaluate only the owner-supplied allow-list, never role alone."""
         return (self.grant_configured and self.supports(locator)
                 and (role.upper() in self.allowed_roles or actor_id in self.allowed_actor_ids)
-                and set(fields).issubset(self.update_columns)
+                and set(fields).issubset(self.update_fields)
                 and 'update' in self.actions)
 
     @property
@@ -337,7 +342,7 @@ class PostgreSQLSourceMetadataWriter:
             raise DomainError('SOURCE_WRITEBACK_ACTION_BLOCKED')
         if not self.supports(locator):
             raise DomainError('SOURCE_WRITEBACK_BLOCKED')
-        fields = validate_source_writeback_fields(fields, allowed_fields=self.update_columns)
+        fields = validate_source_writeback_fields(fields, allowed_fields=self.update_fields)
         if not idempotency_key or len(idempotency_key) > 100:
             raise DomainError('SOURCE_WRITEBACK_IDEMPOTENCY_INVALID')
         with self.engine.begin() as connection:
@@ -353,23 +358,66 @@ class PostgreSQLSourceMetadataWriter:
                 raise DomainError('SOURCE_WRITEBACK_IDEMPOTENCY_REUSED')
             current = self._canonical_state(row)
             current_hash = state_hash(current)
+            # An uncertain commit can be retried after the canonical values
+            # have already changed. Verify the requested end state first.
+            matches = all(current.get(key) == value for key, value in fields.items()
+                          if key not in self.relation_fields)
+            for key, table, column in (('subject_id', 'resource_subjects', 'subject_id'),
+                                       ('grade_level_id', 'resource_grade_levels', 'grade_level_id')):
+                if key in fields:
+                    actual = list(connection.scalars(text(
+                        f'SELECT "{column}" FROM "{self.schema}"."{table}" WHERE resource_id=:id'),
+                        {'id': locator.source_record_id}))
+                    matches = matches and sorted(actual) == ([fields[key]] if fields[key] else [])
+            if matches:
+                return {'status': 'APPLIED', 'source_state_hash': current_hash, 'idempotent_replay': True}
             if current_hash != expected_source_state_hash:
                 raise DomainError('SOURCE_WRITEBACK_CONFLICT')
+            self._validate_metadata_selection(connection, locator.source_record_id, fields)
             assignments = ', '.join(f'"{column}"=:{field}'
                                    for field, column in self.update_columns.items() if field in fields)
-            if not assignments:
+            if not assignments and not self.relation_fields.intersection(fields):
                 raise DomainError('SOURCE_WRITEBACK_FIELD_BLOCKED')
             params = {**fields, 'source_id': locator.source_record_id}
+            assignments = (assignments + ', ' if assignments else '') + '"updated_at"=now()'
             if self.idempotency_column is not None:
                 assignments += f', "{self.idempotency_column}"=:idempotency'
                 params['idempotency'] = idempotency_key
             connection.execute(
                 text(f'UPDATE "{self.schema}"."{self.table}" SET {assignments} '
                      f'WHERE "{self.id_column}"=:source_id'), params)
+            for key, table in (('subject_id', 'resource_subjects'), ('grade_level_id', 'resource_grade_levels')):
+                if key in fields:
+                    connection.execute(text(f'DELETE FROM "{self.schema}"."{table}" WHERE resource_id=:id'),
+                                       {'id': locator.source_record_id})
+            self._ensure_relations(connection, locator.source_record_id,
+                                   fields.get('subject_id'), fields.get('grade_level_id'))
             updated = self._canonical_row(connection, locator.source_record_id, lock=False)
             if updated is None:
                 raise DomainError('SOURCE_RECORD_NOT_FOUND')
             return {'status': 'APPLIED', 'source_state_hash': state_hash(self._canonical_state(updated))}
+
+    def _validate_metadata_selection(self, connection, resource_id, fields):
+        for key, table in (('provider_id', 'providers'), ('resource_type_id', 'resource_types'),
+                           ('subject_id', 'subjects'), ('grade_level_id', 'grade_levels')):
+            if fields.get(key) is not None:
+                valid = connection.scalar(text(
+                    f'SELECT id FROM "{self.schema}"."{table}" WHERE id=:id AND is_active=true AND deleted_at IS NULL'),
+                    {'id': fields[key]})
+                if valid is None:
+                    raise DomainError('SOURCE_WRITEBACK_CATALOG_INVALID')
+        if 'subject_id' in fields or 'grade_level_id' in fields:
+            subject = fields.get('subject_id') if 'subject_id' in fields else connection.scalar(text(
+                f'SELECT subject_id FROM "{self.schema}".resource_subjects WHERE resource_id=:id AND is_primary=true'),
+                {'id': resource_id})
+            grade = fields.get('grade_level_id') if 'grade_level_id' in fields else connection.scalar(text(
+                f'SELECT grade_level_id FROM "{self.schema}".resource_grade_levels WHERE resource_id=:id LIMIT 1'),
+                {'id': resource_id})
+            if subject and grade:
+                subject_grade = connection.scalar(text(f'SELECT grade_id FROM "{self.schema}".subjects WHERE id=:id'),
+                                                   {'id': subject})
+                if subject_grade is not None and subject_grade != grade:
+                    raise DomainError('SOURCE_WRITEBACK_SUBJECT_GRADE_MISMATCH')
 
     @staticmethod
     def _canonical_state(row):
