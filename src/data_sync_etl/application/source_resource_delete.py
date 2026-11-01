@@ -70,7 +70,9 @@ class SourceResourceDeleteService:
                 source_user_id = SourceResourceCreateService._source_user_id(repo, actor_id)
             except DomainError:
                 raise SourceDeleteWriteBackError('SOURCE_DELETE_ACTOR_MAPPING_REQUIRED', 403) from None
-            if not self.writer.allows_delete(actor_id=actor_id, role=role, source_user_id=source_user_id):
+            contract_allowed = bool(self.writer.allows_delete(
+                actor_id=actor_id, role=role, source_user_id=source_user_id))
+            if not contract_allowed:
                 raise SourceDeleteWriteBackError('SOURCE_DELETE_FORBIDDEN', 403)
             fingerprint = hashlib.sha256(json.dumps(
                 [resource_id, locator.canonical_payload(), expected_source_state_hash.lower(), actor_id],
@@ -133,7 +135,7 @@ class SourceResourceDeleteService:
                         'finished_at': stamp, 'claim_token': None, 'lease_expires_at': None,
                     })
                     continue
-                token = f'{worker_id}:{row["id"]}'[:150]
+                token = f'{worker_id}:{row["id"]}'[:36]
                 repo.update('reconciliation_audit_jobs', row['id'], {
                     'status': PROCESSING, 'attempts': attempts + 1, 'claim_token': token,
                     'lease_expires_at': stamp + timedelta(seconds=self.settings.reconciliation_lease_seconds),

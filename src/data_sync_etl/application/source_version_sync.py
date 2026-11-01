@@ -7,6 +7,10 @@ from data_sync_etl.domain.source_ids import SourceLocator, source_identity_hash
 from data_sync_etl.domain.source_status import normalize_source_status
 
 _METADATA_BUCKET = '__SOURCE_METADATA_ONLY__'
+_SOURCE_PROCESSING_STATUSES = frozenset({
+    'UPLOADED', 'PENDING_PRE_REVIEW', 'QUEUED', 'PROCESSING',
+    'READY_FOR_REVIEW', 'FAILED',
+})
 
 
 class SourceVersionSynchronizer:
@@ -29,7 +33,15 @@ class SourceVersionSynchronizer:
         for item in items:
             source_version_id = item.get('source_version_id')
             locator = self._version_identity(source, source_id, source_version_id)
-            lifecycle_status = normalize_source_status(item.get('source_lifecycle_status'))
+            raw_lifecycle_status = item.get('source_lifecycle_status')
+            lifecycle_status = normalize_source_status(raw_lifecycle_status)
+            if lifecycle_status is None and isinstance(raw_lifecycle_status, str) \
+                    and raw_lifecycle_status.strip().upper().replace('-', '_').replace(' ', '_') \
+                    in _SOURCE_PROCESSING_STATUSES:
+                # Processing lifecycle is not publication approval. Keep the
+                # imported version blocked from content access while allowing
+                # the metadata/version mapping to converge.
+                lifecycle_status = 'PRIVATE'
             if lifecycle_status is None:
                 raise DomainError('BLOCKED_SOURCE_VERSION_STATUS')
             if (not isinstance(item.get('resource_id'), str) or not 1 <= len(item['resource_id']) <= 255
@@ -49,10 +61,40 @@ class SourceVersionSynchronizer:
             if len(row) > 1:
                 raise DomainError('SOURCE_VERSION_IDENTITY_COLLISION')
             existing = row[0] if row else None
+            source_identity = {
+                'source_id': source_id,
+                'backend': locator.backend,
+                'namespace': locator.namespace,
+                'source_resource_id': item['resource_id'],
+                'source_version_id': source_version_id,
+                'source_parent_version_id': item.get('parent_version_id'),
+                'identity_hash': version_hash,
+            }
             if existing:
                 target = repo.get('resource_versions', existing.get('target_version_id'))
                 options = (target or {}).get('processing_options') or {}
                 stored_identity = options.get('source_version_identity')
+                legacy_identity_bootstrap = (
+                    target is not None
+                    and not isinstance(stored_identity, dict)
+                    and existing.get('source_system') == source_id
+                    and existing.get('source_version_id') == source_version_id
+                    and existing.get('resource_id') == master_resource_id
+                    and existing.get('source_version_number') == item['source_version_number']
+                    and existing.get('source_hash', '').lower() == source_hash
+                    and target.get('resource_id') == master_resource_id
+                    and target.get('version_number') == item['source_version_number']
+                    and target.get('source_hash', '').lower() == source_hash
+                )
+                if legacy_identity_bootstrap:
+                    repo.update('resource_versions', target['id'], {
+                        'processing_options': {
+                            **options,
+                            'content_availability': options.get('content_availability', 'METADATA_ONLY'),
+                            'source_version_identity': source_identity,
+                        },
+                    })
+                    stored_identity = source_identity
                 if (existing['resource_id'] != master_resource_id
                         or existing['source_version_number'] != item['source_version_number']
                         or existing['source_hash'].lower() != source_hash
@@ -70,11 +112,18 @@ class SourceVersionSynchronizer:
                     'updated_at': now(),
                 }
                 restored = existing.get('last_error_code') == 'SOURCE_VERSION_MISSING'
+                changed = any(
+                    existing.get(name) != value
+                    for name, value in fields.items()
+                    if name != 'updated_at'
+                )
                 if restored:
                     fields.update(status='METADATA_ONLY', last_error_code='SOURCE_METADATA_ONLY')
                 repo.update('source_file_imports', existing['id'], fields)
                 if restored and target:
                     repo.update('resource_versions', target['id'], {'lifecycle_status': 'METADATA_ONLY'})
+                    counts['updated'] += 1
+                elif changed:
                     counts['updated'] += 1
                 else:
                     counts['unchanged'] += 1
@@ -97,15 +146,7 @@ class SourceVersionSynchronizer:
             key = sha256(f'{source_id}\0{source_version_id}'.encode()).hexdigest()
             options = {
                 'content_availability': 'METADATA_ONLY',
-                'source_version_identity': {
-                    'source_id': source_id,
-                    'backend': locator.backend,
-                    'namespace': locator.namespace,
-                    'source_resource_id': item['resource_id'],
-                    'source_version_id': source_version_id,
-                    'source_parent_version_id': parent_id,
-                    'identity_hash': version_hash,
-                },
+                'source_version_identity': source_identity,
             }
             version = repo.insert('resource_versions', {
                 'id': new_id(), 'resource_id': master_resource_id,

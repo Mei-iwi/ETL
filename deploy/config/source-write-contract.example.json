@@ -18,5 +18,6 @@
     "resource_type_updated_at"
   ],
   "columns": {"title": "title"},
+  "update_columns": ["title"],
   "idempotency_column": null
 }

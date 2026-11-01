@@ -46,6 +46,7 @@ class SourceResourceCreateService:
             and getattr(self.writer, 'supported', False)
             and getattr(self.writer, 'create_supported', False)
         )
+        version_status = self.version_service.status() if self.version_service is not None else {}
         return {
             'enabled': bool(self.settings.source_metadata_writeback_enabled),
             'create_supported': create_supported,
@@ -53,7 +54,7 @@ class SourceResourceCreateService:
             'operation': 'CREATE_RESOURCE',
             'storage': 'METADATA_ONLY',
             'actor_mapping': 'MASTER_USER_SOURCE_ID_REQUIRED',
-            'version_create_supported': False,
+            'version_create_supported': bool(version_status.get('version_create_supported')),
         }
 
     @staticmethod
@@ -184,7 +185,7 @@ class SourceResourceCreateService:
                         'finished_at': stamp, 'claim_token': None, 'lease_expires_at': None,
                     })
                     continue
-                token = f'{worker_id}:{row["id"]}'[:150]
+                token = f'{worker_id}:{row["id"]}'[:36]
                 repo.update('reconciliation_audit_jobs', row['id'], {
                     'status': PROCESSING, 'attempts': attempts + 1,
                     'claim_token': token,
@@ -226,7 +227,6 @@ class SourceResourceCreateService:
             if (not isinstance(result, dict) or result.get('status') != 'APPLIED'
                     or result.get('source_resource_id') != checkpoint['source_resource_id']):
                 raise ValueError('Invalid SOURCE CREATE acknowledgement')
-            self.last_source_committed = True
             if checkpoint.get('source_file'):
                 if self.version_service is None or self.stager is None:
                     raise SourceCreateWriteBackError('SOURCE_CREATE_FILE_WORKFLOW_UNAVAILABLE', 409)
@@ -237,6 +237,11 @@ class SourceResourceCreateService:
 
                 self.version_service.apply_for_source_resource(
                     checkpoint=checkpoint, stager=self.stager, persist_checkpoint=persist)
+            # Expose the commit to the worker only after any requested file
+            # version has also reached SOURCE.  A resource row alone must not
+            # be reported as fully reconciled when the version/storage leg is
+            # still retrying.
+            self.last_source_committed = True
         except SourceCreateWriteBackError as exc:
             self._finish_error(claim, exc.code, terminal=True, checkpoint=checkpoint)
             return True

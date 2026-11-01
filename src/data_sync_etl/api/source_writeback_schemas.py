@@ -7,6 +7,9 @@ class SourceWriteBackRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     title: str | None = Field(default=None, max_length=500)
+    provider_id: str | None = Field(default=None, max_length=30)
+    resource_type_id: str | None = Field(default=None, max_length=30)
+    publication_status: Literal['DRAFT', 'PUBLISHED', 'UNPUBLISHED', 'ARCHIVED'] | None = None
     expected_source_state_hash: str = Field(min_length=64, max_length=64, pattern=r'^[0-9a-fA-F]{64}$')
     idempotency_key: str = Field(min_length=8, max_length=100, pattern=r'^[A-Za-z0-9._:-]+$')
     approve: bool = False
@@ -41,6 +44,7 @@ class SourceWriteBackStatusResponse(BaseModel):
     delete_mode: str | None = None
     cloud_upload_supported: bool = False
     version_storage: str | None = None
+    auto_approval: bool = False
     # Exposed only by the resource-scoped status route to support optimistic
     # concurrency in the frontend.  It is not a credential or source locator.
     expected_source_state_hash: str | None = None

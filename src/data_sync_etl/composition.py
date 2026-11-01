@@ -340,6 +340,7 @@ class Container:
                 signature_version=self.settings.source_storage_write_signature_version,
                 connect_timeout=self.settings.source_storage_write_connect_timeout_seconds,
                 read_timeout=self.settings.source_storage_write_read_timeout_seconds,
+                allow_insecure_local=(self.settings.app_environment in ('development', 'test')),
             )
             cloud.validate_config()
             self.source_object_storage_writer = SourceObjectStorageWriter(

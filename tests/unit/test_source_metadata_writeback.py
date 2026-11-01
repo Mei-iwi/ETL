@@ -107,6 +107,8 @@ def test_writeback_worker_recovers_approved_job_after_api_restart(container):
                 'expected_source_state_hash': resource['source_state_hash'],
                 'requested_by': 'local-admin',
                 'requested_role': 'ADMIN',
+                    'approved_by': 'local-admin',
+                    'approved_role': 'ADMIN',
                 'owner_id': None,
                 'idempotency_key': 'worker-recovery-01',
             },

@@ -1,5 +1,5 @@
 # Optional, operator-managed Docker Compose override for approved SOURCE
-# staging only. Copy to a private file, set the two host paths in docker.env,
+# staging only. Copy to a private file and set the host paths in docker.env,
 # and keep SOURCE_METADATA_WRITEBACK_ENABLED=false in the base compose file.
 # The DSN secret must contain one line for the dedicated etl_source_writer role:
 # postgresql+psycopg://etl_source_writer:<password>@<source-host>:5432/<db>?sslmode=require
@@ -12,26 +12,104 @@ services:
     secrets:
       - source_write_database_url
       - source_write_contract
+      - source_version_write_contract
+      - source_storage_write_contract
+      - source_storage_access_key
+      - source_storage_secret_key
     environment:
       SOURCE_METADATA_WRITEBACK_ENABLED: "true"
       SOURCE_METADATA_WRITER_MODE: postgresql
-      SOURCE_WRITE_DATABASE_URL_SECRET_FILE: /run/secrets/source-write-database-url
-      SOURCE_WRITE_CONTRACT_SECRET_FILE: /run/secrets/source-write-contract.json
-      SOURCE_WRITE_ALLOWED_ACTIONS: '["update"]'
+      SOURCE_WRITE_DATABASE_URL_SECRET_FILE: /run/secrets/source_write_database_url
+      SOURCE_WRITE_CONTRACT_SECRET_FILE: /run/secrets/source_write_contract
+      SOURCE_WRITE_ALLOWED_ACTIONS: '["create","update"]'
+      SOURCE_WRITE_AUTO_APPROVAL_ENABLED: "true"
+      SOURCE_VERSION_WRITEBACK_ENABLED: "true"
+      SOURCE_VERSION_WRITE_CONTRACT_FILE: /run/secrets/source_version_write_contract
+      SOURCE_VERSION_WRITE_ALLOWED_ACTIONS: '["create"]'
+      SOURCE_STORAGE_WRITE_ENABLED: "true"
+      SOURCE_STORAGE_WRITE_CONTRACT_FILE: /run/secrets/source_storage_write_contract
+      SOURCE_STORAGE_WRITE_ENDPOINT_URL: ${SOURCE_STORAGE_WRITE_ENDPOINT_URL:?Set the approved staging S3 endpoint}
+      SOURCE_STORAGE_WRITE_REGION: ${SOURCE_STORAGE_WRITE_REGION:?Set the approved staging S3 region}
+      SOURCE_STORAGE_WRITE_BUCKET: ${SOURCE_STORAGE_WRITE_BUCKET:?Set the approved staging S3 bucket}
+      SOURCE_STORAGE_WRITE_PROVIDER: ${SOURCE_STORAGE_WRITE_PROVIDER:-neon}
+      SOURCE_STORAGE_WRITE_PROVIDER_ID: ${SOURCE_STORAGE_WRITE_PROVIDER_ID:?Set the approved staging provider id}
+      SOURCE_STORAGE_WRITE_ACCESS_KEY_ID_FILE: /run/secrets/source_storage_access_key
+      SOURCE_STORAGE_WRITE_SECRET_ACCESS_KEY_FILE: /run/secrets/source_storage_secret_key
 
   reconciliation-worker:
     secrets:
       - source_write_database_url
       - source_write_contract
+      - source_version_write_contract
+      - source_storage_write_contract
+      - source_storage_access_key
+      - source_storage_secret_key
     environment:
       SOURCE_METADATA_WRITEBACK_ENABLED: "true"
       SOURCE_METADATA_WRITER_MODE: postgresql
-      SOURCE_WRITE_DATABASE_URL_SECRET_FILE: /run/secrets/source-write-database-url
-      SOURCE_WRITE_CONTRACT_SECRET_FILE: /run/secrets/source-write-contract.json
-      SOURCE_WRITE_ALLOWED_ACTIONS: '["update"]'
+      SOURCE_WRITE_DATABASE_URL_SECRET_FILE: /run/secrets/source_write_database_url
+      SOURCE_WRITE_CONTRACT_SECRET_FILE: /run/secrets/source_write_contract
+      SOURCE_WRITE_ALLOWED_ACTIONS: '["create","update"]'
+      SOURCE_WRITE_AUTO_APPROVAL_ENABLED: "true"
+      SOURCE_VERSION_WRITEBACK_ENABLED: "true"
+      SOURCE_VERSION_WRITE_CONTRACT_FILE: /run/secrets/source_version_write_contract
+      SOURCE_VERSION_WRITE_ALLOWED_ACTIONS: '["create"]'
+      SOURCE_STORAGE_WRITE_ENABLED: "true"
+      SOURCE_STORAGE_WRITE_CONTRACT_FILE: /run/secrets/source_storage_write_contract
+      SOURCE_STORAGE_WRITE_ENDPOINT_URL: ${SOURCE_STORAGE_WRITE_ENDPOINT_URL:?Set the approved staging S3 endpoint}
+      SOURCE_STORAGE_WRITE_REGION: ${SOURCE_STORAGE_WRITE_REGION:?Set the approved staging S3 region}
+      SOURCE_STORAGE_WRITE_BUCKET: ${SOURCE_STORAGE_WRITE_BUCKET:?Set the approved staging S3 bucket}
+      SOURCE_STORAGE_WRITE_PROVIDER: ${SOURCE_STORAGE_WRITE_PROVIDER:-neon}
+      SOURCE_STORAGE_WRITE_PROVIDER_ID: ${SOURCE_STORAGE_WRITE_PROVIDER_ID:?Set the approved staging provider id}
+      SOURCE_STORAGE_WRITE_ACCESS_KEY_ID_FILE: /run/secrets/source_storage_access_key
+      SOURCE_STORAGE_WRITE_SECRET_ACCESS_KEY_FILE: /run/secrets/source_storage_secret_key
+
+  master-sync-worker:
+    secrets:
+      - source_storage_access_key
+      - source_storage_secret_key
+    environment:
+      # This worker only reads SOURCE and projects to MASTER; it must not
+      # initialize a SOURCE writer just because docker.env enables write-back
+      # for the API/reconciliation services.
+      SOURCE_METADATA_WRITEBACK_ENABLED: "false"
+      SOURCE_METADATA_WRITER_MODE: disabled
+      SOURCE_VERSION_WRITEBACK_ENABLED: "false"
+      SOURCE_STORAGE_WRITE_ENABLED: "false"
+
+  source-file-worker:
+    secrets:
+      - source_storage_access_key
+      - source_storage_secret_key
+    environment:
+      # File import reads the SOURCE object store; it does not write SOURCE
+      # metadata, versions, or objects.
+      SOURCE_METADATA_WRITEBACK_ENABLED: "false"
+      SOURCE_METADATA_WRITER_MODE: disabled
+      SOURCE_VERSION_WRITEBACK_ENABLED: "false"
+      SOURCE_STORAGE_WRITE_ENABLED: "false"
+
+  ocr-worker:
+    secrets:
+      - source_storage_access_key
+      - source_storage_secret_key
+    environment:
+      # OCR consumes imported content and has no SOURCE write-back authority.
+      SOURCE_METADATA_WRITEBACK_ENABLED: "false"
+      SOURCE_METADATA_WRITER_MODE: disabled
+      SOURCE_VERSION_WRITEBACK_ENABLED: "false"
+      SOURCE_STORAGE_WRITE_ENABLED: "false"
 
 secrets:
   source_write_database_url:
     file: ${SOURCE_WRITE_DATABASE_URL_SECRET_HOST_FILE:?Set SOURCE_WRITE_DATABASE_URL_SECRET_HOST_FILE to a private one-line DSN file}
   source_write_contract:
     file: ${SOURCE_WRITE_CONTRACT_SECRET_HOST_FILE:?Set SOURCE_WRITE_CONTRACT_SECRET_HOST_FILE to an approved contract JSON file}
+  source_version_write_contract:
+    file: ${SOURCE_VERSION_WRITE_CONTRACT_SECRET_HOST_FILE:?Set SOURCE_VERSION_WRITE_CONTRACT_SECRET_HOST_FILE to an approved version contract JSON file}
+  source_storage_write_contract:
+    file: ${SOURCE_STORAGE_WRITE_CONTRACT_SECRET_HOST_FILE:?Set SOURCE_STORAGE_WRITE_CONTRACT_SECRET_HOST_FILE to an approved storage contract JSON file}
+  source_storage_access_key:
+    file: ${SOURCE_STORAGE_WRITE_ACCESS_KEY_SECRET_HOST_FILE:?Set SOURCE_STORAGE_WRITE_ACCESS_KEY_SECRET_HOST_FILE to the private access-key file}
+  source_storage_secret_key:
+    file: ${SOURCE_STORAGE_WRITE_SECRET_ACCESS_KEY_SECRET_HOST_FILE:?Set SOURCE_STORAGE_WRITE_SECRET_ACCESS_KEY_SECRET_HOST_FILE to the private secret-key file}

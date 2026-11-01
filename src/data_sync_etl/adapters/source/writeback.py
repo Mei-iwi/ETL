@@ -33,7 +33,7 @@ class InMemorySourceMetadataWriter:
                 and locator.entity_type == 'resources')
 
     def write_metadata(self, *, locator, fields, expected_source_state_hash, idempotency_key):
-        fields = validate_source_writeback_fields(fields)
+        fields = validate_source_writeback_fields(fields, allowed_fields=getattr(self, 'columns', None) or {'title'})
         if not self.supports(locator):
             raise DomainError('SOURCE_WRITEBACK_BLOCKED')
         payload = (locator.canonical_payload(), tuple(sorted(fields.items())), expected_source_state_hash)
@@ -52,7 +52,7 @@ class InMemorySourceMetadataWriter:
             if current.get('source_state_hash') != expected_source_state_hash:
                 raise DomainError('SOURCE_WRITEBACK_CONFLICT')
             result = {'status': 'APPLIED', 'source_updated_at': now().isoformat(),
-                      'source_state_hash': sha256(repr((payload, fields['title'])).encode()).hexdigest()}
+                      'source_state_hash': sha256(repr((payload, tuple(sorted(fields.items())))).encode()).hexdigest()}
             current.update(fields, source_state_hash=result['source_state_hash'])
             self._replays[idempotency_key] = (payload, dict(result))
             return result

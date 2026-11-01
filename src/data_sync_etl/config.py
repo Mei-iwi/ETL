@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from data_sync_etl.domain.concepts import ExpansionPolicy
@@ -167,6 +167,10 @@ class Settings(BaseSettings):
         repr=False,
     )
     source_write_allowed_actions: tuple[str, ...] = ('update',)
+    # A SOURCE owner may pre-authorize the application actor/role in the
+    # private contract.  This flag only permits the durable job to be marked
+    # approved-by-policy; it never widens the contract or database grants.
+    source_write_auto_approval_enabled: bool = False
     source_write_connect_timeout_seconds: int = Field(default=10, ge=1, le=120)
     source_write_statement_timeout_seconds: int = Field(default=30, ge=1, le=600)
     source_write_lock_timeout_seconds: int = Field(default=5, ge=1, le=120)
@@ -408,6 +412,14 @@ class Settings(BaseSettings):
     ocr_engine: Literal["native", "fake", "tesseract"] = "native"
     admin_enabled: bool = False
     upload_request_max_bytes: int = Field(default=501 * 1024 * 1024, ge=1024)
+
+    @field_validator('etl_file_storage_legacy_read_registry_file', mode='before')
+    @classmethod
+    def empty_legacy_registry_is_unset(cls, value):
+        # Compose emits an empty string for an optional unset path.  Treat it
+        # as None instead of Path('.') so object storage startup does not try
+        # to parse the container working directory as JSON.
+        return None if value in (None, '') else value
 
     mongo_uri: str = Field(
         default='mongodb://127.0.0.1:27017',

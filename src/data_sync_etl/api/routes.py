@@ -1,3 +1,4 @@
+import hashlib
 from ipaddress import ip_address
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
@@ -1059,17 +1060,78 @@ def get_processing_job(
     "/api/v1/resources/{id}/metadata",
     tags=[TAG_MASTER],
     summary="Cập nhật Metadata học liệu",
-    response_model=UpdateResourceMetadataResponse,
+    response_model=UpdateResourceMetadataResponse | SourceWriteBackResponse,
 )
 def update_resource_metadata(
     id: ResourceId,
     body: UpdateResourceMetadataRequest,
     request: Request,
-) -> UpdateResourceMetadataResponse:
+    response: Response,
+) -> UpdateResourceMetadataResponse | SourceWriteBackResponse:
     container = services(request)
     if "uploaded_by" in body.model_fields_set:
         raise HTTPException(400, "uploaded_by requires an authenticated identity")
     fields = body.model_dump(exclude_unset=True)
+    principal = getattr(request.state, 'auth_principal', None)
+    # SOURCE-owned metadata is a write intent, never a local Master mutation.
+    # The regular metadata form is therefore routed through the same durable
+    # write-back service as the technical endpoint.  The service remains
+    # fail-closed on contract, actor, field allow-list and CAS checks.
+    if container.settings.source_metadata_writeback_enabled:
+        with container.uow() as repo:
+            current = repo.get('master_learning_resources', id)
+        if current is not None and current.get('source_origin') == 'POSTGRESQL':
+            if not principal or not getattr(principal, 'id', None) or not getattr(principal, 'role', None):
+                raise HTTPException(403, detail={'code': 'SOURCE_WRITEBACK_ACTOR_MAPPING_REQUIRED'})
+            source_fields = {}
+            blocked = {'provider_name', 'provider_type', 'resource_type_name_vi', 'subject_id', 'grade_level_id'}
+            if blocked.intersection(fields):
+                raise HTTPException(422, detail={
+                    'code': 'SOURCE_WRITEBACK_FIELD_BLOCKED',
+                    'phase': 'source_writeback',
+                    'message': 'Trường metadata này chỉ được sửa khi SOURCE contract cho phép ánh xạ tương ứng.',
+                })
+            for name in ('title', 'provider_id', 'publication_status'):
+                if name in fields:
+                    source_fields[name] = fields[name]
+            if 'resource_type_code' in fields:
+                selected = container.resource_lookups.source_selection('types', fields['resource_type_code'])
+                if selected is None:
+                    raise HTTPException(422, detail={
+                        'code': 'SOURCE_WRITEBACK_CATALOG_UNAVAILABLE',
+                        'phase': 'source_writeback',
+                        'message': 'Loại học liệu chưa được xác nhận từ SOURCE.',
+                    })
+                source_fields['resource_type_id'] = selected['id']
+            if not source_fields:
+                raise HTTPException(422, detail={
+                    'code': 'SOURCE_WRITEBACK_FIELDS_REQUIRED',
+                    'phase': 'source_writeback',
+                    'message': 'Không có trường metadata SOURCE hợp lệ để cập nhật.',
+                })
+            actor = principal.id
+            owner_id = actor.removeprefix('master:') if actor.startswith('master:') else None
+            key_material = repr((id, current.get('source_state_hash'), sorted(source_fields.items()), actor))
+            key = 'web-update-' + hashlib.sha256(key_material.encode()).hexdigest()[:48]
+            try:
+                result = container.source_writeback.request(
+                    id, source_fields,
+                    expected_source_state_hash=current.get('source_state_hash') or '',
+                    idempotency_key=key,
+                    actor_id=actor,
+                    role=principal.role,
+                    owner_id=owner_id,
+                    auto_approve=bool(getattr(container.settings, 'source_write_auto_approval_enabled', False)),
+                )
+            except SourceWriteBackError as exc:
+                raise HTTPException(status_code=exc.status, detail={
+                    'code': exc.code,
+                    'phase': 'source_writeback',
+                    'message': 'SOURCE write-back request was not applied',
+                }) from None
+            if result.get('status') not in {'WRITEBACK_APPLIED', 'DRY_RUN'}:
+                response.status_code = 202
+            return SourceWriteBackResponse.model_validate(result)
     try:
         result = container.update_resource_metadata.execute(
             UpdateResourceMetadataCommand(

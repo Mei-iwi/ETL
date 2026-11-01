@@ -20,7 +20,17 @@ class SourceWriteBackWorker:
     def once(self, worker_id='source-writeback-worker'):
         with flow():
             try:
-                worked = self.service.process_pending_once(worker_id)
+                metadata_worked = self.service.process_pending_once(worker_id)
+                worked = metadata_worked
+                if metadata_worked and self.reconcile_source is not None:
+                    try:
+                        # SOURCE is canonical.  Read it back through the
+                        # normal sync path after a committed write so MASTER
+                        # never remains a stale local projection and the
+                        # SOURCE->MASTER marker prevents a write-back loop.
+                        self.reconcile_source()
+                    except Exception:
+                        event(stage='source_writeback', action='SOURCE_METADATA_RECONCILIATION_PENDING')
                 if self.create_service is not None:
                     worked = self.create_service.process_pending_once(worker_id) or worked
                     if (getattr(self.create_service, 'last_source_committed', False)
@@ -36,9 +46,21 @@ class SourceWriteBackWorker:
                         except Exception:
                             event(stage='source_writeback', action='SOURCE_CREATE_RECONCILIATION_PENDING')
                 if self.delete_service is not None:
-                    worked = self.delete_service.process_pending_once(worker_id) or worked
+                    delete_worked = self.delete_service.process_pending_once(worker_id)
+                    worked = delete_worked or worked
+                    if delete_worked and self.reconcile_source is not None:
+                        try:
+                            self.reconcile_source()
+                        except Exception:
+                            event(stage='source_writeback', action='SOURCE_DELETE_RECONCILIATION_PENDING')
                 if self.version_service is not None:
-                    worked = self.version_service.process_pending_once(worker_id) or worked
+                    version_worked = self.version_service.process_pending_once(worker_id)
+                    worked = version_worked or worked
+                    if version_worked and self.reconcile_source is not None:
+                        try:
+                            self.reconcile_source()
+                        except Exception:
+                            event(stage='source_writeback', action='SOURCE_VERSION_RECONCILIATION_PENDING')
             except Exception:
                 event(stage='source_writeback', action='WRITEBACK_WORKER_UNAVAILABLE')
                 return False

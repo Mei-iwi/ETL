@@ -34,6 +34,11 @@ class SourceVersionCreateService:
         self.uow, self.version_writer, self.object_writer, self.settings = (
             uow, version_writer, object_writer, settings)
 
+    def _initial_lifecycle_status(self):
+        # SOURCE contracts provide the enum value; fixture writers retain the
+        # historical PENDING value used by their in-memory tests.
+        return getattr(self.version_writer, 'default_lifecycle_status', 'PENDING')
+
     def status(self):
         enabled = bool(self.settings.source_metadata_writeback_enabled)
         supported = bool(enabled and getattr(self.version_writer, 'create_supported', False)
@@ -154,6 +159,28 @@ class SourceVersionCreateService:
         if not isinstance(version_key, str) or not _KEY.fullmatch(version_key):
             raise SourceVersionCreateError('SOURCE_VERSION_IDEMPOTENCY_INVALID')
 
+        # A previous attempt may have uploaded the object and then crashed
+        # before SOURCE version commit.  Verify the checkpointed object before
+        # trusting it; if an owner-side cleanup removed it, re-upload the same
+        # deterministic key from the staged file instead of creating a
+        # dangling resource version.
+        if checkpoint.get('source_bucket'):
+            verify = getattr(self.object_writer, 'verify', None)
+            if callable(verify):
+                try:
+                    verify(
+                        bucket=checkpoint['source_bucket'],
+                        object_key=checkpoint['source_object_key'],
+                        size=checkpoint['source_file_size'],
+                        source_hash=checkpoint['source_hash'],
+                    )
+                except DomainError as exc:
+                    if str(exc) != 'CLOUD_STORAGE_OBJECT_NOT_FOUND':
+                        raise SourceVersionCreateError(str(exc), 422) from None
+                    for key in ('source_bucket', 'source_object_key', 'source_file_size', 'source_hash'):
+                        checkpoint.pop(key, None)
+                    persist_checkpoint(checkpoint)
+
         if not checkpoint.get('source_bucket'):
             try:
                 with stager.open(manifest) as stream:
@@ -188,7 +215,7 @@ class SourceVersionCreateService:
             source_resource_id=resource_id,
             parent_version_id=None,
             version_number=None,
-            lifecycle_status='PENDING',
+            lifecycle_status=self._initial_lifecycle_status(),
             storage_bucket=checkpoint['source_bucket'],
             storage_object_key=checkpoint['source_object_key'],
             source_hash=checkpoint['source_hash'],
@@ -227,7 +254,7 @@ class SourceVersionCreateService:
                         'finished_at': stamp, 'claim_token': None, 'lease_expires_at': None,
                     })
                     continue
-                token = f'{worker_id}:{row["id"]}'[:150]
+                token = f'{worker_id}:{row["id"]}'[:36]
                 repo.update('reconciliation_audit_jobs', row['id'], {
                     'status': PROCESSING, 'attempts': attempts + 1, 'claim_token': token,
                     'lease_expires_at': stamp + timedelta(seconds=self.settings.reconciliation_lease_seconds),
@@ -253,7 +280,7 @@ class SourceVersionCreateService:
             result = self.version_writer.create_version(
                 source_version_id=checkpoint['source_version_id'],
                 source_resource_id=checkpoint['source_resource_id'], parent_version_id=None,
-                version_number=None, lifecycle_status='PENDING',
+                version_number=None, lifecycle_status=self._initial_lifecycle_status(),
                 storage_bucket=checkpoint['source_bucket'],
                 storage_object_key=checkpoint['source_object_key'],
                 source_hash=checkpoint['source_hash'], uploaded_by=checkpoint['source_user_id'],

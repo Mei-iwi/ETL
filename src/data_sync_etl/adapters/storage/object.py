@@ -139,7 +139,8 @@ class S3CompatibleObjectStorageAdapter(CloudStoragePort):
     def __init__(self, *, provider: str, provider_id: str, endpoint_url: str, region: str,
                  bucket: str, access_key_id: str | None, secret_access_key: str | None,
                  force_path_style: bool = True, signature_version: str = "s3v4",
-                 connect_timeout: int = 10, read_timeout: int = 60):
+                 connect_timeout: int = 10, read_timeout: int = 60,
+                 allow_insecure_local: bool = False):
         self.provider = provider
         self.provider_id = provider_id
         self.endpoint_url = endpoint_url.rstrip("/")
@@ -151,19 +152,23 @@ class S3CompatibleObjectStorageAdapter(CloudStoragePort):
         self.signature_version = signature_version
         self.connect_timeout = connect_timeout
         self.read_timeout = read_timeout
+        self.allow_insecure_local = allow_insecure_local
         self._endpoint = urlsplit(self.endpoint_url)
 
     def validate_config(self):
         if self.signature_version != "s3v4":
             raise DomainError("CLOUD_STORAGE_UNSUPPORTED_SIGNATURE")
-        if self._endpoint.scheme != "https" or not self._endpoint.hostname:
+        if not self._endpoint.hostname:
             raise DomainError("CLOUD_STORAGE_ENDPOINT_MUST_BE_HTTPS")
         hostname = self._endpoint.hostname.rstrip('.').lower()
-        if hostname in {'localhost', 'metadata.google.internal'}:
+        local_test_endpoint = self.allow_insecure_local and hostname in {'127.0.0.1', 'localhost'}
+        if self._endpoint.scheme != "https" and not local_test_endpoint:
+            raise DomainError("CLOUD_STORAGE_ENDPOINT_MUST_BE_HTTPS")
+        if hostname in {'metadata.google.internal'} or (hostname == 'localhost' and not self.allow_insecure_local):
             raise DomainError("CLOUD_STORAGE_ENDPOINT_NOT_ALLOWED")
         try:
             address = ip_address(hostname)
-            if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+            if (address.is_private or address.is_loopback or address.is_link_local or address.is_reserved) and not local_test_endpoint:
                 raise DomainError("CLOUD_STORAGE_ENDPOINT_NOT_ALLOWED")
         except ValueError:
             pass

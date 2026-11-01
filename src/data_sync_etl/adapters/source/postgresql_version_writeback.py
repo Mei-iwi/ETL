@@ -110,6 +110,10 @@ class PostgreSQLSourceVersionWriter:
                 or any(not isinstance(value, str) or not value.strip() for value in statuses)):
             raise DomainError('SOURCE_VERSION_LIFECYCLE_CONTRACT_REQUIRED')
         self.allowed_lifecycle_statuses = frozenset(value.strip().upper() for value in statuses)
+        default_status = contract.get('default_lifecycle_status', 'PENDING_PRE_REVIEW')
+        if not isinstance(default_status, str) or default_status.upper() not in self.allowed_lifecycle_statuses:
+            raise DomainError('SOURCE_VERSION_LIFECYCLE_CONTRACT_REQUIRED')
+        self.default_lifecycle_status = default_status.upper()
         self.connect_timeout_seconds = connect_timeout_seconds
         self.statement_timeout_seconds = statement_timeout_seconds
         self.lock_timeout_seconds = lock_timeout_seconds
@@ -178,21 +182,36 @@ class PostgreSQLSourceVersionWriter:
         }
         with self.engine.begin() as connection:
             self._set_timeouts(connection)
+            # The SOURCE writer receives column-scoped INSERT privileges, not
+            # table-level UPDATE.  Serialize version-number allocation with a
+            # transaction advisory lock instead of SELECT ... FOR UPDATE.
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:resource_id, 0))"),
+                {'resource_id': source_resource_id},
+            )
             resource = connection.execute(text(
                 f'SELECT id, is_active, deleted_at FROM "{self.schema}"."learning_resources" '
-                'WHERE id=:resource_id FOR UPDATE'), {'resource_id': source_resource_id}).mappings().one_or_none()
+                'WHERE id=:resource_id'), {'resource_id': source_resource_id}).mappings().one_or_none()
             if resource is None or resource['is_active'] is not True or resource['deleted_at'] is not None:
                 raise DomainError('SOURCE_RESOURCE_NOT_WRITABLE')
             latest_row = connection.execute(text(
                 f'SELECT "{self.columns["id"]}" AS id, "{self.columns["version_number"]}" AS version_number '
                 f'FROM "{self.schema}"."{self.table}" WHERE "{self.columns["resource_id"]}"=:resource_id '
-                f'ORDER BY "{self.columns["version_number"]}" DESC LIMIT 1 FOR UPDATE'),
+                f'ORDER BY "{self.columns["version_number"]}" DESC LIMIT 1'),
                 {'resource_id': source_resource_id}).mappings().one_or_none()
             if version_number is None:
                 values['version_number'] = (int(latest_row['version_number']) + 1) if latest_row else 1
             if parent_version_id is None and latest_row:
                 values['parent_version_id'] = latest_row['id']
             existing = self._canonical_row(connection, source_version_id)
+            if existing is not None and version_number is None:
+                # The first attempt computes the next version from the latest
+                # row.  On an idempotent replay that latest row is the same
+                # version, so restore the committed tuple before comparing;
+                # otherwise a replay incorrectly asks for version N+1 and
+                # raises SOURCE_VERSION_IDEMPOTENCY_CONFLICT.
+                values['version_number'] = existing['version_number']
+                values['parent_version_id'] = existing['parent_version_id']
             expected = {key: values[key] for key in ('id', 'resource_id', 'parent_version_id', 'version_number',
                                                        'lifecycle_status', 'storage_bucket',
                                                        'storage_object_key', 'source_hash', 'uploaded_by')}

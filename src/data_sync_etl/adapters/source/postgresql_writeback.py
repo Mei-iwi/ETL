@@ -72,6 +72,17 @@ class PostgreSQLSourceMetadataWriter:
         self.state_columns = tuple(_identifier(col, 'SOURCE_WRITE_CONTRACT_INVALID') for col in contract.get('state_columns', ()))
         self.columns = {field: _identifier(column, 'SOURCE_WRITE_CONTRACT_INVALID')
                         for field, column in (contract.get('columns') or {}).items()}
+        # CREATE needs a wider insert allow-list than UPDATE.  Keep the
+        # update allow-list separate so a CREATE contract cannot accidentally
+        # grant UPDATE on provider/resource-type/identity columns.
+        update_columns = contract.get('update_columns')
+        if update_columns is None:
+            self.update_columns = dict(self.columns)
+        elif isinstance(update_columns, list) and all(isinstance(field, str) for field in update_columns):
+            self.update_columns = {field: self.columns[field] for field in update_columns
+                                   if field in self.columns}
+        else:
+            raise DomainError('SOURCE_WRITE_CONTRACT_INVALID')
         idempotency_column = contract.get('idempotency_column')
         self.idempotency_column = (_identifier(idempotency_column, 'SOURCE_WRITE_CONTRACT_INVALID')
                                    if idempotency_column is not None else None)
@@ -118,7 +129,7 @@ class PostgreSQLSourceMetadataWriter:
         """Evaluate only the owner-supplied allow-list, never role alone."""
         return (self.grant_configured and self.supports(locator)
                 and (role.upper() in self.allowed_roles or actor_id in self.allowed_actor_ids)
-                and set(fields).issubset(self.columns)
+                and set(fields).issubset(self.update_columns)
                 and 'update' in self.actions)
 
     @property
@@ -326,7 +337,7 @@ class PostgreSQLSourceMetadataWriter:
             raise DomainError('SOURCE_WRITEBACK_ACTION_BLOCKED')
         if not self.supports(locator):
             raise DomainError('SOURCE_WRITEBACK_BLOCKED')
-        fields = validate_source_writeback_fields(fields)
+        fields = validate_source_writeback_fields(fields, allowed_fields=self.update_columns)
         if not idempotency_key or len(idempotency_key) > 100:
             raise DomainError('SOURCE_WRITEBACK_IDEMPOTENCY_INVALID')
         with self.engine.begin() as connection:
@@ -344,7 +355,8 @@ class PostgreSQLSourceMetadataWriter:
             current_hash = state_hash(current)
             if current_hash != expected_source_state_hash:
                 raise DomainError('SOURCE_WRITEBACK_CONFLICT')
-            assignments = ', '.join(f'"{column}"=:{field}' for field, column in self.columns.items() if field in fields)
+            assignments = ', '.join(f'"{column}"=:{field}'
+                                   for field, column in self.update_columns.items() if field in fields)
             if not assignments:
                 raise DomainError('SOURCE_WRITEBACK_FIELD_BLOCKED')
             params = {**fields, 'source_id': locator.source_record_id}
@@ -365,6 +377,15 @@ class PostgreSQLSourceMetadataWriter:
 
     def _canonical_row(self, connection, source_id, *, lock):
         """Return the same resource projection used by SOURCE -> MASTER sync."""
+        if lock:
+            # SOURCE writer grants are intentionally column-scoped.  PostgreSQL
+            # requires table-level UPDATE for SELECT ... FOR UPDATE, so use a
+            # transaction advisory lock keyed by the canonical SOURCE id and
+            # keep the SELECT read-only.
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:source_id, 0))"),
+                {'source_id': source_id},
+            )
         table = f'"{self.schema}"."{self.table}"'
         receipt = (f', r."{self.idempotency_column}" AS __writeback_receipt'
                    if self.idempotency_column is not None else '')
@@ -384,6 +405,4 @@ class PostgreSQLSourceMetadataWriter:
         LEFT JOIN "{self.schema}"."providers" p ON p.id = r.provider_id
         JOIN "{self.schema}"."resource_types" t ON t.id = r.resource_type_id
         WHERE r."{self.id_column}"=:source_id'''
-        if lock:
-            query += ' FOR UPDATE OF r'
         return connection.execute(text(query), {'source_id': source_id}).mappings().one_or_none()

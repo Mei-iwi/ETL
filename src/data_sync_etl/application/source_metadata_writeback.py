@@ -38,11 +38,15 @@ class SourceMetadataWriteBackService:
     def status(self):
         enabled = bool(self.settings.source_metadata_writeback_enabled)
         grant_ready = bool(getattr(self.writer, 'grant_configured', True))
+        contract_fields = set(getattr(self.writer, 'update_columns', None)
+                              or getattr(self.writer, 'columns', None) or {'title'})
         return {'enabled': enabled,
                 'writer_supported': bool(enabled and getattr(self.writer, 'supported', False)
                                          and self.permission is not None and grant_ready),
                 'mode': self.settings.source_metadata_writer_mode,
-                'fields': sorted(SOURCE_WRITE_BACK_FIELDS), 'default': 'disabled'}
+                'fields': sorted(contract_fields & set(SOURCE_WRITE_BACK_FIELDS)),
+                'auto_approval': bool(getattr(self.settings, 'source_write_auto_approval_enabled', False)),
+                'default': 'disabled'}
 
     def _authorize(self, resource, actor, role, owner, fields):
         if not actor or role not in ('ADMIN', 'OPERATOR'):
@@ -73,13 +77,22 @@ class SourceMetadataWriteBackService:
         return locator
 
     def request(self, resource_id, fields, *, expected_source_state_hash, idempotency_key,
-                actor_id, role=None, owner_id=None, approve=False, dry_run=False):
+                actor_id, role=None, owner_id=None, approve=False, dry_run=False,
+                auto_approve=False):
+        # This switch is fail-closed: callers cannot request policy approval
+        # unless deployment explicitly enables it.  Contract/actor/field
+        # authorization is still performed by _authorize before a job is
+        # persisted, so the flag never widens SOURCE permissions.
+        if auto_approve and not getattr(self.settings, 'source_write_auto_approval_enabled', False):
+            raise SourceWriteBackError('SOURCE_WRITEBACK_APPROVAL_REQUIRED', 409)
         if not self.settings.source_metadata_writeback_enabled:
             raise SourceWriteBackError('SOURCE_WRITEBACK_DISABLED', 409)
         if not getattr(self.writer, 'supported', False):
             raise SourceWriteBackError('SOURCE_WRITEBACK_UNSUPPORTED', 409)
         try:
-            fields = validate_source_writeback_fields(fields)
+            allowed_fields = (getattr(self.writer, 'update_columns', None)
+                              or getattr(self.writer, 'columns', None) or frozenset({'title'}))
+            fields = validate_source_writeback_fields(fields, allowed_fields=allowed_fields)
         except DomainError as exc:
             raise SourceWriteBackError(str(exc), 422) from None
         if not isinstance(expected_source_state_hash, str) or not re.fullmatch('[a-fA-F0-9]{64}', expected_source_state_hash):
@@ -92,7 +105,7 @@ class SourceMetadataWriteBackService:
             if not acquired:
                 raise SourceWriteBackError('SOURCE_WRITEBACK_BUSY', 409)
             return self._request(resource_id, fields, expected_source_state_hash.lower(), idempotency_key,
-                                 actor_id, role, owner_id, approve, dry_run)
+                                 actor_id, role, owner_id, approve, dry_run, auto_approve)
 
     def process_pending_once(self, worker_id='source-writeback-worker'):
         """Apply one approved, durable write-back job.
@@ -115,7 +128,12 @@ class SourceMetadataWriteBackService:
                 due = row.get('next_retry_at') is None or row['next_retry_at'] <= stamp
                 lease_expired = status == 'WRITEBACK_PROCESSING' and (
                     row.get('lease_expires_at') is None or row['lease_expires_at'] <= stamp)
-                if not ((status == 'WRITEBACK_PENDING' and due) or lease_expired):
+                # A plain pending request is not executable.  It becomes
+                # worker-visible only after an explicit approval or a
+                # contract/setting-gated pre-authorized policy marker.
+                if status in (PENDING, 'WRITEBACK_PENDING') and not (row.get('checkpoint') or {}).get('approved_by'):
+                    continue
+                if not ((status in (PENDING, 'WRITEBACK_PENDING') and due) or lease_expired):
                     continue
                 attempts = int(row.get('attempts') or 0)
                 if attempts >= self.settings.source_metadata_writeback_max_attempts:
@@ -124,7 +142,7 @@ class SourceMetadataWriteBackService:
                         'finished_at': stamp, 'claim_token': None, 'lease_expires_at': None,
                     })
                     continue
-                token = f'{worker_id}:{row["id"]}'[:150]
+                token = f'{worker_id}:{row["id"]}'[:36]
                 repo.update('reconciliation_audit_jobs', row['id'], {
                     'status': 'WRITEBACK_PROCESSING', 'attempts': attempts + 1,
                     'claim_token': token,
@@ -191,7 +209,8 @@ class SourceMetadataWriteBackService:
             })
         return True
 
-    def _request(self, resource_id, fields, expected_hash, key, actor, role, owner, approve, dry_run):
+    def _request(self, resource_id, fields, expected_hash, key, actor, role, owner, approve, dry_run,
+                 auto_approve):
         with self.uow() as repo:
             resource = repo.get('master_learning_resources', resource_id, lock=True)
             if resource is None:
@@ -217,24 +236,32 @@ class SourceMetadataWriteBackService:
                 return {'request_id': None, 'status': 'DRY_RUN', 'resource_id': resource_id,
                         'fields': sorted(fields), 'writer_supported': True}
             if row is None:
-                if approve:
+                if approve and not auto_approve:
                     raise SourceWriteBackError('SOURCE_WRITEBACK_APPROVAL_REQUIRED', 409)
                 cp = {'kind': 'SOURCE_METADATA_WRITEBACK', 'resource_id': resource_id,
                       'fields': fields, 'expected_source_state_hash': expected_hash,
                       'fingerprint': fingerprint, 'requested_by': actor,
                       'requested_role': role, 'owner_id': owner, 'idempotency_key': key}
+                if auto_approve:
+                    cp.update(approved_by=actor, approved_role=role,
+                              approved_by_policy=True,
+                              policy='SOURCE_PREAUTHORIZED_CONTRACT',
+                              approved_at=now().isoformat())
                 row = repo.insert('reconciliation_audit_jobs', {
                     'id': new_id(), 'job_key': f'SOURCE_WRITEBACK:{key}', 'audit_type': 'SOURCE_WRITEBACK',
                     'stream_name': 'resources', 'status': PENDING, 'created_at': now(), 'checkpoint': cp})
                 return self._response(row)
-            if not approve:
+            if not approve and not auto_approve:
                 return self._response(row)
             attempts = row['attempts'] + 1
             if attempts > self.settings.source_metadata_writeback_max_attempts:
                 raise SourceWriteBackError('SOURCE_WRITEBACK_RETRY_EXHAUSTED', 409)
             lease_started = now()
-            claim_token = f'api:{actor}:{key}'[:150]
-            cp.update(approved_by=actor, approved_role=role, approved_at=now().isoformat())
+            claim_token = f'api:{actor}:{key}'[:36]
+            cp.update(approved_by=actor, approved_role=role,
+                      approved_by_policy=bool(auto_approve),
+                      policy='SOURCE_PREAUTHORIZED_CONTRACT' if auto_approve else 'EXPLICIT_APPROVAL',
+                      approved_at=now().isoformat())
             repo.update('reconciliation_audit_jobs', row['id'], {
                 'status': 'WRITEBACK_PROCESSING', 'attempts': attempts, 'checkpoint': cp,
                 'finished_at': None, 'error_code': None,

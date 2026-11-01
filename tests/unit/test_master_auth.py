@@ -186,6 +186,16 @@ def test_stale_master_denied_but_admin_explicitly_available(master_auth, monkeyp
         assert api.get('/api/v1/auth/me').json()['role'] == 'ADMIN'
 
 
+def test_federated_users_sync_watermark_is_fresh(master_auth):
+    container = master_auth[0]
+    with container.uow() as repo:
+        runs = repo.find('sync_runs', {'stream_name': 'users'}, order=('-finished_at',), limit=1)
+        assert runs
+        repo.update('sync_runs', runs[0]['id'], {'stream_name': 'postgresql:users'})
+    reader = MasterIdentityReader(container.settings, engine=container.engine)
+    assert reader.read(email='master@etl.test') is not None
+
+
 def test_stale_watermark_is_not_freshness_and_ambiguous_email_denied(master_auth):
     c = master_auth[0]
     reader = MasterIdentityReader(c.settings, engine=c.engine)
