@@ -62,7 +62,8 @@ def recent_file_evidence(state, version, origin, settings):
 
 
 FILE_COLUMNS = ('id', 'resource_id', 'source_hash', 'source_file_size', 'storage_file_size',
-                'storage_bucket', 'storage_object_key', 'version_number', 'parent_version_id')
+                'storage_bucket', 'storage_object_key', 'version_number', 'parent_version_id',
+                'processing_options')
 
 
 class ScheduledAudit:
