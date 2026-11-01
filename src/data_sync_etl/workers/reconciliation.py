@@ -15,7 +15,12 @@ def main():
     parser.add_argument('--once', action='store_true')
     args = parser.parse_args()
     container = Container(Settings())
-    audit = ScheduledAudit(container.reconciliation_engine, container.settings, getattr(container, 'sync', None))
+    audit = ScheduledAudit(
+        container.reconciliation_engine,
+        container.settings,
+        getattr(container, 'sync', None),
+        getattr(container, 'source_writeback_worker', None),
+    )
     # The common lifecycle owns its heartbeat file. Never let an audit process
     # overwrite/unlink a heartbeat inherited from a Sync worker launch profile.
     previous_heartbeat = os.environ.pop('ETL_WORKER_HEARTBEAT_FILE', None)

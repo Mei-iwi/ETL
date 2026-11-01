@@ -500,12 +500,20 @@ class OCRPipeline:
                     status="SUCCEEDED",
                     completed_at=now(),
                     updated_at=now(),
-                    local_image_path=image_path,
+                    # Cloud-backed originals use request/task scratch only;
+                    # never persist a server-local path as a locator.
+                    local_image_path=(None if hasattr(self.storage, 'cloud') else image_path),
                     claim_token=None,
                 ),
             )
             self._counter(repo, task["job_id"], completed=1)
         event(task_id=task["id"], job_id=task["job_id"], stage="ocr", action="SUCCEEDED")
+        if image_path and hasattr(self.storage, 'cloud'):
+            try:
+                from pathlib import Path
+                Path(image_path).unlink(missing_ok=True)
+            except OSError:
+                pass
         return True
 
     def _fail(self, repo, task, message, permanent=False):

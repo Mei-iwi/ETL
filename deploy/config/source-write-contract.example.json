@@ -1,0 +1,23 @@
+{
+  "backend": "postgresql",
+  "namespace": "postgresql:learning",
+  "entity_type": "resources",
+  "schema": "public",
+  "actions": ["update"],
+  "allowed_roles": [],
+  "allowed_actor_ids": [],
+  "table": "learning_resources",
+  "id_column": "id",
+  "state_columns": [
+    "id", "mongo_id", "provider_id", "resource_type_id", "created_by", "title",
+    "publication_status", "is_active", "deleted_at", "deleted_by", "created_at", "updated_at",
+    "provider_name", "provider_type", "provider_is_active", "provider_deleted_at",
+    "provider_deleted_by", "provider_created_at", "provider_updated_at",
+    "resource_type_code", "resource_type_name_vi", "resource_type_is_active",
+    "resource_type_deleted_at", "resource_type_deleted_by", "resource_type_created_at",
+    "resource_type_updated_at"
+  ],
+  "columns": {"title": "title"},
+  "update_columns": ["title"],
+  "idempotency_column": null
+}

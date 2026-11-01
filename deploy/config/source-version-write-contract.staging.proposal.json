@@ -1,0 +1,33 @@
+{
+  "backend": "postgresql",
+  "namespace": "postgresql:learning",
+  "entity_type": "versions",
+  "schema": "public",
+  "table": "resource_versions",
+  "id_column": "id",
+  "id_prefix": "RSV",
+  "id_pattern": "RSV(?:0[1-9]|1[0-2])[0-9]{7}",
+  "actions": ["create"],
+  "allowed_roles": ["ADMIN"],
+  "allowed_actor_ids": [],
+  "allowed_lifecycle_statuses": ["UPLOADED", "PENDING_PRE_REVIEW", "QUEUED", "PROCESSING", "READY_FOR_REVIEW", "APPROVED", "REJECTED", "FAILED", "CANCELLED"],
+  "default_lifecycle_status": "PENDING_PRE_REVIEW",
+  "state_columns": [
+    "id", "resource_id", "parent_version_id", "version_number",
+    "lifecycle_status", "storage_bucket", "storage_object_key",
+    "source_hash", "uploaded_by", "created_at", "updated_at"
+  ],
+  "columns": {
+    "id": "id",
+    "resource_id": "resource_id",
+    "parent_version_id": "parent_version_id",
+    "version_number": "version_number",
+    "lifecycle_status": "lifecycle_status",
+    "storage_bucket": "storage_bucket",
+    "storage_object_key": "storage_object_key",
+    "source_hash": "source_hash",
+    "uploaded_by": "uploaded_by",
+    "created_at": "created_at",
+    "updated_at": "updated_at"
+  }
+}

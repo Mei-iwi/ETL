@@ -501,7 +501,11 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
                                     <td>{importLabels[file.import_status] ?? file.import_status}</td>
                                     <td>{file.etl_status ? etlLabels[file.etl_status] ?? file.etl_status : '—'}</td>
                                     <td>{file.retry_count ?? '—'}</td>
-                                    <td>{file.last_error_code ? errorLabels[file.last_error_code] ?? 'Lỗi xử lý, cần kiểm tra' : '—'}</td>
+                                    <td>{file.last_error_code === 'SOURCE_METADATA_ONLY'
+                                        ? '—'
+                                        : file.last_error_code
+                                            ? errorLabels[file.last_error_code] ?? 'Lỗi xử lý, cần kiểm tra'
+                                            : '—'}</td>
                                     <td>{file.retry_eligible && file.import_job_id ? <button className={`${styles.button} ${styles.fileAction}`}
                                         type="button" disabled={retryPending} onClick={() => void retry(file.import_job_id!)}>Thử lại</button> : '—'}</td>
                                 </tr>

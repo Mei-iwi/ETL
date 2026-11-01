@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from data_sync_etl.domain.concepts import ExpansionPolicy
@@ -13,6 +13,7 @@ class Settings(BaseSettings):
         env_file=".env",
         extra="ignore",
         hide_input_in_errors=True,
+        populate_by_name=True,
     )
     database_url: str = Field(
         default="postgresql+psycopg://localhost/etl",
@@ -21,6 +22,28 @@ class Settings(BaseSettings):
     test_database_url: str | None = Field(default=None, repr=False)
     log_level: str = "INFO"
     storage_root: Path = Path("storage")
+    # ETL_MANAGED originals are cloud-owned in staging/production.  The local
+    # adapter remains available only for isolated development/test fixtures.
+    etl_file_storage_mode: Literal['object', 'local'] = 'local'
+    etl_file_storage_provider: Literal['neon', 'r2', 'aws_s3', 'supabase_s3', 's3_compatible', 'fake'] = 'neon'
+    etl_file_storage_endpoint_url: str | None = Field(default=None, repr=False)
+    etl_file_storage_region: str | None = Field(default=None, max_length=64)
+    etl_file_storage_bucket: str | None = Field(default=None, max_length=255)
+    etl_file_storage_access_key_id: str | None = Field(default=None, repr=False)
+    etl_file_storage_secret_access_key: str | None = Field(default=None, repr=False)
+    etl_file_storage_access_key_id_file: Path | None = Field(default=None, repr=False)
+    etl_file_storage_secret_access_key_file: Path | None = Field(default=None, repr=False)
+    etl_file_storage_force_path_style: bool = True
+    etl_file_storage_signature_version: Literal['s3v4'] = 's3v4'
+    etl_file_storage_private: bool = True
+    etl_file_storage_read_url_ttl_seconds: int = Field(default=60, ge=1, le=900)
+    etl_file_storage_upload_url_ttl_seconds: int = Field(default=300, ge=1, le=900)
+    etl_file_storage_max_upload_bytes: int = Field(default=512 * 1024 * 1024, ge=1024, le=4 * 1024 * 1024 * 1024)
+    etl_file_storage_connect_timeout_seconds: int = Field(default=10, ge=1, le=120)
+    etl_file_storage_read_timeout_seconds: int = Field(default=60, ge=1, le=600)
+    etl_file_storage_object_prefix: str = Field(default='learning-resources/', max_length=255)
+    etl_file_storage_provider_id: str = Field(default='etl-cloud-current', min_length=1, max_length=100)
+    etl_file_storage_legacy_read_registry_file: Path | None = Field(default=None, repr=False)
     ffmpeg_path: str = 'ffmpeg'
     ffprobe_path: str = 'ffprobe'
     media_max_size_bytes: int = Field(default=50 * 1024 * 1024, ge=1024, le=1024 * 1024 * 1024)
@@ -73,6 +96,25 @@ class Settings(BaseSettings):
     reconciliation_retry_max_attempts: int = Field(default=3, ge=1, le=10)
     reconciliation_retry_seconds: int = Field(default=30, ge=1, le=3600)
     source_file_storage_root: Path | None = Field(default=None, repr=False)
+    # SOURCE_EXTERNAL object storage is read-only and independent from the
+    # ETL-managed destination bucket.  Endpoint/credentials fall back to the
+    # ETL object-storage contract only when the same provider is intentionally
+    # used for both roles; the bucket remains explicit and isolated.
+    source_file_storage_mode: Literal['local', 'object'] = 'local'
+    source_file_storage_provider: Literal['neon', 'r2', 'aws_s3', 'supabase_s3', 's3_compatible'] = 'neon'
+    source_file_storage_endpoint_url: str | None = Field(default=None, repr=False)
+    source_file_storage_region: str | None = Field(default=None, max_length=64)
+    source_file_storage_bucket: str | None = Field(default=None, max_length=255)
+    source_file_storage_provider_id: str = Field(default='source-cloud-current', min_length=1, max_length=100)
+    source_file_storage_access_key_id: str | None = Field(default=None, repr=False)
+    source_file_storage_secret_access_key: str | None = Field(default=None, repr=False)
+    source_file_storage_access_key_id_file: Path | None = Field(default=None, repr=False)
+    source_file_storage_secret_access_key_file: Path | None = Field(default=None, repr=False)
+    source_file_storage_force_path_style: bool = True
+    source_file_storage_signature_version: Literal['s3v4'] = 's3v4'
+    source_file_storage_connect_timeout_seconds: int = Field(default=10, ge=1, le=120)
+    source_file_storage_read_timeout_seconds: int = Field(default=60, ge=1, le=600)
+    source_file_storage_read_url_ttl_seconds: int = Field(default=60, ge=1, le=900)
     # Policy gates: disabling SOURCE access never restores the historical copier.
     source_reference_enabled: bool = False
     source_temporary_files_enabled: bool = False
@@ -103,8 +145,57 @@ class Settings(BaseSettings):
     # Master -> SOURCE metadata write-back is an explicit opt-in.  The default
     # production composition has no writer capability and remains read-only.
     source_metadata_writeback_enabled: bool = False
-    source_metadata_writer_mode: Literal['disabled', 'fixture'] = 'disabled'
+    source_metadata_writer_mode: Literal['disabled', 'fixture', 'postgresql'] = 'disabled'
+    source_write_database_url: str | None = Field(default=None, repr=False)
+    # Production deployments may inject the writer URL through a file-mounted
+    # secret instead of putting it in the process environment.  Reader and
+    # writer values intentionally remain separate connection pools.
+    source_write_database_url_file: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            'SOURCE_WRITE_DATABASE_URL_SECRET_FILE',
+            'SOURCE_WRITE_DATABASE_URL_FILE',
+        ),
+        repr=False,
+    )
+    source_write_contract_file: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            'SOURCE_WRITE_CONTRACT_SECRET_FILE',
+            'SOURCE_WRITE_CONTRACT_FILE',
+        ),
+        repr=False,
+    )
+    source_write_allowed_actions: tuple[str, ...] = ('update',)
+    # A SOURCE owner may pre-authorize the application actor/role in the
+    # private contract.  This flag only permits the durable job to be marked
+    # approved-by-policy; it never widens the contract or database grants.
+    source_write_auto_approval_enabled: bool = False
+    source_write_connect_timeout_seconds: int = Field(default=10, ge=1, le=120)
+    source_write_statement_timeout_seconds: int = Field(default=30, ge=1, le=600)
+    source_write_lock_timeout_seconds: int = Field(default=5, ge=1, le=120)
     source_metadata_writeback_max_attempts: int = Field(default=3, ge=1, le=10)
+    # CREATE_VERSION and SOURCE object upload are independently gated from
+    # metadata CREATE.  Defaults remain disabled; contracts/credentials are
+    # owner-supplied secret references and are never sent to the browser.
+    source_version_writeback_enabled: bool = False
+    source_version_write_contract_file: Path | None = Field(default=None, repr=False)
+    source_version_write_allowed_actions: tuple[str, ...] = ('create',)
+    source_storage_write_enabled: bool = False
+    source_storage_write_contract_file: Path | None = Field(default=None, repr=False)
+    source_storage_write_endpoint_url: str | None = Field(default=None, repr=False)
+    source_storage_write_region: str | None = Field(default=None, max_length=64)
+    source_storage_write_bucket: str | None = Field(default=None, max_length=255)
+    source_storage_write_provider: Literal['neon', 'r2', 'aws_s3', 'supabase_s3', 's3_compatible'] = 'neon'
+    source_storage_write_provider_id: str = Field(default='source-cloud-current', min_length=1, max_length=100)
+    source_storage_write_access_key_id: str | None = Field(default=None, repr=False)
+    source_storage_write_secret_access_key: str | None = Field(default=None, repr=False)
+    source_storage_write_access_key_id_file: Path | None = Field(default=None, repr=False)
+    source_storage_write_secret_access_key_file: Path | None = Field(default=None, repr=False)
+    source_storage_write_force_path_style: bool = True
+    source_storage_write_signature_version: Literal['s3v4'] = 's3v4'
+    source_storage_write_connect_timeout_seconds: int = Field(default=10, ge=1, le=120)
+    source_storage_write_read_timeout_seconds: int = Field(default=60, ge=1, le=600)
     ocr_max_retries: int = Field(default=3, ge=1)
     ocr_heartbeat_timeout_seconds: int = Field(default=120, ge=3)
     ocr_recovery_interval_seconds: int = Field(default=30, ge=1)
@@ -166,6 +257,7 @@ class Settings(BaseSettings):
     semantic_rerank_enabled: bool = False
     semantic_rerank_top_k: int = Field(default=20, ge=1, le=50)
     search_max_bags: int = Field(default=2000, ge=1, le=10000)
+    search_concept_snapshot: Path | None = Field(default=None, repr=False)
     # Corpus dictionary is OFF by default; a flag is never a live ACL attestation.
     concept_dynamic_enabled: bool = False
     concept_dynamic_builder_enabled: bool = False
@@ -262,9 +354,72 @@ class Settings(BaseSettings):
         if self.chunk_overlap_words >= self.chunk_size_words:
             raise ValueError("CHUNK_OVERLAP_WORDS must be smaller than CHUNK_SIZE_WORDS")
         return self
+
+    @model_validator(mode="after")
+    def validate_cloud_storage_contract(self):
+        if self.etl_file_storage_mode == 'local' and self.app_environment == 'production':
+            raise ValueError('ETL_FILE_STORAGE_MODE=local is forbidden in production')
+        if self.etl_file_storage_mode == 'object':
+            if not self.etl_file_storage_bucket:
+                raise ValueError('Object storage requires bucket')
+            if self.etl_file_storage_provider != 'fake' and not self.etl_file_storage_endpoint_url:
+                raise ValueError('Object storage requires endpoint and bucket')
+            if not self.etl_file_storage_private:
+                raise ValueError('ETL-managed object storage must remain private')
+            if self.etl_file_storage_provider != 'fake' and not (self.etl_file_storage_access_key_id_file or self.etl_file_storage_access_key_id):
+                raise ValueError('Object storage access key reference is required')
+            if self.etl_file_storage_provider != 'fake' and not (self.etl_file_storage_secret_access_key_file or self.etl_file_storage_secret_access_key):
+                raise ValueError('Object storage secret reference is required')
+            if self.etl_file_storage_object_prefix and not self.etl_file_storage_object_prefix.endswith('/'):
+                self.etl_file_storage_object_prefix += '/'
+        if self.source_file_storage_mode == 'object':
+            if not self.source_file_storage_bucket:
+                raise ValueError('SOURCE_FILE_STORAGE_MODE=object requires bucket')
+            source_endpoint = self.source_file_storage_endpoint_url or self.etl_file_storage_endpoint_url
+            source_region = self.source_file_storage_region or self.etl_file_storage_region
+            source_access = (self.source_file_storage_access_key_id_file
+                             or self.source_file_storage_access_key_id
+                             or self.etl_file_storage_access_key_id_file
+                             or self.etl_file_storage_access_key_id)
+            source_secret = (self.source_file_storage_secret_access_key_file
+                             or self.source_file_storage_secret_access_key
+                             or self.etl_file_storage_secret_access_key_file
+                             or self.etl_file_storage_secret_access_key)
+            if not source_endpoint or not source_region or not source_access or not source_secret:
+                raise ValueError('SOURCE_FILE_STORAGE_MODE=object requires endpoint, region and credentials')
+        if not set(self.source_write_allowed_actions).issubset({'create', 'update', 'delete'}):
+            raise ValueError('SOURCE_WRITE_ALLOWED_ACTIONS contains an unsupported action')
+        if not set(self.source_version_write_allowed_actions).issubset({'create'}):
+            raise ValueError('SOURCE_VERSION_WRITE_ALLOWED_ACTIONS contains an unsupported action')
+        if self.source_metadata_writer_mode == 'postgresql' and not self.source_metadata_writeback_enabled:
+            raise ValueError('PostgreSQL SOURCE writer requires explicit writeback enablement')
+        if self.source_version_writeback_enabled and not self.source_metadata_writeback_enabled:
+            raise ValueError('SOURCE_VERSION_WRITEBACK requires SOURCE_METADATA_WRITEBACK_ENABLED')
+        if self.source_storage_write_enabled:
+            required = (
+                self.source_storage_write_contract_file,
+                self.source_storage_write_endpoint_url,
+                self.source_storage_write_region,
+                self.source_storage_write_bucket,
+                self.source_storage_write_access_key_id_file or self.source_storage_write_access_key_id,
+                self.source_storage_write_secret_access_key_file or self.source_storage_write_secret_access_key,
+            )
+            if any(value is None or value == '' for value in required):
+                raise ValueError('SOURCE_STORAGE_WRITE requires contract, endpoint, bucket and credential references')
+            if not self.source_metadata_writeback_enabled:
+                raise ValueError('SOURCE_STORAGE_WRITE requires SOURCE_METADATA_WRITEBACK_ENABLED')
+        return self
     ocr_engine: Literal["native", "fake", "tesseract"] = "native"
     admin_enabled: bool = False
     upload_request_max_bytes: int = Field(default=501 * 1024 * 1024, ge=1024)
+
+    @field_validator('etl_file_storage_legacy_read_registry_file', mode='before')
+    @classmethod
+    def empty_legacy_registry_is_unset(cls, value):
+        # Compose emits an empty string for an optional unset path.  Treat it
+        # as None instead of Path('.') so object storage startup does not try
+        # to parse the container working directory as JSON.
+        return None if value in (None, '') else value
 
     mongo_uri: str = Field(
         default='mongodb://127.0.0.1:27017',

@@ -54,13 +54,14 @@ class SourceFileResolver:
             raise SourceFileError('SOURCE_UNAVAILABLE', transient=True) from None
         if source is None:
             raise SourceFileError('SOURCE_VERSION_MISSING')
-        keys = ('source_version_id', 'resource_id', 'source_version_number', 'storage_bucket', 'storage_object_key')
+        keys = ('source_version_id', 'source_version_number', 'storage_bucket', 'storage_object_key')
         if any(source.get(k) != row.get(k) for k in keys) or source.get('source_hash', '').lower() != row['source_hash'].lower():
+            raise SourceFileError('SOURCE_VERSION_MUTATED')
+        if source.get('resource_id') != self._source_resource_id(row):
             raise SourceFileError('SOURCE_VERSION_MUTATED')
         if (not source.get('resource_active', True)
                 or source.get('resource_deleted_at') is not None
-                or not source_status_allowed(source.get('source_lifecycle_status'),
-                                             self.settings.source_file_allowed_statuses)):
+                or not self._status_allowed(source, namespace=getattr(adapter, 'source_namespace', None))):
             raise SourceFileError('BLOCKED_SOURCE_POLICY')
         return source
 
@@ -78,15 +79,33 @@ class SourceFileResolver:
         if source is None:
             raise SourceFileError('SOURCE_VERSION_MISSING')
         if (source.get('source_version_id') != row.get('source_version_id')
-                or source.get('resource_id') != row.get('resource_id')
+                or source.get('resource_id') != self._source_resource_id(row)
                 or source.get('source_version_number') != row.get('source_version_number')
                 or source.get('source_hash', '').lower() != row.get('source_hash', '').lower()):
             raise SourceFileError('SOURCE_VERSION_MUTATED')
         if (not source.get('resource_active', True) or source.get('resource_deleted_at') is not None
-                or not source_status_allowed(source.get('source_lifecycle_status'),
-                                             self.settings.source_file_allowed_statuses)):
+                or not self._status_allowed(source, namespace=getattr(adapter, 'source_namespace', None))):
             raise SourceFileError('BLOCKED_SOURCE_POLICY')
         return source
+
+    def _source_resource_id(self, row):
+        with self.uow() as repo:
+            resource = repo.get('master_learning_resources', row.get('resource_id'))
+        return (resource or {}).get('source_record_key') or row.get('resource_id')
+
+    def _status_allowed(self, source, *, namespace=None):
+        if source_status_allowed(source.get('source_lifecycle_status'), self.settings.source_file_allowed_statuses):
+            return True
+        # ETL uploads may be processed while SOURCE is awaiting review, but
+        # only with an exact committed writeback receipt and a live resource.
+        if source.get('source_lifecycle_status') not in {
+                'UPLOADED', 'PENDING_PRE_REVIEW', 'QUEUED', 'PROCESSING', 'READY_FOR_REVIEW'}:
+            return False
+        with self.uow() as repo:
+            reader = getattr(repo, 'source_version_writeback_receipt', None)
+            return bool(callable(reader) and reader(source.get('resource_id'),
+                        source.get('source_version_id'), source.get('source_hash', ''),
+                        namespace=namespace or getattr(self.source, 'source_namespace', None)))
 
     def _validate_source_lineage(self, version, row, source):
         """Require the bounded SOURCE ancestry and MASTER parent chain to match."""
@@ -114,8 +133,7 @@ class SourceFileResolver:
                     or parent.get('resource_id') != source.get('resource_id')):
                 raise SourceFileError('BLOCKED_SOURCE_MAPPING')
             if (not parent.get('resource_active', True) or parent.get('resource_deleted_at') is not None
-                    or not source_status_allowed(parent.get('source_lifecycle_status'),
-                                                 self.settings.source_file_allowed_statuses)):
+                    or not self._status_allowed(parent, namespace=getattr(adapter, 'source_namespace', None))):
                 raise SourceFileError('BLOCKED_SOURCE_POLICY')
             with self.uow() as repo:
                 mappings = repo.find('source_file_imports', {
@@ -144,8 +162,9 @@ class SourceFileResolver:
             raise SourceFileError('INVALID_SOURCE_LINK')
         if not re.fullmatch('[0-9a-fA-F]{64}', version['source_hash']):
             raise SourceFileError('INVALID_SOURCE_HASH')
+        filename = (version.get('processing_options') or {}).get('source_filename') or PurePosixPath(key).name
         try:
-            validator = self.formats.find_validator(key)
+            validator = self.formats.find_validator(filename)
         except DomainError:
             raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT') from None
         provider = 'managed'
@@ -157,10 +176,13 @@ class SourceFileResolver:
             target_version_id=version.get('id'), resource_id=version['resource_id'],
             source_version_id=row['source_version_id'] if row else None,
             provider=provider, bucket=bucket, opaque_locator=key,
-            filename=PurePosixPath(key).name,
+            filename=filename,
             mime='text/csv' if validator.extension == '.csv' else sorted(validator.mime_types)[0],
             expected_sha256=version['source_hash'].lower(),
-            source_id=row['source_system'] if row else None, source_snapshot=source,
+            source_id=row['source_system'] if row else None,
+            provider_id=((version.get('processing_options') or {}).get('storage_provider_id')
+                         if not row else None),
+            source_snapshot=source,
         )
 
     def _capability_source_id(self, ref):
@@ -199,6 +221,9 @@ class SourceFileResolver:
             if resource.get('source_origin') == 'LOCAL':
                 return True
             rows = repo.find('source_file_imports', {'target_version_id': version_id}, limit=2)
+            uploaded = bool((version.get('processing_options') or {}).get('etl_source_upload')
+                            and len(rows) == 1
+                            and rows[0].get('source_lifecycle_status') == 'UNREVIEWED')
             if (resource.get('source_origin') != 'POSTGRESQL'
                     or resource.get('publication_status') != 'PUBLISHED'
                     or not resource.get('is_active') or resource_deleted(resource)
@@ -209,8 +234,8 @@ class SourceFileResolver:
                     or rows[0].get('resource_id') != resource['id']
                     or rows[0].get('source_hash', '').lower() != version.get('source_hash', '').lower()
                     or not rows[0].get('source_resource_active', True)
-                    or not source_status_allowed(rows[0].get('source_lifecycle_status'),
-                                                 self.settings.source_file_allowed_statuses)
+                    or not (uploaded or source_status_allowed(rows[0].get('source_lifecycle_status'),
+                                                              self.settings.source_file_allowed_statuses))
                     or rows[0].get('last_error_code') in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING')):
                 return False
             source_id = rows[0]['source_system']
@@ -294,9 +319,27 @@ class SourceFileResolver:
     @contextmanager
     def temporary_path(self, ref, *, cancelled=None):
         if ref.ownership == 'LOCAL_OWNED':
-            if not self.storage.exists(ref.bucket, ref.opaque_locator):
+            try:
+                storage = (self.storage.for_provider(ref.provider_id)
+                           if callable(getattr(self.storage, 'for_provider', None)) else self.storage)
+            except DomainError as exc:
+                raise SourceFileError(str(exc)) from None
+            cloud_temporary = getattr(self.storage, 'temporary_path', None)
+            if callable(cloud_temporary):
+                # ETL_MANAGED object storage may require a bounded ephemeral
+                # scratch file for legacy Office/media libraries.  The context
+                # owns cleanup; SOURCE_EXTERNAL never reaches this branch.
+                try:
+                    with storage.temporary_path(ref.bucket, ref.opaque_locator, cancelled=cancelled) as path:
+                        yield path
+                except SourceFileError:
+                    raise
+                except DomainError as exc:
+                    raise SourceFileError(str(exc), transient=str(exc).endswith('UNAVAILABLE')) from None
+                return
+            if not storage.exists(ref.bucket, ref.opaque_locator):
                 raise SourceFileError('FILE_NOT_FOUND')
-            yield self.storage.get_local_path(ref.bucket, ref.opaque_locator)
+            yield storage.get_local_path(ref.bucket, ref.opaque_locator)
             return
         # SOURCE bytes must never be materialized as a local file.
         raise SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED')

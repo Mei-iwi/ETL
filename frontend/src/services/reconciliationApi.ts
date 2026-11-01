@@ -112,10 +112,98 @@ export function getAuditCoverage(signal?: AbortSignal) {
 }
 export type SourceWriteBackStatus = {
     enabled: boolean; writer_supported: boolean; mode: string; fields: string[]; default: 'disabled'
+    expected_source_state_hash?: string | null
+    create_supported?: boolean
+    actor_mapping?: string | null
+    version_create_supported?: boolean
+    delete_supported?: boolean
+    cloud_upload_supported?: boolean
+    version_storage?: string | null
 }
 export function getSourceWriteBackStatus(signal?: AbortSignal) {
     return fetch('/api/v1/source-writeback/status', { signal, cache: 'no-store', headers: { Accept: 'application/json' } })
         .then(async response => { if (!response.ok) throw new Error(await getErrorMessage(response)); return response.json() as Promise<SourceWriteBackStatus> })
+}
+export function getResourceSourceWriteBackStatus(resourceId: string, signal?: AbortSignal) {
+    return fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/source-writeback/status`, {
+        signal, cache: 'no-store', headers: { Accept: 'application/json' },
+    }).then(async response => {
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json() as Promise<SourceWriteBackStatus>
+    })
+}
+export type SourceWriteBackResponse = {
+    request_id: string | null
+    status: 'DRY_RUN' | 'WRITEBACK_PENDING_APPROVAL' | 'WRITEBACK_PENDING' | 'WRITEBACK_PROCESSING' | 'WRITEBACK_APPLIED' | 'WRITEBACK_CONFLICT' | 'WRITEBACK_FAILED'
+    resource_id: string
+    fields: string[]
+    writer_supported: boolean
+    error_code?: string | null
+}
+export function requestSourceWriteBack(
+    resourceId: string,
+    payload: { title: string; expected_source_state_hash: string; idempotency_key: string; approve?: boolean },
+    signal?: AbortSignal,
+) {
+    return fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/source-writeback`, {
+        method: 'POST', signal, credentials: 'same-origin',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    }).then(async response => {
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json() as Promise<SourceWriteBackResponse>
+    })
+}
+export type SourceDeleteResponse = {
+    request_id: string
+    status: 'SOURCE_DELETE_PENDING' | 'SOURCE_DELETE_PROCESSING' | 'SOURCE_DELETE_APPLIED' | 'SOURCE_DELETE_FAILED'
+    operation: 'DELETE_RESOURCE'
+    resource_id: string
+    reconciliation_required: boolean
+    error_code?: string | null
+}
+export function requestSourceDelete(
+    resourceId: string,
+    payload: { expected_source_state_hash: string; idempotency_key: string; approve?: boolean },
+    signal?: AbortSignal,
+) {
+    return fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/source-delete`, {
+        method: 'POST', signal, credentials: 'same-origin',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    }).then(async response => {
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json() as Promise<SourceDeleteResponse>
+    })
+}
+export type SourceCreateVersionResponse = {
+    request_id: string
+    status: 'SOURCE_VERSION_PENDING' | 'SOURCE_VERSION_PROCESSING' | 'SOURCE_VERSION_APPLIED' | 'SOURCE_VERSION_FAILED'
+    operation: 'CREATE_VERSION'
+    resource_id: string
+    source_version_id?: string | null
+    workflow: string
+    reconciliation_required: boolean
+    error_code?: string | null
+}
+export function requestSourceVersion(
+    resourceId: string,
+    file: File,
+    idempotencyKey: string,
+    expectedSha256?: string,
+    signal?: AbortSignal,
+) {
+    const form = new FormData()
+    form.set('file', file, file.name)
+    form.set('idempotency_key', idempotencyKey)
+    if (expectedSha256) form.set('expected_sha256', expectedSha256)
+    return fetch(`/api/v1/resources/${encodeURIComponent(resourceId)}/source-versions`, {
+        method: 'POST', signal, credentials: 'same-origin',
+        headers: { Accept: 'application/json' }, body: form,
+    }).then(async response => {
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json() as Promise<SourceCreateVersionResponse>
+    })
 }
 export function queueAudit(stream: string, mode: 'INCREMENTAL' | 'FULL', repair = false, kind?: AuditKind) {
     const all = stream === 'all'

@@ -133,7 +133,7 @@ const invalidResponse = () => new SearchApiError(502, 'SEARCH_INVALID_RESPONSE',
 async function request<T>(path: string, validate: (value: unknown) => value is T, signal?: AbortSignal, payload?: SearchRequest, method: 'GET' | 'POST' = 'GET'): Promise<T> {
     // Server deadlines are cooperative; abort stops waiting, not running inference.
     const combined = AbortSignal.any([...(signal ? [signal] : []),
-        AbortSignal.timeout(payload && payload.method !== 'bow' ? 90000 : 20000)])
+        AbortSignal.timeout(payload ? (payload.method !== 'bow' ? 90000 : 45000) : 20000)])
     let abortWait: () => void
     const aborted = new Promise<never>((_, reject) => {
         abortWait = () => reject(combined.reason)

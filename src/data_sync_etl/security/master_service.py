@@ -8,7 +8,7 @@ import secrets
 import time
 from datetime import UTC
 
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, or_, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -61,11 +61,19 @@ class MasterIdentityReader:
             isolation = 'REPEATABLE READ' if self.engine.dialect.name == 'postgresql' else 'SERIALIZABLE'
             with self.engine.connect().execution_options(isolation_level=isolation, postgresql_readonly=True) as connection:
                 with connection.begin():
+                    user_sync_stream = or_(
+                        SyncRun.stream_name == 'users',
+                        SyncRun.stream_name.like('%:users'),
+                    )
                     stamp = connection.scalar(select(func.max(SyncRun.finished_at)).where(
-                        SyncRun.stream_name == 'users', SyncRun.status == 'COMPLETED',
+                        user_sync_stream, SyncRun.status == 'COMPLETED',
                         SyncRun.sync_mode.in_(('FULL', 'INCREMENTAL'))))
                     verified = connection.scalar(select(func.max(SyncReconciliationRun.finished_at)).where(
-                        SyncReconciliationRun.stream_name == 'users', SyncReconciliationRun.status == 'COMPLETED',
+                        or_(
+                            SyncReconciliationRun.stream_name == 'users',
+                            SyncReconciliationRun.stream_name.like('%:users'),
+                        ),
+                        SyncReconciliationRun.status == 'COMPLETED',
                         SyncReconciliationRun.summary_meta['auth_verified'].as_boolean().is_(True)))
                     if verified is not None and (stamp is None or verified > stamp):
                         stamp = verified
@@ -116,7 +124,10 @@ class MasterAuthService(AuthService):
         self.dummy_hash = f'pbkdf2_sha256$120000${salt}${dummy}'
 
     def fingerprint(self, user):
-        return self.digest(json.dumps(user, sort_keys=True, default=str).encode())
+        # Resource ownership is refreshed on every request. Creating a resource
+        # must not revoke the owner's session; identity/role/password changes do.
+        identity = {key: value for key, value in user.items() if key != 'resource_ids'}
+        return self.digest(json.dumps(identity, sort_keys=True, default=str).encode())
 
     def login(self, request, email, password, remember=False, *, provider=None):
         # provider is accepted only for old clients; it cannot select an identity or role.

@@ -29,6 +29,7 @@ $EnvFile = (Resolve-Path -LiteralPath $EnvFile).Path
 $databaseMode = 'same-host'
 $mediaEnabled = 'false'
 $driveEnabled = 'false'
+$sourceWriteOverrideFile = $null
 foreach ($line in Get-Content -LiteralPath $EnvFile) {
     if ($line -match '^\s*MEDIA_ENABLED\s*=') {
         if ($line -notmatch '^\s*MEDIA_ENABLED\s*=\s*["'']?(true|false)["'']?\s*(?:#.*)?$') { throw 'Invalid MEDIA_ENABLED in Docker env file.' }
@@ -41,6 +42,12 @@ foreach ($line in Get-Content -LiteralPath $EnvFile) {
     if ($line -match '^\s*SOURCE_DRIVE_ENABLED\s*=') {
         if ($line -notmatch '^\s*SOURCE_DRIVE_ENABLED\s*=\s*["'']?(true|false)["'']?\s*(?:#.*)?$') { throw 'Invalid SOURCE_DRIVE_ENABLED in Docker env file.' }
         $driveEnabled = $Matches[1]
+    }
+    if ($line -match '^\s*SOURCE_WRITE_COMPOSE_OVERRIDE_FILE\s*=') {
+        if ($line -match '^\s*SOURCE_WRITE_COMPOSE_OVERRIDE_FILE\s*=\s*["'']?([^"'']+)["'']?\s*(?:#.*)?$') {
+            $sourceWriteOverrideFile = $Matches[1].Trim()
+        }
+        else { throw 'Invalid SOURCE_WRITE_COMPOSE_OVERRIDE_FILE in Docker env file.' }
     }
 }
 if ($env:DATABASE_MODE) { $databaseMode = $env:DATABASE_MODE }
@@ -64,6 +71,12 @@ if ($Media -or $mediaEnabled -eq 'true') { $composeArgs += @('-f',(Join-Path $de
 if ($Drive) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.drive.yml')) }
 if ($RemoteDatabase) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.remote-db.yml')) }
 if ($SourceNeon) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.source-neon.yml')) }
+if ($sourceWriteOverrideFile) {
+    if (-not (Test-Path -LiteralPath $sourceWriteOverrideFile -PathType Leaf)) {
+        throw 'SOURCE_WRITE_COMPOSE_OVERRIDE_FILE does not exist.'
+    }
+    $composeArgs += @('-f',(Resolve-Path -LiteralPath $sourceWriteOverrideFile).Path)
+}
 if ($AuthProfile -like 'db-auth*') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.db-auth.yml')) }
 elseif ($AuthProfile -ne 'legacy') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth.yml')) }
 if ($AuthProfile -in @('auth-tls','db-auth-tls')) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth-tls.yml')) }

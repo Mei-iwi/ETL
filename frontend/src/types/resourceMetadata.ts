@@ -1,4 +1,4 @@
-export type PublicationStatus = 'DRAFT' | 'PUBLISHED' | 'UNPUBLISHED'
+export type PublicationStatus = 'DRAFT' | 'PUBLISHED' | 'UNPUBLISHED' | 'ARCHIVED'
 
 export interface UpdateResourceMetadataRequest {
     title: string

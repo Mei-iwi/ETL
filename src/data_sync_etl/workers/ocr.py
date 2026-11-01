@@ -67,6 +67,7 @@ class OCRWorker:
             )
             thread.start()
 
+            image_path = None
             try:
                 result, image_path = self.pipeline.recognize(task)
 
@@ -80,6 +81,12 @@ class OCRWorker:
                 self.pipeline.fail(task, error=exc)
 
             finally:
+                if image_path and hasattr(self.pipeline.storage, 'cloud'):
+                    try:
+                        from pathlib import Path
+                        Path(image_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
                 stop.set()
                 thread.join(timeout=5)
 

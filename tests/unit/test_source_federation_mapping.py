@@ -251,6 +251,15 @@ def test_source_version_sync_namespaces_colliding_ids_and_reuses_existing_tables
             with container.uow() as repo:
                 imported = repo.find('source_file_imports', {'target_version_id': versions_a['VER001']['id']})[0]
                 repo.update('source_file_imports', imported['id'], {'updated_at': datetime.now(UTC)})
+                current = repo.get('resource_versions', versions_a['VER001']['id'])
+                repo.update('resource_versions', current['id'], {
+                    'lifecycle_status': 'INGESTED', 'updated_at': datetime.now(UTC),
+                    'processing_options': {**current['processing_options'], 'content_availability': 'PROCESSING'},
+                })
+                repo.update('source_file_imports', imported['id'], {
+                    'status': 'PROCESSING', 'last_error_code': None,
+                    'processing_job_id': None, 'attempts': imported['attempts'] + 1,
+                })
             return {'source_file_id': 'blob', 'file_name': 'book.pdf', 'mime_type': 'application/pdf',
                     'revision': 'drive-revision-7',
                     'viewer_url': 'https://drive.google.com/file/d/blob/view',

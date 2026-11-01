@@ -17,10 +17,29 @@ class SourceResolutionError(DomainError):
 
 
 def same_import_snapshot(current, observed):
-    """Discovery's poll timestamp is not a file identity or access grant."""
-    return (current is not None and observed is not None
-            and {key: value for key, value in current.items() if key != 'updated_at'}
-            == {key: value for key, value in observed.items() if key != 'updated_at'})
+    """Queue progress is not a change of the SOURCE file or its access grant."""
+    if current is None or observed is None:
+        return False
+    if current.get('status') not in (None, 'METADATA_ONLY', 'PROCESSING', 'IMPORTED'):
+        return False
+    if current.get('last_error_code') not in (None, 'SOURCE_METADATA_ONLY', 'UNSUPPORTED_SOURCE_FORMAT'):
+        return False
+    progress = {'updated_at', 'source_updated_at', 'resource_title', 'status', 'last_error_code',
+                'attempts', 'manual_retries', 'processing_retry_requested', 'next_retry_at',
+                'claim_token', 'lease_expires_at', 'processing_job_id', 'storage_file_size'}
+    return ({key: value for key, value in current.items() if key not in progress}
+            == {key: value for key, value in observed.items() if key not in progress})
+
+
+def same_version_file_snapshot(current, observed):
+    if current is None or observed is None:
+        return False
+    keys = ('id', 'resource_id', 'parent_version_id', 'version_number',
+            'storage_bucket', 'storage_object_key', 'source_hash')
+    immutable_options = ('source_version_identity', 'storage_provider_id', 'source_filename', 'etl_source_upload')
+    return (all(current.get(key) == observed.get(key) for key in keys)
+            and all((current.get('processing_options') or {}).get(key)
+                    == (observed.get('processing_options') or {}).get(key) for key in immutable_options))
 
 
 class SourceResolutionService:
@@ -211,8 +230,10 @@ class SourceResolutionService:
         source_lifecycle_status = normalize_source_status(source.get('source_lifecycle_status'))
         if (not source.get('resource_active', True) or source.get('resource_deleted_at') is not None
                 or source.get('resource_publication_status', 'PUBLISHED') != 'PUBLISHED'
-                or not source_status_allowed(source.get('source_lifecycle_status'),
-                                             self.settings.source_file_allowed_statuses)):
+                or not (self.source_status_policy(source, namespace=locator.namespace)
+                        if callable(getattr(self, 'source_status_policy', None))
+                        else source_status_allowed(source.get('source_lifecycle_status'),
+                                                   self.settings.source_file_allowed_statuses))):
             result.update(resolution_status='blocked', source_record_available=False)
             if (not source.get('resource_active', True)
                     or source.get('resource_deleted_at') is not None
@@ -234,7 +255,8 @@ class SourceResolutionService:
                     mapping_changed = (current_route.locator != locator or current_route.adapter is not source_adapter)
                 except Exception:
                     mapping_changed = True
-            if (current_resource != resource or current_version != version or not same_import_snapshot(current_import, import_row)
+            if (current_resource != resource or not same_version_file_snapshot(current_version, version)
+                    or not same_import_snapshot(current_import, import_row)
                     or mapping_changed):
                 result.update(resolution_status='stale', source_record_available=False,
                               content_availability='metadata-only')

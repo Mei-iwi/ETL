@@ -258,6 +258,33 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         return self.session.scalar(
             select(func.count()).select_from(MODELS[table]).filter_by(**filters)
         )
+
+    def source_version_writeback_receipt(self, source_resource_id, source_version_id, source_hash, *, namespace=None):
+        """Find an exact durable acknowledgement, never infer origin from IDs."""
+        model = MODELS['reconciliation_audit_jobs']
+        rows = self.session.scalars(select(model).where(
+            model.audit_type.in_(('SOURCE_CREATE', 'SOURCE_CREATE_VERSION')),
+            model.checkpoint['source_resource_id'].as_string() == source_resource_id,
+            model.checkpoint['source_version_id'].as_string() == source_version_id,
+            model.checkpoint['workflow'].as_string() == 'SOURCE_VERSION_COMMITTED',
+        ).limit(2)).all()
+        if len(rows) != 1:
+            return None
+        cp = rows[0].checkpoint or {}
+        if cp.get('source_hash', '').lower() != source_hash.lower():
+            return None
+        if namespace is not None and cp.get('source_namespace', 'postgresql:learning') != namespace:
+            return None
+        return dict(cp)
+
+    def pending_writeback_reconciliations(self, limit=20):
+        model = MODELS['reconciliation_audit_jobs']
+        return [self._dict(row) for row in self.session.scalars(select(model).where(
+            model.status.in_(('SOURCE_CREATE_APPLIED', 'SOURCE_VERSION_APPLIED', 'WRITEBACK_APPLIED', 'SOURCE_DELETE_APPLIED')),
+            model.checkpoint['reconciliation_required'].as_boolean().is_(True),
+            or_(model.checkpoint['master_reconciliation_status'].as_string().is_(None),
+                model.checkpoint['master_reconciliation_status'].as_string() != 'MASTER_RECONCILED'),
+        ).order_by(model.created_at).limit(limit))]
     #ham truy van chi tiet resource
     def get_resource_detail(self, resource_id: str) -> dict | None: 
         resource = self.session.scalar(

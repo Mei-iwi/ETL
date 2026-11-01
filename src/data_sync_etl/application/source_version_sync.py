@@ -7,6 +7,10 @@ from data_sync_etl.domain.source_ids import SourceLocator, source_identity_hash
 from data_sync_etl.domain.source_status import normalize_source_status
 
 _METADATA_BUCKET = '__SOURCE_METADATA_ONLY__'
+_SOURCE_PROCESSING_STATUSES = frozenset({
+    'UPLOADED', 'PENDING_PRE_REVIEW', 'QUEUED', 'PROCESSING',
+    'READY_FOR_REVIEW', 'FAILED', 'CANCELLED',
+})
 
 
 class SourceVersionSynchronizer:
@@ -29,7 +33,21 @@ class SourceVersionSynchronizer:
         for item in items:
             source_version_id = item.get('source_version_id')
             locator = self._version_identity(source, source_id, source_version_id)
-            lifecycle_status = normalize_source_status(item.get('source_lifecycle_status'))
+            receipt_reader = getattr(repo, 'source_version_writeback_receipt', None)
+            receipt = (receipt_reader(item.get('resource_id'), source_version_id, item.get('source_hash', ''),
+                                      namespace=locator.namespace)
+                       if callable(receipt_reader) else None)
+            raw_lifecycle_status = item.get('source_lifecycle_status')
+            lifecycle_status = normalize_source_status(raw_lifecycle_status)
+            if lifecycle_status is None and isinstance(raw_lifecycle_status, str) \
+                    and raw_lifecycle_status.strip().upper().replace('-', '_').replace(' ', '_') \
+                    in _SOURCE_PROCESSING_STATUSES:
+                # Only an acknowledged ETL upload may continue its local
+                # processing while SOURCE awaits review. External pending
+                # versions retain the default closed policy.
+                status_key = raw_lifecycle_status.strip().upper().replace('-', '_').replace(' ', '_')
+                lifecycle_status = ('DELETED' if status_key == 'CANCELLED' else
+                                    'UNREVIEWED' if receipt and status_key != 'FAILED' else 'PRIVATE')
             if lifecycle_status is None:
                 raise DomainError('BLOCKED_SOURCE_VERSION_STATUS')
             if (not isinstance(item.get('resource_id'), str) or not 1 <= len(item['resource_id']) <= 255
@@ -49,10 +67,63 @@ class SourceVersionSynchronizer:
             if len(row) > 1:
                 raise DomainError('SOURCE_VERSION_IDENTITY_COLLISION')
             existing = row[0] if row else None
+            unbound = None
+            if existing and not existing.get('target_version_id'):
+                if (existing.get('resource_id') not in {master_resource_id, item['resource_id']}
+                        or existing.get('source_version_number') != item.get('source_version_number')
+                        or existing.get('source_hash', '').lower() != source_hash):
+                    raise DomainError('SOURCE_VERSION_MUTATED')
+                # Legacy discovery can register the SOURCE key before the
+                # federated Master resource exists. Bind that exact inventory
+                # row rather than inserting a conflicting second identity.
+                unbound, existing = existing, None
+            source_identity = {
+                'source_id': source_id,
+                'backend': locator.backend,
+                'namespace': locator.namespace,
+                'source_resource_id': item['resource_id'],
+                'source_version_id': source_version_id,
+                'source_parent_version_id': item.get('parent_version_id'),
+                'identity_hash': version_hash,
+            }
+            upload_options = {}
+            if receipt:
+                manifest = receipt.get('source_file') or receipt
+                upload_options = {
+                    **(manifest.get('processing_preferences') or {}),
+                    'etl_source_upload': True,
+                    'source_filename': manifest.get('filename'),
+                }
             if existing:
                 target = repo.get('resource_versions', existing.get('target_version_id'))
                 options = (target or {}).get('processing_options') or {}
                 stored_identity = options.get('source_version_identity')
+                if target and upload_options and any(key not in options for key in upload_options):
+                    # Initial preferences precede auto-OCR. Later syncs must
+                    # not overwrite locally edited extraction options.
+                    options = {**upload_options, **options}
+                    repo.update('resource_versions', target['id'], {'processing_options': options})
+                legacy_identity_bootstrap = (
+                    target is not None
+                    and not isinstance(stored_identity, dict)
+                    and existing.get('source_system') == source_id
+                    and existing.get('source_version_id') == source_version_id
+                    and existing.get('resource_id') == master_resource_id
+                    and existing.get('source_version_number') == item['source_version_number']
+                    and existing.get('source_hash', '').lower() == source_hash
+                    and target.get('resource_id') == master_resource_id
+                    and target.get('version_number') == item['source_version_number']
+                    and target.get('source_hash', '').lower() == source_hash
+                )
+                if legacy_identity_bootstrap:
+                    repo.update('resource_versions', target['id'], {
+                        'processing_options': {
+                            **options,
+                            'content_availability': options.get('content_availability', 'METADATA_ONLY'),
+                            'source_version_identity': source_identity,
+                        },
+                    })
+                    stored_identity = source_identity
                 if (existing['resource_id'] != master_resource_id
                         or existing['source_version_number'] != item['source_version_number']
                         or existing['source_hash'].lower() != source_hash
@@ -69,12 +140,28 @@ class SourceVersionSynchronizer:
                     'source_updated_at': item['updated_at'],
                     'updated_at': now(),
                 }
-                restored = existing.get('last_error_code') == 'SOURCE_VERSION_MISSING'
+                # The immutable identity above was revalidated against SOURCE.
+                # A legacy worker may have mistaken the new Master ID for a
+                # changed SOURCE resource. Restore only after that proof, and
+                # preserve any completed extraction/index generation.
+                restored = existing.get('last_error_code') in {
+                    'SOURCE_VERSION_MISSING', 'SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING'}
+                ready = options.get('content_availability') == 'CONTENT_READY'
+                changed = any(
+                    existing.get(name) != value
+                    for name, value in fields.items()
+                    if name != 'updated_at'
+                )
                 if restored:
-                    fields.update(status='METADATA_ONLY', last_error_code='SOURCE_METADATA_ONLY')
+                    fields.update(status='IMPORTED' if ready else 'METADATA_ONLY',
+                                  last_error_code=None if ready else 'SOURCE_METADATA_ONLY')
                 repo.update('source_file_imports', existing['id'], fields)
                 if restored and target:
-                    repo.update('resource_versions', target['id'], {'lifecycle_status': 'METADATA_ONLY'})
+                    if target.get('lifecycle_status') == 'REVOKED':
+                        repo.update('resource_versions', target['id'], {
+                            'lifecycle_status': 'INGESTED' if ready else 'METADATA_ONLY'})
+                    counts['updated'] += 1
+                elif changed:
                     counts['updated'] += 1
                 else:
                     counts['unchanged'] += 1
@@ -97,15 +184,8 @@ class SourceVersionSynchronizer:
             key = sha256(f'{source_id}\0{source_version_id}'.encode()).hexdigest()
             options = {
                 'content_availability': 'METADATA_ONLY',
-                'source_version_identity': {
-                    'source_id': source_id,
-                    'backend': locator.backend,
-                    'namespace': locator.namespace,
-                    'source_resource_id': item['resource_id'],
-                    'source_version_id': source_version_id,
-                    'source_parent_version_id': parent_id,
-                    'identity_hash': version_hash,
-                },
+                'source_version_identity': source_identity,
+                **upload_options,
             }
             version = repo.insert('resource_versions', {
                 'id': new_id(), 'resource_id': master_resource_id,
@@ -118,7 +198,7 @@ class SourceVersionSynchronizer:
                 'source_file_size': item.get('source_file_size'),
                 'processing_options': options,
             })
-            repo.insert('source_file_imports', {
+            import_values = {
                 'id': new_id(), 'source_system': source_id,
                 'source_version_id': source_version_id, 'resource_id': master_resource_id,
                 'resource_title': item.get('resource_title'),
@@ -133,7 +213,12 @@ class SourceVersionSynchronizer:
                 'source_hash': source_hash, 'source_file_size': item.get('source_file_size'),
                 'status': 'METADATA_ONLY', 'last_error_code': 'SOURCE_METADATA_ONLY',
                 'target_version_id': version['id'],
-            })
+            }
+            if unbound:
+                import_values.pop('id')
+                repo.update('source_file_imports', unbound['id'], import_values)
+            else:
+                repo.insert('source_file_imports', import_values)
             counts['inserted'] += 1
         return counts
 

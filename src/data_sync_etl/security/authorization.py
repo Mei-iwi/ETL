@@ -54,6 +54,11 @@ def authorize(request, principal):
         return
     if path == '/api/v1/auth/profile' and method in ('GET', 'PATCH'):
         return  # Endpoint resolves only this session's explicit MASTER -> Mongo identity.
+    if path == '/openapi.json' and method in ('GET', 'HEAD'):
+        # Keep the schema behind the authenticated gateway, but allow any
+        # authenticated user to load Swagger UI.  Route-level permissions still
+        # protect every operation described by the schema.
+        return
     catalogs = ('/api/v1/subjects', '/api/v1/providers', '/api/v1/resource-types', '/api/v1/grade-levels')
     if method == 'GET' and (path in catalogs or path in ('/api/v1/search/model-status', '/api/v1/resources')):
         return
@@ -62,9 +67,15 @@ def authorize(request, principal):
         return  # SearchAccess verifies explicit resource grants and eligibility.
     if method == 'GET' and re.fullmatch(r'/api/v1/resources/[^/]+/(source-resolution|open)', path):
         return  # SourceResolutionService validates the same published metadata policy as search.
-    if ('/source-writeback' in path or path == '/api/v1/source-writeback/status'):
+    if ('/source-writeback' in path or '/source-delete' in path
+            or '/source-versions' in path
+            or path == '/api/v1/source-writeback/status'):
         # Only independently granted operators may reach the service. The
         # service additionally requires a revocable SOURCE write grant.
+        if principal.role == 'OPERATOR' and 'sync' in principal.permissions:
+            return
+        raise AuthError('AUTH_FORBIDDEN', 403)
+    if path == '/api/v1/source/resources' and method == 'POST':
         if principal.role == 'OPERATOR' and 'sync' in principal.permissions:
             return
         raise AuthError('AUTH_FORBIDDEN', 403)

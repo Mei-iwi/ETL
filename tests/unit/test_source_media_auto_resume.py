@@ -104,7 +104,11 @@ def test_worker_startup_does_not_resume_external_file_processing(metadata_media,
 
 def test_manual_job_is_linked_instead_of_created_again(metadata_media):
     c, _, before, _ = metadata_media
-    with pytest.raises(Exception, match='CONTENT_NOT_AVAILABLE'):
+    # The process command now reaches the SOURCE capability gate for a
+    # METADATA_ONLY version.  This fixture intentionally has no content grant,
+    # so it must fail closed there rather than being rejected solely by the
+    # Master lifecycle marker.
+    with pytest.raises(Exception, match='SOURCE_CAPABILITY_BLOCKED'):
         c.process_version.run(before['target_version_id'])
     assert c.source_file_worker.once('automatic-worker') is False
     with c.uow() as repo:

@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+from functools import wraps
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +14,51 @@ from alembic import command
 from data_sync_etl.composition import Container
 from data_sync_etl.config import Settings
 from data_sync_etl.db.session import make_engine
+
+
+def _install_testclient_compatibility() -> None:
+    """Keep the test-only client-address contract across Starlette releases.
+
+    Starlette 0.41 removed ``TestClient(..., client=...)`` while the
+    application's boundary tests intentionally set the ASGI peer address.
+    The compatibility shim is limited to pytest collection and wraps the
+    in-process ASGI app so ``scope['client']`` retains the requested value.
+    No production module is changed.
+    """
+    from inspect import signature
+
+    from fastapi.testclient import TestClient
+
+    if "client" in signature(TestClient.__init__).parameters:
+        return
+    if getattr(TestClient, "_etl_client_compat", False):
+        return
+
+    original_init = TestClient.__init__
+
+    @wraps(original_init)
+    def compatible_init(self, app, *args, client=None, **kwargs):
+        original_init(self, app, *args, **kwargs)
+        if client is None:
+            return
+        transport = getattr(self, "_transport", None)
+        if transport is None:
+            return
+        downstream = transport.app
+
+        async def with_client(scope, receive, send):
+            if "client" in scope:
+                scope = dict(scope)
+                scope["client"] = client
+            await downstream(scope, receive, send)
+
+        transport.app = with_client
+
+    TestClient.__init__ = compatible_init
+    TestClient._etl_client_compat = True
+
+
+_install_testclient_compatibility()
 
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))

@@ -50,6 +50,55 @@ def test_http_writeback_requires_login_csrf_two_steps_and_strict_fields(configur
             assert secret not in result.text
 
 
+def test_source_create_endpoint_is_explicit_and_fail_closed_until_contract(configured):
+    c, password, _ = configured
+    with make_client(configured) as api:
+        assert login(api, password).status_code == 200
+        response = api.post(
+            '/api/v1/source/resources',
+            headers=csrf(api),
+            json={
+                'provider_id': 'provider-1', 'resource_type_id': 'type-1',
+                'title': 'Metadata only', 'publication_status': 'DRAFT',
+                'idempotency_key': 'create-api-01',
+            },
+        )
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] in {
+            'SOURCE_CREATE_DISABLED', 'SOURCE_CREATE_CONTRACT_UNAVAILABLE',
+        }
+        with c.uow() as repo:
+            assert repo.find('reconciliation_audit_jobs', {'audit_type': 'SOURCE_CREATE'}) == []
+
+
+def test_source_version_and_delete_endpoints_fail_closed_without_owner_contract(configured):
+    c, password, _ = configured
+    with make_client(configured) as api:
+        assert login(api, password).status_code == 200
+        version = api.post(
+            '/api/v1/resources/resource-1/source-versions',
+            headers=csrf(api),
+            files={'file': ('lesson.pdf', b'%PDF-source', 'application/pdf')},
+            data={'idempotency_key': 'version-api-01'},
+        )
+        assert version.status_code == 409
+        assert version.json()['detail']['code'] in {
+            'SOURCE_VERSION_CREATE_DISABLED', 'SOURCE_VERSION_CONTRACT_UNAVAILABLE',
+        }
+        delete = api.post(
+            '/api/v1/resources/resource-1/source-delete',
+            headers=csrf(api),
+            json={'expected_source_state_hash': 'a' * 64, 'idempotency_key': 'delete-api-01'},
+        )
+        assert delete.status_code == 409
+        assert delete.json()['detail']['code'] in {
+            'SOURCE_DELETE_DISABLED', 'SOURCE_DELETE_CONTRACT_UNAVAILABLE',
+        }
+        with c.uow() as repo:
+            assert repo.find('reconciliation_audit_jobs', {'audit_type': 'SOURCE_CREATE_VERSION'}) == []
+            assert repo.find('reconciliation_audit_jobs', {'audit_type': 'SOURCE_DELETE'}) == []
+
+
 def test_viewer_can_resolve_published_metadata_but_cannot_write(master_auth, monkeypatch):
     c, password, _ = master_auth
     c.settings.source_reference_enabled = True

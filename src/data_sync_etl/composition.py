@@ -1,5 +1,6 @@
 import os
 from dataclasses import replace
+from pathlib import Path
 
 from pymongo import MongoClient
 
@@ -29,13 +30,28 @@ from data_sync_etl.adapters.persistence.subject_reader import SQLAlchemySubjectR
 from data_sync_etl.adapters.source.json_fixture import JsonFixtureSourceAdapter
 from data_sync_etl.adapters.source.mongo_metadata import MongoMetadataSourceReader
 from data_sync_etl.adapters.source.postgresql import PostgreSQLSourceAdapter
+from data_sync_etl.adapters.source.postgresql_version_writeback import (
+    DisabledSourceVersionWriter,
+    PostgreSQLSourceVersionWriter,
+)
+from data_sync_etl.adapters.source.postgresql_writeback import PostgreSQLSourceMetadataWriter
 from data_sync_etl.adapters.source.registry import ConfiguredSourceRegistry
 from data_sync_etl.adapters.source.writeback import DisabledSourceMetadataWriter
 from data_sync_etl.adapters.storage.evaluation_store import EvaluationFileStore
 from data_sync_etl.adapters.storage.local import LocalFilesystemStorageAdapter
+from data_sync_etl.adapters.storage.object import (
+    S3CompatibleObjectStorageAdapter,
+    _read_secret,
+    storage_from_settings,
+)
 from data_sync_etl.adapters.storage.source_dispatcher import SourceFileDispatcher
 from data_sync_etl.adapters.storage.source_google_drive import SourceGoogleDriveFileReader
 from data_sync_etl.adapters.storage.source_local import SourceLocalFileReader
+from data_sync_etl.adapters.storage.source_object import SourceObjectStorageReader
+from data_sync_etl.adapters.storage.source_object_writer import (
+    DisabledSourceObjectStorageWriter,
+    SourceObjectStorageWriter,
+)
 from data_sync_etl.adapters.storage.source_temporary import SourceTemporaryFiles
 from data_sync_etl.application.auto_sync import AutoSyncCoordinator
 from data_sync_etl.application.bilingual import BilingualService
@@ -67,13 +83,17 @@ from data_sync_etl.application.reconciliation_engine import ReconciliationEngine
 from data_sync_etl.application.retry_processing_job import RetryProcessingJob
 from data_sync_etl.application.search import SearchService
 from data_sync_etl.application.semantic import SemanticService
+from data_sync_etl.application.source_create_staging import SourceCreateStager
 from data_sync_etl.application.source_file_import import SourceFileImportService
 from data_sync_etl.application.source_file_resolver import SourceFileResolver
 from data_sync_etl.application.source_metadata_writeback import SourceMetadataWriteBackService
 from data_sync_etl.application.source_mongo_metadata_sync import SourceMongoMetadataSync
 from data_sync_etl.application.source_open import SourceOpenResolver
 from data_sync_etl.application.source_resolution import SourceResolutionService
+from data_sync_etl.application.source_resource_create import SourceResourceCreateService
+from data_sync_etl.application.source_resource_delete import SourceResourceDeleteService
 from data_sync_etl.application.source_router import SourceRouter
+from data_sync_etl.application.source_version_create import SourceVersionCreateService
 from data_sync_etl.application.sync import MasterSync
 from data_sync_etl.application.update_resource_metadata import UpdateResourceMetadataUseCase
 from data_sync_etl.config import Settings
@@ -85,6 +105,20 @@ from data_sync_etl.domain.subject import GradeBasedSubjectRecommendationPolicy
 from data_sync_etl.workers.master_sync import MasterSyncWorker
 from data_sync_etl.workers.ocr import OCRWorker
 from data_sync_etl.workers.source_file_import import SourceFileImportWorker
+from data_sync_etl.workers.source_writeback import SourceWriteBackWorker
+
+
+def _source_writer_database_url(settings):
+    """Resolve the optional writer URL without ever logging the secret."""
+    if settings.source_write_database_url_file is not None:
+        try:
+            value = Path(settings.source_write_database_url_file).read_text(encoding='utf-8').strip()
+        except OSError as exc:
+            raise DomainError('SOURCE_WRITE_DATABASE_URL_UNAVAILABLE') from exc
+        if not value:
+            raise DomainError('SOURCE_WRITE_DATABASE_URL_UNAVAILABLE')
+        return value
+    return settings.source_write_database_url
 
 
 def create_source(settings):
@@ -154,6 +188,34 @@ def create_ocr_engine(settings):
     raise DomainError("BLOCKED_OCR_RUNTIME: requested OCR engine is not configured")
 
 
+def create_source_object_reader(settings):
+    if settings.source_file_storage_mode != 'object':
+        return None
+    endpoint = settings.source_file_storage_endpoint_url or settings.etl_file_storage_endpoint_url
+    region = settings.source_file_storage_region or settings.etl_file_storage_region
+    access_file = (settings.source_file_storage_access_key_id_file
+                   or settings.etl_file_storage_access_key_id_file)
+    secret_file = (settings.source_file_storage_secret_access_key_file
+                   or settings.etl_file_storage_secret_access_key_file)
+    access = _read_secret(access_file, settings.source_file_storage_access_key_id
+                          or settings.etl_file_storage_access_key_id)
+    secret = _read_secret(secret_file, settings.source_file_storage_secret_access_key
+                          or settings.etl_file_storage_secret_access_key)
+    cloud = S3CompatibleObjectStorageAdapter(
+        provider=settings.source_file_storage_provider,
+        provider_id=settings.source_file_storage_provider_id,
+        endpoint_url=endpoint or '', region=region or '',
+        bucket=settings.source_file_storage_bucket or '',
+        access_key_id=access, secret_access_key=secret,
+        force_path_style=settings.source_file_storage_force_path_style,
+        signature_version=settings.source_file_storage_signature_version,
+        connect_timeout=settings.source_file_storage_connect_timeout_seconds,
+        read_timeout=settings.source_file_storage_read_timeout_seconds,
+    )
+    cloud.validate_config()
+    return SourceObjectStorageReader(cloud, read_url_ttl_seconds=settings.source_file_storage_read_url_ttl_seconds)
+
+
 class Container:
     def close(self):
         if hasattr(self, 'reconciliation_jobs'):
@@ -165,6 +227,17 @@ class Container:
         if self.source_mongo_client is not None and self.source_mongo_client is not self.mongo_client:
             self.source_mongo_client.close()
         self.engine.dispose()
+
+    def _reconcile_source_create(self):
+        """Run the normal SOURCE -> MASTER resources sync after CREATE."""
+        if self.settings.source_federation_enabled:
+            registrations = tuple(item for item in self.source_registry.registrations() if item.enabled)
+            if not registrations:
+                raise DomainError('SOURCE_REGISTRY_EMPTY')
+            for registration in registrations:
+                self.sync.run('resources', full=False, source_id=registration.source_id)
+            return
+        self.sync.run('resources', full=False)
 
     def __init__(self, settings=None, engine=None, documents=None, *, source_registry=None, source_adapters=None):
         self.settings = settings or Settings()
@@ -214,14 +287,80 @@ class Container:
             self.uow, self.source, self.settings, router=self.source_router)
         self.source_open = SourceOpenResolver(
             self.uow, self.source_registry, self.source_router, self.source_resolution)
-        # A real SOURCE writer is intentionally not constructed by production
-        # composition. Tests/demo may inject an isolated writer capability.
+        # A real writer is constructed only from an explicit, owner-supplied
+        # contract and separate RW URL.  The default remains fail-closed.
         self.source_metadata_writer = DisabledSourceMetadataWriter()
+        if (self.settings.source_metadata_writeback_enabled
+                and self.settings.source_metadata_writer_mode == 'postgresql'):
+            writer_url = _source_writer_database_url(self.settings)
+            if not writer_url or not self.settings.source_write_contract_file:
+                raise DomainError('SOURCE_WRITEBACK_CONTRACT_UNAVAILABLE')
+            self.source_metadata_writer = PostgreSQLSourceMetadataWriter(
+                writer_url,
+                self.settings.source_write_contract_file,
+                namespace=self.settings.source_namespace,
+                connect_timeout_seconds=self.settings.source_write_connect_timeout_seconds,
+                statement_timeout_seconds=self.settings.source_write_statement_timeout_seconds,
+                lock_timeout_seconds=self.settings.source_write_lock_timeout_seconds,
+                allowed_actions=self.settings.source_write_allowed_actions,
+            )
+        writer_permission = getattr(self.source_metadata_writer, 'allows', None)
         self.source_writeback = SourceMetadataWriteBackService(
+            self.uow, self.source_metadata_writer, self.settings, permission=writer_permission)
+        self.source_resource_delete = SourceResourceDeleteService(
             self.uow, self.source_metadata_writer, self.settings)
+        self.source_version_writer = DisabledSourceVersionWriter()
+        if self.settings.source_version_writeback_enabled:
+            writer_url = _source_writer_database_url(self.settings)
+            if not writer_url or not self.settings.source_version_write_contract_file:
+                raise DomainError('SOURCE_VERSION_WRITE_CONTRACT_UNAVAILABLE')
+            self.source_version_writer = PostgreSQLSourceVersionWriter(
+                writer_url, self.settings.source_version_write_contract_file,
+                namespace=self.settings.source_namespace,
+                connect_timeout_seconds=self.settings.source_write_connect_timeout_seconds,
+                statement_timeout_seconds=self.settings.source_write_statement_timeout_seconds,
+                lock_timeout_seconds=self.settings.source_write_lock_timeout_seconds,
+                allowed_actions=self.settings.source_version_write_allowed_actions,
+            )
+        self.source_object_storage_writer = DisabledSourceObjectStorageWriter()
+        if self.settings.source_storage_write_enabled:
+            cloud = S3CompatibleObjectStorageAdapter(
+                provider=self.settings.source_storage_write_provider,
+                provider_id=self.settings.source_storage_write_provider_id,
+                endpoint_url=self.settings.source_storage_write_endpoint_url or '',
+                region=self.settings.source_storage_write_region or '',
+                bucket=self.settings.source_storage_write_bucket or '',
+                access_key_id=_read_secret(
+                    self.settings.source_storage_write_access_key_id_file,
+                    self.settings.source_storage_write_access_key_id),
+                secret_access_key=_read_secret(
+                    self.settings.source_storage_write_secret_access_key_file,
+                    self.settings.source_storage_write_secret_access_key),
+                force_path_style=self.settings.source_storage_write_force_path_style,
+                signature_version=self.settings.source_storage_write_signature_version,
+                connect_timeout=self.settings.source_storage_write_connect_timeout_seconds,
+                read_timeout=self.settings.source_storage_write_read_timeout_seconds,
+                allow_insecure_local=(self.settings.app_environment in ('development', 'test')),
+            )
+            cloud.validate_config()
+            self.source_object_storage_writer = SourceObjectStorageWriter(
+                cloud, self.settings.source_storage_write_contract_file)
+        self.source_version_create = SourceVersionCreateService(
+            self.uow, self.source_version_writer, self.source_object_storage_writer, self.settings)
+        source_create_root = (self.settings.source_temp_root
+                              or (self.settings.storage_root / '.source-create-staging'))
+        self.source_create_stager = SourceCreateStager(
+            source_create_root, max_size_bytes=self.settings.media_max_size_bytes)
+        self.source_resource_create = SourceResourceCreateService(
+            self.uow, self.source_metadata_writer, self.settings,
+            version_service=self.source_version_create, stager=self.source_create_stager)
+        self.source_writeback_worker = SourceWriteBackWorker(
+            self.source_writeback, self.source_resource_create, self.source_resource_delete,
+            self.source_version_create)
         self.resource_versions = ListResourceVersions(self.uow)
         self.processing_job_detail = GetProcessingJob(self.uow)
-        self.storage = LocalFilesystemStorageAdapter(self.settings.storage_root)
+        cloud_storage = storage_from_settings(self.settings)
+        self.storage = cloud_storage or LocalFilesystemStorageAdapter(self.settings.storage_root)
         self.format_registry = FormatValidatorRegistry(
             media_probe=lambda path, extension: probe(path, self.settings, extension),
             media_max_size_bytes=self.settings.media_max_size_bytes)
@@ -248,6 +387,7 @@ class Container:
                                skip_shared_metadata_validation=self.settings.mongo_metadata_mode == 'shared',
                                source_registry=self.source_registry,
                                federation_enabled=self.settings.source_federation_enabled)
+        self.source_writeback_worker.reconcile_source = self._reconcile_source_create
         self.reconcile_master = ReconcileMaster(self.source, self.uow,
             batch_size=min(1000, self.settings.sync_batch_size),
             max_affected=self.settings.reconcile_max_affected, max_ratio=self.settings.reconcile_max_ratio,
@@ -257,6 +397,7 @@ class Container:
             self.uow,
             source_adapter=self.source,
             storage_root=self.settings.storage_root,
+            storage=self.storage,
             max_ratio=self.settings.reconcile_max_ratio,
             batch_size=min(1000, self.settings.sync_batch_size),
         )
@@ -446,10 +587,22 @@ class Container:
             self.uow,
             max_manual_retries=self.settings.processing_manual_retry_limit,
         )
-        self.source_files = SourceLocalFileReader(self.settings.source_file_storage_root, self.storage.root)
-        if self.settings.source_drive_enabled or self.settings.source_drive_buckets or self.settings.source_local_buckets:
-            self.source_files = SourceFileDispatcher(self.source_files, SourceGoogleDriveFileReader(self.settings),
-                                                     local_buckets=self.settings.source_local_buckets)
+        # SOURCE fixture roots must remain distinct from ETL-managed storage;
+        # cloud adapters intentionally have no local `root` attribute.
+        source_destination_root = (self.storage.root if getattr(self.storage, 'root', None) is not None
+                                   else self.settings.storage_root)
+        self.source_files = SourceLocalFileReader(self.settings.source_file_storage_root,
+                                                  source_destination_root)
+        source_object = create_source_object_reader(self.settings)
+        if (source_object is not None or self.settings.source_drive_enabled
+                or self.settings.source_drive_buckets or self.settings.source_local_buckets):
+            self.source_files = SourceFileDispatcher(
+                self.source_files, SourceGoogleDriveFileReader(self.settings),
+                object_reader=source_object,
+                local_buckets=self.settings.source_local_buckets,
+                object_buckets=((self.settings.source_file_storage_bucket,)
+                                if source_object is not None else ()),
+            )
         self.source_open.file_sources = self.source_files
         self.source_file_import = SourceFileImportService(
             self.source, self.source_files, self.storage, self.uow,
@@ -462,9 +615,11 @@ class Container:
         )
         self.source_resolver = SourceFileResolver(
             self.uow, self.source, self.source_files, self.storage, self.source_file_import.formats,
-            self.settings, SourceTemporaryFiles(self.settings, self.storage.root), self.source_registry,
+            self.settings, SourceTemporaryFiles(self.settings, source_destination_root), self.source_registry,
         )
         self.source_file_import.resolver = self.source_resolver
+        self.source_resolution.source_status_policy = self.source_resolver._status_allowed
+        self.bilingual.source_resolver = self.source_resolver
         self.search.source_content_authorizer = self.source_resolver.derived_index_authorized
         self.indexing.source_content_authorizer = self.source_resolver.derived_index_authorized
         self.reconciliation_engine.source_resolver = self.source_resolver

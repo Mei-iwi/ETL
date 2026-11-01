@@ -23,5 +23,13 @@ export async function saveProcessingPreferences(versionId: string, value: Proces
     const response = await fetch(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/processing-options`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
     })
-    if (!response.ok) throw new Error('Không thể lưu tùy chọn xử lý. Hãy mở trang xử lý để thử lại.')
+    if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        const detail = body?.detail
+        const code = typeof detail === 'string' ? detail : detail?.code
+        if (code === 'PROCESSING_BUSY' || code === 'EXTRACTION_OPTIONS_LOCKED_USE_NEW_VERSION') {
+            throw new Error('Học liệu đã bắt đầu xử lý với tùy chọn khác. Hãy kiểm tra trạng thái xử lý trước khi thay đổi.')
+        }
+        throw new Error(detail?.message ?? `Không thể lưu tùy chọn xử lý${code ? ` (${code})` : ''}.`)
+    }
 }

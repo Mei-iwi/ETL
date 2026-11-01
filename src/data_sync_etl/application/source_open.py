@@ -3,7 +3,11 @@
 from ipaddress import ip_address
 from urllib.parse import parse_qsl, urlsplit
 
-from data_sync_etl.application.source_resolution import SourceResolutionError, same_import_snapshot
+from data_sync_etl.application.source_resolution import (
+    SourceResolutionError,
+    same_import_snapshot,
+    same_version_file_snapshot,
+)
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.metadata_search import metadata_allowed
 from data_sync_etl.domain.resource_deletion import resource_deleted
@@ -25,28 +29,29 @@ class SourceOpenResolver:
         try:
             parsed = urlsplit(url)
             host = (parsed.hostname or '').lower().rstrip('.')
+            query_keys = {key.casefold() for key, _ in parse_qsl(parsed.query, keep_blank_values=True)}
+            signed_s3 = ({'x-amz-algorithm', 'x-amz-credential', 'x-amz-date',
+                          'x-amz-expires', 'x-amz-signedheaders', 'x-amz-signature'}
+                         <= query_keys and query_keys <= {
+                             'x-amz-algorithm', 'x-amz-credential', 'x-amz-date',
+                             'x-amz-expires', 'x-amz-signedheaders', 'x-amz-signature',
+                             'x-amz-security-token', 'x-amz-content-sha256',
+                         })
+            unsafe_query = any(key.casefold() in {
+                'token', 'access_token', 'auth', 'authorization', 'signature', 'sig',
+                'credential', 'key', 'jwt', 'session', 'authkey', 'resourcekey'}
+                for key, _ in parse_qsl(parsed.query, keep_blank_values=True))
             if (parsed.scheme != 'https' or not host or parsed.username or parsed.password
                     or parsed.port not in (None, 443) or parsed.fragment or host not in hosts
-                    or any(key.casefold() in {'token', 'access_token', 'auth', 'authorization',
-                                              'signature', 'sig', 'credential', 'key', 'jwt', 'session',
-                                              'authkey', 'resourcekey'}
-                           for key, _ in parse_qsl(parsed.query, keep_blank_values=True))):
+                    or (unsafe_query and not signed_s3)):
                 return False
+        except ValueError:
+            return False
+        # IP literals are not trusted viewer hosts; registered DNS names are.
+        try:
             ip_address(host)
         except ValueError:
-            # A non-IP hostname is expected; malformed ports/URLs fail closed.
-            try:
-                parsed = urlsplit(url)
-                host = (parsed.hostname or '').lower().rstrip('.')
-                return (parsed.scheme == 'https' and bool(host) and not parsed.username
-                        and not parsed.password and parsed.port in (None, 443)
-                        and not parsed.fragment and host in hosts
-                        and not any(key.casefold() in {'token', 'access_token', 'auth', 'authorization',
-                                                       'signature', 'sig', 'credential', 'key', 'jwt', 'session',
-                                                       'authkey', 'resourcekey'}
-                                    for key, _ in parse_qsl(parsed.query, keep_blank_values=True)))
-            except ValueError:
-                return False
+            return True
         return False
 
     def resolve(self, resource_id, access, version_id=None):
@@ -84,9 +89,12 @@ class SourceOpenResolver:
                 return result
             imported = imports[0]
             imported_status = normalize_source_status(imported.get('source_lifecycle_status'))
+            uploaded = bool((version.get('processing_options') or {}).get('etl_source_upload')
+                            and imported_status == 'UNREVIEWED'
+                            and resolved.get('source_record_available'))
             if (imported_status in {'PRIVATE', 'REJECTED', 'DELETED'}
-                    or not source_status_allowed(imported.get('source_lifecycle_status'),
-                                                 self.source_resolution.settings.source_file_allowed_statuses)):
+                    or not (uploaded or source_status_allowed(imported.get('source_lifecycle_status'),
+                                                              self.source_resolution.settings.source_file_allowed_statuses))):
                 raise SourceResolutionError('BLOCKED_SOURCE_POLICY', 403)
             try:
                 route = self.router.route_resource(resource)
@@ -139,6 +147,7 @@ class SourceOpenResolver:
                                 if source_version.get('source_auth_required') else 'METADATA_ONLY')
             return result
         list_refs = getattr(adapter, 'list_file_references', None)
+        generated_hosts = ()
         if callable(list_refs):
             try:
                 raw_files = list_refs(source_version_id)
@@ -162,6 +171,12 @@ class SourceOpenResolver:
             if viewer is None:
                 raw_files = []
             else:
+                host_lookup = getattr(self.file_sources, 'viewer_hosts', None)
+                if callable(host_lookup):
+                    generated_hosts = host_lookup(bucket)
+                filename = (version.get('processing_options') or {}).get('source_filename')
+                if filename:
+                    viewer = {**viewer, 'file_name': filename}
                 raw_files = [{
                     'source_resource_id': route.locator.source_record_id,
                     'source_version_id': source_version_id,
@@ -171,7 +186,7 @@ class SourceOpenResolver:
         if not isinstance(raw_files, (list, tuple)) or len(raw_files) > 100:
             result['status'] = 'SOURCE_OPEN_UNSUPPORTED'
             return result
-        hosts = set(registration.viewer_hosts)
+        hosts = set(registration.viewer_hosts) | set(generated_hosts)
         files = []
         for raw in raw_files:
             if not isinstance(raw, dict):
@@ -223,6 +238,7 @@ class SourceOpenResolver:
                 or current_source_version.get('resource_id') != route.locator.source_record_id
                 or current_source_version.get('source_version_number') != version.get('version_number')
                 or current_source_version.get('source_hash') != source_version.get('source_hash')
+                or current_source_version.get('source_lifecycle_status') != source_version.get('source_lifecycle_status')
                 or not current_source_version.get('resource_active', True)
                 or current_source_version.get('resource_deleted_at') is not None
                 or current_source_version.get('resource_publication_status', 'PUBLISHED') != 'PUBLISHED'):
@@ -238,7 +254,7 @@ class SourceOpenResolver:
             except Exception:
                 current_route = None
             if (not metadata_allowed(current, current_version, access) or current != resource
-                    or current_version != version or len(current_imports) != 1
+                    or not same_version_file_snapshot(current_version, version) or len(current_imports) != 1
                     or not same_import_snapshot(current_imports[0], imported) or current_route is None
                     or current_route.locator != route.locator or current_route.adapter is not adapter):
                 result.update(status='VERSION_STALE', files=[])

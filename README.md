@@ -191,7 +191,17 @@ SOURCE_REFERENCE_ENABLED=true
 SOURCE_TEMPORARY_FILES_ENABLED=false
 SOURCE_FILE_STORAGE_ROOT=D:/etl/source
 SOURCE_TEMP_ROOT=D:/etl/source-temp
-STORAGE_ROOT=D:/etl/storage
+# ETL_MANAGED originals (production): private object storage, never a local
+# primary file store.  The local STORAGE_ROOT is fixture-only and deprecated.
+ETL_FILE_STORAGE_MODE=object
+ETL_FILE_STORAGE_PROVIDER=neon
+ETL_FILE_STORAGE_ENDPOINT_URL=https://object-storage.example.invalid
+ETL_FILE_STORAGE_REGION=us-east-1
+ETL_FILE_STORAGE_BUCKET=etl-learning-resources
+ETL_FILE_STORAGE_PROVIDER_ID=etl-cloud-current
+ETL_FILE_STORAGE_ACCESS_KEY_ID_FILE=/run/secrets/file_storage_access_key
+ETL_FILE_STORAGE_SECRET_ACCESS_KEY_FILE=/run/secrets/file_storage_secret_key
+# STORAGE_ROOT=D:/etl/storage
 OCR_ENGINE=tesseract
 TESSERACT_PATH="C:/Program Files/Tesseract-OCR/tesseract.exe"
 TESSERACT_LANGUAGES=vie+eng
@@ -488,6 +498,15 @@ CONNECTIONS_FILE=D:/etl/private/connections.json
 MODEL_DIR=D:/etl/models/bge-m3
 MODEL_MANIFEST_FILE=D:/etl/models/bge-m3/etl-model-manifest.json
 SOURCE_LOCAL_DIR=D:/etl/source
+# SOURCE_LOCAL_DIR is a read-only SOURCE fixture mount, not ETL-managed storage.
+ETL_FILE_STORAGE_MODE=object
+ETL_FILE_STORAGE_PROVIDER=neon
+ETL_FILE_STORAGE_ENDPOINT_URL=https://object-storage.example.invalid
+ETL_FILE_STORAGE_REGION=us-east-1
+ETL_FILE_STORAGE_BUCKET=etl-learning-resources
+ETL_FILE_STORAGE_PROVIDER_ID=etl-cloud-current
+ETL_FILE_STORAGE_ACCESS_KEY_ID_FILE=/run/secrets/file_storage_access_key
+ETL_FILE_STORAGE_SECRET_ACCESS_KEY_FILE=/run/secrets/file_storage_secret_key
 INDEX_EMBEDDING_MODEL_ID=BAAI/bge-m3
 INDEX_EMBEDDING_MODEL_VERSION=5617a9f61b028005a4858fdac845db406aefb181
 INDEX_EMBEDDING_DIMENSION=1024
@@ -1144,6 +1163,43 @@ allowlist and are never replaced by an ETL download/proxy URL. Production writeb
 remote search remain disabled without an explicit SOURCE contract.
 
 See [the current architecture, migration governance findings, and SOURCE federation readiness](SOURCE_FEDERATION_READINESS.md). Multi-source resource/version metadata sync is feature-gated and uses existing MASTER identity columns, versions/imports, checkpoints, and reconciliation audit tables; SOURCE registrations are server configuration, not database rows. A fail-closed open-at-SOURCE API and frontend action accept only per-source allowlisted HTTPS viewer links. Production writeback remains disabled; real PostgreSQL/Mongo/API viewer integration, physical SOURCE acceptance, and migration-governance approval remain incomplete.
+
+## Object storage and controlled SOURCE writeback
+
+ETL-managed originals are selected with `ETL_FILE_STORAGE_MODE=object` and the
+provider-neutral variables in `.env.example` / `deploy/docker.env.example`.
+The same SigV4 adapter supports Neon Object Storage, Cloudflare R2, AWS S3 and
+Supabase S3-compatible endpoints; credentials are injected through secret files.
+The bucket remains private and signed URLs are issued only during an authorized
+open request. `SOURCE_EXTERNAL` remains metadata-only: ETL never copies its
+original bytes to local disk or ETL cloud storage.
+
+For a SOURCE file stored in Neon/R2/S3, enable the separate read-only SOURCE
+reader with `SOURCE_FILE_STORAGE_MODE=object` and set its explicit bucket (for
+example `SOURCE_FILE_STORAGE_BUCKET=assets`). The SOURCE database locator must
+match the object exactly (`storage_bucket` + `storage_object_key`), while the
+reader reuses the endpoint/region/credentials only when the same private
+provider is intentionally shared. The resolver verifies size, revision and
+SHA-256 in bounded memory before OCR/indexing; it never persists the original.
+The current deployment mounts the access/secret files at the paths configured
+by `SOURCE_FILE_STORAGE_ACCESS_KEY_ID_FILE` and
+`SOURCE_FILE_STORAGE_SECRET_ACCESS_KEY_FILE`.
+For embedded or external viewing, the SOURCE registration must also allowlist
+the exact object-storage hostname in `viewer_hosts`; the backend emits a
+short-lived presigned HTTPS URL only after ACL and version checks.
+
+Changing provider ENV affects new writes only. Existing versions carry the
+persisted `storage_provider_id` in their existing `processing_options` JSON;
+they require a verified legacy registry or an approved migration/cutover, and
+are never guessed from a filename or silently read from another bucket. See
+[`docs/storage-cutover.md`](docs/storage-cutover.md).
+
+SOURCE writeback defaults to `SOURCE_METADATA_WRITER_MODE=disabled`. A separate
+PostgreSQL writer can be enabled only in approved staging with an exact contract
+file, a least-privilege RW URL, canonical CAS/readback and durable idempotency
+through the existing MASTER audit jobs (or an explicitly approved SOURCE receipt
+column). The review-only SQL templates are in `deploy/sql/`; ETL never executes
+grants or production DDL.
 
 ### Regression verification (2026-10-31)
 
