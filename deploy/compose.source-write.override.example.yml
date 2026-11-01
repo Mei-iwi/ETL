@@ -1,0 +1,37 @@
+# Optional, operator-managed Docker Compose override for approved SOURCE
+# staging only. Copy to a private file, set the two host paths in docker.env,
+# and keep SOURCE_METADATA_WRITEBACK_ENABLED=false in the base compose file.
+# The DSN secret must contain one line for the dedicated etl_source_writer role:
+# postgresql+psycopg://etl_source_writer:<password>@<source-host>:5432/<db>?sslmode=require
+# Do not commit that private secret file or its contents.
+# The contract JSON must also contain the approved application actor allow-list;
+# the database role alone never grants UI/API write permission.
+
+services:
+  api:
+    secrets:
+      - source_write_database_url
+      - source_write_contract
+    environment:
+      SOURCE_METADATA_WRITEBACK_ENABLED: "true"
+      SOURCE_METADATA_WRITER_MODE: postgresql
+      SOURCE_WRITE_DATABASE_URL_SECRET_FILE: /run/secrets/source-write-database-url
+      SOURCE_WRITE_CONTRACT_SECRET_FILE: /run/secrets/source-write-contract.json
+      SOURCE_WRITE_ALLOWED_ACTIONS: '["update"]'
+
+  reconciliation-worker:
+    secrets:
+      - source_write_database_url
+      - source_write_contract
+    environment:
+      SOURCE_METADATA_WRITEBACK_ENABLED: "true"
+      SOURCE_METADATA_WRITER_MODE: postgresql
+      SOURCE_WRITE_DATABASE_URL_SECRET_FILE: /run/secrets/source-write-database-url
+      SOURCE_WRITE_CONTRACT_SECRET_FILE: /run/secrets/source-write-contract.json
+      SOURCE_WRITE_ALLOWED_ACTIONS: '["update"]'
+
+secrets:
+  source_write_database_url:
+    file: ${SOURCE_WRITE_DATABASE_URL_SECRET_HOST_FILE:?Set SOURCE_WRITE_DATABASE_URL_SECRET_HOST_FILE to a private one-line DSN file}
+  source_write_contract:
+    file: ${SOURCE_WRITE_CONTRACT_SECRET_HOST_FILE:?Set SOURCE_WRITE_CONTRACT_SECRET_HOST_FILE to an approved contract JSON file}

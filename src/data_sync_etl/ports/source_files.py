@@ -53,6 +53,7 @@ class ResolvedFileReference:
     mime: str
     expected_sha256: str
     source_id: str | None = None
+    provider_id: str | None = None
     source_snapshot: dict | None = field(default=None, repr=False)
 
 

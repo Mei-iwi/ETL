@@ -1,0 +1,22 @@
+{
+  "backend": "s3-compatible",
+  "provider_id": "source-cloud-current",
+  "bucket": "source-uploads",
+  "actions": ["upload"],
+  "allowed_roles": ["ADMIN"],
+  "allowed_actor_ids": [],
+  "prefix": "learning-resources/",
+  "allowed_mime_types": [
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "text/csv",
+    "image/jpeg",
+    "image/png"
+  ],
+  "max_upload_bytes": 536870912,
+  "private": true,
+  "allow_overwrite": false
+}

@@ -66,9 +66,10 @@ FILE_COLUMNS = ('id', 'resource_id', 'source_hash', 'source_file_size', 'storage
 
 
 class ScheduledAudit:
-    def __init__(self, engine, settings, sync=None):
+    def __init__(self, engine, settings, sync=None, writeback=None):
         self.engine, self.settings = engine, settings
         self.sync = sync
+        self.writeback = writeback
         self.queue = AuditQueue(engine.uow, settings)
 
     def schedule(self):
@@ -78,6 +79,11 @@ class ScheduledAudit:
         return AuditSchedule(self.engine.uow, self.settings).tick()
 
     def once(self, job_id=None):
+        # Recover an approved SOURCE mutation before claiming a regular audit
+        # job.  This reuses the existing reconciliation worker and durable
+        # audit-job table; it does not make write-back capability implicit.
+        if job_id is None and self.writeback is not None and self.writeback.once('reconciliation-writeback'):
+            return True
         claim = self.queue.claim(job_id)
         if claim is None:
             return False

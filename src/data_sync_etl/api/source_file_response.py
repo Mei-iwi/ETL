@@ -16,8 +16,14 @@ from data_sync_etl.security.auth import AuthError
 def source_file_error(error):
     code = error.code
     status = 503 if error.transient or code in {'SOURCE_REFERENCE_DISABLED', 'SOURCE_TEMP_POLICY_REQUIRED'} else 409
-    if code in {'FILE_NOT_FOUND', 'SOURCE_VERSION_MISSING', 'DRIVE_FILE_NOT_FOUND'}:
+    if code in {'FILE_NOT_FOUND', 'SOURCE_VERSION_MISSING', 'DRIVE_FILE_NOT_FOUND',
+                'CLOUD_STORAGE_OBJECT_NOT_FOUND'}:
         status = 404
+    elif code in {'CLOUD_STORAGE_UNAVAILABLE', 'CLOUD_STORAGE_TRANSIENT',
+                  'CLOUD_STORAGE_SECRET_UNAVAILABLE'}:
+        status = 503
+    elif code in {'CLOUD_STORAGE_ACCESS_DENIED', 'CLOUD_STORAGE_BUCKET_MISMATCH'}:
+        status = 403
     elif code in {'PERMISSION_DENIED', 'DRIVE_PERMISSION_DENIED', 'BLOCKED_SOURCE_POLICY'}:
         status = 403
     elif code == 'FILE_TOO_LARGE':

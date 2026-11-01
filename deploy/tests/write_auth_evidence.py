@@ -45,7 +45,7 @@ def main():
                     'public-with-gateway' if path in public and path != '/health' else 'public-liveness' if path == '/health' else 'server-ADMIN-required',
                     'YES' if not path.startswith('/api/v1/auth/') and (protected(path, method) or management(route.endpoint.__name__)) else 'NO',
                     'YES' if unsafe else 'NO', 'existing ownership/eligibility/freshness checks remain'])
-        writer.writerow(['GET', '/openapi.json', 'FastAPI schema', False, 'server-ADMIN-required', 'NO', 'NO', 'no credential/session values'])
+        writer.writerow(['GET', '/openapi.json', 'FastAPI schema', False, 'server-authenticated-session', 'NO', 'NO', 'no credential/session values'])
     statuses = {
         'T01': ('PASS', 'TLS fixture Secure/__Host cookie; no production CA claim'),
         'T02': ('PASS', 'generic wrong email/password unit and browser'),

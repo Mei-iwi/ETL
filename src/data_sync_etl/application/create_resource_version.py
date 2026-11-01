@@ -102,7 +102,12 @@ class CreateResourceVersionUseCase:
                                 "storage_bucket": stored.bucket,
                                 "storage_object_key": stored.object_key,
                                 "source_hash": stored.source_hash,
-                                "processing_options": {'original_filename': command.filename},
+                                "processing_options": {
+                                    'original_filename': command.filename,
+                                    'storage_ownership': 'ETL_MANAGED',
+                                    **({'storage_provider_id': getattr(self.storage, 'provider_id', None)}
+                                       if getattr(self.storage, 'provider_id', None) else {}),
+                                },
                                 "uploaded_by": command.uploaded_by.strip() if command.uploaded_by else None,
                             },
                         )

@@ -35,6 +35,20 @@ def test_content_capabilities_fail_closed_by_default():
     assert capabilities.index_derived_content is False
 
 
+def test_process_command_allows_authorized_metadata_only_source(source_importing):
+    container, _, _ = source_importing
+    row = discover_and_import(container)
+    grant_source_content(container)
+
+    result = container.process_version.run(row['target_version_id'])
+
+    assert result['job_status'] == 'PENDING'
+    assert result['action'] == 'QUEUED'
+    with container.uow() as repo:
+        version = repo.get('resource_versions', row['target_version_id'])
+        assert version['lifecycle_status'] == 'INGESTED'
+
+
 def test_authorized_source_reads_are_bounded_memory_and_never_saved(source_importing, monkeypatch):
     container, _, path = source_importing
     row = discover_and_import(container)

@@ -15,6 +15,7 @@ from data_sync_etl.domain.reconciliation import serialize_json_value as serializ
 
 
 class ReconciliationEngine:
-    def __new__(cls, uow, source_adapter=None, storage_root="storage", max_ratio=0.1, batch_size=500):
+    def __new__(cls, uow, source_adapter=None, storage_root="storage", storage=None,
+                max_ratio=0.1, batch_size=500):
         return uow.reconciliation_engine(source_adapter=source_adapter, storage_root=storage_root,
-                                         max_ratio=max_ratio, batch_size=batch_size)
+                                         storage=storage, max_ratio=max_ratio, batch_size=batch_size)

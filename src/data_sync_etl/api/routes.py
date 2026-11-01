@@ -1,6 +1,7 @@
 from ipaddress import ip_address
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
+from uuid import uuid4
 
 import anyio
 from fastapi import (
@@ -81,6 +82,11 @@ from data_sync_etl.api.search_schemas import (
 from data_sync_etl.api.source_file_response import SourceFileResponse, source_file_error
 from data_sync_etl.api.source_resolution_schemas import SourceOpenResponse, SourceResolutionResponse
 from data_sync_etl.api.source_writeback_schemas import (
+    SourceCreateResourceRequest,
+    SourceCreateResourceResponse,
+    SourceCreateVersionResponse,
+    SourceDeleteResourceRequest,
+    SourceDeleteResourceResponse,
     SourceWriteBackRequest,
     SourceWriteBackResponse,
     SourceWriteBackStatusResponse,
@@ -99,6 +105,9 @@ from data_sync_etl.application.create_resource_version import (
 from data_sync_etl.application.source_file_import import SourceImportConflict, SourceImportNotFound
 from data_sync_etl.application.source_metadata_writeback import SourceWriteBackError
 from data_sync_etl.application.source_resolution import SourceResolutionError
+from data_sync_etl.application.source_resource_create import SourceCreateWriteBackError
+from data_sync_etl.application.source_resource_delete import SourceDeleteWriteBackError
+from data_sync_etl.application.source_version_create import SourceVersionCreateError
 from data_sync_etl.application.update_resource_metadata import (
     InvalidResourceMetadata,
     ResourceMetadataNotFound,
@@ -526,7 +535,7 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
         return source_file_error(exc)
     if reference.ownership == 'SOURCE_BACKED':
         return source_file_error(SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED'))
-    if view == 'preview' and not download:
+    if (view == 'preview' and not download) or hasattr(container.storage, 'cloud'):
         return SourceFileResponse(container.source_resolver, reference,
                                   lambda: container.search.file_version(id, access=search_access(request)), download=download,
                                   preview=container.file_previews if view == 'preview' and not download else None)
@@ -836,9 +845,17 @@ def source_federation_health(request: Request):
 def source_writeback_status(id: ResourceId, request: Request) -> SourceWriteBackStatusResponse:
     container = services(request)
     with container.uow() as repo:
-        if repo.get('master_learning_resources', id) is None:
+        resource = repo.get('master_learning_resources', id)
+        if resource is None:
             raise HTTPException(status_code=404, detail='Resource not found')
-    return SourceWriteBackStatusResponse.model_validate(container.source_writeback.status())
+    status = container.source_writeback.status()
+    status.update({key: value for key, value in container.source_resource_create.status().items()
+                   if key in ('create_supported', 'actor_mapping', 'version_create_supported')})
+    status.update(container.source_resource_delete.status())
+    status.update(container.source_version_create.status())
+    if resource.get('source_origin') == 'POSTGRESQL':
+        status['expected_source_state_hash'] = resource.get('source_state_hash')
+    return SourceWriteBackStatusResponse.model_validate(status)
 
 
 @router.get(
@@ -848,7 +865,117 @@ def source_writeback_status(id: ResourceId, request: Request) -> SourceWriteBack
     summary="Xem trạng thái toàn cục của write-back metadata",
 )
 def source_writeback_global_status(request: Request) -> SourceWriteBackStatusResponse:
-    return SourceWriteBackStatusResponse.model_validate(services(request).source_writeback.status())
+    container = services(request)
+    status = container.source_writeback.status()
+    status.update({key: value for key, value in container.source_resource_create.status().items()
+                   if key in ('create_supported', 'actor_mapping', 'version_create_supported')})
+    status.update(container.source_resource_delete.status())
+    status.update(container.source_version_create.status())
+    return SourceWriteBackStatusResponse.model_validate(status)
+
+
+@router.post(
+    "/api/v1/source/resources",
+    tags=[TAG_MASTER],
+    response_model=SourceCreateResourceResponse,
+    status_code=202,
+    summary="Xếp hàng CREATE_RESOURCE metadata-only từ MASTER về SOURCE",
+)
+def source_create_resource(body: SourceCreateResourceRequest, request: Request) -> SourceCreateResourceResponse:
+    container = services(request)
+    principal = getattr(request.state, 'auth_principal', None)
+    local_admin = container.settings.auth_mode == 'legacy_local'
+    actor_id = getattr(principal, 'id', None) or ('local-admin' if local_admin else None)
+    role = getattr(principal, 'role', None) or ('ADMIN' if local_admin else None)
+    if not actor_id or not role:
+        raise HTTPException(403, detail={'code': 'SOURCE_CREATE_FORBIDDEN'})
+    payload = body.model_dump(exclude={'idempotency_key'}, exclude_none=True)
+    try:
+        result = container.source_resource_create.request(
+            payload, idempotency_key=body.idempotency_key, actor_id=actor_id, role=role)
+        return SourceCreateResourceResponse.model_validate(result)
+    except SourceCreateWriteBackError as exc:
+        raise HTTPException(status_code=exc.status,
+                            detail={'code': exc.code, 'phase': 'source_create',
+                                    'message': 'SOURCE CREATE is not enabled or could not be queued'}) from None
+
+
+@router.get(
+    "/api/v1/source/resources/{request_id}",
+    tags=[TAG_MASTER],
+    response_model=SourceCreateResourceResponse,
+    summary="Theo dõi yêu cầu CREATE SOURCE và đồng bộ về MASTER",
+)
+def source_create_resource_status(request_id: ResourceId, request: Request) -> SourceCreateResourceResponse:
+    container = services(request)
+    result = container.source_resource_create.status_for_request(request_id)
+    if result is None or result.get('operation') != 'CREATE_RESOURCE':
+        raise HTTPException(404, detail={'code': 'SOURCE_CREATE_REQUEST_NOT_FOUND'})
+    return SourceCreateResourceResponse.model_validate(result)
+
+
+@router.post(
+    "/api/v1/resources/{id}/source-delete",
+    tags=[TAG_MASTER],
+    response_model=SourceDeleteResourceResponse,
+    status_code=202,
+    summary="Xáº¿p hÃ ng xÃ³a má»m há»c liá»‡u SOURCE",
+)
+def source_delete_resource(id: ResourceId, body: SourceDeleteResourceRequest,
+                           request: Request) -> SourceDeleteResourceResponse:
+    container = services(request)
+    principal = getattr(request.state, 'auth_principal', None)
+    actor_id = getattr(principal, 'id', None)
+    role = getattr(principal, 'role', None)
+    if not actor_id or not role:
+        raise HTTPException(403, detail={'code': 'SOURCE_DELETE_FORBIDDEN'})
+    try:
+        result = container.source_resource_delete.request(
+            id, expected_source_state_hash=body.expected_source_state_hash,
+            idempotency_key=body.idempotency_key, actor_id=actor_id, role=role,
+            approve=body.approve)
+        return SourceDeleteResourceResponse.model_validate(result)
+    except SourceDeleteWriteBackError as exc:
+        raise HTTPException(status_code=exc.status,
+                            detail={'code': exc.code, 'phase': 'source_delete',
+                                    'message': 'SOURCE soft-delete is not enabled or could not be queued'}) from None
+
+
+@router.post(
+    "/api/v1/resources/{id}/source-versions",
+    tags=[TAG_MASTER],
+    response_model=SourceCreateVersionResponse,
+    status_code=202,
+    summary="Xáº¿p hÃ ng CREATE_VERSION vÃ  upload tệp vÃ o SOURCE",
+)
+def source_create_version(id: ResourceId, request: Request,
+                          file: Annotated[UploadFile, File()],
+                          idempotency_key: Annotated[str, Form(min_length=8, max_length=100)],
+                          expected_sha256: Annotated[str | None, Form(max_length=64)] = None,
+) -> SourceCreateVersionResponse:
+    container = services(request)
+    principal = getattr(request.state, 'auth_principal', None)
+    actor_id = getattr(principal, 'id', None)
+    role = getattr(principal, 'role', None)
+    if not actor_id or not role:
+        raise HTTPException(403, detail={'code': 'SOURCE_VERSION_CREATE_FORBIDDEN'})
+    if not file.filename:
+        raise HTTPException(400, detail={'code': 'SOURCE_VERSION_FILENAME_INVALID'})
+    stream = file.file
+    stream.seek(0, 2)
+    size = stream.tell()
+    stream.seek(0)
+    try:
+        result = container.source_version_create.request(
+            id, file_stream=stream, filename=file.filename,
+            content_type=file.content_type or '', file_size=size,
+            idempotency_key=idempotency_key, actor_id=actor_id, role=role,
+            expected_sha256=expected_sha256)
+        return SourceCreateVersionResponse.model_validate(result)
+    except SourceVersionCreateError as exc:
+        raise HTTPException(status_code=exc.status,
+                            detail={'code': exc.code, 'phase': 'source_version_create',
+                                    'message': 'SOURCE CREATE_VERSION is not enabled or could not be queued'}) from None
 
 
 @router.post(
@@ -981,10 +1108,11 @@ def update_resource_metadata(
     tags=[TAG_MASTER],
     summary="Tiếp nhận học liệu và Metadata đã định dạng",
     status_code=201,
-    response_model=CreateResourceResponse,
+    response_model=CreateResourceResponse | SourceCreateResourceResponse,
 )
 def create_resource(
     request: Request,
+    response: Response,
     file: Annotated[UploadFile, File()],
     title: str = Form(..., min_length=1, max_length=500),
     resource_type_code: str = Form(..., min_length=1, max_length=50),
@@ -996,6 +1124,7 @@ def create_resource(
     grade_level_id: str | None = Form(None, max_length=30),
     publication_status: str = Form("PUBLISHED", max_length=30),
     uploaded_by: str | None = Form(None, max_length=30),
+    idempotency_key: str | None = Form(None, max_length=100),
 ) -> CreateResourceResponse:
     container = services(request)
     try:
@@ -1013,6 +1142,110 @@ def create_resource(
         stream.seek(0, 2)
         file_size = stream.tell()
         stream.seek(0)
+
+        # Once SOURCE write-back is enabled, the main form is SOURCE-owned.
+        # It must fail closed when a required capability is missing; it never
+        # silently creates a LOCAL row that later becomes a duplicate SOURCE.
+        if container.settings.source_metadata_writeback_enabled:
+            source_status = container.source_resource_create.status()
+            if not source_status.get('create_supported'):
+                raise HTTPException(
+                    status_code=409,
+                    detail={'code': 'SOURCE_CREATE_CONTRACT_UNAVAILABLE',
+                            'phase': 'source_create',
+                            'message': 'SOURCE CREATE contract is not enabled for the configured writer'},
+                )
+            version_status = container.source_version_create.status()
+            if not version_status.get('version_create_supported'):
+                raise HTTPException(
+                    status_code=409,
+                    detail={'code': 'SOURCE_CREATE_FILE_WORKFLOW_UNAVAILABLE',
+                            'phase': 'source_version_create',
+                            'message': 'SOURCE version and object-storage write contracts are not enabled'},
+                )
+            principal = getattr(request.state, 'auth_principal', None)
+            actor_id = getattr(principal, 'id', None)
+            role = getattr(principal, 'role', None)
+            if not actor_id or not role:
+                raise HTTPException(
+                    status_code=403,
+                    detail={'code': 'SOURCE_CREATE_ACTOR_MAPPING_REQUIRED',
+                            'phase': 'authorization',
+                            'message': 'An authenticated actor with a SOURCE identity is required'},
+                )
+            source_provider = container.resource_lookups.source_selection('providers', provider_id)
+            source_type = container.resource_lookups.source_selection('types', resource_type_code)
+            if source_provider is None or source_type is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail={'code': 'SOURCE_CREATE_CATALOG_UNAVAILABLE',
+                            'phase': 'metadata',
+                            'message': 'Provider and resource type must be resolved from SOURCE catalogs'},
+                )
+            source_subject_id, source_grade_level_id = subject_id, grade_level_id
+            if subject_id or grade_level_id:
+                with container.uow() as repo:
+                    if subject_id:
+                        subject = repo.get('subjects', subject_id)
+                        source_subject_id = (subject or {}).get('source_record_key')
+                        if ((subject or {}).get('source_origin') != 'POSTGRESQL'
+                                or not source_subject_id):
+                            raise HTTPException(
+                                status_code=422,
+                                detail={'code': 'SOURCE_CREATE_SUBJECT_MAPPING_REQUIRED',
+                                        'phase': 'metadata',
+                                        'message': 'Môn học chưa có định danh SOURCE hợp lệ'},
+                            )
+                    if grade_level_id:
+                        grade = repo.get('master_grade_levels', grade_level_id)
+                        source_grade_level_id = (grade or {}).get('source_record_key')
+                        if ((grade or {}).get('source_origin') != 'POSTGRESQL'
+                                or not source_grade_level_id):
+                            raise HTTPException(
+                                status_code=422,
+                                detail={'code': 'SOURCE_CREATE_GRADE_MAPPING_REQUIRED',
+                                        'phase': 'metadata',
+                                        'message': 'Khối lớp chưa có định danh SOURCE hợp lệ'},
+                            )
+            key = idempotency_key or f'web-{uuid4().hex}'
+            try:
+                result = container.source_create_stager.stage(
+                    stream,
+                    idempotency_key=key,
+                    filename=file.filename,
+                    content_type=file.content_type or '',
+                    file_size=file_size,
+                )
+                payload = {
+                    'provider_id': source_provider['id'],
+                    'resource_type_id': source_type['id'],
+                    'title': title,
+                    'publication_status': publication_status,
+                    'subject_id': source_subject_id,
+                    'grade_level_id': source_grade_level_id,
+                }
+                result = container.source_resource_create.request(
+                    payload,
+                    idempotency_key=key,
+                    actor_id=actor_id,
+                    role=role,
+                    source_file=result,
+                )
+            except SourceCreateWriteBackError as exc:
+                raise HTTPException(
+                    status_code=exc.status,
+                    detail={'code': exc.code, 'phase': 'source_create',
+                            'message': 'SOURCE CREATE is not enabled or could not be queued'},
+                ) from None
+            except DomainError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail={'code': str(exc), 'phase': 'source_create',
+                            'message': 'SOURCE CREATE input or staging policy rejected the file'},
+                ) from None
+            response.status_code = 202
+            return SourceCreateResourceResponse.model_validate(result)
+
         result = container.resource_create.execute(
             CreateResourceCommand(
                 title=title,
@@ -1122,6 +1355,75 @@ def process_resource_version(
         raise HTTPException(400, detail={"code": exc.code, "phase": "processing", "message": message}) from None
     except ResourceVersionNotFound:
         raise HTTPException(404, 'Resource version not found') from None
+    except DomainError as exc:
+        # Keep the generic boundary safe while returning a stable diagnostic
+        # code for actionable SOURCE/storage/job-state failures.  The old
+        # handler discarded CONTENT_NOT_AVAILABLE and SOURCE_* codes, making
+        # every failed manual run indistinguishable in the UI.
+        raw = getattr(exc, 'code', None) or str(exc)
+        known = {
+            'BLOCKED_OCR_RUNTIME', 'BLOCKED_SOURCE_MAPPING', 'BLOCKED_SOURCE_POLICY',
+            'CLOUD_STORAGE_SECRET_UNAVAILABLE', 'CONTENT_NOT_AVAILABLE',
+            'EXTERNAL_SOURCE_PROCESSING_DISABLED', 'FILE_NOT_FOUND',
+            'INVALID_DOCUMENT_CONTENT', 'INVALID_SOURCE_HASH', 'INVALID_SOURCE_LINK',
+            'PERMISSION_DENIED', 'SOURCE_BUCKET_NOT_ALLOWED',
+            'SOURCE_CAPABILITY_BLOCKED', 'SOURCE_HASH_MISMATCH',
+            'SOURCE_CAPABILITY_INVALID', 'SOURCE_FILE_REFERENCE_UNAVAILABLE',
+            'SOURCE_REGISTRY_NAMESPACE_UNKNOWN', 'SOURCE_REGISTRY_SOURCE_DISABLED',
+            'SOURCE_REQUEST_CANCELLED', 'SOURCE_SIZE_MISMATCH',
+            'SOURCE_STORAGE_UNAVAILABLE', 'SOURCE_UNAVAILABLE',
+            'SOURCE_VERSION_MISSING', 'SOURCE_VERSION_MUTATED',
+            'UNSUPPORTED_PROCESSING_FORMAT', 'UNSUPPORTED_SOURCE_FORMAT',
+            'UNSUPPORTED_SOURCE_IN_MEMORY_FORMAT',
+        }
+        code = raw.split(':', 1)[0] if isinstance(raw, str) else ''
+        if raw == 'Learning resource is unavailable':
+            code = 'RESOURCE_UNAVAILABLE'
+        elif raw == 'Resource version not found':
+            code = 'RESOURCE_VERSION_NOT_FOUND'
+        if code not in known and code not in {'RESOURCE_UNAVAILABLE', 'RESOURCE_VERSION_NOT_FOUND'}:
+            # DomainError messages are not safe to echo, but stable uppercase
+            # operation codes are.  Preserve an unlisted SOURCE/cloud code so
+            # the operator can fix the real dependency instead of seeing an
+            # indistinguishable generic 400.
+            safe_prefixes = ('BLOCKED_', 'CLOUD_STORAGE_', 'CONTENT_', 'FILE_',
+                             'INVALID_', 'RESOURCE_', 'SOURCE_', 'UNSUPPORTED_')
+            if not isinstance(code, str) or not code.isupper() or not code.startswith(safe_prefixes):
+                code = 'INVALID_ETL_OPERATION'
+        messages = {
+            'CONTENT_NOT_AVAILABLE': 'Phiên bản chưa có nội dung để xử lý.',
+            'SOURCE_CAPABILITY_BLOCKED': 'SOURCE chưa cấp quyền đọc/xử lý nội dung.',
+            'SOURCE_CAPABILITY_INVALID': 'Cấu hình capability SOURCE không hợp lệ.',
+            'SOURCE_BUCKET_NOT_ALLOWED': 'Bucket SOURCE chưa được cấu hình cho luồng này.',
+            'SOURCE_FILE_REFERENCE_UNAVAILABLE': 'SOURCE chưa cung cấp đủ định danh tệp.',
+            'SOURCE_REGISTRY_NAMESPACE_UNKNOWN': 'Namespace SOURCE chưa được đăng ký.',
+            'SOURCE_REGISTRY_SOURCE_DISABLED': 'Nguồn SOURCE đang bị tắt.',
+            'SOURCE_UNAVAILABLE': 'Không kết nối được cơ sở dữ liệu SOURCE.',
+            'SOURCE_STORAGE_UNAVAILABLE': 'Không truy cập được kho tệp SOURCE.',
+            'CLOUD_STORAGE_SECRET_UNAVAILABLE': 'Worker chưa được mount secret Object Storage.',
+            'SOURCE_HASH_MISMATCH': 'Hash tệp SOURCE không khớp metadata.',
+            'SOURCE_SIZE_MISMATCH': 'Kích thước tệp SOURCE không khớp metadata.',
+            'SOURCE_VERSION_MISSING': 'Không tìm thấy phiên bản tương ứng tại SOURCE.',
+            'INVALID_SOURCE_HASH': 'Hash SOURCE trong Master không hợp lệ.',
+            'INVALID_SOURCE_LINK': 'Định danh tệp SOURCE không hợp lệ.',
+            'PERMISSION_DENIED': 'SOURCE không cấp quyền đọc tệp.',
+            'FILE_NOT_FOUND': 'Không tìm thấy tệp tại SOURCE.',
+            'SOURCE_VERSION_MUTATED': 'Metadata SOURCE đã thay đổi; cần đồng bộ lại.',
+            'BLOCKED_SOURCE_MAPPING': 'Ánh xạ SOURCE–Master không hợp lệ.',
+            'BLOCKED_SOURCE_POLICY': 'Tệp SOURCE không đạt chính sách xử lý.',
+            'RESOURCE_UNAVAILABLE': 'Học liệu không khả dụng.',
+            'RESOURCE_VERSION_NOT_FOUND': 'Không tìm thấy phiên bản học liệu.',
+        }
+        fallback_message = (
+            f'Không thể khởi động xử lý (mã {code}); kiểm tra trạng thái nguồn và job.'
+            if code != 'INVALID_ETL_OPERATION' else
+            'Không thể khởi động xử lý; kiểm tra trạng thái nguồn và job.'
+        )
+        raise HTTPException(400, detail={
+            'code': code,
+            'phase': 'processing',
+            'message': messages.get(code, fallback_message),
+        }) from None
 
     if result['processing_status'] in ('CONTENT_READY', 'OCR_FAILED', 'FINALIZATION_FAILED'):
         response.status_code = 200

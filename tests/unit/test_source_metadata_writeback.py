@@ -2,6 +2,7 @@ import pytest
 
 from data_sync_etl.adapters.source.writeback import InMemorySourceMetadataWriter
 from data_sync_etl.application.source_metadata_writeback import SourceWriteBackError
+from data_sync_etl.domain.core import now
 from data_sync_etl.domain.source_ids import SourceLocator, source_identity_hash
 from data_sync_etl.domain.source_ownership import state_hash
 
@@ -87,3 +88,31 @@ def test_writeback_field_whitelist_and_owner_policy(container):
             approve=True,
         )
     assert error.value.code == 'SOURCE_WRITEBACK_OWNER_REQUIRED'
+
+
+def test_writeback_worker_recovers_approved_job_after_api_restart(container):
+    resource, writer = prepare_writeback(container)
+    with container.uow() as repo:
+        repo.insert('reconciliation_audit_jobs', {
+            'id': 'writeback-worker-job',
+            'job_key': 'SOURCE_WRITEBACK:worker-recovery-01',
+            'audit_type': 'SOURCE_WRITEBACK',
+            'stream_name': 'resources',
+            'status': 'WRITEBACK_PENDING',
+            'created_at': now(),
+            'checkpoint': {
+                'kind': 'SOURCE_METADATA_WRITEBACK',
+                'resource_id': 'resource-1',
+                'fields': {'title': 'Recovered title'},
+                'expected_source_state_hash': resource['source_state_hash'],
+                'requested_by': 'local-admin',
+                'requested_role': 'ADMIN',
+                'owner_id': None,
+                'idempotency_key': 'worker-recovery-01',
+            },
+        })
+    assert container.source_writeback_worker.once('test-writeback-worker')
+    with container.uow() as repo:
+        row = repo.get('reconciliation_audit_jobs', 'writeback-worker-job')
+    assert row['status'] == 'WRITEBACK_APPLIED'
+    assert writer.records['resource-1']['title'] == 'Recovered title'

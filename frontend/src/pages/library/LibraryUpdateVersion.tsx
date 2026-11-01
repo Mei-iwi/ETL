@@ -17,6 +17,11 @@ import {
 } from '../../services/libraryLookupApi'
 import { startProcessing } from '../../services/processingApi'
 import { createResourceVersion, metadataReadOnlyMessage } from '../../services/resourceApi'
+import {
+    getResourceSourceWriteBackStatus,
+    requestSourceWriteBack,
+    type SourceWriteBackStatus,
+} from '../../services/reconciliationApi'
 import type {
     PublicationStatus,
     UpdateResourceMetadataRequest,
@@ -56,6 +61,7 @@ export function LibraryUpdateVersion() {
     const [subjects, setSubjects] = useState<SubjectOption[]>([])
     const [loading, setLoading] = useState(true)
     const [sourceOrigin, setSourceOrigin] = useState<string | null>(null)
+    const [sourceWritebackStatus, setSourceWritebackStatus] = useState<SourceWriteBackStatus | null>(null)
     const [loadError, setLoadError] = useState('')
     const [updateStage, setUpdateStage] = useState<UpdateStage>('idle')
     const [versionError, setVersionError] = useState('')
@@ -108,6 +114,16 @@ export function LibraryUpdateVersion() {
                 const resource: ResourceDetailResponse = await resourceResponse.json()
                 if (controller.signal.aborted) return
                 setSourceOrigin(resource.source_origin ?? null)
+                setSourceWritebackStatus(null)
+                if (resource.source_origin === 'POSTGRESQL') {
+                    try {
+                        setSourceWritebackStatus(await getResourceSourceWriteBackStatus(id, controller.signal))
+                    } catch {
+                        // A missing capability is rendered as read-only; the
+                        // form must never infer write permission from the UI.
+                        setSourceWritebackStatus(null)
+                    }
+                }
                 setTitle(resource.title)
                 setResourceTypeCode(resource.resource_type_code)
                 setProviderId(resource.provider_id)
@@ -151,8 +167,6 @@ export function LibraryUpdateVersion() {
 
     async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault()
-        const readOnly = metadataReadOnlyMessage(sourceOrigin)
-        if (readOnly) { setVersionError(readOnly); return }
         if (submittingRef.current || !resourceId || !selectedResourceType || !selectedProvider) return
 
         const formData = new FormData(event.currentTarget)
@@ -161,6 +175,45 @@ export function LibraryUpdateVersion() {
         const selectedFile = fileValue instanceof File && fileValue.name ? fileValue : null
         const fileError = selectedFile ? libraryFileError(selectedFile) : null
         if (fileError) { setVersionError(fileError); return }
+
+        if (sourceOrigin === 'POSTGRESQL') {
+            if (!sourceWritebackTitleOnly) {
+                setVersionError('Học liệu thuộc SOURCE và chưa được cấp quyền write-back. Vui lòng cập nhật tại SOURCE.')
+                return
+            }
+            if (selectedFile) {
+                setVersionError('Phiên bản tệp SOURCE chưa được mở write-back. Chỉ có thể cập nhật tiêu đề theo contract hiện tại.')
+                return
+            }
+            submittingRef.current = true
+            setUpdateStage('metadata')
+            setVersionError('')
+            setVersionMessage('')
+            try {
+                const idempotencyKey = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+                const expectedHash = sourceWritebackStatus?.expected_source_state_hash
+                if (!expectedHash) throw new Error('SOURCE chưa cung cấp revision để cập nhật an toàn.')
+                const payload = {
+                    title: title.trim(),
+                    expected_source_state_hash: expectedHash,
+                    idempotency_key: idempotencyKey,
+                }
+                await requestSourceWriteBack(resourceId, payload)
+                const applied = await requestSourceWriteBack(resourceId, { ...payload, approve: true })
+                if (applied.status !== 'WRITEBACK_APPLIED') throw new Error('SOURCE chưa xác nhận cập nhật.')
+                setVersionMessage('Đã cập nhật tại SOURCE. Master sẽ đọc lại và đồng bộ theo worker.')
+                setReturnToDetail(true)
+            } catch (cause) {
+                setVersionError(cause instanceof Error ? cause.message : 'Không thể cập nhật tại SOURCE.')
+            } finally {
+                submittingRef.current = false
+                setUpdateStage('idle')
+            }
+            return
+        }
+
+        const readOnly = metadataReadOnlyMessage(sourceOrigin)
+        if (readOnly) { setVersionError(readOnly); return }
 
         const payload: UpdateResourceMetadataRequest = {
             title: title.trim(),
@@ -238,8 +291,17 @@ export function LibraryUpdateVersion() {
         }
     }
 
-    const ownershipMessage = metadataReadOnlyMessage(sourceOrigin)
-    const formDisabled = loading || isLoading || updateStage !== 'idle' || Boolean(loadError) || Boolean(ownershipMessage)
+    const sourceWritebackTitleOnly = sourceOrigin === 'POSTGRESQL'
+        && sourceWritebackStatus?.enabled === true
+        && sourceWritebackStatus.writer_supported === true
+        && sourceWritebackStatus.fields.includes('title')
+        && typeof sourceWritebackStatus.expected_source_state_hash === 'string'
+    const ownershipMessage = sourceWritebackTitleOnly
+        ? 'Học liệu thuộc SOURCE; chỉ có thể cập nhật tiêu đề qua write-back có kiểm soát.'
+        : metadataReadOnlyMessage(sourceOrigin)
+    const sourceFieldsLocked = sourceOrigin === 'POSTGRESQL'
+    const formDisabled = loading || isLoading || updateStage !== 'idle' || Boolean(loadError)
+        || (Boolean(ownershipMessage) && !sourceWritebackTitleOnly)
     const submitLabel = updateStage === 'metadata'
         ? 'Đang lưu thông tin...'
         : updateStage === 'uploading'
@@ -286,7 +348,7 @@ export function LibraryUpdateVersion() {
                             value={resourceTypeCode}
                             onChange={(event) => setResourceTypeCode(event.target.value)}
                             required
-                            disabled={formDisabled}
+                            disabled={formDisabled || sourceFieldsLocked}
                         >
                             <option value="">Chọn loại học liệu</option>
                             {resourceTypes.map((item) => (
@@ -302,7 +364,7 @@ export function LibraryUpdateVersion() {
                             value={providerId}
                             onChange={(event) => setProviderId(event.target.value)}
                             required
-                            disabled={formDisabled}
+                            disabled={formDisabled || sourceFieldsLocked}
                         >
                             <option value="">Chọn đơn vị cung cấp</option>
                             {providers.map((item) => (
@@ -324,7 +386,7 @@ export function LibraryUpdateVersion() {
                                     setSubjectId('')
                                 }
                             }}
-                            disabled={formDisabled}
+                            disabled={formDisabled || sourceFieldsLocked}
                         >
                             <option value="">Không chọn khối lớp</option>
                             {gradeLevels.map((item) => (
@@ -339,7 +401,7 @@ export function LibraryUpdateVersion() {
                             id="subject"
                             value={subjectId}
                             onChange={(event) => setSubjectId(event.target.value)}
-                            disabled={formDisabled}
+                            disabled={formDisabled || sourceFieldsLocked}
                         >
                             <option value="">Không chọn môn học</option>
                             {availableSubjects.map((item) => (
@@ -354,7 +416,7 @@ export function LibraryUpdateVersion() {
                             id="publicationStatus"
                             value={publicationStatus}
                             onChange={(event) => setPublicationStatus(event.target.value as PublicationStatus)}
-                            disabled={formDisabled}
+                            disabled={formDisabled || sourceFieldsLocked}
                         >
                             <option value="PUBLISHED">Đã xuất bản</option>
                             <option value="DRAFT">Bản nháp</option>
@@ -377,7 +439,7 @@ export function LibraryUpdateVersion() {
                                 setReplacementFileName(error ? '' : chosen?.name ?? '')
                                 setProcessingPreferences(defaultProcessingPreferences)
                             }}
-                            disabled={formDisabled}
+                            disabled={formDisabled || sourceFieldsLocked}
                         />
                         <small>{LIBRARY_FILE_FORMATS}</small>
                     </div>
@@ -386,7 +448,7 @@ export function LibraryUpdateVersion() {
                     {selectedMediaType && <ProcessingPreferences
                         value={processingPreferences}
                         onChange={setProcessingPreferences}
-                        disabled={formDisabled}
+                        disabled={formDisabled || sourceFieldsLocked}
                         mediaType={selectedMediaType}
                     />}
 

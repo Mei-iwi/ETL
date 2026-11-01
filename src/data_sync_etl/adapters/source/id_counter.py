@@ -21,6 +21,38 @@ class PostgreSQLSourceIDCounter:
             is not None
         ):
             raise DomainError("Source ID counter requires a SOURCE schema, not Master")
+        # Attest the deployed SOURCE contract before allocating anything.  This
+        # is read-only and intentionally fails closed when a similarly named
+        # table has different columns, nullability, primary key or sequence
+        # guard.  No migration or GRANT is attempted here.
+        shape = connection.execute(text("""
+            SELECT
+                bool_and(data_type = 'character varying' AND is_nullable = 'NO') FILTER (WHERE column_name = 'prefix') AS prefix_ok,
+                bool_and(data_type = 'character varying' AND is_nullable = 'NO') FILTER (WHERE column_name = 'period') AS period_ok,
+                bool_and(data_type = 'integer' AND is_nullable = 'NO') FILTER (WHERE column_name = 'last_seq') AS sequence_ok,
+                count(*) FILTER (WHERE column_name IN ('prefix', 'period', 'last_seq')) AS required_columns
+            FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'id_counters'
+        """)).mappings().one()
+        primary_key = connection.scalar(text("""
+            SELECT array_agg(att.attname ORDER BY key.ord)::text
+            FROM pg_index idx
+            CROSS JOIN LATERAL unnest(idx.indkey) WITH ORDINALITY AS key(attnum, ord)
+            JOIN pg_attribute att ON att.attrelid = idx.indrelid AND att.attnum = key.attnum
+            WHERE idx.indisprimary AND idx.indrelid = to_regclass('id_counters')
+        """))
+        non_negative = connection.scalar(text("""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conrelid = to_regclass('id_counters')
+                  AND contype = 'c'
+                  AND pg_get_constraintdef(oid) ILIKE '%last_seq%>=%0%'
+            )
+        """))
+        if (shape['required_columns'] != 3 or shape['prefix_ok'] is not True
+                or shape['period_ok'] is not True or shape['sequence_ok'] is not True
+                or primary_key != '{prefix,period}' or non_negative is not True):
+            raise DomainError("Source ID counter schema contract is invalid")
         self.connection = connection
 
     def next_sequence(self, prefix: str, period: str) -> int:

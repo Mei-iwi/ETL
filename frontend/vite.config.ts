@@ -4,13 +4,20 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { localProxyGuard } from './devProxyBoundary.ts'
 
+const buildOutDir = process.env.ETL_VITE_OUT_DIR ?? (process.platform === 'win32' ? 'dist-safe' : 'dist')
+
 // https://vite.dev/config/
 export default defineConfig({
+  // The repository keeps a tracked public/.gitkeep placeholder. On Windows,
+  // an active preview/dev process can hold the matching dist/.gitkeep open and
+  // Vite's public-directory copy then fails with EPERM. Windows therefore uses
+  // a separate output directory; Docker/Linux keeps the standard dist path.
+  build: { outDir: buildOutDir, emptyOutDir: true },
   plugins: [react(), { name: 'local-api-proxy-boundary', configureServer(server) {
-    server.middlewares.use(localProxyGuard)
-  }, configurePreviewServer(server) {
-    server.middlewares.use(localProxyGuard)
-  } }],
+      server.middlewares.use(localProxyGuard)
+    }, configurePreviewServer(server) {
+      server.middlewares.use(localProxyGuard)
+    } }],
   preview: { host: '127.0.0.1' },
   server: {
     host: '127.0.0.1',

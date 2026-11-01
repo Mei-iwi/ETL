@@ -21,7 +21,13 @@ class ProcessResourceVersion:
 
             if resource is None or not resource["is_active"] or resource_deleted(resource):
                 raise DomainError("Learning resource is unavailable")
-            if version.get("lifecycle_status") == "METADATA_ONLY":
+            # SOURCE-backed versions intentionally remain METADATA_ONLY until
+            # content processing is explicitly authorized.  They must still be
+            # able to start an OCR job when the configured SOURCE registry
+            # grants read/process/index capabilities.  LOCAL metadata-only
+            # versions have no readable bytes and remain blocked here.
+            if (version.get("lifecycle_status") == "METADATA_ONLY"
+                    and resource.get("source_origin") != "POSTGRESQL"):
                 raise DomainError("CONTENT_NOT_AVAILABLE")
 
         job = (self.ocr.create_job(version_id, fence=fence) if fence is not None

@@ -160,7 +160,10 @@ class SourceFileResolver:
             filename=PurePosixPath(key).name,
             mime='text/csv' if validator.extension == '.csv' else sorted(validator.mime_types)[0],
             expected_sha256=version['source_hash'].lower(),
-            source_id=row['source_system'] if row else None, source_snapshot=source,
+            source_id=row['source_system'] if row else None,
+            provider_id=((version.get('processing_options') or {}).get('storage_provider_id')
+                         if not row else None),
+            source_snapshot=source,
         )
 
     def _capability_source_id(self, ref):
@@ -294,9 +297,27 @@ class SourceFileResolver:
     @contextmanager
     def temporary_path(self, ref, *, cancelled=None):
         if ref.ownership == 'LOCAL_OWNED':
-            if not self.storage.exists(ref.bucket, ref.opaque_locator):
+            try:
+                storage = (self.storage.for_provider(ref.provider_id)
+                           if callable(getattr(self.storage, 'for_provider', None)) else self.storage)
+            except DomainError as exc:
+                raise SourceFileError(str(exc)) from None
+            cloud_temporary = getattr(self.storage, 'temporary_path', None)
+            if callable(cloud_temporary):
+                # ETL_MANAGED object storage may require a bounded ephemeral
+                # scratch file for legacy Office/media libraries.  The context
+                # owns cleanup; SOURCE_EXTERNAL never reaches this branch.
+                try:
+                    with storage.temporary_path(ref.bucket, ref.opaque_locator, cancelled=cancelled) as path:
+                        yield path
+                except SourceFileError:
+                    raise
+                except DomainError as exc:
+                    raise SourceFileError(str(exc), transient=str(exc).endswith('UNAVAILABLE')) from None
+                return
+            if not storage.exists(ref.bucket, ref.opaque_locator):
                 raise SourceFileError('FILE_NOT_FOUND')
-            yield self.storage.get_local_path(ref.bucket, ref.opaque_locator)
+            yield storage.get_local_path(ref.bucket, ref.opaque_locator)
             return
         # SOURCE bytes must never be materialized as a local file.
         raise SourceFileError('EXTERNAL_SOURCE_CONTENT_DISABLED')

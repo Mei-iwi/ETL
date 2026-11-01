@@ -23,6 +23,16 @@ type CreateResourceResponse = {
     initial_version_id: string
 }
 
+type SourceCreateResponse = {
+    request_id: string
+    status: "SOURCE_CREATE_PENDING" | "SOURCE_CREATE_PROCESSING" | "SOURCE_CREATE_APPLIED" | "SOURCE_CREATE_FAILED"
+    source_resource_id?: string | null
+    source_version_id?: string | null
+    master_resource_id?: string | null
+    master_reconciliation_status?: "NOT_STARTED" | "PENDING_RECONCILIATION" | "MASTER_RECONCILED"
+    error_code?: string | null
+}
+
 type SubmitStage = "idle" | "creating" | "processing"
 
 function formatFileSize(size: number): string {
@@ -72,7 +82,6 @@ export function LibraryCreatePage() {
     )
 
     const isSubmitting = submitStage !== "idle"
-
     useEffect(() => {
         const controller = new AbortController()
 
@@ -226,6 +235,7 @@ export function LibraryCreatePage() {
         // The picker unmounts while the selected-file card is visible.
         // State retains the File for both picker and drag/drop selection.
         formData.set("file", selectedFile, selectedFile.name)
+        formData.set("idempotency_key", `web-${crypto.randomUUID()}`)
 
         try {
             const response = await fetch("/api/v1/resources", {
@@ -245,7 +255,41 @@ export function LibraryCreatePage() {
             }
 
             const created: CreateResourceResponse = await response.json()
-            const versionId = created.initial_version_id
+            const body = created as CreateResourceResponse & Partial<SourceCreateResponse>
+            let versionId = body.initial_version_id
+
+            if (body.request_id) {
+                // SOURCE CREATE is durable and asynchronous.  Do not navigate
+                // or report success until SOURCE and Master reconciliation have
+                // both produced canonical identifiers.
+                const deadline = Date.now() + 120_000
+                let status: SourceCreateResponse | null = null
+                while (Date.now() < deadline) {
+                    const statusResponse = await fetch(
+                        `/api/v1/source/resources/${encodeURIComponent(body.request_id)}`,
+                        { headers: { Accept: "application/json" } },
+                    )
+                    if (!statusResponse.ok) {
+                        throw new Error(`Không đọc được trạng thái đồng bộ (HTTP ${statusResponse.status}).`)
+                    }
+                    status = await statusResponse.json() as SourceCreateResponse
+                    if (status.status === "SOURCE_CREATE_FAILED") {
+                        throw new Error(status.error_code ?? "SOURCE CREATE thất bại.")
+                    }
+                    if (
+                        status.status === "SOURCE_CREATE_APPLIED" &&
+                        status.source_version_id &&
+                        status.master_reconciliation_status === "MASTER_RECONCILED"
+                    ) {
+                        versionId = status.source_version_id
+                        break
+                    }
+                    await new Promise((resolve) => window.setTimeout(resolve, 750))
+                }
+                if (!versionId) {
+                    throw new Error("Yêu cầu đã tiếp nhận nhưng SOURCE chưa hoàn tất trong thời gian chờ.")
+                }
+            }
 
             if (!versionId) {
                 throw new Error("Phản hồi tạo học liệu thiếu mã phiên bản.")

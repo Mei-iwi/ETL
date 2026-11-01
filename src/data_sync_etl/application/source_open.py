@@ -25,28 +25,29 @@ class SourceOpenResolver:
         try:
             parsed = urlsplit(url)
             host = (parsed.hostname or '').lower().rstrip('.')
+            query_keys = {key.casefold() for key, _ in parse_qsl(parsed.query, keep_blank_values=True)}
+            signed_s3 = ({'x-amz-algorithm', 'x-amz-credential', 'x-amz-date',
+                          'x-amz-expires', 'x-amz-signedheaders', 'x-amz-signature'}
+                         <= query_keys and query_keys <= {
+                             'x-amz-algorithm', 'x-amz-credential', 'x-amz-date',
+                             'x-amz-expires', 'x-amz-signedheaders', 'x-amz-signature',
+                             'x-amz-security-token', 'x-amz-content-sha256',
+                         })
+            unsafe_query = any(key.casefold() in {
+                'token', 'access_token', 'auth', 'authorization', 'signature', 'sig',
+                'credential', 'key', 'jwt', 'session', 'authkey', 'resourcekey'}
+                for key, _ in parse_qsl(parsed.query, keep_blank_values=True))
             if (parsed.scheme != 'https' or not host or parsed.username or parsed.password
                     or parsed.port not in (None, 443) or parsed.fragment or host not in hosts
-                    or any(key.casefold() in {'token', 'access_token', 'auth', 'authorization',
-                                              'signature', 'sig', 'credential', 'key', 'jwt', 'session',
-                                              'authkey', 'resourcekey'}
-                           for key, _ in parse_qsl(parsed.query, keep_blank_values=True))):
+                    or (unsafe_query and not signed_s3)):
                 return False
+        except ValueError:
+            return False
+        # IP literals are not trusted viewer hosts; registered DNS names are.
+        try:
             ip_address(host)
         except ValueError:
-            # A non-IP hostname is expected; malformed ports/URLs fail closed.
-            try:
-                parsed = urlsplit(url)
-                host = (parsed.hostname or '').lower().rstrip('.')
-                return (parsed.scheme == 'https' and bool(host) and not parsed.username
-                        and not parsed.password and parsed.port in (None, 443)
-                        and not parsed.fragment and host in hosts
-                        and not any(key.casefold() in {'token', 'access_token', 'auth', 'authorization',
-                                                       'signature', 'sig', 'credential', 'key', 'jwt', 'session',
-                                                       'authkey', 'resourcekey'}
-                                    for key, _ in parse_qsl(parsed.query, keep_blank_values=True)))
-            except ValueError:
-                return False
+            return True
         return False
 
     def resolve(self, resource_id, access, version_id=None):
