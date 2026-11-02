@@ -183,8 +183,13 @@ class BilingualService:
                 if not version:
                     return False
                 resource = repo.get('master_learning_resources', version['resource_id'])
-                if not resource or resource.get('source_origin') != 'LOCAL':
+                if not resource:
                     return False
+                if resource.get('source_origin') != 'LOCAL':
+                    pipeline = getattr(self.text_store, 'pipeline', None)
+                    source = pipeline.state(version_id, repo) if pipeline is not None else None
+                    if not source or not pipeline.authorize_identity(source['identity']):
+                        return False
                 options = version.get("processing_options") or {}
                 jobs = repo.find(
                     "ocr_jobs",
@@ -315,6 +320,9 @@ class BilingualService:
                     with self.uow() as repo:
                         self.text_store.set_metadata(repo, row['id'], {**metadata, 'paired_segments': segments})
             with self.uow() as repo:
+                latest = repo.get('resource_versions', version_id, lock=True)
+                if latest is None:
+                    return False
                 state = (
                     "completed"
                     if all(s in ("completed", "same_language") for s in statuses)
@@ -325,7 +333,7 @@ class BilingualService:
                     version_id,
                     {
                         "processing_options": {
-                            **options,
+                            **(latest.get('processing_options') or {}),
                             "translation_pending": False,
                             "translation_state": state,
                         }
@@ -338,6 +346,9 @@ class BilingualService:
         with self.uow() as repo:
             versions = repo.translation_candidates()
         for version in versions:
+            pipeline = getattr(self.text_store, 'pipeline', None)
+            if pipeline is not None and not pipeline.state(version['id']):
+                continue
             if (version.get("processing_options") or {}).get("translation_pending"):
                 with self.uow() as repo:
                     jobs = repo.find("ocr_jobs", {"resource_version_id": version["id"]}, limit=1)

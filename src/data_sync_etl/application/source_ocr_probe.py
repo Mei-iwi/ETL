@@ -34,9 +34,11 @@ class SourceOCRProbe:
             return {'status': 'UNVERIFIABLE' if orphaned else 'ABSENT', 'missing_pages': ()}
         total = job.get('total_pages')
         if type(total) is not int or not 1 <= total <= 2000:
+            orphaned = self.reader.ocr_pages(version_id=snapshot['source_version_id'], job_id=None,
+                                              limit=1, offset=0)
             if not self.authorize(snapshot):
                 raise DomainError('SOURCE_OCR_UNAUTHORIZED')
-            return {'status': 'NOT_READY', 'missing_pages': ()}
+            return {'status': 'UNVERIFIABLE' if orphaned else 'NOT_READY', 'missing_pages': ()}
         tasks = snapshot.get('pages')
         if not isinstance(tasks, list):
             raise DomainError('SOURCE_OCR_INVALID_STATE')

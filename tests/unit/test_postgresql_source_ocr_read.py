@@ -1,33 +1,58 @@
+from contextlib import contextmanager
+from types import SimpleNamespace
+
 import pytest
-from sqlalchemy import create_engine, text
 
 from data_sync_etl.adapters.source.postgresql_ocr_read import PostgreSQLSourceOCRReader
 from data_sync_etl.domain.core import DomainError
 
 
+class Result:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self.rows
+
+    def one_or_none(self):
+        return self.rows[0] if self.rows else None
+
+
+class SourceDouble:
+    dialect = SimpleNamespace(name='postgresql')
+
+    def __init__(self):
+        self.version = dict(id='v1', source_hash='a' * 64, lifecycle_status='APPROVED', updated_at=None)
+        self.jobs = [dict(id='j1', resource_version_id='v1', status='PROCESSING', total_pages=2,
+                          completed_pages=1, failed_pages=0, started_at=None, completed_at=None, updated_at=None)]
+        self.pages = [dict(id=f'p{number}', job_id='j1', page_num=number,
+                           status='COMPLETED' if number == 1 else 'PENDING', retry_count=0,
+                           updated_at=None, completed_at=None) for number in (1, 2)]
+        self.units = [dict(id=f'u{number}', mongo_id=None, resource_version_id='v1',
+                           parent_unit_id=None if number == 1 else 'u1', unit_type='CHAPTER',
+                           sequence_no=number, page_from=1, page_to=2, review_status='APPROVED',
+                           retrieval_eligible=True, updated_at=None) for number in (1, 2)]
+
+    @contextmanager
+    def begin(self):
+        yield self
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        assert sql.startswith(('SELECT ', 'SET TRANSACTION ')), 'Reader must be read-only'
+        for table, rows in [('resource_versions', [self.version]), ('ocr_jobs', self.jobs),
+                            ('ocr_page_tasks', self.pages), ('content_units', self.units)]:
+            if f'FROM public.{table} ' in sql:
+                return Result([dict(row) for row in rows])
+        return Result([])
+
+
 @pytest.fixture
 def source():
-    engine = create_engine('sqlite:///:memory:')
-    with engine.begin() as conn:
-        conn.execute(text('CREATE TABLE resource_versions (id TEXT PRIMARY KEY, source_hash TEXT, '
-                          'lifecycle_status TEXT, updated_at TEXT)'))
-        conn.execute(text('CREATE TABLE ocr_jobs (id TEXT PRIMARY KEY, resource_version_id TEXT, status TEXT, '
-                          'total_pages INTEGER, completed_pages INTEGER, failed_pages INTEGER, started_at TEXT, '
-                          'completed_at TEXT, updated_at TEXT)'))
-        conn.execute(text('CREATE TABLE ocr_page_tasks (id TEXT PRIMARY KEY, job_id TEXT, page_num INTEGER, '
-                          'status TEXT, retry_count INTEGER, updated_at TEXT, completed_at TEXT, local_image_path TEXT)'))
-        conn.execute(text('CREATE TABLE content_units (id TEXT PRIMARY KEY, mongo_id TEXT, resource_version_id TEXT, '
-                          'parent_unit_id TEXT, unit_type TEXT, sequence_no INTEGER, page_from INTEGER, page_to INTEGER, '
-                          'review_status TEXT, retrieval_eligible BOOLEAN, updated_at TEXT)'))
-        conn.execute(text("INSERT INTO resource_versions VALUES ('v1', :hash, 'APPROVED', '2026-01-01')"),
-                     {'hash': 'a' * 64})
-        conn.execute(text("INSERT INTO ocr_jobs VALUES ('j1', 'v1', 'PROCESSING', 2, 1, 0, NULL, NULL, '2026-01-01')"))
-        conn.execute(text("INSERT INTO ocr_page_tasks VALUES ('p1', 'j1', 1, 'COMPLETED', 0, '2026-01-01', NULL, 'private')"))
-        conn.execute(text("INSERT INTO ocr_page_tasks VALUES ('p2', 'j1', 2, 'PENDING', 0, '2026-01-01', NULL, 'private')"))
-        conn.execute(text("INSERT INTO content_units VALUES ('u1', NULL, 'v1', NULL, 'CHAPTER', 1, 1, 2, 'APPROVED', 1, '2026-01-01')"))
-        conn.execute(text("INSERT INTO content_units VALUES ('u2', 'm2', 'v1', 'u1', 'SECTION', 2, 1, 1, 'APPROVED', 1, '2026-01-01')"))
-    yield engine
-    engine.dispose()
+    return SourceDouble()
 
 
 def read(engine, authorize=lambda _identity: True, **changes):
@@ -37,27 +62,27 @@ def read(engine, authorize=lambda _identity: True, **changes):
 
 
 def test_read_source_state_without_content_or_private_paths(source):
+    source.units[0]['review_status'] = 'PENDING'
     authorized = []
     result = read(source, lambda identity: authorized.append(identity) or True)
     assert len(authorized) == 2
     assert result['job']['status'] == 'RUNNING'
     assert [page['status'] for page in result['pages']] == ['SUCCEEDED', 'PENDING']
     assert result['units'][1]['parent_unit_id'] == 'u1'
+    assert result['units'][0]['review_status'] == 'UNREVIEWED'
     assert all('local_image_path' not in page and 'raw_text' not in page for page in result['pages'])
 
 
 def test_rejects_stale_versions_and_duplicate_pages(source):
     with pytest.raises(DomainError, match='SOURCE_VERSION_MUTATED'):
         read(source, source_hash='b' * 64)
-    with source.begin() as conn:
-        conn.execute(text("INSERT INTO ocr_page_tasks VALUES ('p3', 'j1', 1, 'COMPLETED', 0, NULL, NULL, 'private')"))
+    source.pages.append(dict(source.pages[0], id='p3'))
     with pytest.raises(DomainError, match='SOURCE_OCR_PAGE_CONFLICT'):
         read(source)
 
 
 def test_rejects_cyclic_units(source):
-    with source.begin() as conn:
-        conn.execute(text("UPDATE content_units SET parent_unit_id = 'u2' WHERE id = 'u1'"))
+    source.units[0]['parent_unit_id'] = 'u2'
     with pytest.raises(DomainError, match='SOURCE_OCR_UNIT_CONFLICT'):
         read(source)
 
@@ -68,7 +93,6 @@ def test_denied_or_revoked_source_mapping_fails_closed(source):
     answers = iter([True, False])
     with pytest.raises(DomainError, match='SOURCE_OCR_UNAUTHORIZED'):
         read(source, lambda _: next(answers))
-    with source.begin() as conn:
-        conn.execute(text("UPDATE resource_versions SET lifecycle_status = 'REJECTED' WHERE id = 'v1'"))
+    source.version['lifecycle_status'] = 'REJECTED'
     with pytest.raises(DomainError, match='SOURCE_OCR_LIFECYCLE_BLOCKED'):
         read(source)

@@ -39,13 +39,20 @@ class Postprocessor:
         if units:
             unit = units[0]
             body = self.text_store.unit_text(repo, unit['id'])
-            if (any(unit[key] != values[key] for key in values)
-                    or body['text'] != text or body['page_result_id'] != result['id']):
-                repo.update('content_units', unit['id'], {**values, 'review_status': 'UNREVIEWED',
-                                                        'retrieval_eligible': False, 'updated_at': now()})
+            metadata_changed = any(unit[key] != values[key] for key in values)
+            if (metadata_changed or body is None or body['text'] != text or body['page_result_id'] != result['id']):
+                recovering_source = (body is None and not metadata_changed
+                                     and hasattr(self.text_store, 'source_version')
+                                     and self.text_store.source_version(repo, version_id))
+                if not recovering_source:
+                    repo.update('content_units', unit['id'], {**values, 'review_status': 'UNREVIEWED',
+                                                            'retrieval_eligible': False, 'updated_at': now()})
                 self.text_store.update_unit_text(repo, unit['id'], result['id'], text)
         else:
+            identity = (self.text_store.unit_identity(repo, version_id, sequence)
+                        if hasattr(self.text_store, 'unit_identity') else {})
             unit = repo.insert('content_units', {
+                **identity,
                 **values, 'resource_version_id': version_id, 'sequence_no': sequence,
                 'review_status': 'UNREVIEWED', 'retrieval_eligible': False,
             })
@@ -65,6 +72,9 @@ class Postprocessor:
                 version = repo.get("resource_versions", version_id)
                 if not version:
                     raise DomainError("Resource version not found")
+                if ((version.get('processing_options') or {}).get('_source_ocr')
+                        and not hasattr(self.text_store, 'pipeline')):
+                    raise DomainError('SOURCE_OCR_OWNER_REQUIRED')
                 from data_sync_etl.domain.resource_deletion import resource_deleted
                 resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
                 if not resource or resource_deleted(resource):

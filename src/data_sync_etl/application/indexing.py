@@ -37,6 +37,11 @@ class IndexingService:
         self.text_store = text_store or LegacyOCRText()
 
     def _authorize_source_index(self, version_id):
+        pipeline = getattr(self.text_store, 'pipeline', None)
+        if pipeline is not None and (state := pipeline.state(version_id)):
+            if not pipeline.authorize_identity(state['identity']):
+                raise IndexingError('SOURCE_CAPABILITY_BLOCKED', 403)
+            return
         if (self.source_content_authorizer is not None
                 and not self.source_content_authorizer(
                     version_id, access=SearchAccess(scope='authenticated_admin'))):
@@ -76,7 +81,14 @@ class IndexingService:
         if not projections or len(docs) != len(units) or len(by_id) != len(docs):
             raise IndexingError('CONTENT_NOT_READY')
         # HTTP Search alone opts in. All other callers retain point-read timing.
-        texts = text_reader([unit['id'] for unit in units]) if text_reader is not None else None
+        if (hasattr(self.text_store, 'source_version')
+                and self.text_store.source_version(repo, version_id)):
+            try:
+                texts = self.text_store.unit_texts(repo, [unit['id'] for unit in units], by_id)
+            except DomainError:
+                raise IndexingError('CONTENT_NOT_READY') from None
+        else:
+            texts = text_reader([unit['id'] for unit in units]) if text_reader is not None else None
         content, total_chars = [], 0
         for unit in units:
             body = texts.get(unit['id']) if texts is not None else self.text_store.unit_text(repo, unit['id'])

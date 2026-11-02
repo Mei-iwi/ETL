@@ -76,6 +76,9 @@ class OCRWorker:
             if task is None:
                 return self._background_once()
 
+            if getattr(self.pipeline, 'source_owned', False) and not task.get('source_job_id'):
+                raise ValueError('SOURCE_OCR_TASK_IDENTITY_REQUIRED')
+
             stop = Event()
 
             def heartbeat():
@@ -139,7 +142,15 @@ class OCRWorker:
             try:
                 while not stop.is_set():
                     tick()
-                    if not self.once(worker_id):
+                    try:
+                        worked = self.once(worker_id)
+                    except Exception:
+                        if not getattr(self.pipeline, 'source_owned', False):
+                            raise
+                        event(stage='source_ocr', action='RUNTIME_UNAVAILABLE')
+                        stop.wait(min(30, max(1, self.recovery_interval_seconds)))
+                        continue
+                    if not worked:
                         stop.wait(1)
             except KeyboardInterrupt:
                 return None

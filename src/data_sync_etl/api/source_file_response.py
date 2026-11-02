@@ -1,6 +1,8 @@
 """Verified request-scoped SOURCE FileResponse, including Range and cancellation."""
 
+import re
 import sys
+from pathlib import PurePosixPath
 from threading import Event
 
 import anyio
@@ -11,6 +13,52 @@ from data_sync_etl.domain.core import SourceFileError
 from data_sync_etl.domain.search import SearchError
 from data_sync_etl.logging import event
 from data_sync_etl.security.auth import AuthError
+
+
+def verified_source_response(resolver, reference, reauthorize, *, version_id, range_header=None, download=False):
+    """Serve bounded, hash-verified SOURCE bytes without exposing a provider locator.
+
+    The resolver owns the maximum byte budget and provider capability. This is
+    used only after an authenticated processing grant, never by public search.
+    """
+    headers = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
+               'Accept-Ranges': 'bytes'}
+    try:
+        reauthorize()
+        resolver.require_content_capabilities(reference)
+        with resolver.open_verified_stream(reference) as stream:
+            stream.seek(0, 2)
+            size = stream.tell()
+            start, end = 0, size - 1
+            status = 200
+            if range_header:
+                match = re.fullmatch(r'bytes=([0-9]*)-([0-9]*)', range_header) if len(range_header) <= 128 else None
+                if not match or not any(match.groups()) or size == 0:
+                    reauthorize()
+                    return Response(status_code=416, headers={**headers, 'Content-Range': f'bytes */{size}'})
+                left, right = match.groups()
+                if left:
+                    start = int(left)
+                    end = min(int(right), size - 1) if right else size - 1
+                else:
+                    length = int(right)
+                    if length < 1:
+                        reauthorize()
+                        return Response(status_code=416, headers={**headers, 'Content-Range': f'bytes */{size}'})
+                    start = max(0, size - length)
+                if start >= size or end < start:
+                    reauthorize()
+                    return Response(status_code=416, headers={**headers, 'Content-Range': f'bytes */{size}'})
+                status = 206
+                headers['Content-Range'] = f'bytes {start}-{end}/{size}'
+            stream.seek(start)
+            content = stream.read(max(0, end - start + 1))
+        reauthorize()
+    except SourceFileError as exc:
+        return source_file_error(exc)
+    suffix = PurePosixPath(reference.filename).suffix.lower()
+    headers['Content-Disposition'] = f'{"attachment" if download else "inline"}; filename="hoc-lieu-{version_id}{suffix}"'
+    return Response(content, status_code=status, media_type=reference.mime, headers=headers)
 
 
 def source_file_error(error):

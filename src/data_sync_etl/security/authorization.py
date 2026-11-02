@@ -79,7 +79,21 @@ def authorize(request, principal):
         if principal.role == 'OPERATOR' and 'sync' in principal.permissions:
             return
         raise AuthError('AUTH_FORBIDDEN', 403)
-    version = re.fullmatch(r'/api/v1/resource-versions/([^/]+)/(file|source-info|chunks|content-units|index-status|etl-status|process|postprocess|index|reindex|ocr-jobs|processing-options|bilingual|processing-source|translations/retry|exports/(?:json|txt|srt|vtt)|segments/[^/]+/frame)', path)
+    job_route = re.fullmatch(r'/api/v1/processing-jobs/([^/]+)(/retry)?', path)
+    if job_route:
+        with request.app.state.container.uow() as repo:
+            job = repo.get('ocr_jobs', job_route[1])
+            row = repo.get('resource_versions', job['resource_version_id']) if job else None
+            resource = repo.get('master_learning_resources', row['resource_id']) if row else None
+        if (not resource or resource['id'] not in principal.resource_ids
+                or not owns_resource(principal, resource)):
+            raise AuthError('AUTH_RESOURCE_FORBIDDEN', 403)
+        if method == 'GET' and job_route[2] is None:
+            return
+        if method == 'POST' and job_route[2] and principal.role == 'OPERATOR' and 'process' in principal.permissions:
+            return
+        raise AuthError('AUTH_FORBIDDEN', 403)
+    version = re.fullmatch(r'/api/v1/resource-versions/([^/]+)/(file|source-info|chunks|content-units|index-status|etl-status|process|postprocess|index|reindex|ocr-jobs|ocr-pages/[0-9]+|processing-options|bilingual|processing-source|translations/retry|exports/(?:json|txt|srt|vtt)|segments/[^/]+/frame)', path)
     if version:
         if method != 'GET' and principal.role != 'OPERATOR':
             raise AuthError('AUTH_FORBIDDEN', 403)

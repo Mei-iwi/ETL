@@ -453,16 +453,20 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
     def pending_live_ocr_tasks(self, max_active=1, heartbeat_timeout=120):
         admission_lock(self.session, 'ocr')
         stamp = now()
+        legacy_owned = exists().where(OcrJob.id == OcrPageTask.job_id,
+            ResourceVersion.id == OcrJob.resource_version_id,
+            ResourceVersion.processing_options['_source_ocr'].as_string().is_(None),
+            ~OcrJob.id.like('SJ%'))
         active = and_(OcrPageTask.status == 'RUNNING',
                       OcrPageTask.heartbeat_at > stamp - timedelta(seconds=heartbeat_timeout))
-        if self.session.scalar(select(func.count()).select_from(OcrPageTask).where(active)) >= max_active:
+        if self.session.scalar(select(func.count()).select_from(OcrPageTask).where(active, legacy_owned)) >= max_active:
             return []
         live = exists().where(OcrJob.id == OcrPageTask.job_id,
             ResourceVersion.id == OcrJob.resource_version_id,
             MasterLearningResource.id == ResourceVersion.resource_id,
             MasterLearningResource.is_active.is_(True), MasterLearningResource.deleted_at.is_(None),
             MasterLearningResource.master_deleted_at.is_(None))
-        query = select(OcrPageTask).where(OcrPageTask.status == 'PENDING', live).order_by(
+        query = select(OcrPageTask).where(OcrPageTask.status == 'PENDING', live, legacy_owned).order_by(
             OcrPageTask.created_at, OcrPageTask.id).limit(1).with_for_update(skip_locked=True)
         return [self._dict(row) for row in self.session.scalars(query)]
 
@@ -818,9 +822,13 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         return [self._dict(row) for row in self.session.scalars(query)]
 
     def stale_tasks(self, cutoff):
+        legacy_owned = exists().where(OcrJob.id == OcrPageTask.job_id,
+            ResourceVersion.id == OcrJob.resource_version_id,
+            ResourceVersion.processing_options['_source_ocr'].as_string().is_(None),
+            ~OcrJob.id.like('SJ%'))
         stmt = (
             select(OcrPageTask)
-            .where(OcrPageTask.status == "RUNNING", OcrPageTask.heartbeat_at < cutoff)
+            .where(OcrPageTask.status == "RUNNING", OcrPageTask.heartbeat_at < cutoff, legacy_owned)
             .order_by(OcrPageTask.id)
             .with_for_update(skip_locked=True)
             .limit(1)

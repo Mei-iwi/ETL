@@ -75,3 +75,14 @@ def test_absent_job_with_orphan_mongo_page_is_not_treated_as_empty():
     assert probe.probe(current, generation=1, processing_fingerprint='b' * 64)['status'] == 'UNVERIFIABLE'
     reader.ocr_pages = lambda **_: []
     assert probe.probe(current, generation=1, processing_fingerprint='b' * 64)['status'] == 'ABSENT'
+
+
+def test_new_empty_job_cannot_hide_orphan_pages_before_file_open():
+    current = snapshot()
+    current['job']['total_pages'] = 0
+    current['pages'] = []
+    reader = SimpleNamespace(ocr_pages=lambda **_: [document(1, 'existing')])
+    probe = SourceOCRProbe(reader, authorize=lambda _: True, proof_provider=lambda *_: None)
+    assert probe.probe(current, generation=1, processing_fingerprint='b' * 64)['status'] == 'UNVERIFIABLE'
+    reader.ocr_pages = lambda **_: []
+    assert probe.probe(current, generation=1, processing_fingerprint='b' * 64)['status'] == 'NOT_READY'

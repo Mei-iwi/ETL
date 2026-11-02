@@ -32,6 +32,12 @@ class PostgreSQLSourceOCRWriter:
             raise DomainError('SOURCE_OCR_DATABASE_INVALID')
         self.engine, self.contract, self.authorize_identity = engine, contract, authorize_identity
 
+    @staticmethod
+    def next_id(connection, prefix):
+        if prefix not in ('OCR', 'OPT', 'CUN'):
+            raise DomainError('SOURCE_OCR_ID_PREFIX_INVALID')
+        return SourceIDService(PostgreSQLSourceIDCounter(connection)).next_id(prefix, created_at=datetime.now(UTC))
+
     def ensure_job(self, *, namespace, master_version_id, source_version_id, source_hash,
                    actor_id, role, source_user_id):
         """Create at most one SOURCE job for a version, or return its existing ID.
@@ -88,8 +94,9 @@ class PostgreSQLSourceOCRWriter:
                 if not self.authorize_identity(dict(identity)):
                     raise DomainError('SOURCE_OCR_UNAUTHORIZED')
                 return job_id
-        except SQLAlchemyError:
-            raise DomainError('SOURCE_OCR_WRITE_UNAVAILABLE') from None
+        except SQLAlchemyError as exc:
+            from data_sync_etl.adapters.source.postgresql_ocr_queue import source_sql_error
+            raise source_sql_error(exc) from None
 
     def ensure_page_task(self, *, namespace, master_version_id, source_version_id, source_hash,
                          actor_id, role, source_user_id, source_job_id, page_num, staging_path,
@@ -169,8 +176,9 @@ class PostgreSQLSourceOCRWriter:
                 if not self.authorize_identity(dict(identity)):
                     raise DomainError('SOURCE_OCR_UNAUTHORIZED')
                 return task_id
-        except SQLAlchemyError:
-            raise DomainError('SOURCE_OCR_WRITE_UNAVAILABLE') from None
+        except SQLAlchemyError as exc:
+            from data_sync_etl.adapters.source.postgresql_ocr_queue import source_sql_error
+            raise source_sql_error(exc) from None
 
     def set_page_count(self, *, namespace, master_version_id, source_version_id, source_hash,
                        actor_id, role, source_user_id, source_job_id, total_pages):
@@ -219,5 +227,6 @@ class PostgreSQLSourceOCRWriter:
                              {'id': source_job_id, 'total': total_pages, 'updated': datetime.now(UTC)})
                 if not self.authorize_identity(dict(identity)):
                     raise DomainError('SOURCE_OCR_UNAUTHORIZED')
-        except SQLAlchemyError:
-            raise DomainError('SOURCE_OCR_WRITE_UNAVAILABLE') from None
+        except SQLAlchemyError as exc:
+            from data_sync_etl.adapters.source.postgresql_ocr_queue import source_sql_error
+            raise source_sql_error(exc) from None

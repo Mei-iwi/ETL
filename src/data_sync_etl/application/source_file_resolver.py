@@ -96,6 +96,9 @@ class SourceFileResolver:
     def _status_allowed(self, source, *, namespace=None):
         if source_status_allowed(source.get('source_lifecycle_status'), self.settings.source_file_allowed_statuses):
             return True
+        processing_policy = getattr(self, 'source_ocr_status_policy', None)
+        if processing_policy is not None and processing_policy(source, namespace):
+            return True
         # ETL uploads may be processed while SOURCE is awaiting review, but
         # only with an exact committed writeback receipt and a live resource.
         if source.get('source_lifecycle_status') not in {

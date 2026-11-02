@@ -9,8 +9,17 @@ from data_sync_etl.domain.concepts import ExpansionPolicy
 
 class Settings(BaseSettings):
     search_result_sessions_enabled: bool = False
-    # Explicit opt-in must fail closed until the component pipeline is complete.
+    # SOURCE-owned OCR requires an approved contract and MASTER migration 0020.
     ocr_component_pipeline_enabled: bool = False
+    source_ocr_contract_file: Path | None = None
+    source_ocr_actor_id: str | None = Field(default=None, min_length=1, max_length=30)
+    source_ocr_role: Literal['ADMIN', 'OPERATOR'] | None = None
+
+    @field_validator('source_ocr_contract_file', 'source_ocr_actor_id', 'source_ocr_role', mode='before')
+    @classmethod
+    def empty_source_ocr_setting_is_unset(cls, value):
+        return None if value in (None, '') else value
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",

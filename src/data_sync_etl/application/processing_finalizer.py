@@ -1,11 +1,10 @@
-from datetime import timedelta
 import re
+from datetime import timedelta
 
 from data_sync_etl.application.processing_state import processing_state, projection_fingerprint
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.logging import event
 from data_sync_etl.ports.repositories import UnitOfWork
-
 
 _SAFE_ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,79}$")
 
@@ -39,6 +38,11 @@ class ProcessingFinalizer:
         if job is None or job["status"] != "COMPLETED":
             return None
         version_id = job["resource_version_id"]
+        with self.uow() as repo:
+            version = repo.get('resource_versions', version_id)
+        if ((version.get('processing_options') or {}).get('_source_ocr')
+                and not hasattr(getattr(self, 'text_store', None), 'pipeline')):
+            raise DomainError('SOURCE_OCR_OWNER_REQUIRED')
         with self.uow.processing_lock(version_id) as acquired:
             if not acquired:
                 return {"status": "IN_PROGRESS"}
@@ -58,7 +62,7 @@ class ProcessingFinalizer:
                 or job["completed_pages"] != job["total_pages"]
             ):
                 return None
-            state = processing_state(repo, job)
+            state = processing_state(repo, job, getattr(self, 'text_store', None))
             if state == 'NO_EXTRACTABLE_CONTENT':
                 return {'status': state}
             if state == "CONTENT_READY":
@@ -232,6 +236,14 @@ class ProcessingFinalizer:
         with self.uow() as repo:
             jobs = repo.find("ocr_jobs", {"status": "COMPLETED"}, order=("created_at", "id"))
         for job in jobs:
+            store = getattr(self, 'text_store', None)
+            if store is not None and not store.pipeline.state(job['resource_version_id']):
+                continue
+            if store is None:
+                with self.uow() as repo:
+                    version = repo.get('resource_versions', job['resource_version_id'])
+                if (version.get('processing_options') or {}).get('_source_ocr'):
+                    continue
             try:
                 result = self.finalize(job["id"])
             except Exception as exc:

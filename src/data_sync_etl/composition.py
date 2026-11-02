@@ -221,13 +221,19 @@ class Container:
     def close(self):
         if hasattr(self, 'reconciliation_jobs'):
             self.reconciliation_jobs.close()
-        if hasattr(self.source, "close"):
-            self.source.close()
-        if self.mongo_client is not None:
-            self.mongo_client.close()
-        if self.source_mongo_client is not None and self.source_mongo_client is not self.mongo_client:
-            self.source_mongo_client.close()
-        self.engine.dispose()
+        source = getattr(self, 'source', None)
+        if callable(getattr(source, 'close', None)):
+            source.close()
+        mongo_client = getattr(self, 'mongo_client', None)
+        source_mongo_client = getattr(self, 'source_mongo_client', None)
+        if mongo_client is not None:
+            mongo_client.close()
+        if source_mongo_client is not None and source_mongo_client is not mongo_client:
+            source_mongo_client.close()
+        if getattr(self, 'source_ocr_engine', None) is not None:
+            self.source_ocr_engine.dispose()
+        if getattr(self, 'engine', None) is not None:
+            self.engine.dispose()
 
     def _reconcile_source_create(self):
         """Run the normal SOURCE -> MASTER resources sync after CREATE."""
@@ -241,14 +247,16 @@ class Container:
         self.sync.run('resources', full=False)
 
     def __init__(self, settings=None, engine=None, documents=None, *, source_registry=None, source_adapters=None,
-                 component_projection_worker=None):
+                 component_projection_worker=None, source_ocr_access_provider=None):
         self.settings = settings or Settings()
+        self.source_ocr_access_provider = source_ocr_access_provider
         # MASTER remains on 0020: the older component projection worker reads
         # the removed 0021 tables and must never be injected into this runtime.
         if component_projection_worker is not None:
             raise DomainError('BLOCKED_LEGACY_COMPONENT_PROJECTION')
         if self.settings.ocr_component_pipeline_enabled:
-            raise DomainError('BLOCKED_COMPONENT_PIPELINE_NOT_READY')
+            from data_sync_etl.application.source_ocr_runtime import load_source_ocr_contract
+            source_ocr_contract = load_source_ocr_contract(self.settings)
         if self.settings.master_mongo_identity_projection and (
                 self.settings.app_environment not in ('development', 'test')
                 or self.settings.mongo_metadata_mode != 'shared'
@@ -645,6 +653,14 @@ class Container:
         self.reconciliation_jobs = FileReconciliationJobs(self.reconciliation_engine)
         self.file_previews = FilePreviewService(self.source_resolver, self.settings)
         self.ocr.resolver = self.source_resolver
+        self.source_ocr_engine = None
+        if self.settings.ocr_component_pipeline_enabled:
+            from data_sync_etl.application.source_ocr_runtime import wire_source_ocr
+            try:
+                wire_source_ocr(self, source_ocr_contract, _source_writer_database_url(self.settings))
+            except Exception:
+                self.close()
+                raise
         self.source_file_worker = SourceFileImportWorker(self.source_file_import)
         self.worker = OCRWorker(
             self.ocr,
@@ -656,6 +672,8 @@ class Container:
         self._prefer_index_reconcile = False
 
     def reconcile_processing(self):
+        if getattr(self.ocr, 'source_owned', False):
+            self.ocr.reconcile_once()
         translated = self.bilingual.once()
         self._prefer_index_reconcile = not self._prefer_index_reconcile
         if self._prefer_index_reconcile:
@@ -665,7 +683,13 @@ class Container:
     def finalize_bilingual(self, job_id):
         with self.uow() as repo:
             job = repo.get('ocr_jobs', job_id)
+        if getattr(self.ocr, 'source_owned', False) and job and not self.ocr.state(job['resource_version_id']):
+            return None
         if job and job['status'] in ('COMPLETED', 'COMPLETED_WITH_ERRORS'):
             self.bilingual.translate_version(job['resource_version_id'])
-        return self.processing_finalizer.finalize(job_id)
+        result = self.processing_finalizer.finalize(job_id)
+        if (getattr(self.ocr, 'source_owned', False) and job and result
+                and result['status'] in ('CONTENT_READY', 'ALREADY_COMPLETED', 'NO_EXTRACTABLE_CONTENT')):
+            self.ocr.cleanup_staging(self.ocr.state(job['resource_version_id']))
+        return result
 

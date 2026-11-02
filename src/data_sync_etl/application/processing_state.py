@@ -8,6 +8,8 @@ def projection_fingerprint(job_id: str, postprocess: dict) -> str:
 
 
 def processing_state(repo, job: dict, text_store=None) -> str:
+    if text_store is not None and hasattr(text_store, 'processing_state'):
+        return text_store.processing_state(repo, job)
     if job['status'] == 'COMPLETED':
         tasks = repo.find('ocr_page_tasks', {'job_id': job['id']}, order=('page_num', 'id'), limit=1)
         if tasks:

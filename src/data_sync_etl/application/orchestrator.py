@@ -58,7 +58,7 @@ class EtlOrchestrator:
             )
             return {
                 "resource": resource,
-                "processing_status": processing_state(repo, jobs[0]) if jobs else 'NOT_STARTED',
+                "processing_status": processing_state(repo, jobs[0], getattr(self, 'text_store', None)) if jobs else 'NOT_STARTED',
                 "version": version,
                 "latest_version": latest,
                 "ocr_job": jobs[0] if jobs else None,
@@ -76,4 +76,17 @@ class EtlOrchestrator:
             resource = repo.get('master_learning_resources', version['resource_id'])
             if resource is None or not resource['is_active'] or resource_deleted(resource):
                 raise DomainError('Resource inactive or deleted')
+            store = getattr(self, 'text_store', None)
+            if store is not None and store.pipeline.state(version_id, repo):
+                units = repo.find('content_units', {'resource_version_id': version_id}, order=('sequence_no', 'id'))
+                items = []
+                for unit in units:
+                    body = store.unit_text(repo, unit['id'])
+                    if body is None:
+                        raise DomainError('SOURCE_OCR_UNIT_NOT_READY')
+                    items.append({**unit, **body})
+                if search:
+                    items = [unit for unit in items if search.casefold() in unit['text'].casefold()
+                             or search.casefold() in unit['id'].casefold()]
+                return {'items': items[offset:offset + limit], 'total': len(items), 'offset': offset, 'limit': limit}
             return repo.content_units(version_id, offset=offset, limit=limit, search=search)

@@ -28,7 +28,7 @@ class GetProcessingJob:
                 "error_code": error_code if error_code in PUBLIC_PROCESSING_ERROR_CODES else None,
                 "resource_version_id": job["resource_version_id"],
                 "status": job["status"],
-                "processing_status": processing_state(repo, job),
+                "processing_status": processing_state(repo, job, getattr(self, 'text_store', None)),
                 "total_pages": job["total_pages"],
                 "completed_pages": job["completed_pages"],
                 "failed_pages": job["failed_pages"],

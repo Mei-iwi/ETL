@@ -348,9 +348,16 @@ class SourceFileImportService:
         return resource
 
     def _source_allowed(self, row):
-        return (row["source_resource_active"]
-                and source_status_allowed(row.get("source_lifecycle_status"),
-                                          self.settings.source_file_allowed_statuses))
+        if not row['source_resource_active']:
+            return False
+        if source_status_allowed(row.get('source_lifecycle_status'), self.settings.source_file_allowed_statuses):
+            return True
+        pipeline = getattr(self.process, 'ocr', None)
+        if getattr(pipeline, 'source_owned', False):
+            return pipeline.status_allowed(dict(source_version_id=row['source_version_id'],
+                source_lifecycle_status=row.get('source_lifecycle_status'), resource_active=True),
+                self.settings.source_namespace)
+        return False
 
     def execute(self, claimed):
         if not claimed or claimed.get('status') == 'METADATA_ONLY':
@@ -606,7 +613,9 @@ class SourceFileImportService:
             job = jobs[0] if jobs else None
         if not job:
             return None, False
-        state = processing_state(repo, job)
+        pipeline = getattr(self.process, 'ocr', None)
+        store = pipeline.container.ocr_text_store if getattr(pipeline, 'source_owned', False) else None
+        state = processing_state(repo, job, store)
         if job["status"] == "RUNNING":
             state = "OCR_RUNNING"
         exhausted = state == "OCR_FAILED"
@@ -629,7 +638,10 @@ class SourceFileImportService:
         version = repo.get('resource_versions', row['target_version_id'])
         if (resource is None or version is None or resource.get('source_origin') != 'POSTGRESQL'
                 or not resource['is_active'] or resource_deleted(resource)
-                or resource.get('publication_status') != 'PUBLISHED'
+                or (resource.get('publication_status') != 'PUBLISHED'
+                    and not (getattr(getattr(self.process, 'ocr', None), 'source_owned', False)
+                             and resource.get('publication_status') == 'DRAFT'
+                             and self.process.ocr.scheduler_authorized(version['id'])))
                 or resource.get('source_missing_at') is not None
                 or version['resource_id'] != row['resource_id']
                 or version['version_number'] != row['source_version_number']

@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
+from hashlib import sha256
 from threading import BoundedSemaphore
 from time import monotonic
 
@@ -299,6 +300,11 @@ class SearchService:
         if any(any(unit[key] != previous[key_id][key] for key in fields)
                for key_id, unit in current.items()):
             return True
+        store = self.indexing.text_store
+        if hasattr(store, 'source_version') and store.source_version(repo, old['id']):
+            state = store.pipeline.state(old['id'], repo)
+            return any(state['units'].get(key, {}).get('text_sha256') != sha256(previous[key]['text'].encode()).hexdigest()
+                       for key in current)
         texts = repo.search_unit_texts(list(current))
         return any(key not in texts or texts[key]['text'] != previous[key]['text'] for key in current)
 

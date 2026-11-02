@@ -47,19 +47,25 @@ class OCRPipeline:
         self.default_target_language = default_target_language
         self.max_active = max_active
         self.text_store = text_store or LegacyOCRText()
+        self.source_scheduling_enabled = False
 
     def create_job(self, version_id, triggered_by=None, *, fence=None):
         with self.uow() as repo:
             version = repo.get('resource_versions', version_id)
             resource = repo.get('master_learning_resources', version['resource_id']) if version else None
             source_backed = bool(resource and resource.get('source_origin') != 'LOCAL')
+            if version and (version.get('processing_options') or {}).get('_source_ocr'):
+                raise DomainError('SOURCE_OCR_OWNER_REQUIRED')
             if version and version.get('lifecycle_status') == 'METADATA_ONLY' and not source_backed:
                 raise DomainError('CONTENT_NOT_AVAILABLE')
         reference = self.resolver.resolve(version_id)
         if reference.ownership == 'SOURCE_BACKED':
-            with self.resolver.open_verified_stream(reference, index=True) as stream:
-                data = stream.read()
-            return self._create_source_job(version_id, triggered_by, reference, data, fence=fence)
+            with self.uow() as repo:
+                historical = repo.find('ocr_jobs', {'resource_version_id': version_id},
+                                       order=('-created_at', '-id'), limit=1)
+            if historical and not historical[0]['id'].startswith('SJ'):
+                return historical[0]
+            raise DomainError('SOURCE_OCR_OWNER_REQUIRED')
         if reference.ownership == 'LOCAL_OWNED':
             # Preserve LOCAL command idempotency even if its managed file later disappears.
             with self.uow() as repo:
@@ -238,6 +244,8 @@ class OCRPipeline:
             return {**task, **change, 'deletion_revision': resource['deletion_revision']}
 
     def schedule_authorized_source_job(self, *, limit=50):
+        if not self.source_scheduling_enabled:
+            return False
         """Enqueue one opted-in SOURCE version without copying its original file."""
         if self.resolver.source_registry is None:
             return False

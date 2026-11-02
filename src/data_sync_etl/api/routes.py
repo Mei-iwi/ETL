@@ -80,7 +80,11 @@ from data_sync_etl.api.search_schemas import (
     SearchResponse,
     search_error,
 )
-from data_sync_etl.api.source_file_response import SourceFileResponse, source_file_error
+from data_sync_etl.api.source_file_response import (
+    SourceFileResponse,
+    source_file_error,
+    verified_source_response,
+)
 from data_sync_etl.api.source_resolution_schemas import SourceOpenResponse, SourceResolutionResponse
 from data_sync_etl.api.source_writeback_schemas import (
     SourceCreateResourceRequest,
@@ -506,6 +510,17 @@ def source_view_response(container, version_id, access, *, embedded=False):
 def resource_file(id: ResourceId, request: Request, download: bool = False, view: Literal['file', 'text', 'preview'] = 'file'):
     container = request.app.state.container
     access = search_access(request)
+    if view == 'file' and getattr(container.ocr, 'source_owned', False) and container.ocr.state(id):
+        with container.uow() as repo:
+            version = repo.get('resource_versions', id)
+        private_access = (access.scope == 'authenticated_admin' or
+                          (version is not None and access.actor_id and version['resource_id'] in access.resource_ids))
+        if private_access:
+            bilingual_access(request, id)
+            reference = container.source_resolver.resolve(id)
+            return verified_source_response(container.source_resolver, reference,
+                                            lambda: bilingual_access(request, id), version_id=id,
+                                            range_header=request.headers.get('range'), download=download)
     if view != 'text':
         source_response = source_view_response(container, id, access, embedded=view == 'preview')
         if source_response is not None:
@@ -1436,7 +1451,10 @@ def process_resource_version(
             resource = repo.get('master_learning_resources', version['resource_id']) if version else None
         if resource and resource.get('source_origin') not in ('LOCAL', None):
             container.search.authorize_source_processing_version(id, access=search_access(request))
-        result = container.process_version.run(id)
+        if getattr(container.ocr, 'source_owned', False):
+            result = container.process_version.run(id, access=search_access(request))
+        else:
+            result = container.process_version.run(id)
     except ProcessingFormatError as exc:
         message = (
             'OCR ảnh cần Tesseract và dữ liệu ngôn ngữ được cấu hình hợp lệ.'
@@ -1538,7 +1556,10 @@ def retry_processing_job(
 ) -> RetryProcessingJobResponse:
     container = services(request)
     try:
-        result = container.retry_processing_job.run(job_id)
+        if getattr(container.ocr, 'source_owned', False):
+            result = container.retry_processing_job.run(job_id, access=search_access(request))
+        else:
+            result = container.retry_processing_job.run(job_id)
     except ProcessingJobNotFound:
         raise HTTPException(404, "Processing job not found") from None
     except ProcessingRetryConflict:
@@ -1718,6 +1739,8 @@ def create_job(id: ResourceId, request: Request, body: JobInput | None = None):
         resource = repo.get('master_learning_resources', version['resource_id']) if version else None
     if resource and resource.get('source_origin') not in ('LOCAL', None):
         services(request).search.authorize_source_processing_version(id, access=search_access(request))
+    if getattr(services(request).ocr, 'source_owned', False):
+        return services(request).ocr.create_job(id, access=search_access(request))
     return services(request).ocr.create_job(id, body.triggered_by if body else None)
 
 
@@ -1777,6 +1800,9 @@ def status(id: ResourceId, request: Request):
         if isinstance(version, dict):
             result[key] = {name: value for name, value in version.items()
                            if name not in ('storage_bucket', 'storage_object_key')}
+            if isinstance(result[key].get('processing_options'), dict):
+                result[key]['processing_options'] = {name: value for name, value in result[key]['processing_options'].items()
+                                                     if name != '_source_ocr'}
     return result
 
 
@@ -1793,14 +1819,20 @@ def list_public_content_units(
     search: Annotated[str, Query(max_length=200)] = "",
 ) -> dict:
     try:
-        request.app.state.container.search.authorize_content_version(id, access=search_access(request))
+        container = request.app.state.container
+        if getattr(container.ocr, 'source_owned', False) and container.ocr.state(id):
+            container.search.authorize_source_processing_version(id, access=search_access(request))
+        else:
+            container.search.authorize_content_version(id, access=search_access(request))
     except Exception as exc:
         raise search_error(exc) from None
     try:
         return request.app.state.container.orchestrator.content_units(
             id, offset=offset, limit=limit, search=search
         )
-    except DomainError:
+    except DomainError as exc:
+        if str(exc) in ('SOURCE_OCR_UNIT_NOT_READY', 'SOURCE_OCR_UNIT_CONFLICT'):
+            raise HTTPException(status_code=409, detail={'code': str(exc), 'message': 'Nội dung chưa sẵn sàng.'}) from None
         raise HTTPException(status_code=404, detail="Resource version not found") from None
 
 
@@ -1820,7 +1852,11 @@ def bilingual_access(request, version_id):
 
     container = services(request)
     principal = getattr(request.state, 'auth_principal', None)
-    if principal is not None and principal.role != 'ADMIN':
+    source_processing = getattr(container.ocr, 'source_owned', False) and container.ocr.state(version_id)
+    if source_processing:
+        container.search.authorize_source_processing_version(version_id, access=search_access(request))
+        container.ocr.authorize_identity(source_processing['identity'])
+    elif principal is not None and principal.role != 'ADMIN':
         try:
             container.search.authorize_content_version(version_id, access=search_access(request))
         except Exception as exc:
@@ -1831,7 +1867,7 @@ def bilingual_access(request, version_id):
     if (not resource or not resource['is_active'] or resource_deleted(resource)
             or resource.get('source_missing_at') is not None):
         raise HTTPException(404, 'Resource version not found')
-    if (resource.get('source_origin') != 'LOCAL'
+    if (not source_processing and resource.get('source_origin') != 'LOCAL'
             and not container.source_resolver.derived_index_authorized(version_id, access=search_access(request))):
         raise HTTPException(403, detail={'code': 'SOURCE_CAPABILITY_BLOCKED',
                                         'message': 'Nguồn chưa cấp quyền đọc nội dung đã xử lý.'})
@@ -1926,7 +1962,14 @@ def bilingual_export(id: ResourceId, format: Literal['json', 'txt', 'srt', 'vtt'
 
 @router.get('/api/v1/resource-versions/{id}/processing-source', tags=[TAG_PROCESSING])
 def bilingual_source(id: ResourceId, request: Request, embedded: bool = False):
-    source_response = source_view_response(services(request), id, search_access(request), embedded=embedded)
+    container = services(request)
+    if getattr(container.ocr, 'source_owned', False) and container.ocr.state(id):
+        bilingual_access(request, id)
+        reference = container.source_resolver.resolve(id)
+        return verified_source_response(container.source_resolver, reference,
+                                        lambda: bilingual_access(request, id), version_id=id,
+                                        range_header=request.headers.get('range'))
+    source_response = source_view_response(container, id, search_access(request), embedded=embedded)
     if source_response is not None:
         return source_response
     container = bilingual_access(request, id)
@@ -1947,10 +1990,20 @@ def bilingual_frame(id: ResourceId, segment_id: str, request: Request):
         jobs = repo.find('ocr_jobs', {'resource_version_id': id}, order=('-created_at', '-id'), limit=1)
         for job in jobs:
             for task in repo.find('ocr_page_tasks', {'job_id': job['id']}):
-                for result in repo.find('ocr_page_results', {'page_task_id': task['id']}):
-                    for segment in (result['result_metadata'] or {}).get('paired_segments', []):
-                        if segment['segment_id'] == segment_id and segment.get('frame'):
-                            frame = segment['frame']
-                            return FileResponse(container.storage.get_local_path(frame['bucket'], frame['object_key']),
-                                                media_type='image/png', headers={'Cache-Control': 'private, no-store'})
+                result = container.ocr_text_store.page_by_task(repo, task['id'])
+                if result is None:
+                    continue
+                for segment in (result['result_metadata'] or {}).get('paired_segments', []):
+                    if segment['segment_id'] == segment_id and segment.get('frame'):
+                        frame = segment['frame']
+                        stream = container.storage.open_stream(frame['bucket'], frame['object_key'])
+                        try:
+                            content = stream.read(16 * 1024 * 1024 + 1)
+                        finally:
+                            stream.close()
+                        if len(content) > 16 * 1024 * 1024 or not content.startswith(bytes((137, 80, 78, 71, 13, 10, 26, 10))):
+                            raise HTTPException(409, 'FRAME_NOT_READY')
+                        bilingual_access(request, id)
+                        return Response(content, media_type='image/png', headers={
+                            'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
     raise HTTPException(404, 'Frame not found')
