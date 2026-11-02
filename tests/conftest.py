@@ -92,7 +92,7 @@ def pytest_sessionfinish(session, exitstatus):
             reporter.write_line("Required PostgreSQL tests were not executed; refusing PASS")
 
 
-def migrate(engine, revision="head", downgrade=False):
+def migrate(engine, revision="0020", downgrade=False):
     config = Config(str(ROOT / "alembic.ini"))
     with engine.begin() as connection:
         config.attributes["connection"] = connection

@@ -39,6 +39,15 @@ class MongoContentStore:
             pass
 
     def _upsert(self, collection_name: str, document: dict[str, Any]) -> None:
+        # A Mongo upsert can create a missing collection implicitly. Refuse to
+        # proceed when the configured collection was not provisioned by the
+        # database owner; never bootstrap it from an OCR processing request.
+        try:
+            existing = self.database.list_collection_names(filter={'name': collection_name})
+        except PyMongoError:
+            raise DomainError('MONGO_COLLECTION_UNAVAILABLE') from None
+        if collection_name not in existing:
+            raise DomainError('MONGO_COLLECTION_MISSING')
         document_id = document["_id"]
 
         values = {key: value for key, value in document.items() if key not in ("_id", "created_at")}
@@ -73,6 +82,36 @@ class MongoContentStore:
 
     def upsert_ocr_page(self, document: dict[str, Any]) -> None:
         self._upsert("ocr_pages", self._validate(OCRPageDocument, document))
+
+    def insert_source_ocr_page(self, document: dict[str, Any]) -> bool:
+        """Insert a SOURCE-owned page once, or verify an identical retry.
+
+        The caller must authorize SOURCE ownership, version and job before
+        invoking this method. Existing documents with the same ID but different
+        content are never overwritten, including historical ETL documents.
+        """
+        data = self._validate(OCRPageDocument, document)
+        try:
+            if 'ocr_pages' not in self.database.list_collection_names(filter={'name': 'ocr_pages'}):
+                raise DomainError('MONGO_COLLECTION_MISSING')
+            collection = self.database['ocr_pages']
+            try:
+                collection.insert_one(data)
+                inserted = True
+            except DuplicateKeyError:
+                inserted = False
+            saved = collection.find_one({'_id': data['_id']})
+            if saved is None:
+                raise DomainError('SOURCE_OCR_PAGE_READBACK_FAILED')
+            # Timestamps describe storage attempts; identity and OCR content
+            # must be identical across retries even when retry time differs.
+            expected = {key: value for key, value in data.items() if key not in ('created_at', 'updated_at')}
+            observed = {key: value for key, value in saved.items() if key not in ('created_at', 'updated_at')}
+            if expected != observed:
+                raise DomainError('SOURCE_OCR_PAGE_CONFLICT')
+            return inserted
+        except PyMongoError:
+            raise DomainError('SOURCE_OCR_MONGO_UNAVAILABLE') from None
 
     def upsert_content_unit(self, document: dict[str, Any]) -> None:
         self._upsert("mongo_content_units", self._validate(ContentUnitDocument, document))

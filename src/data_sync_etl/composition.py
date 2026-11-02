@@ -243,6 +243,10 @@ class Container:
     def __init__(self, settings=None, engine=None, documents=None, *, source_registry=None, source_adapters=None,
                  component_projection_worker=None):
         self.settings = settings or Settings()
+        # MASTER remains on 0020: the older component projection worker reads
+        # the removed 0021 tables and must never be injected into this runtime.
+        if component_projection_worker is not None:
+            raise DomainError('BLOCKED_LEGACY_COMPONENT_PROJECTION')
         if self.settings.ocr_component_pipeline_enabled:
             raise DomainError('BLOCKED_COMPONENT_PIPELINE_NOT_READY')
         if self.settings.master_mongo_identity_projection and (

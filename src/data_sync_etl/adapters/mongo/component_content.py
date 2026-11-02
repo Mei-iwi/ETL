@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 
+from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from pymongo.write_concern import WriteConcern
 
@@ -34,6 +35,11 @@ def _identity(namespace, version_id, generation, kind, item_id):
 
 class MongoComponentContent:
     def __init__(self, database):
+        # Historical component-only prototype uses collection names forbidden
+        # by the SOURCE contract. Never bind it to a real PyMongo database.
+        # In-memory test doubles remain usable to exercise old recovery tests.
+        if isinstance(database, Database):
+            raise ComponentContentError('COMPONENT_PROTOTYPE_DISABLED')
         self.pages = database['component_ocr_pages'].with_options(write_concern=WriteConcern(w='majority'))
         self.units = database['component_content_units'].with_options(write_concern=WriteConcern(w='majority'))
         self.manifests = database['component_ocr_manifests'].with_options(write_concern=WriteConcern(w='majority'))
@@ -61,6 +67,15 @@ class MongoComponentContent:
         return {'source_hash': source_hash, 'fingerprint': fingerprint,
                 'checksum': hashlib.sha256(text.encode('utf-8')).hexdigest()}
 
+    @staticmethod
+    def _page_metadata_checksum(engine_name, engine_version, confidence, result_metadata):
+        try:
+            payload = json.dumps([engine_name, engine_version, confidence, result_metadata],
+                                 ensure_ascii=True, sort_keys=True, separators=(',', ':'), allow_nan=False)
+        except (TypeError, ValueError):
+            raise ComponentContentError('COMPONENT_INVALID_METADATA') from None
+        return hashlib.sha256(payload.encode('ascii')).hexdigest()
+
     def put_page(self, *, namespace, version_id, generation, page_num, source_hash, fingerprint, raw_text,
                  engine_name=None, engine_version=None, confidence=None, result_metadata=None):
         if type(page_num) is not int or page_num < 1:
@@ -70,6 +85,8 @@ class MongoComponentContent:
                     'page_num': page_num, 'raw_text': raw_text, 'verified': True,
                     'engine_name': engine_name, 'engine_version': engine_version,
                     'confidence': confidence, 'result_metadata': result_metadata,
+                    'metadata_checksum': self._page_metadata_checksum(
+                        engine_name, engine_version, confidence, result_metadata),
                     **self._text_fields(raw_text, source_hash, fingerprint)}
         return self._put(self.pages, document)
 
@@ -118,6 +135,10 @@ class MongoComponentContent:
                 if (type(page_num) is not int or not 1 <= page_num <= len(keys)
                         or document.get('_id') != keys[page_num - 1] or page_num in pages):
                     raise ComponentContentError('COMPONENT_CONTENT_CORRUPT')
+                if document.get('metadata_checksum') != self._page_metadata_checksum(
+                        document.get('engine_name'), document.get('engine_version'),
+                        document.get('confidence'), document.get('result_metadata')):
+                    document = {**document, 'verified': False}
                 pages[page_num] = document
             return probe_ocr(**args, pages=pages)
         except PyMongoError:
@@ -147,6 +168,10 @@ class MongoComponentContent:
             raise ComponentContentError('COMPONENT_CONTENT_CONFLICT')
         fields = self._text_fields(document.get('raw_text'), source_hash, fingerprint)
         if document.get('checksum') != fields['checksum']:
+            raise ComponentContentError('COMPONENT_CONTENT_CORRUPT')
+        if document.get('metadata_checksum') != self._page_metadata_checksum(
+                document.get('engine_name'), document.get('engine_version'),
+                document.get('confidence'), document.get('result_metadata')):
             raise ComponentContentError('COMPONENT_CONTENT_CORRUPT')
         return document
 

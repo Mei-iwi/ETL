@@ -1,7 +1,14 @@
 """Component migrations require an externally verified isolated connection."""
 from alembic import context
 from data_sync_etl.adapters.persistence.component_isolation import postgres_component_is_isolated
+from data_sync_etl.adapters.persistence.component_ocr_lease import (
+    component_page_leases,  # noqa: F401
+)
 from data_sync_etl.adapters.persistence.component_ocr_outbox import component_metadata
+from data_sync_etl.adapters.persistence.component_ocr_units import (  # noqa: F401
+    component_postprocess_manifests,
+    component_unit_provenance,
+)
 
 config = context.config
 connection = config.attributes.get('connection')

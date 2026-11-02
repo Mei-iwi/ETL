@@ -337,6 +337,8 @@ def test_page_executor_recovers_content_after_lost_lease_without_second_ocr():
     component = create_engine('sqlite:///:memory:')
     component_metadata.create_all(component)
     store = MongoComponentContent(FakeDatabase())
+    store.put_manifest(namespace='source-a', version_id='version-1', generation=1, total_pages=2,
+                       source_hash='a' * 64, fingerprint='b' * 64)
     with component.begin() as conn:
         record_snapshot(conn, 'job', job())
     calls = []
@@ -367,6 +369,25 @@ def test_page_executor_recovers_content_after_lost_lease_without_second_ocr():
     component.dispose()
 
 
+def test_component_executor_rejects_stale_manifest_before_opening_source():
+    component = create_engine('sqlite:///:memory:')
+    component_metadata.create_all(component)
+    store = MongoComponentContent(FakeDatabase())
+    with component.begin() as conn:
+        record_snapshot(conn, 'job', job())
+    calls = []
+    executor = ComponentOCRPageExecutor(component, store, authorize=lambda *_: True,
+                                       check_lease=lambda *_: True,
+                                       open_verified=lambda: calls.append('open'), recognize=lambda *_: None)
+    args = dict(source_version_id='version-1', source_hash='a' * 64, fingerprint='b' * 64)
+    store.put_manifest(namespace='source-a', version_id='version-1', generation=1, total_pages=2,
+                       source_hash='c' * 64, fingerprint='b' * 64)
+    with pytest.raises(DomainError, match='MANIFEST_STALE'):
+        executor.run(page(), **args)
+    assert calls == []
+    component.dispose()
+
+
 def test_isolated_processing_outbox_and_three_master_replicas():
     from contextlib import contextmanager
     from io import BytesIO
@@ -377,6 +398,8 @@ def test_isolated_processing_outbox_and_three_master_replicas():
     for model in (ComponentJobRef, ComponentPageRef, ComponentUnitRef):
         model.__table__.create(master)
     store = MongoComponentContent(FakeDatabase())
+    store.put_manifest(namespace='source-a', version_id='version-1', generation=1, total_pages=2,
+                       source_hash='a' * 64, fingerprint='b' * 64)
     calls = []
 
     @contextmanager

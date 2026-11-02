@@ -23,6 +23,6 @@ def test_cli_schema_error_is_actionable_and_hides_sensitive_details(sqlstate, mo
     assert cli.main() == 1
     output = capsys.readouterr().err
     assert "MASTER_SCHEMA_MIGRATION_REQUIRED" in output
-    assert "python -m alembic upgrade head" in output
+    assert "python -m alembic upgrade 0020" in output
     assert "sensitive" not in output
     assert closed == [True]

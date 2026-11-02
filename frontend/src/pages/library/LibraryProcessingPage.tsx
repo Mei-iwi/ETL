@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BilingualPanel } from '../../components/BilingualPanel'
+import { OriginalOCRPanel } from '../../components/OriginalOCRPanel'
 import { startVisiblePolling } from '../system/visiblePolling'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router'
 import {
@@ -24,6 +25,9 @@ type ProcessingView = {
     job_id: string
     job_status: JobStatus
     processing_status: ProcessingStatus
+    total_pages?: number
+    completed_pages?: number
+    failed_pages?: number
 }
 
 type ProcessingLocationState = {
@@ -135,6 +139,9 @@ export function LibraryProcessingPage() {
                     job_status: data.status,
                     processing_status: data.processing_status,
                     error_code: data.error_code,
+                    total_pages: data.total_pages,
+                    completed_pages: data.completed_pages,
+                    failed_pages: data.failed_pages,
                 })
 
                 pending = !terminalJobStatuses.includes(data.status)
@@ -302,6 +309,10 @@ export function LibraryProcessingPage() {
                 {currentResult?.error_code && <p className={styles.notice}>{mediaErrors[currentResult.error_code] ?? 'Lỗi xử lý nội dung.'}</p>}
                 {statusError && <p className={styles.alert} role="alert">{statusError}</p>}
 
+                {!!currentResult?.total_pages && <OriginalOCRPanel key={`${versionId}:${jobId}`} versionId={versionId}
+                    jobId={jobId} totalPages={currentResult.total_pages}
+                    refreshKey={`${currentResult.job_status}:${currentResult.completed_pages}:${currentResult.failed_pages}`} />}
+
                 {contentReady && (
                     <section className={styles.contentSection}>
                         <div className={styles.actions}>
@@ -362,6 +373,15 @@ export function LibraryProcessingPage() {
                             <span className={styles.resultLabel}>Trạng thái xử lý</span>
                             <span className={styles.resultValue}>{currentResult.processing_status}</span>
                         </p>
+                        {currentResult.total_pages != null && (
+                            <p className={styles.resultItem}>
+                                <span className={styles.resultLabel}>Tiến độ trích xuất</span>
+                                <span className={styles.resultValue}>
+                                    {currentResult.completed_pages ?? 0} / {currentResult.total_pages} trang
+                                    {(currentResult.failed_pages ?? 0) > 0 && ` · Lỗi: ${currentResult.failed_pages}`}
+                                </span>
+                            </p>
+                        )}
                     </div>
                 )}
 

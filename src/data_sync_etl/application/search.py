@@ -1014,8 +1014,13 @@ class SearchService:
                 raise SearchError('FILE_NOT_FOUND', 404) from None
 
     def authorize_source_processing_version(self, version_id, *, access=None):
-        """Require current authenticated resource visibility before a SOURCE job is created."""
-        from data_sync_etl.domain.metadata_search import metadata_allowed
+        """Authorize processing separately from published-content visibility.
+
+        The HTTP boundary must first enforce its processing role/ACL. This
+        method checks the server-issued resource grant again; it does not grant
+        search or file-read access to unpublished content. SourceFileResolver
+        remains responsible for live SOURCE mapping, lifecycle and file access.
+        """
         access = access or SearchAccess()
         if not access.internal:
             raise SearchError('FILE_NOT_FOUND', 404)
@@ -1023,9 +1028,15 @@ class SearchService:
             version = repo.get('resource_versions', version_id)
             resource = repo.get('master_learning_resources', version['resource_id']) if version else None
             if (not version or not resource or resource.get('source_origin') not in ('POSTGRESQL', 'SOURCE')
-                    or resource.get('publication_status') != 'PUBLISHED' or not resource.get('is_active')
+                    or resource.get('publication_status') not in ('DRAFT', 'PUBLISHED')
+                    or resource.get('is_active') is not True
+                    or version.get('resource_id') != resource.get('id')
+                    or version.get('lifecycle_status') not in ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED')
+                    or version.get('rejection_reason')
                     or resource_deleted(resource) or denied(resource) or denied(version)
-                    or not metadata_allowed(resource, version, access)):
+                    or (access.scope == 'authenticated_user' and (
+                        not access.actor_id or resource['id'] not in access.resource_ids
+                        or (access.owner_id is not None and resource.get('created_by') != access.owner_id)))):
                 raise SearchError('FILE_NOT_FOUND', 404)
 
     def file_version(self, version_id, *, access=None, include_text=False):

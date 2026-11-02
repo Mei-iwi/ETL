@@ -15,7 +15,7 @@ def test_component_opt_in_fails_closed_before_creating_connections():
         Container(settings=settings)
 
 
-def test_component_projection_is_routed_through_actual_container_worker(container):
+def test_legacy_projection_worker_is_rejected_before_connecting():
     class Projection:
         def __init__(self):
             self.calls = 0
@@ -24,13 +24,9 @@ def test_component_projection_is_routed_through_actual_container_worker(containe
             self.calls += 1
             return 1
 
-    projection = Projection()
-    configured = Container(container.settings, container.engine, container.documents,
-                           component_projection_worker=projection)
-    configured.ocr.schedule_authorized_source_job = lambda: False
-    configured.ocr.claim = lambda worker_id: None
-    assert configured.worker.once('worker-test') is True
-    assert projection.calls == 1
+    settings = Settings(_env_file=None, ocr_component_pipeline_enabled=False)
+    with pytest.raises(DomainError, match='BLOCKED_LEGACY_COMPONENT_PROJECTION'):
+        Container(settings, component_projection_worker=Projection())
 
 
 def test_component_migration_requires_injected_isolation_verifier():

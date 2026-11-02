@@ -73,7 +73,14 @@ class ComponentStateError(ValueError):
     pass
 
 
+def require_isolated_prototype(engine):
+    """Historical component-schema prototype is limited to in-memory tests."""
+    if engine.dialect.name != 'sqlite' or engine.url.database not in (None, ':memory:'):
+        raise ComponentStateError('COMPONENT_PROTOTYPE_DISABLED')
+
+
 def record_snapshot(connection, kind, snapshot):
+    require_isolated_prototype(connection.engine)
     if (kind == 'page' and isinstance(snapshot, dict)
             and (snapshot.get('status') == 'SUCCEEDED' or snapshot.get('verified') is True)):
         raise ComponentStateError('COMPONENT_PAGE_REQUIRES_CONTENT_CHECK')
@@ -104,6 +111,7 @@ def _record_snapshot(connection, kind, snapshot):
     authoritative processing state change. Callers must verify actor, source
     ownership and page/unit content before invoking it.
     """
+    require_isolated_prototype(connection.engine)
     if kind not in _MODELS or not isinstance(snapshot, dict):
         raise ComponentStateError('INVALID_SNAPSHOT')
     fields = set(_MODELS[kind].__table__.c.keys()) - {'synced_at'}
@@ -182,6 +190,7 @@ def complete_verified_page(connection, content_store, snapshot, *, source_versio
     by the caller in this component transaction. Missing or unavailable content
     is never treated as an empty page.
     """
+    require_isolated_prototype(connection.engine)
     if snapshot.get('status') != 'SUCCEEDED' or snapshot.get('verified') is not True:
         raise ComponentStateError('COMPONENT_PAGE_NOT_VERIFIED')
     jobs = component_tables['job']
@@ -207,6 +216,7 @@ def complete_verified_page(connection, content_store, snapshot, *, source_versio
 
 def complete_verified_unit(connection, content_store, snapshot, *, source_hash, fingerprint):
     """Publish a verified unit only after its component content is readable."""
+    require_isolated_prototype(connection.engine)
     if snapshot.get('verified') is not True:
         raise ComponentStateError('COMPONENT_UNIT_NOT_VERIFIED')
     document = content_store.get_unit(
@@ -225,6 +235,7 @@ def project_pending(component_connection, master_engine, verify_mapping, verify_
     Master commit is intentionally before ACK; a crash causes replay, and the
     projector fences the duplicate. This is not a distributed transaction.
     """
+    require_isolated_prototype(component_connection.engine)
     if type(limit) is not int or not 1 <= limit <= 1000:
         raise ComponentStateError('INVALID_LIMIT')
     rows = component_connection.execute(
@@ -279,6 +290,7 @@ class ComponentProjectionWorker:
     def __init__(self, component_engine, master_engine, *, verify_mapping, verify_isolation):
         if not callable(verify_mapping) or not callable(verify_isolation):
             raise ComponentStateError('COMPONENT_PROJECTION_NOT_CONFIGURED')
+        require_isolated_prototype(component_engine)
         self.component_engine = component_engine
         self.master_engine = master_engine
         self.verify_mapping = verify_mapping

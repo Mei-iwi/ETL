@@ -306,7 +306,7 @@ Trong psql chạy `\password etl_source_reader`, nhập password khớp `SOURCE_
 Nếu tự cài PostgreSQL/Mongo thay vì Compose: chủ DB tạo DB/role, sau đó khởi tạo **DB rỗng**:
 
 ```bash
-python -m alembic upgrade head
+python -m alembic upgrade 0020
 python -m alembic -c alembic_source.ini upgrade head
 python -m data_sync_etl.adapters.mongo.schema --bootstrap-empty
 ```

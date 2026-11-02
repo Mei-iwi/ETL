@@ -1429,6 +1429,13 @@ def process_resource_version(
 
     container = services(request)
     try:
+        # The direct process endpoint must enforce the same live SOURCE
+        # authorization as /ocr-jobs before it resolves or opens source bytes.
+        with container.uow() as repo:
+            version = repo.get('resource_versions', id)
+            resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+        if resource and resource.get('source_origin') not in ('LOCAL', None):
+            container.search.authorize_source_processing_version(id, access=search_access(request))
         result = container.process_version.run(id)
     except ProcessingFormatError as exc:
         message = (
@@ -1439,6 +1446,8 @@ def process_resource_version(
         raise HTTPException(400, detail={"code": exc.code, "phase": "processing", "message": message}) from None
     except ResourceVersionNotFound:
         raise HTTPException(404, 'Resource version not found') from None
+    except SearchError as exc:
+        raise search_error(exc) from None
     except DomainError as exc:
         # Keep the generic boundary safe while returning a stable diagnostic
         # code for actionable SOURCE/storage/job-state failures.  The old
@@ -1760,7 +1769,15 @@ def reindex_version(id: ResourceId, request: Request, body: ReindexRequest | Non
 
 @router.get("/api/v1/resource-versions/{id}/etl-status", tags=[TAG_PROCESSING])
 def status(id: ResourceId, request: Request):
-    return services(request).orchestrator.status(id)
+    result = services(request).orchestrator.status(id)
+    # A processing-status response is not a file-open capability. Source
+    # locators must stay behind the authenticated source resolver.
+    for key in ('version', 'latest_version'):
+        version = result.get(key)
+        if isinstance(version, dict):
+            result[key] = {name: value for name, value in version.items()
+                           if name not in ('storage_bucket', 'storage_object_key')}
+    return result
 
 
 @router.get(
@@ -1799,6 +1816,8 @@ class ProcessingOptions(BaseModel):
 
 
 def bilingual_access(request, version_id):
+    from data_sync_etl.domain.resource_deletion import resource_deleted
+
     container = services(request)
     principal = getattr(request.state, 'auth_principal', None)
     if principal is not None and principal.role != 'ADMIN':
@@ -1809,13 +1828,51 @@ def bilingual_access(request, version_id):
     with container.uow() as repo:
         version = repo.get('resource_versions', version_id)
         resource = repo.get('master_learning_resources', version['resource_id']) if version else None
-    if not resource or not resource['is_active'] or resource.get('deleted_at'):
+    if (not resource or not resource['is_active'] or resource_deleted(resource)
+            or resource.get('source_missing_at') is not None):
         raise HTTPException(404, 'Resource version not found')
     if (resource.get('source_origin') != 'LOCAL'
             and not container.source_resolver.derived_index_authorized(version_id, access=search_access(request))):
         raise HTTPException(403, detail={'code': 'SOURCE_CAPABILITY_BLOCKED',
                                         'message': 'Nguồn chưa cấp quyền đọc nội dung đã xử lý.'})
     return container
+
+
+@router.get('/api/v1/resource-versions/{id}/ocr-pages/{page_num}', tags=[TAG_PROCESSING],
+            summary='Xem văn bản OCR gốc theo trang')
+def original_ocr_page(id: ResourceId, page_num: Annotated[int, Path(ge=1, le=2000)], request: Request,
+                      response: Response, job_id: Annotated[str, Query(min_length=1, max_length=30)],
+                      offset: Annotated[int, Query(ge=0, le=10000000)] = 0,
+                      limit: Annotated[int, Query(ge=1, le=20000)] = 10000):
+    """Read one authorized legacy OCR page with a bounded response.
+
+    The current component mode is disabled. This endpoint deliberately uses the
+    existing text boundary and never interprets a missing component page as an
+    empty legacy result.
+    """
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    container = bilingual_access(request, id)
+    with container.uow() as repo:
+        job = repo.get('ocr_jobs', job_id)
+        if not job or job['resource_version_id'] != id:
+            raise HTTPException(404, detail={'code': 'OCR_JOB_NOT_FOUND', 'message': 'Chưa có lượt xử lý OCR.'})
+        latest = repo.find('ocr_jobs', {'resource_version_id': id}, order=('-created_at', '-id'), limit=1)
+        if not latest or latest[0]['id'] != job_id:
+            raise HTTPException(409, detail={'code': 'OCR_JOB_STALE', 'message': 'Lượt OCR đã thay đổi. Vui lòng tải lại trạng thái.'})
+        tasks = repo.find('ocr_page_tasks', {'job_id': job['id'], 'page_num': page_num}, limit=1)
+        if not tasks:
+            raise HTTPException(404, detail={'code': 'OCR_PAGE_NOT_FOUND', 'message': 'Không tìm thấy trang OCR.'})
+        task = tasks[0]
+        result = container.ocr_text_store.page_by_task(repo, task['id']) if task['status'] == 'SUCCEEDED' else None
+        if task['status'] == 'SUCCEEDED' and result is None:
+            raise HTTPException(409, detail={'code': 'OCR_PAGE_NOT_READY', 'message': 'Kết quả trang chưa sẵn sàng.'})
+        raw = result['raw_text'] if result else None
+        if result and not isinstance(raw, str):
+            raise HTTPException(409, detail={'code': 'OCR_PAGE_NOT_READY', 'message': 'Kết quả trang chưa sẵn sàng.'})
+        return {'job_id': job_id, 'page_num': page_num, 'total_pages': job['total_pages'], 'status': task['status'],
+                'available': raw is not None, 'text': raw[offset:offset + limit] if raw is not None else None,
+                'offset': offset, 'total_characters': len(raw) if raw is not None else None}
 
 
 @router.put('/api/v1/resource-versions/{id}/processing-options', tags=[TAG_PROCESSING])
