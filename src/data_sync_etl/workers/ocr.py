@@ -13,13 +13,41 @@ class OCRWorker:
         on_job_terminal: Callable[[str], object] | None = None,
         reconcile: Callable[[], bool] | None = None,
         recovery_interval_seconds: int = 30,
+        component_projection_worker: Any | None = None,
+        component_page_executor: Any | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.on_job_terminal = on_job_terminal
         self.reconcile = reconcile
         self.recovery_interval_seconds = recovery_interval_seconds
+        self.component_projection_worker = component_projection_worker
+        component_owned = getattr(pipeline, 'component_owned', False) is True
+        if component_owned != (component_page_executor is not None):
+            raise ValueError('COMPONENT_OCR_WORKER_NOT_CONFIGURED')
+        self.component_page_executor = component_page_executor
         self._next_recovery_at = 0.0
         self._tasks_since_reconcile = 0
+        self._prefer_component_projection = False
+
+    def _background_once(self) -> bool:
+        self._prefer_component_projection = not self._prefer_component_projection
+
+        def project() -> bool:
+            if self.component_projection_worker is None:
+                return False
+            try:
+                return bool(self.component_projection_worker.run_once())
+            except Exception:
+                # Errors may contain source paths or credentials; report only a code.
+                event(stage='component_projection', action='PROJECTION_UNAVAILABLE')
+                return False
+
+        def reconcile() -> bool:
+            return bool(self.reconcile()) if self.reconcile is not None else False
+
+        if self._prefer_component_projection:
+            return project() or reconcile()
+        return reconcile() or project()
 
     def once(self, worker_id: str) -> bool:
         with flow():
@@ -35,16 +63,18 @@ class OCRWorker:
                 )
             # Bounded fair turn for existing finalization/indexing work, even under
             # a continuous OCR backlog. No new queue or scheduler is introduced.
-            if self._tasks_since_reconcile >= 5 and self.reconcile is not None:
+            if self._tasks_since_reconcile >= 5 and (self.reconcile is not None
+                                                      or self.component_projection_worker is not None):
                 self._tasks_since_reconcile = 0
-                if self.reconcile():
+                if self._background_once():
                     return True
-            if self.pipeline.schedule_authorized_source_job():
+            schedule_source = getattr(self.pipeline, 'schedule_authorized_source_job', None)
+            if schedule_source is not None and schedule_source():
                 return True
             task = self.pipeline.claim(worker_id)
 
             if task is None:
-                return self.reconcile() if self.reconcile is not None else False
+                return self._background_once()
 
             stop = Event()
 
@@ -69,13 +99,11 @@ class OCRWorker:
 
             image_path = None
             try:
-                result, image_path = self.pipeline.recognize(task)
-
-                self.pipeline.succeed(
-                    task,
-                    result,
-                    image_path,
-                )
+                if self.component_page_executor is not None:
+                    self.component_page_executor.execute_claimed(task)
+                else:
+                    result, image_path = self.pipeline.recognize(task)
+                    self.pipeline.succeed(task, result, image_path)
 
             except Exception as exc:
                 self.pipeline.fail(task, error=exc)

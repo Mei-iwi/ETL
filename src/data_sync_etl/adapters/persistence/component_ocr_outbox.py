@@ -5,12 +5,14 @@ caller manages the component transaction for state + outbox and supplies the
 Master transaction and trusted identity verifier to the runner.
 """
 import re
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
     Column,
+    DateTime,
     Integer,
     MetaData,
     String,
@@ -33,6 +35,7 @@ from data_sync_etl.db.ocr_component_models import (
     ComponentPageRef,
     ComponentUnitRef,
 )
+from data_sync_etl.domain.core import DomainError
 
 component_metadata = MetaData()
 
@@ -46,11 +49,18 @@ component_outbox = Table(
     Column('revision', BigInteger, nullable=False),
     Column('snapshot', JSON, nullable=False),
     Column('delivered', Boolean, nullable=False, default=False),
+    Column('attempts', Integer, nullable=False, default=0, server_default='0'),
+    Column('next_attempt_at', DateTime(timezone=True), nullable=True),
+    Column('last_error_code', String(80), nullable=True),
     UniqueConstraint('namespace', 'kind', 'entity_id', 'generation', 'revision', name='uq_component_ocr_event'),
 )
 
 _MODELS = {'job': ComponentJobRef, 'page': ComponentPageRef, 'unit': ComponentUnitRef}
 _ID = {'job': 'source_job_id', 'page': 'source_task_id', 'unit': 'source_unit_id'}
+_PUBLIC_PROJECTION_ERRORS = frozenset({
+    'PARENT_NOT_READY', 'IDENTITY_NOT_AUTHORIZED', 'IDENTITY_CONFLICT', 'REVISION_CONFLICT',
+    'TOMBSTONE_CONFLICT', 'TERMINAL_JOB_CONFLICT', 'UNIT_NOT_VERIFIED',
+})
 _TABLE_NAMES = {'job': 'component_ocr_jobs', 'page': 'component_ocr_pages', 'unit': 'component_content_units'}
 component_tables = {
     kind: Table(_TABLE_NAMES[kind], component_metadata,
@@ -218,31 +228,49 @@ def project_pending(component_connection, master_engine, verify_mapping, verify_
     if type(limit) is not int or not 1 <= limit <= 1000:
         raise ComponentStateError('INVALID_LIMIT')
     rows = component_connection.execute(
-        select(component_outbox).where(component_outbox.c.delivered.is_(False))
+        select(component_outbox).where(
+            component_outbox.c.delivered.is_(False),
+            or_(component_outbox.c.next_attempt_at.is_(None),
+                component_outbox.c.next_attempt_at <= datetime.now(timezone.utc)),
+        )
         .order_by(component_outbox.c.id).limit(limit).with_for_update(skip_locked=True)
     ).mappings().all()
     if not rows:
         return 0
-    with master_engine.begin() as master:
-        if not verify_isolation(component_connection, master):
-            raise ComponentStateError('COMPONENT_MASTER_NOT_ISOLATED')
-        projector = ComponentOCRProjector(master, verify_mapping)
-        pending = list(rows)
-        while pending:
-            deferred = []
-            for row in pending:
-                try:
+    pending, delivered = list(rows), []
+    errors = {}
+    while pending:
+        deferred = []
+        for row in pending:
+            try:
+                with master_engine.begin() as master:
+                    if not verify_isolation(component_connection, master):
+                        raise ComponentStateError('COMPONENT_MASTER_NOT_ISOLATED')
+                    projector = ComponentOCRProjector(master, verify_mapping)
                     projector.apply(row['kind'], row['snapshot'])
-                except ProjectionError as exc:
-                    if str(exc) != 'PARENT_NOT_READY':
-                        raise
-                    deferred.append(row)
-            if len(deferred) == len(pending):
-                raise ComponentStateError('COMPONENT_PARENT_NOT_READY')
-            pending = deferred
-    component_connection.execute(update(component_outbox).where(
-        component_outbox.c.id.in_([row['id'] for row in rows])).values(delivered=True))
-    return len(rows)
+                delivered.append(row['id'])
+            except ProjectionError as exc:
+                code = str(exc)
+                errors[row['id']] = code if code in _PUBLIC_PROJECTION_ERRORS else 'PROJECTION_FAILED'
+                deferred.append(row)
+            except DomainError:
+                errors[row['id']] = 'AUTHORITY_UNAVAILABLE'
+                deferred.append(row)
+        if len(deferred) == len(pending):
+            break
+        pending = deferred
+    if delivered:
+        component_connection.execute(update(component_outbox).where(
+            component_outbox.c.id.in_(delivered)).values(delivered=True, last_error_code=None,
+                                                         next_attempt_at=None))
+    for row in deferred:
+        attempts = row['attempts'] + 1
+        delay = min(300, 2 ** min(attempts, 8))
+        component_connection.execute(update(component_outbox).where(component_outbox.c.id == row['id']).values(
+            attempts=attempts, last_error_code=errors[row['id']],
+            next_attempt_at=datetime.now(timezone.utc) + timedelta(seconds=delay),
+        ))
+    return len(delivered)
 
 
 class ComponentProjectionWorker:

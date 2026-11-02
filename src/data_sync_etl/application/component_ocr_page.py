@@ -17,6 +17,11 @@ class ComponentOCRPageExecutor:
         self.open_verified = open_verified
         self.recognize = recognize
 
+    def execute_claimed(self, task):
+        """Use a server-owned claimed task; never accept it from an API body."""
+        return self.run(task['component_snapshot'], source_version_id=task['source_version_id'],
+                        source_hash=task['source_hash'], fingerprint=task['processing_fingerprint'])
+
     def run(self, snapshot, *, source_version_id, source_hash, fingerprint):
         if not self.authorize(snapshot, source_version_id, source_hash):
             raise DomainError('COMPONENT_CONTENT_UNAUTHORIZED')
@@ -41,6 +46,7 @@ class ComponentOCRPageExecutor:
         with self.component_engine.begin() as connection:
             if not self.check_lease(connection, snapshot):
                 raise DomainError('COMPONENT_OCR_LEASE_LOST')
-            complete_verified_page(connection, self.content, snapshot, source_version_id=source_version_id,
-                                   source_hash=source_hash, fingerprint=fingerprint)
+            if not complete_verified_page(connection, self.content, snapshot, source_version_id=source_version_id,
+                                          source_hash=source_hash, fingerprint=fingerprint):
+                raise DomainError('COMPONENT_OCR_STALE_REVISION')
         return {'reused': reused, 'page_num': snapshot['page_num']}

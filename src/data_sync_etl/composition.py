@@ -240,7 +240,8 @@ class Container:
             return
         self.sync.run('resources', full=False)
 
-    def __init__(self, settings=None, engine=None, documents=None, *, source_registry=None, source_adapters=None):
+    def __init__(self, settings=None, engine=None, documents=None, *, source_registry=None, source_adapters=None,
+                 component_projection_worker=None):
         self.settings = settings or Settings()
         if self.settings.ocr_component_pipeline_enabled:
             raise DomainError('BLOCKED_COMPONENT_PIPELINE_NOT_READY')
@@ -646,6 +647,7 @@ class Container:
             on_job_terminal=self.finalize_bilingual,
             reconcile=self.reconcile_processing,
             recovery_interval_seconds=self.settings.ocr_recovery_interval_seconds,
+            component_projection_worker=component_projection_worker,
         )
         self._prefer_index_reconcile = False
 

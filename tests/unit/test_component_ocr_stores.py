@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 
 from data_sync_etl.adapters.mongo.component_content import (
     ComponentContentError,
@@ -15,7 +15,6 @@ from data_sync_etl.adapters.persistence.component_ocr_outbox import (
     project_pending,
     record_snapshot,
 )
-from data_sync_etl.adapters.persistence.component_ocr_projection import ProjectionError
 from data_sync_etl.application.component_ocr_page import ComponentOCRPageExecutor
 from data_sync_etl.db.ocr_component_models import (
     ComponentJobRef,
@@ -24,6 +23,7 @@ from data_sync_etl.db.ocr_component_models import (
 )
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.ports.processing import OCRResult
+from data_sync_etl.workers.ocr import OCRWorker
 from tests.unit.test_component_ocr_projection import job, page, unit
 
 
@@ -148,6 +148,137 @@ def test_worker_defers_children_until_parents_in_same_batch():
         assert len(conn.execute(select(ComponentUnitRef.__table__)).all()) == 2
     component.dispose()
     master.dispose()
+
+
+def test_parent_in_later_batch_does_not_block_other_events():
+    component = create_engine('sqlite:///:memory:')
+    master = create_engine('sqlite:///:memory:')
+    component_metadata.create_all(component)
+    for model in (ComponentJobRef, ComponentPageRef, ComponentUnitRef):
+        model.__table__.create(master)
+    with component.begin() as conn:
+        record_snapshot(conn, 'page', page(status='PENDING', verified=False))
+        record_snapshot(conn, 'job', job())
+    worker = ComponentProjectionWorker(component, master, verify_mapping=lambda *_: True,
+                                       verify_isolation=lambda *_: True)
+    assert worker.run_once(limit=1) == 0
+    with component.begin() as conn:
+        row = conn.execute(select(component_outbox).order_by(component_outbox.c.id)).mappings().first()
+        assert row['attempts'] == 1 and row['last_error_code'] == 'PARENT_NOT_READY'
+    assert worker.run_once(limit=1) == 1
+    with component.begin() as conn:
+        conn.execute(update(component_outbox).values(next_attempt_at=None))
+    assert worker.run_once(limit=1) == 1
+    with master.begin() as conn:
+        assert len(conn.execute(select(ComponentPageRef.__table__)).all()) == 1
+    component.dispose()
+    master.dispose()
+
+
+def test_existing_ocr_worker_runs_injected_projection_and_preserves_fairness():
+    class IdlePipeline:
+        def recover_stale(self):
+            return {'recovered': 0}
+
+        def schedule_authorized_source_job(self):
+            return False
+
+        def claim(self, worker_id):
+            return None
+
+    calls = []
+
+    class Projection:
+        def run_once(self):
+            calls.append('projection')
+            return 1
+
+    worker = OCRWorker(IdlePipeline(), reconcile=lambda: calls.append('index') or True,
+                       component_projection_worker=Projection())
+    assert worker.once('test') is True
+    assert worker.once('test') is True
+    assert calls == ['projection', 'index']
+
+
+def test_actual_ocr_worker_routes_component_claim_to_component_executor():
+    from contextlib import contextmanager
+    from io import BytesIO
+
+    component = create_engine('sqlite:///:memory:')
+    component_metadata.create_all(component)
+    store = MongoComponentContent(FakeDatabase())
+    with component.begin() as conn:
+        record_snapshot(conn, 'job', job())
+    calls = []
+
+    @contextmanager
+    def opener():
+        calls.append('open')
+        yield BytesIO(b'file')
+
+    executor = ComponentOCRPageExecutor(
+        component, store, authorize=lambda *_: True, check_lease=lambda *_: True,
+        open_verified=opener, recognize=lambda _, n: OCRResult(f'text-{n}', engine_name='test'),
+    )
+    task = {'id': 'task-1', 'job_id': 'job-1', 'component_snapshot': page(),
+            'source_version_id': 'version-1', 'source_hash': 'a' * 64, 'processing_fingerprint': 'b' * 64}
+
+    class ComponentPipeline:
+        component_owned = True
+        heartbeat_timeout = 300
+
+        def recover_stale(self):
+            return {'recovered': 0}
+
+        def claim(self, worker_id):
+            return task
+
+        def fail(self, task, error):
+            raise AssertionError('component path unexpectedly failed') from error
+
+    worker = OCRWorker(ComponentPipeline(), component_page_executor=executor)
+    assert worker.once('worker-test')
+    assert worker.once('worker-test')
+    assert calls == ['open']
+    with component.begin() as conn:
+        events = conn.execute(select(component_outbox)).mappings().all()
+        assert len(events) == 2
+        assert all('raw_text' not in row['snapshot'] for row in events)
+    with pytest.raises(ValueError, match='WORKER_NOT_CONFIGURED'):
+        OCRWorker(ComponentPipeline())
+    component.dispose()
+
+
+def test_component_worker_error_never_falls_back_to_legacy_ocr():
+    task = {'id': 'task-1', 'job_id': 'job-1'}
+    calls = []
+
+    class ComponentPipeline:
+        component_owned = True
+        heartbeat_timeout = 300
+
+        def recover_stale(self):
+            return {'recovered': 0}
+
+        def claim(self, worker_id):
+            return task
+
+        def recognize(self, claimed):
+            raise AssertionError('must not use legacy OCR')
+
+        def succeed(self, *args):
+            raise AssertionError('must not write legacy results')
+
+        def fail(self, claimed, error):
+            calls.append((claimed, str(error)))
+
+    class Executor:
+        def execute_claimed(self, claimed):
+            raise DomainError('COMPONENT_CONTENT_UNAVAILABLE')
+
+    worker = OCRWorker(ComponentPipeline(), component_page_executor=Executor())
+    assert worker.once('worker-test')
+    assert calls == [(task, 'COMPONENT_CONTENT_UNAVAILABLE')]
 
 
 def test_verified_content_readback_before_component_commit_and_retry():
@@ -297,8 +428,30 @@ def test_outbox_fails_closed_and_rolls_back_invalid_projection():
     with component.begin() as conn:
         with pytest.raises(ComponentStateError, match='NOT_ISOLATED'):
             project_pending(conn, master, lambda *_: True, lambda *_: False)
-        with pytest.raises(ProjectionError, match='NOT_AUTHORIZED'):
-            project_pending(conn, master, lambda *_: False, lambda *_: True)
-        assert conn.execute(select(component_outbox.c.delivered)).scalar_one() is False
+        assert project_pending(conn, master, lambda *_: False, lambda *_: True) == 0
+        row = conn.execute(select(component_outbox)).mappings().one()
+        assert row['delivered'] is False and row['last_error_code'] == 'IDENTITY_NOT_AUTHORIZED'
+    component.dispose()
+    master.dispose()
+
+
+def test_authority_outage_defers_event_without_storing_error_details():
+    component = create_engine('sqlite:///:memory:')
+    master = create_engine('sqlite:///:memory:')
+    component_metadata.create_all(component)
+    ComponentJobRef.__table__.create(master)
+    with component.begin() as conn:
+        record_snapshot(conn, 'job', job())
+
+    def unavailable(*_):
+        raise DomainError('sensitive internal detail')
+
+    worker = ComponentProjectionWorker(component, master, verify_mapping=unavailable,
+                                       verify_isolation=lambda *_: True)
+    assert worker.run_once() == 0
+    with component.begin() as conn:
+        row = conn.execute(select(component_outbox)).mappings().one()
+        assert row['last_error_code'] == 'AUTHORITY_UNAVAILABLE'
+        assert row['delivered'] is False and row['attempts'] == 1
     component.dispose()
     master.dispose()
