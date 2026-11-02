@@ -1,13 +1,15 @@
 import hashlib
 
+from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.domain.core import DomainError, normalize_text, now
 from data_sync_etl.logging import event, flow
 from data_sync_etl.ports.repositories import UnitOfWork
 
 
 class Postprocessor:
-    def __init__(self, uow: UnitOfWork, normalizer=normalize_text):
+    def __init__(self, uow: UnitOfWork, normalizer=normalize_text, text_store=None):
         self.uow, self.normalizer = uow, normalizer
+        self.text_store = text_store or LegacyOCRText()
 
     @staticmethod
     def _text_units(result, page):
@@ -30,25 +32,24 @@ class Postprocessor:
                        {1: 'CHAPTER', 2: 'LESSON', 3: 'SECTION'}[heading] if heading else metadata['source_type'].upper() + '_TEXT',
                        heading)
 
-    @staticmethod
-    def _save_unit(repo, version_id, sequence, page, title, unit_type, result, text, parent_id=None, locator=None):
+    def _save_unit(self, repo, version_id, sequence, page, title, unit_type, result, text, parent_id=None, locator=None):
         values = dict(page_from=page, page_to=page, title=title, unit_type=unit_type,
                       parent_unit_id=parent_id, source_locator=locator)
         units = repo.find('content_units', {'resource_version_id': version_id, 'sequence_no': sequence}, limit=1)
         if units:
             unit = units[0]
-            body = repo.get('content_unit_texts', unit['id'])
+            body = self.text_store.unit_text(repo, unit['id'])
             if (any(unit[key] != values[key] for key in values)
                     or body['text'] != text or body['page_result_id'] != result['id']):
                 repo.update('content_units', unit['id'], {**values, 'review_status': 'UNREVIEWED',
                                                         'retrieval_eligible': False, 'updated_at': now()})
-                repo.update('content_unit_texts', unit['id'], dict(text=text, page_result_id=result['id']))
+                self.text_store.update_unit_text(repo, unit['id'], result['id'], text)
         else:
             unit = repo.insert('content_units', {
                 **values, 'resource_version_id': version_id, 'sequence_no': sequence,
                 'review_status': 'UNREVIEWED', 'retrieval_eligible': False,
             })
-            repo.insert('content_unit_texts', dict(content_unit_id=unit['id'], page_result_id=result['id'], text=text))
+            self.text_store.insert_unit_text(repo, unit['id'], result['id'], text)
         return unit['id']
 
     def run(self, version_id, *, allow_partial=False):
@@ -113,20 +114,13 @@ class Postprocessor:
                                 raise DomainError("OCR page has not succeeded")
                             continue
                         successful += 1
-                        results = repo.find(
-                            "ocr_page_results", {"page_task_id": task["id"]}, limit=1
-                        )
-                        if not results:
+                        result = self.text_store.page_by_task(repo, task['id'])
+                        if not result:
                             raise DomainError("OCR page result is missing")
-                        result = results[0]
                         normalized = self.normalizer(result["raw_text"])
                         digest.update(hashlib.sha256(normalized.encode()).digest())
                         if result["normalized_text"] != normalized:
-                            repo.update(
-                                "ocr_page_results",
-                                result["id"],
-                                {"normalized_text": normalized, "updated_at": now()},
-                            )
+                            self.text_store.set_normalized(repo, result['id'], normalized, now())
                         for logical_index, (text, source_page, title, unit_type, heading) in enumerate(self._text_units(result, page)):
                             text = self.normalizer(text)
                             if not text:
@@ -164,7 +158,7 @@ class Postprocessor:
                         {"resource_version_id": version_id, "sequence_no": sequence},
                         limit=1,
                     ):
-                        repo.delete("content_unit_texts", {"content_unit_id": units[0]["id"]})
+                        self.text_store.delete_unit_text(repo, units[0]['id'])
                         repo.delete("content_units", {"id": units[0]["id"]})
                         sequence += 1
                     fingerprint = digest.hexdigest()

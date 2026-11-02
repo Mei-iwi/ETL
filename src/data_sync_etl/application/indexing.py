@@ -2,6 +2,7 @@
 
 from time import monotonic
 
+from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.application.content_bags import (
     ContentBagBuilder,
     StructuredUnit,
@@ -28,10 +29,12 @@ from data_sync_etl.ports.mongo_foundation import (
 
 class IndexingService:
     def __init__(self, uow, reader: IndexContentPort | None, embedding: IndexEmbeddingPort, settings,
-                 *, bags: ContentBagPort | None = None, extractor: KeywordExtractorPort | None = None):
+                 *, bags: ContentBagPort | None = None, extractor: KeywordExtractorPort | None = None,
+                 text_store=None):
         self.uow, self.reader, self.embedding, self.settings = uow, reader, embedding, settings
         self.bags, self.extractor = bags, extractor or UnigramKeywords()
         self.source_content_authorizer = None
+        self.text_store = text_store or LegacyOCRText()
 
     def _authorize_source_index(self, version_id):
         if (self.source_content_authorizer is not None
@@ -45,7 +48,7 @@ class IndexingService:
         if not resource or not resource['is_active'] or resource_deleted(resource):
             raise IndexingError('VERSION_NOT_FOUND', 404)
         jobs = repo.find('ocr_jobs', {'resource_version_id': version_id}, order=('-created_at', '-id'), limit=1)
-        return version, processing_state(repo, jobs[0]) if jobs else 'NOT_STARTED'
+        return version, processing_state(repo, jobs[0], self.text_store) if jobs else 'NOT_STARTED'
 
     def _runs(self, repo, version_id):
         return repo.find('etl_stage_runs', {'resource_version_id': version_id, 'stage': 'INDEX_BUILD'},
@@ -76,7 +79,7 @@ class IndexingService:
         texts = text_reader([unit['id'] for unit in units]) if text_reader is not None else None
         content, total_chars = [], 0
         for unit in units:
-            body = texts.get(unit['id']) if texts is not None else repo.get('content_unit_texts', unit['id'])
+            body = texts.get(unit['id']) if texts is not None else self.text_store.unit_text(repo, unit['id'])
             doc = by_id.get(unit['id'])
             if (not body or not doc or unit['mongo_id'] != unit['id'] or doc.content_unit_id != unit['id']
                     or not doc.is_current or doc.projection_generation != generation or doc.resource_version_id != version_id

@@ -21,6 +21,7 @@ from data_sync_etl.adapters.ocr.engines import (
     TesseractOCREngine,
     UnconfiguredOCREngine,
 )
+from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.adapters.persistence.reconciled_sync import SQLAlchemyReconciledSync
 from data_sync_etl.adapters.persistence.source_identity_mapping import (
     SQLAlchemySourceIdentityMappingStore,
@@ -241,6 +242,8 @@ class Container:
 
     def __init__(self, settings=None, engine=None, documents=None, *, source_registry=None, source_adapters=None):
         self.settings = settings or Settings()
+        if self.settings.ocr_component_pipeline_enabled:
+            raise DomainError('BLOCKED_COMPONENT_PIPELINE_NOT_READY')
         if self.settings.master_mongo_identity_projection and (
                 self.settings.app_environment not in ('development', 'test')
                 or self.settings.mongo_metadata_mode != 'shared'
@@ -254,6 +257,7 @@ class Container:
         self.source = create_source(self.settings)
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
+        self.ocr_text_store = LegacyOCRText()
         self.subject_reader = SQLAlchemySubjectReader(sessions(self.engine))
         self.subject_listing = ListSubjectsUseCase(self.subject_reader)
         self.subject_recommendation = RecommendSubjectsUseCase(
@@ -364,7 +368,7 @@ class Container:
         self.format_registry = FormatValidatorRegistry(
             media_probe=lambda path, extension: probe(path, self.settings, extension),
             media_max_size_bytes=self.settings.media_max_size_bytes)
-        self.bilingual = BilingualService(self.uow, self.settings, local_model_task)
+        self.bilingual = BilingualService(self.uow, self.settings, local_model_task, self.ocr_text_store)
         self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry, self.resource_lookups)
         self.resource_version_create = CreateResourceVersionUseCase(
             self.uow, self.storage, self.format_registry
@@ -439,8 +443,9 @@ class Container:
             media=MediaExtractor(self.settings, self.storage, create_ocr_engine(self.settings)),
             default_target_language=self.settings.translation_target_language,
             max_active=self.settings.ocr_max_active,
+            text_store=self.ocr_text_store,
         )
-        self.postprocess = Postprocessor(self.uow)
+        self.postprocess = Postprocessor(self.uow, text_store=self.ocr_text_store)
         self.orchestrator = EtlOrchestrator(
             self.sync, self.ingestion, self.ocr, self.postprocess, self.uow
         )
@@ -520,6 +525,7 @@ class Container:
         self.mongo_projector = MongoContentProjector(
             self.uow,
             self.documents,
+            text_store=self.ocr_text_store,
         )
 
         self.indexing = IndexingService(
@@ -529,6 +535,7 @@ class Container:
                                    self.settings.index_embedding_model_version,
                                    self.settings.index_embedding_dimension), self.settings,
             bags=self.content_bags,
+            text_store=self.ocr_text_store,
         )
         self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
         self.semantic = None

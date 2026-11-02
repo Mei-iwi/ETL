@@ -3,6 +3,7 @@ from datetime import timedelta
 from functools import partial
 from types import SimpleNamespace
 
+from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.domain.core import DomainError, SourceFileError, job_terminal, new_id, now
 from data_sync_etl.domain.file_integrity import stream_hash
 from data_sync_etl.domain.format_validation import (
@@ -36,6 +37,7 @@ class OCRPipeline:
         media=None,
         default_target_language='vi',
         max_active=1,
+        text_store=None,
     ):
         self.uow, self.storage, self.pdf, self.engine = uow, storage, pdf, engine
         self.max_retries, self.heartbeat_timeout = max_retries, heartbeat_timeout
@@ -44,6 +46,7 @@ class OCRPipeline:
         self.media = media
         self.default_target_language = default_target_language
         self.max_active = max_active
+        self.text_store = text_store or LegacyOCRText()
 
     def create_job(self, version_id, triggered_by=None, *, fence=None):
         with self.uow() as repo:
@@ -490,8 +493,8 @@ class OCRPipeline:
                 repo.update('ocr_page_tasks', task['id'], {'status': 'PENDING', 'worker_id': None,
                     'claim_token': None, 'heartbeat_at': None, 'error_message': 'RESOURCE_SOFT_DELETED'})
                 return False
-            repo.insert(
-                "ocr_page_results",
+            self.text_store.insert_page(
+                repo,
                 dict(
                     page_task_id=task["id"],
                     raw_text=result.text,

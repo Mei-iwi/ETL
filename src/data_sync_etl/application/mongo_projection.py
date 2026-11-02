@@ -1,3 +1,4 @@
+from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.ports.document_store import ContentDocumentPort
 from data_sync_etl.ports.repositories import UnitOfWork
@@ -8,9 +9,11 @@ class MongoContentProjector:
         self,
         uow: UnitOfWork,
         documents: ContentDocumentPort,
+        text_store=None,
     ) -> None:
         self.uow = uow
         self.documents = documents
+        self.text_store = text_store or LegacyOCRText()
 
     def _assert_owner(self, version_id: str, stage_id: str | None) -> None:
         from data_sync_etl.domain.resource_deletion import require_live_version
@@ -79,16 +82,11 @@ class MongoContentProjector:
                 continue
 
             with self.uow() as repo:
-                results = repo.find(
-                    "ocr_page_results",
-                    {"page_task_id": task["id"]},
-                    limit=1,
-                )
+                result = self.text_store.page_by_task(repo, task['id'])
 
-            if not results:
+            if not result:
                 raise DomainError("Completed OCR page has no result")
 
-            result = results[0]
             stamp = now()
             self._assert_owner(version_id, stage_id)
 
@@ -116,7 +114,7 @@ class MongoContentProjector:
 
         for unit in units:
             with self.uow() as repo:
-                body = repo.get("content_unit_texts", unit["id"])
+                body = self.text_store.unit_text(repo, unit['id'])
 
             if body is None:
                 raise DomainError("Content unit text not found")

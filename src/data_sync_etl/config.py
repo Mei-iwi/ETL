@@ -9,6 +9,8 @@ from data_sync_etl.domain.concepts import ExpansionPolicy
 
 class Settings(BaseSettings):
     search_result_sessions_enabled: bool = False
+    # Explicit opt-in must fail closed until the component pipeline is complete.
+    ocr_component_pipeline_enabled: bool = False
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",
