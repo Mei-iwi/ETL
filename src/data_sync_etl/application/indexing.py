@@ -51,7 +51,7 @@ class IndexingService:
         return repo.find('etl_stage_runs', {'resource_version_id': version_id, 'stage': 'INDEX_BUILD'},
                          order=('-created_at', '-id'))
 
-    def _snapshot(self, repo, version_id, *, text_reader=None):
+    def _snapshot(self, repo, version_id, *, text_reader=None, content_reader=None):
         version, state = self._version(repo, version_id)
         if state != 'CONTENT_READY':
             raise IndexingError('CONTENT_NOT_READY')
@@ -65,7 +65,7 @@ class IndexingService:
                                 order=('-created_at', '-id'))
         generation, docs = len(projections), []
         for offset in range(0, len(units) + 1, 100):
-            batch = self.reader.units(version_id, limit=100, offset=offset)
+            batch = (content_reader or self.reader.units)(version_id, limit=100, offset=offset)
             docs.extend(batch)
             if len(batch) < 100:
                 break

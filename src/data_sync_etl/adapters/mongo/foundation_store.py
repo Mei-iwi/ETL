@@ -4,6 +4,7 @@ import hashlib
 import json
 from copy import deepcopy
 from datetime import UTC
+from weakref import ref
 
 from bson import BSON, ObjectId
 from bson.codec_options import CodecOptions
@@ -36,6 +37,29 @@ def _copy_search_bag(document):
     return deepcopy(document, {id(vector): vector.copy() for vector in vectors})
 
 
+def _record_validation(scope, key, document):
+    proofs = scope.get('proofs')
+    if proofs is not None and len(proofs) < 10001:
+        proofs[id(document)] = (ref(document), hashlib.sha256(key).digest(),
+                                hashlib.sha256(BSON.encode(document.bson())).digest())
+
+
+def _fresh_search_bag(value, expected):
+    scope = SEARCH_DOCUMENT_VALIDATION.get()
+    proof = (scope or {}).get('proofs', {}).get(id(expected)) if expected is not None else None
+    if proof and proof[0]() is expected:
+        try:
+            # Both the complete freshly read BSON and the still-live validated
+            # object must be identical to the original validation input. This
+            # retains no extra vector payload and never trusts a stored hash.
+            if (hashlib.sha256(BSON.encode(value)).digest() == proof[1]
+                    and hashlib.sha256(BSON.encode(expected.bson())).digest() == proof[2]):
+                return _copy_search_bag(expected)
+        except (BSONError, OverflowError):
+            pass
+    return checked(ContentBagDocument, value)
+
+
 def checked(model, value):
     try:
         if isinstance(value, Document):
@@ -49,8 +73,12 @@ def checked(model, value):
             except (BSONError, OverflowError):
                 pass  # Preserve strict DTO validation for non-BSON test inputs.
             if key is not None and key in scope['documents']:
-                return _copy_search_bag(scope['documents'][key])
+                document = _copy_search_bag(scope['documents'][key])
+                _record_validation(scope, key, document)
+                return document
         document = model.model_validate(value)
+        if key is not None:
+            _record_validation(scope, key, document)
         if key is not None and scope['bytes'] + len(key) <= 16 * 1024 * 1024:
             scope['documents'][key] = _copy_search_bag(document)
             scope['bytes'] += len(key)
@@ -438,12 +466,15 @@ class MongoBagStore:
     def search_phase(self, version_ids, *, limit, max_chars=10_000_000):
         return self._search_phase(version_ids, limit=limit, max_chars=max_chars)
 
-    def _search_phase(self, version_ids, *, limit, max_chars, candidates=None):
+    def search_final_phase(self, version_ids, expected, *, limit, max_chars=10_000_000):
+        return self._search_phase(version_ids, limit=limit, max_chars=max_chars, expected=expected)
+
+    def _search_phase(self, version_ids, *, limit, max_chars, candidates=None, expected=None):
         """One bounded fresh read phase, reused only within the calling Search.
 
-        Full Bag BSON is read before content fingerprints. The final phase must
-        be created independently; PostgreSQL snapshots and _verified still read
-        live content separately. No timestamp-only or cross-request cache.
+        Full Bag BSON and content documents are read together for this phase.
+        The final phase is created independently and validates live PostgreSQL
+        authority again. No timestamp-only or cross-request cache.
         """
         versions = tuple(identifier(value) for value in version_ids)
         if (len(versions) > 10000 or len(set(versions)) != len(versions) or not 1 <= limit <= 10001
@@ -459,15 +490,15 @@ class MongoBagStore:
         for raw in rows:
             if candidates is not None and not isinstance(raw, ContentBagDocument):
                 raise DomainError('Invalid initial search candidates')
-            doc = checked(ContentBagDocument, raw) if candidates is None else raw
+            doc = (_fresh_search_bag(raw, (expected or {}).get(raw.get('_id')))
+                   if candidates is None else raw)
             if doc.resource_version_id not in content or doc.id in documents:
                 raise DomainError('Search phase identity mismatch')
             documents[doc.id] = doc
         # Keep the global read bounded even when many versions contain leaves.
-        rows = self.database.mongo_content_units.find(selector, {
-            '_id': 1, 'resource_version_id': 1, 'text': 1, 'keywords': 1,
-            'projection_generation': 1}).sort('_id', 1).limit(10001).max_time_ms(5000)
+        rows = self.database.mongo_content_units.find(selector).sort('_id', 1).limit(10001).max_time_ms(5000)
         total_chars = 0
+        full_content = {version: [] for version in versions}
         for ordinal, raw in enumerate(rows, 1):
             if not isinstance(raw.get('text'), str):
                 raise DomainError('Invalid search content phase text')
@@ -478,7 +509,8 @@ class MongoBagStore:
             version = raw.get('resource_version_id')
             if version not in content:
                 raise DomainError('Search content phase identity mismatch')
-            content[version].append({key: value for key, value in raw.items() if key != 'resource_version_id'})
+            content[version].append({key: raw[key] for key in ('_id', 'text', 'keywords', 'projection_generation') if key in raw})
+            full_content[version].append(raw)
         fingerprints = {version: hashlib.sha256(json.dumps(records, ensure_ascii=False,
             sort_keys=True, separators=(',', ':')).encode()).hexdigest()
             for version, records in content.items() if records}
@@ -497,6 +529,16 @@ class MongoBagStore:
                 and doc.content_fingerprint == fingerprints[version_id]
                 and len(doc.embedding) == self.dimension) else None
                 for key in ids for doc in [documents.get(key)]}
+        for records in full_content.values():
+            records.sort(key=lambda row: (row.get('page_from') is not None, row.get('page_from') or 0, row['_id']))
+        def units(version_id, *, limit=100, offset=0):
+            bounds(limit, offset)
+            if version_id not in full_content:
+                raise DomainError('Search content phase identity mismatch')
+            records = full_content[version_id]
+            return [checked(ContentUnitDocument, row) for row in records[offset:offset + limit]]
+        read.units = units
+        read.content_phase = True
         return read
 
     def search_bags(self, root_ids, *, version_id, generation):

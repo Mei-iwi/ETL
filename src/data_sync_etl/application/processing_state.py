@@ -7,7 +7,7 @@ def projection_fingerprint(job_id: str, postprocess: dict) -> str:
 
 def processing_state(repo, job: dict) -> str:
     if job['status'] == 'COMPLETED':
-        tasks = repo.find('ocr_page_tasks', {'job_id': job['id']}, limit=1)
+        tasks = repo.find('ocr_page_tasks', {'job_id': job['id']}, order=('page_num', 'id'), limit=1)
         if tasks:
             results = repo.find('ocr_page_results', {'page_task_id': tasks[0]['id']}, limit=1)
             if results and (results[0]['result_metadata'] or {}).get('extraction_status') == 'no_extractable_content':

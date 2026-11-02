@@ -211,20 +211,34 @@ class SourceFileResolver:
 
     def derived_index_authorized(self, version_id, *, access):
         """Check retrieval grants, SOURCE eligibility and current registry policy."""
+        return self.derived_index_authorized_many([version_id], access=access).get(version_id, False)
+
+    def derived_index_authorized_many(self, version_ids, *, access):
+        ids = list(dict.fromkeys(version_ids))
+        if len(ids) > self.settings.search_max_bags + 1:
+            raise SourceFileError('SOURCE_AUTHORIZATION_LIMIT')
+        result = {}
+        # No cache crosses requests or final snapshot phases. Three authority
+        # reads per batch replace three reads per candidate version.
+        for offset in range(0, len(ids), 250):
+            with self.uow() as repo:
+                authorities = repo.source_index_authorities(ids[offset:offset + 250])
+            for key in ids[offset:offset + 250]:
+                version, resource, rows = authorities.get(key, (None, None, []))
+                result[key] = self._derived_index_authorized(version, resource, rows, access)
+        return result
+
+    def _derived_index_authorized(self, version, resource, rows, access):
         from data_sync_etl.domain.metadata_search import metadata_allowed
         from data_sync_etl.domain.search_access import denied
-        with self.uow() as repo:
-            version = repo.get('resource_versions', version_id)
-            resource = repo.get('master_learning_resources', version['resource_id']) if version else None
-            if not version or not resource:
-                return False
-            if resource.get('source_origin') == 'LOCAL':
-                return True
-            rows = repo.find('source_file_imports', {'target_version_id': version_id}, limit=2)
-            uploaded = bool((version.get('processing_options') or {}).get('etl_source_upload')
+        if not version or not resource:
+            return False
+        if resource.get('source_origin') == 'LOCAL':
+            return True
+        uploaded = bool((version.get('processing_options') or {}).get('etl_source_upload')
                             and len(rows) == 1
                             and rows[0].get('source_lifecycle_status') == 'UNREVIEWED')
-            if (resource.get('source_origin') != 'POSTGRESQL'
+        if (resource.get('source_origin') != 'POSTGRESQL'
                     or resource.get('publication_status') != 'PUBLISHED'
                     or not resource.get('is_active') or resource_deleted(resource)
                     or denied(resource) or denied(version)
@@ -237,10 +251,10 @@ class SourceFileResolver:
                     or not (uploaded or source_status_allowed(rows[0].get('source_lifecycle_status'),
                                                               self.settings.source_file_allowed_statuses))
                     or rows[0].get('last_error_code') in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING')):
-                return False
-            source_id = rows[0]['source_system']
+            return False
+        source_id = rows[0]['source_system']
         reference = ResolvedFileReference(
-            ownership='SOURCE_BACKED', target_version_id=version_id, resource_id=resource['id'],
+            ownership='SOURCE_BACKED', target_version_id=version['id'], resource_id=resource['id'],
             source_version_id=rows[0]['source_version_id'], provider='external', bucket='',
             opaque_locator='', filename='', mime='', expected_sha256=version['source_hash'].lower(),
             source_id=source_id,

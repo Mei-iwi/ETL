@@ -3,12 +3,54 @@ from contextlib import contextmanager
 from datetime import UTC
 from heapq import nsmallest
 
-from sqlalchemy import bindparam, inspect, text
+from sqlalchemy import and_, bindparam, func, inspect, or_, select, text, true
 
+from data_sync_etl.db.models import MODELS
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.reconciliation import METADATA_FIELDS, STREAM_TABLE_MAPPING
+from data_sync_etl.domain.source_ids import source_identity_hash
 
 AUTH_FIELDS = ('hashed_password', 'role_code', 'role_is_active', 'role_deleted_at', 'role_updated_at')
+
+
+def audit_master_ids(repo, adapter, stream, source_ids):
+    """Resolve existing namespace-bound identities without manufacturing IDs."""
+    ids = set(source_ids)
+    result = {key: key for key in ids}
+    if not ids or not callable(getattr(adapter, 'locator', None)):
+        return result
+    probe = adapter.locator(stream, next(iter(ids)))
+    model = MODELS[STREAM_TABLE_MAPPING[stream]['target_table']]
+    rows = repo.session.execute(select(model.id, model.source_record_key,
+        model.source_identity_hash, model.source_identity_version).where(
+            model.source_backend == probe.backend.casefold(), model.source_namespace == probe.namespace,
+            model.source_entity_type == stream, model.source_record_key.in_(ids))).mappings()
+    seen = set()
+    for row in rows:
+        key = row['source_record_key']
+        expected = adapter.locator(stream, key)
+        if (key in seen or row['source_identity_hash'] != source_identity_hash(expected)
+                or row['source_identity_version'] != expected.version):
+            raise DomainError('BLOCKED_SOURCE_MAPPING')
+        seen.add(key)
+        result[key] = row['id']
+    unresolved = ids - seen
+    if unresolved:
+        for row in repo.session.execute(select(model.id, model.source_identity_hash).where(
+                model.id.in_(unresolved), model.source_identity_hash.is_not(None))).mappings():
+            if row['source_identity_hash'] != source_identity_hash(adapter.locator(stream, row['id'])):
+                raise DomainError('BLOCKED_SOURCE_MAPPING')
+    return result
+
+
+def audit_source_key(adapter, stream, model):
+    if not callable(getattr(adapter, 'locator', None)):
+        return model.id, true()
+    probe = adapter.locator(stream, '__audit_probe__')
+    scope = or_(model.source_identity_hash.is_(None), and_(
+        model.source_backend == probe.backend.casefold(), model.source_namespace == probe.namespace,
+        model.source_entity_type == stream))
+    return func.coalesce(model.source_record_key, model.id), scope
 
 
 def resource_relations(conn, rows):

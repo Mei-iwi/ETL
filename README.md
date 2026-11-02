@@ -189,7 +189,6 @@ MONGO_METADATA_MODE=shared
 SOURCE_MONGO_ENABLED=false
 SOURCE_REFERENCE_ENABLED=true
 SOURCE_TEMPORARY_FILES_ENABLED=false
-SOURCE_FILE_STORAGE_ROOT=D:/etl/source
 SOURCE_TEMP_ROOT=D:/etl/source-temp
 # ETL_MANAGED originals (production): private object storage, never a local
 # primary file store.  The local STORAGE_ROOT is fixture-only and deprecated.
@@ -976,14 +975,17 @@ SOURCE_DRIVE_ENABLED=true
 SOURCE_DRIVE_AUTH_TYPE=authorized_user
 SOURCE_DRIVE_CREDENTIALS_FILE=D:/etl/private/drive.json
 SOURCE_DRIVE_BUCKETS={"DRIVE":"YOUR_APPROVED_FOLDER_ID"}
-SOURCE_LOCAL_BUCKETS=[]
 SOURCE_DRIVE_FILENAME_POLICY=canonical_id
 SOURCE_DRIVE_FILENAME_ALIASES={}
 ```
 
 Bucket khớp SOURCE; object key dạng `files/<file_id>/<filename>`. canonical_id cho đổi tên theo file ID đã kiểm chứng và cùng loại tệp; vẫn kiểm tra folder/MIME/quyền/revision/hash. Không cần alias cứng từng file. Muốn kiểm tra tên nghiêm ngặt dùng exact.
 
-Docker thêm `DRIVE_CREDENTIALS_FILE=D:/etl/private/drive.json`, các khóa AUTH_TYPE/BUCKETS/LOCAL_BUCKETS/FILENAME_POLICY tương ứng vào docker.env; image đọc credential qua secret. Thêm `-Drive` vào launcher PowerShell hoặc `ETL_WITH_DRIVE=true` cho Bash. Restart API/source-file/OCR sau thay đổi.
+Docker thêm `DRIVE_CREDENTIALS_FILE=D:/etl/private/drive.json`, các khóa AUTH_TYPE/BUCKETS/FILENAME_POLICY tương ứng vào docker.env; image đọc credential qua secret. Thêm `-Drive` vào launcher PowerShell hoặc `ETL_WITH_DRIVE=true` cho Bash. Restart API/source-file/OCR sau thay đổi.
+
+SOURCE PostgreSQL chỉ đọc tệp từ Drive hoặc Object Storage. Connector đọc thư mục local không còn được nối vào ứng dụng PostgreSQL, kể cả khi cấu hình cũ còn `SOURCE_FILE_STORAGE_ROOT` hoặc `SOURCE_LOCAL_BUCKETS`. Bộ đọc thư mục chỉ phục vụ fixture JSON trong môi trường development/test. Tệp cloud do ETL quản lý vẫn được xử lý bình thường dù bản ghi lịch sử có `source_origin=LOCAL`.
+
+Tệp nguồn đã đăng ký nhưng chưa tạo được job OCR sẽ lưu mã lỗi, số lần thử và thời điểm thử tiếp theo. Worker thử lại lỗi tạm thời theo backoff và dừng khi đạt giới hạn; sau khi sửa tệp hoặc cấu hình, dùng **Thử lại** trong danh sách tệp lỗi. Thao tác này giữ nguyên ánh xạ phiên bản và dùng lại job OCR hoặc bước hoàn tất bị lỗi, không nhập lại tệp gốc hay tạo thêm phiên bản.
 
 ### 4.3. Index, metadata search và semantic chunk
 
@@ -1210,10 +1212,44 @@ $env:PYTHONPATH='tests/unit;tests/integration'
 .\.venv\Scripts\python.exe -m pytest tests/unit/test_five_commit_pipeline.py tests/unit/test_source_pipeline_http.py tests/unit/test_five_commit_regressions.py -q
 ```
 
-The SOURCE regression contract is metadata-only: discovery creates MASTER metadata
-versions, while the SOURCE file worker does not claim, copy, preview, download, or
-retry original bytes. Reconciliation reports an unverified SOURCE file when that
-content contract is unavailable. The full unit suite includes environment-dependent
-embedding/OCR and external-integration tests; use `SOURCE_FEDERATION_READINESS.md`
-for the latest PASS/FAIL/BLOCKED/NOT_RUN classification rather than treating a
-partial full-suite run as production acceptance.
+Discovery registers metadata without importing original files into ETL storage.
+When the configured SOURCE grants read/process/index capabilities, the OCR worker
+can read content into bounded memory and retry failed processing through the
+existing version/job mapping. Missing grants still fail closed. The full unit suite
+includes environment-dependent embedding/OCR and external integration tests; a
+passing focused suite is not acceptance of every deployment configuration.
+
+### Tìm kiếm khi số học liệu tăng
+
+Đường HTTP đọc PostgreSQL và MongoDB theo từng lô trong hai pha độc lập: lấy ứng viên
+và kiểm tra lại trước khi trả kết quả. Trạng thái OCR, phiên bản, đơn vị nội dung và
+văn bản không còn bị đọc riêng nhiều lần cho từng học liệu. Hai nhánh metadata/nội
+dung dùng chung một lần kiểm tra metadata cuối. Bảng thứ hạng RRF được tính một lần
+cho mỗi nhánh. Việc tái sử dụng kiểm tra túi từ chỉ diễn ra trong cùng request, sau
+khi đối chiếu toàn bộ BSON vừa đọc và đối tượng đã được xác minh; không lưu quyền
+truy cập hoặc kết quả nội dung qua các request.
+
+Đo chỉ đọc ngày 02/11/2026, cùng runtime đã warmup như API, truy vấn `vector` ở chế
+độ BoW: đường cũ 1.261 câu SQL / 7,42 giây; đường mới 28 câu SQL / 4,64–4,74 giây.
+Cùng 10 kết quả, điểm và thứ hạng. Đây là phép đo trên tập dữ liệu hiện tại, không
+phải benchmark tải lớn hoặc kết luận cho mọi truy vấn/vector/model.
+
+Đo lại mà không ghi dữ liệu:
+
+```powershell
+python scripts/profile_search_readonly.py --query vector --methods bow --repeat 2
+```
+
+Để phục vụ corpus lớn, hướng tiếp theo là truy hồi ứng viên ngay tại chỉ mục:
+
+1. Xây biểu diễn và cập nhật chỉ mục ngoài luồng tìm kiếm bằng worker hiện có.
+2. Lấy ứng viên từ chỉ mục đảo BM25 và ANN theo từng meaning/chunk, với bộ lọc
+   nguồn, phiên bản/generation, model và phạm vi được phép truy xuất.
+3. Gom theo phiên bản, hợp nhất RRF rồi chỉ tải phần nội dung cần hiển thị; vẫn
+   kiểm tra quyền, xóa/thu hồi và trạng thái chỉ mục từ Master trước khi trả kết quả.
+4. Ưu tiên kiểm tra khả năng dùng MongoDB Search/Vector Search trên hạ tầng hiện
+   có. Cần cấu hình index và đánh giá Recall@k/nDCG, độ trễ, phân trang và thu hồi
+   quyền trước khi chuyển đường tìm kiếm; ANN chưa được kích hoạt bởi bản sửa này.
+
+Tham khảo chính thức: [MongoDB Search BM25](https://www.mongodb.com/docs/search/query/operators-collectors/text/)
+và [MongoDB Vector Search ANN và bộ lọc](https://www.mongodb.com/docs/vector-search/query/aggregation-stages/vector-search-stage/?deployment-type=atlas&embedding=byo&interface=driver&language=go).

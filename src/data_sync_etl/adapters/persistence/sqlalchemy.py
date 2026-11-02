@@ -337,6 +337,21 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             .on_conflict_do_nothing(index_elements=["stream_name"])
         )
 
+    def source_processing_candidates(self, source_ids, *, limit=50):
+        model = SourceFileImport
+        stmt = select(model).join(ResourceVersion, ResourceVersion.id == model.target_version_id).join(
+            MasterLearningResource, MasterLearningResource.id == model.resource_id).where(
+            model.source_system.in_(source_ids), model.status.in_(('METADATA_ONLY', 'RETRY_WAIT')),
+            or_(model.next_retry_at.is_(None), model.next_retry_at <= now()),
+            ResourceVersion.lifecycle_status == 'METADATA_ONLY',
+            MasterLearningResource.source_origin == 'POSTGRESQL',
+            MasterLearningResource.is_active.is_(True), MasterLearningResource.deleted_at.is_(None),
+            MasterLearningResource.master_deleted_at.is_(None),
+            MasterLearningResource.publication_status == 'PUBLISHED',
+            ~exists().where(OcrJob.resource_version_id == model.target_version_id))
+        return [self._dict(row) for row in self.session.scalars(
+            stmt.order_by(model.updated_at, model.id).limit(min(100, max(1, limit))))]
+
     def source_import_page(self, after=None, size=20, retry_candidates=False, failed_only=False, count_only=False):
         model = SourceFileImport
         key = model.source_version_id
@@ -346,7 +361,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         if after is not None:
             stmt = stmt.where(key > after)
         if retry_candidates:
-            stmt = stmt.where(model.status.in_(["FAILED", "RETRY_EXHAUSTED", "PROCESSING"]))
+            stmt = stmt.where(model.status.in_(["FAILED", "RETRY_EXHAUSTED", "PROCESSING", "METADATA_ONLY", "RETRY_WAIT"]))
         if failed_only:
             def latest_stage(stage):
                 return select(EtlStageRun.status).where(
@@ -372,7 +387,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
                         finalization_failed,
                     ))),
             )
-            stmt = stmt.where(or_(model.status.in_(["FAILED", "RETRY_EXHAUSTED"]),
+            stmt = stmt.where(or_(model.status.in_(["FAILED", "RETRY_EXHAUSTED", "RETRY_WAIT"]),
                                   and_(model.status == "PROCESSING", processing_failed)))
         if count_only:
             return self.session.scalar(select(func.count()).select_from(stmt.subquery())) or 0

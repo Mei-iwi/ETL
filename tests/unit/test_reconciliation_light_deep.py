@@ -65,13 +65,13 @@ def test_deep_byte_and_time_limits_are_not_verified(local_file):
         assert c.reconciliation_engine.verify_file_blobs(repo.session)[0]['target_value']['reason_code'] == 'RECONCILIATION_READ_BUDGET'
 
 
-def test_deep_cloud_object_uses_provider_head_size_and_stream_hash(local_file):
+def test_deep_cloud_object_uses_provider_head_size_and_stream_hash(local_file, monkeypatch):
     from io import BytesIO
     from types import SimpleNamespace
 
     from data_sync_etl.ports.cloud_storage import CloudObject
 
-    c, _, _ = local_file
+    c, _, version_id = local_file
     payload = b'cloud learning resource'
 
     class Cloud:
@@ -109,8 +109,32 @@ def test_deep_cloud_object_uses_provider_head_size_and_stream_hash(local_file):
     assert rows[0]['discrepancy_flag'] == 'SYNCED'
     assert rows[0]['target_value']['storage_file_size'] == len(payload)
     assert rows[0]['target_value']['verification'] == 'CLOUD_STREAM_SHA256'
+    assert rows[0]['target_value']['observed_revision']
     assert c.reconciliation_engine.file_metrics == {'bytes_read': len(payload), 'sha256_computed_count': 1,
                                                     'cache_reused_count': 0}
+
+    # Persisted cloud proof must count in coverage and survive an unchanged
+    # LIGHT scan, just like filesystem/Drive proof. Regression for 46/50.
+    from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
+    with c.uow() as repo:
+        repo.update('resource_versions', version_id, {
+            'storage_bucket': 'assets', 'storage_object_key': 'uploads/version.pdf',
+            'source_hash': hashlib.sha256(payload).hexdigest(), 'source_file_size': len(payload),
+            'processing_options': {'storage_provider_id': 'etl-cloud-current'}})
+    audit = ScheduledAudit(c.reconciliation_engine, c.settings)
+    audit.once(audit.queue.enqueue('DEEP', 'files', mode='FULL'))
+    assert audit.coverage()['recent_sha256_evidence_count'] == 1
+    audit.once(audit.queue.enqueue('LIGHT', 'files'))
+    assert audit.coverage()['recent_sha256_evidence_count'] == 1
+    calls = 0
+    def changing_head(self, key):
+        nonlocal calls
+        calls += 1
+        return CloudObject('neon-provider', 'assets', key, len(payload),
+                           hashlib.sha256(payload).hexdigest(), etag=str(calls))
+    monkeypatch.setattr(Cloud, 'head_object', changing_head)
+    audit.once(audit.queue.enqueue('DEEP', 'files', mode='FULL'))
+    assert audit.coverage()['recent_sha256_evidence_count'] == 0
 
 
 def test_light_source_uses_provider_revision_without_download(source_viewer, monkeypatch):
@@ -185,7 +209,8 @@ def test_cloud_audit_stream_is_metered_and_respects_byte_limit(provider):
 
 def test_deep_then_unchanged_light_preserves_proof_but_not_light_hash_credit(local_file):
     from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
-    from data_sync_etl.db.models import ReconciliationFileState as State, ReconciliationAuditJob as Job
+    from data_sync_etl.db.models import ReconciliationAuditJob as Job
+    from data_sync_etl.db.models import ReconciliationFileState as State
     from data_sync_etl.main import create_app
     from tests.local_admin_client import TestClient
 
@@ -214,8 +239,8 @@ def test_deep_then_unchanged_light_preserves_proof_but_not_light_hash_credit(loc
 
 @pytest.mark.parametrize('change', ['revision', 'expected_hash', 'expected_size', 'ownership', 'missing_revision'])
 def test_light_invalidates_changed_or_unprovable_binding(local_file, monkeypatch, change):
-    from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
     from data_sync_etl.adapters.persistence.audit_queue import utc
+    from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
     from data_sync_etl.db.models import ReconciliationFileState as State
     from data_sync_etl.domain.core import now
 

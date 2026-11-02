@@ -244,8 +244,8 @@ class OCRPipeline:
         if not enabled:
             return False
         with self.uow() as repo:
-            candidates = repo.find('source_file_imports', {'status': 'METADATA_ONLY'},
-                                   order=('updated_at', 'id'), limit=limit)
+            candidates = repo.source_processing_candidates(
+                enabled | ({'postgresql'} if len(enabled) == 1 else set()), limit=limit)
             rows = []
             for imported in candidates:
                 source_id = imported['source_system']
@@ -259,7 +259,7 @@ class OCRPipeline:
                         or version.get('lifecycle_status') != 'METADATA_ONLY'
                         or not resource.get('is_active') or resource_deleted(resource)
                         or resource.get('publication_status') != 'PUBLISHED'
-                        or imported.get('last_error_code') not in (None, 'SOURCE_METADATA_ONLY')):
+                        or imported.get('attempts', 0) >= self.resolver.settings.source_file_import_max_attempts):
                     continue
                 if (version.get('processing_options') or {}).get('source_processing_status') == 'UNSUPPORTED':
                     continue
@@ -267,22 +267,34 @@ class OCRPipeline:
                 # returning success here repeatedly would starve both queues.
                 if repo.find('ocr_jobs', {'resource_version_id': version['id']}, limit=1):
                     continue
-                rows.append((version['id'], version.get('processing_options') or {}))
-        for version_id, options in rows:
+                rows.append((version['id'], imported['id']))
+        for version_id, import_id in rows:
             try:
                 self.create_job(version_id)
                 return True
             except SourceFileError as exc:
-                if exc.code not in ('SOURCE_CAPABILITY_BLOCKED', 'SOURCE_CAPABILITY_INVALID'):
-                    continue
+                self._source_schedule_failed(import_id, exc.code,
+                    transient=exc.transient or exc.code in ('FILE_NOT_FOUND', 'SOURCE_STORAGE_UNAVAILABLE',
+                                                           'SOURCE_UNAVAILABLE', 'PERMISSION_DENIED'))
             except ProcessingFormatError as exc:
-                with self.uow() as repo:
-                    current = repo.get('resource_versions', version_id, lock=True)
-                    if current and current.get('lifecycle_status') == 'METADATA_ONLY':
-                        repo.update('resource_versions', version_id, {'processing_options': {
-                            **options, 'source_processing_status': 'UNSUPPORTED',
-                            'source_processing_error': exc.code}})
+                self._source_schedule_failed(import_id, exc.code, transient=exc.code == 'BLOCKED_OCR_RUNTIME')
+            except (DomainError, OSError):
+                self._source_schedule_failed(import_id, 'SOURCE_PROCESSING_UNAVAILABLE', transient=True)
         return False
+
+    def _source_schedule_failed(self, import_id, code, *, transient):
+        settings = self.resolver.settings
+        with self.uow() as repo:
+            row = repo.get('source_file_imports', import_id, lock=True)
+            if not row or row['status'] not in ('METADATA_ONLY', 'RETRY_WAIT'):
+                return
+            attempts = row['attempts'] + 1
+            retry = transient and attempts < settings.source_file_import_max_attempts
+            delay = min(3600, settings.source_file_import_retry_seconds * 2 ** min(attempts - 1, 10))
+            repo.update('source_file_imports', import_id, {
+                'status': 'RETRY_WAIT' if retry else 'RETRY_EXHAUSTED' if transient else 'FAILED',
+                'last_error_code': code, 'attempts': attempts,
+                'next_retry_at': now() + timedelta(seconds=delay) if retry else None, 'updated_at': now()})
 
     def owns(self, current, claimed):
         return (

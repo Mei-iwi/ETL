@@ -67,3 +67,29 @@ def test_validation_retention_is_bounded_and_exception_releases_scope():
         assert not state['documents']
         raise RuntimeError('cancelled')
     assert SEARCH_DOCUMENT_VALIDATION.get() is None
+
+
+def test_final_phase_reuses_live_validation_without_retaining_another_vector_copy(monkeypatch):
+    from tests.unit.test_search_bulk_phase import store_with_data
+    store, _, raw_bags, _ = store_with_data()
+    # MongoDB field order can differ from Pydantic's canonical field order.
+    raw_bags[:] = [dict(reversed(list(row.items()))) for row in raw_bags]
+    validate, calls = ContentBagDocument.model_validate, []
+    def counted(value):
+        calls.append(1)
+        return validate(value)
+    monkeypatch.setattr(ContentBagDocument, 'model_validate', counted)
+    with document_validation_scope():
+        SEARCH_DOCUMENT_VALIDATION.get()['bytes'] = 16 * 1024 * 1024
+        candidates = {row['_id']: checked(ContentBagDocument, row) for row in raw_bags}
+        final = store.search_final_phase(['v-0', 'v-1'], candidates, limit=10)
+        assert final(['root-0'], version_id='v-0', generation=1)['root-0']
+        assert len(calls) == 2
+        assert not SEARCH_DOCUMENT_VALIDATION.get()['documents']
+        candidates['root-0'].embedding[0] = 123.
+        final = store.search_final_phase(['v-0', 'v-1'], candidates, limit=10)
+        assert final(['root-0'], version_id='v-0', generation=1)['root-0'].embedding == raw_bags[0]['embedding']
+        assert len(calls) == 3
+        raw_bags[1]['unexpected_restriction'] = True
+        with pytest.raises(DomainError):
+            store.search_final_phase(['v-0', 'v-1'], candidates, limit=10)

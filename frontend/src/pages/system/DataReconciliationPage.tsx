@@ -6,7 +6,6 @@ import {
     queueAudit,
     getAuditJobs,
     getAuditCoverage,
-    getSourceWriteBackStatus,
 } from '../../services/reconciliationApi'
 import type {
     DiscrepancyItem,
@@ -15,7 +14,7 @@ import type {
 import type { AuditCoverage, AuditJob } from '../../services/reconciliationApi'
 import styles from './DataReconciliationPage.module.css'
 import { ReconciliationSchedule } from './ReconciliationSchedule'
-import { auditJobInProgress, auditJobLabel, auditSummary, auditViewJobs, formatAuditBytes as formatBytes, metadataMatchLabel, pendingHash, sha256CoverageLabel } from './reconciliationDisplay'
+import { auditJobInProgress, auditJobLabel, auditSummary, auditViewJobs, fileScanProgressLabel, formatAuditBytes as formatBytes, metadataMatchLabel, pendingHash, sha256CoverageLabel } from './reconciliationDisplay'
 import { startVisiblePolling } from './visiblePolling'
 
 function formatDate(dateStr?: string | null): string {
@@ -106,20 +105,19 @@ export function DataReconciliationPage() {
         onConfirm: () => void
     } | null>(null)
     const [displayJob, setDisplayJob] = useState<AuditJob | null>(null)
+    const [fileJob, setFileJob] = useState<AuditJob | null>(null)
     const [coverage, setCoverage] = useState<AuditCoverage | null>(null)
     const [latestJob, setLatestJob] = useState<AuditJob | null>(null)
-    const [writebackStatus, setWritebackStatus] = useState<Awaited<ReturnType<typeof getSourceWriteBackStatus>> | null>(null)
 
     const loadData = useCallback(async (signal?: AbortSignal) => {
         const revision = ++loadRevision.current
         setLoading(true)
         setError('')
         try {
-            const [newest, evidence, writeback] = await Promise.all([
+            const [newest, evidence] = await Promise.all([
                 getAuditJobs(selectedStream, signal),
                 selectedStream === 'all' || selectedStream === 'files'
                     ? getAuditCoverage(signal).catch(() => null) : Promise.resolve(null),
-                getSourceWriteBackStatus(signal).catch(() => null),
             ])
             const queued = viewedRunIds.current.length
                 ? await getAuditJobs(selectedStream, signal, null, viewedRunIds.current) : newest
@@ -130,9 +128,9 @@ export function DataReconciliationPage() {
             if (signal?.aborted || revision !== loadRevision.current) return
             setReport(latest)
             setDisplayJob(jobs.find(auditJobInProgress) ?? jobs[0] ?? null)
+            setFileJob(jobs.find(job => job.stream === 'files') ?? null)
             setCoverage(evidence)
             setLatestJob(newest.items[0] ?? null)
-            setWritebackStatus(writeback)
             const active = jobs.some(auditJobInProgress)
                 || latest.stream_reports.some(row => row.status === 'RUNNING')
             running.current = active || posting.current
@@ -188,6 +186,7 @@ export function DataReconciliationPage() {
             loadRevision.current++
             setReport(null)
             setDisplayJob(null)
+            setFileJob(null)
             setDiscrepancies([])
             setTotal(0)
             setLastExecutionTimeMs(null)
@@ -210,6 +209,7 @@ export function DataReconciliationPage() {
     const { unverified, hashPending, onlyHashPending, observedBytes, observedFiles } = auditSummary(report)
     const fileProgress = report?.stream_reports.find(row => row.stream_name === 'files')?.summary_meta
     const scanInProgress = reconciling || report?.overall_status === 'RUNNING'
+    const fileScanProgress = fileScanProgressLabel(fileJob, coverage)
 
     return (
         <div className={styles.container}>
@@ -275,15 +275,6 @@ export function DataReconciliationPage() {
 
                 <ReconciliationSchedule />
 
-                {writebackStatus && <div className={`${styles.alertBox} ${writebackStatus.enabled && writebackStatus.writer_supported
-                    ? styles.alertSuccess : styles.alertWarning}`} role="status">
-                    <strong>Write-back metadata:</strong>{' '}
-                    {writebackStatus.enabled && writebackStatus.writer_supported
-                        ? `Có thể đề nghị/duyệt các trường: ${writebackStatus.fields.join(', ')}`
-                        : writebackStatus.enabled ? 'Chưa có writer hoặc quyền ghi SOURCE được cấp.'
-                            : 'Đang tắt mặc định; hệ thống chỉ đồng bộ SOURCE → MASTER và không ghi SOURCE.'}
-                </div>}
-
                 {/* THÔNG BÁO / CẢNH BÁO */}
                 {error && <div className={`${styles.alertBox} ${styles.alertWarning}`}>{error}</div>}
                 {reconciling && <p role="status">Đã xếp hàng hoặc đang đối soát nền. Có thể rời trang; kết quả sẽ cập nhật sau khi worker xử lý.</p>}
@@ -310,12 +301,20 @@ export function DataReconciliationPage() {
                             Lượt đang xem: <strong>{displayJob ? auditJobLabel(displayJob)
                                 : onlyHashPending && report?.overall_status === 'PARTIAL' ? 'Quét nhanh' : report?.overall_status ?? 'CHƯA CHẠY'}</strong>
                         </span>
+                        {selectedStream === 'all' && fileScanProgress && <span className={styles.statusSub}>
+                            Tiến độ quét kho tệp: <strong>{fileScanProgress}</strong>
+                        </span>}
                     </div>
 
                     <div className={styles.statusItem}>
-                        <span className={styles.statusLabel} title="Số liệu của các lượt đối soát, không phải tiến độ hoàn thành">Bản ghi SOURCE / MASTER</span>
+                        <span className={styles.statusLabel} title={selectedStream === 'files'
+                            ? 'Số tệp đã kiểm tra trong lượt đang xem; tách biệt với bằng chứng SHA-256 còn hiệu lực'
+                            : 'Số liệu của các lượt đối soát, không phải tiến độ hoàn thành'}>
+                            {selectedStream === 'files' ? 'Tiến độ lượt quét' : 'Bản ghi SOURCE / MASTER'}
+                        </span>
                         <span className={styles.statusValue}>
-                            {report?.total_source_records ?? 0} / {report?.total_target_records ?? 0}
+                            {selectedStream === 'files' ? fileScanProgress ?? 'Đang chờ số liệu'
+                                : `${report?.total_source_records ?? 0} / ${report?.total_target_records ?? 0}`}
                         </span>
                         <span className={styles.statusSub}>
                             Khớp: <strong style={{ color: '#166534' }}>{report?.total_matched_records ?? 0}</strong> | Lệch: <strong style={{ color: '#991b1b' }}>{report?.total_mismatched_records ?? 0}</strong>
@@ -335,7 +334,10 @@ export function DataReconciliationPage() {
                     </div>
 
                     <div className={styles.statusItem}>
-                        <span className={styles.statusLabel}>{selectedStream === 'all' || selectedStream === 'files' ? 'Độ bao phủ SHA-256' : 'Table Fingerprint'}</span>
+                        <span className={styles.statusLabel} title={selectedStream === 'all' || selectedStream === 'files'
+                            ? 'Số tệp có bằng chứng SHA-256 còn hiệu lực trong toàn kho; không đặt lại khi bắt đầu lượt quét mới' : undefined}>
+                            {selectedStream === 'all' || selectedStream === 'files' ? 'Độ bao phủ SHA-256 (toàn kho)' : 'Table Fingerprint'}
+                        </span>
                         <span className={styles.statusValue} style={{ fontSize: '13px', fontFamily: 'monospace' }}>
                             {selectedStream === 'all' || selectedStream === 'files' ? sha256CoverageLabel(coverage)
                                 : report?.stream_reports?.[0]?.target_table_hash ? `${report.stream_reports[0].target_table_hash.substring(0, 16)}...` : 'Chưa băm'}

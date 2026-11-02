@@ -85,6 +85,7 @@ class SearchService:
         self.dictionary = empty_dictionary()
         self.concept_resolver = concept_resolver
         self.source_content_authorizer = None
+        self.source_content_authorizer_many = None
 
         self._http_inference = SearchInferenceQueue()
         # Retain worker leases after HTTP timeout: repeated cancellations cannot
@@ -252,7 +253,9 @@ class SearchService:
         if not runs or runs[0]['status'] != 'COMPLETED':
             return None
         try:
-            snapshot = (self.indexing._snapshot(repo, version_id, text_reader=repo.search_unit_texts)
+            content_options = ({'content_reader': bag_reader.units}
+                if batch_texts and getattr(bag_reader, 'content_phase', False) is True else {})
+            snapshot = (self.indexing._snapshot(repo, version_id, text_reader=repo.search_unit_texts, **content_options)
                         if batch_texts else self.indexing._snapshot(repo, version_id))
             if runs[0]['input_fingerprint'] != snapshot[3]:
                 return None
@@ -329,6 +332,15 @@ class SearchService:
         if not access.internal:
             return []  # No existing contract can prove public full-text rights.
         return repo.search_versions({k: v for k, v in filters.items() if k != 'domain'}, limit=limit)
+
+    def _authorized_metadata(self, rows, access):
+        if self.source_content_authorizer is None:
+            return rows
+        owner = getattr(self.source_content_authorizer, '__self__', None)
+        if owner is not None and getattr(self.source_content_authorizer_many, '__self__', None) is owner:
+            allowed = self.source_content_authorizer_many([row['version_id'] for row in rows], access=access)
+            return [row for row in rows if allowed.get(row['version_id'], False)]
+        return [row for row in rows if self.source_content_authorizer(row['version_id'], access=access)]
 
     def _snippets(self, snapshot, keywords, started, allowed, query=None, expansion=None, policy=None):
         roots = bag_structure(snapshot[2])
@@ -477,14 +489,15 @@ class SearchService:
         # independently verified snapshot and ACL contract.
         if metadata_items:
             try:
+                validation_cache = {}  # One fresh final authority phase, owned only by this request.
                 metadata_hit_count = len(metadata_items)
                 metadata_items = self.metadata.final_validate(metadata_items, snapshots, filters, access,
-                    checkpoint=lambda: self._deadline(started))
+                    checkpoint=lambda: self._deadline(started), validation_cache=validation_cache)
                 if metadata_hit_count and not metadata_items:
                     status['metadata'] = 'STALE'
                 if content['items']:
                     content['items'] = self.metadata.final_validate(content['items'], snapshots, filters, access,
-                        checkpoint=lambda: self._deadline(started), content=True)
+                        checkpoint=lambda: self._deadline(started), content=True, validation_cache=validation_cache)
             except SearchError:
                 raise
             except Exception:
@@ -573,8 +586,7 @@ class SearchService:
                 self._deadline(started)
         with self.indexing.uow() as repo:
             metadata = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
-        if self.source_content_authorizer is not None:
-            metadata = [row for row in metadata if self.source_content_authorizer(row['version_id'], access=access)]
+        metadata = self._authorized_metadata(metadata, access)
         if len(metadata) > self.settings.search_max_bags:
             raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
         by_version = {row['version_id']: row for row in metadata}
@@ -599,9 +611,16 @@ class SearchService:
         by_bag, bow, semantic, snapshots, ready_count, source_chars = {}, {}, {}, {}, 0, 0
         excluded, semantic_metadata = set(), {}
         authorized_roots, evidence_by_version = {}, {}
+        postgres_phase = None
+        if _batch_texts and candidates:
+            with self.indexing.uow() as repo:
+                if callable(getattr(type(repo), 'search_authority_phase', None)):
+                    postgres_phase = repo.search_authority_phase(list(candidates_by_version), include_semantic=use_semantic,
+                        max_chars=self.settings.index_max_source_chars)
         for version_id in sorted({bag.resource_version_id for bag in candidates}):
             self._deadline(started)
             with self.indexing.uow() as repo:
+                repo = postgres_phase.bind(repo) if postgres_phase is not None else repo
                 snapshot = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts,
                     batch_bags=_batch_bags, bag_reader=initial_phase)
                 allowed = self._allowed_units(repo, snapshot, access) if snapshot else set()
@@ -828,6 +847,7 @@ class SearchService:
         if snapshots or (_batch_texts and excluded):
             with self.indexing.uow() as repo:
                 fresh_rows = self._metadata(repo, filters, access, self.settings.search_max_bags + 1)
+                fresh_rows = self._authorized_metadata(fresh_rows, access)
                 fresh_by_version = {row['version_id']: row for row in fresh_rows}
                 fresh_ids = set(fresh_by_version)
                 if (len(fresh_rows) > self.settings.search_max_bags
@@ -835,11 +855,21 @@ class SearchService:
                     raise SearchError('SEARCH_INDEX_STALE', 409)
                 checked_versions = set(snapshots)  # Nonhits also influence corpus statistics.
                 expected_bags = {bag.id: bag for bag in candidates}
-                final_phase = (phase_reader(sorted(checked_versions), limit=self.settings.search_max_bags + 1,
+                final_phase = None
+                if phase_reader is not None and checked_versions:
+                    phase_options = dict(limit=self.settings.search_max_bags + 1,
+                                         max_chars=self.settings.index_max_source_chars)
+                    if callable(getattr(type(self.bags), 'search_final_phase', None)):
+                        final_phase = self.bags.search_final_phase(sorted(checked_versions), expected_bags, **phase_options)
+                    else:
+                        final_phase = phase_reader(sorted(checked_versions), **phase_options)
+                final_postgres_phase = (repo.search_authority_phase(sorted(checked_versions), include_semantic=use_semantic,
                                             max_chars=self.settings.index_max_source_chars)
-                               if phase_reader is not None and checked_versions else None)
+                    if _batch_texts and checked_versions and callable(getattr(type(repo), 'search_authority_phase', None))
+                    else None)
+                read_repo = final_postgres_phase.bind(repo) if final_postgres_phase is not None else repo
                 for version_id in checked_versions:
-                    fresh = self._ready_snapshot(repo, version_id, batch_texts=_batch_texts,
+                    fresh = self._ready_snapshot(read_repo, version_id, batch_texts=_batch_texts,
                                                  expected_bags=expected_bags, batch_bags=_batch_bags,
                                                  bag_reader=final_phase)
                     if version_id not in fresh_ids or fresh is None or fresh[3] != snapshots[version_id][3]:
@@ -853,14 +883,14 @@ class SearchService:
                     if use_semantic and authorized_roots[version_id]:
                         if fresh_by_version[version_id] != by_version[version_id]:
                             raise SearchError('SEARCH_INDEX_STALE', 409)
-                        fresh_metadata = repo.semantic_metadata(fresh[0]['resource_id'])
+                        fresh_metadata = read_repo.semantic_metadata(fresh[0]['resource_id'])
                         if fresh_metadata != semantic_metadata[version_id]:
                             raise SearchError('SEMANTIC_INDEX_STALE', 409)
                         plan, _ = self.semantic.plan(fresh, fresh_metadata)
                         manifest = self.semantic.store.manifest(plan['_id'])
                         if not manifest or manifest['status'] != 'READY':
                             raise SearchError('SEMANTIC_INDEX_STALE', 409)
-                    allowed = self._allowed_units(repo, fresh, access)
+                    allowed = self._allowed_units(read_repo, fresh, access)
                     whole_file_access[version_id] = bool(fresh[2]) and {unit['id'] for unit in fresh[2]} <= allowed
                     fresh_structure = bag_structure(fresh[2])
                     fresh_roots = {root for root, leaves in fresh_structure.items()

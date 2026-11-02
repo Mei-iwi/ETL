@@ -591,15 +591,19 @@ class Container:
         # cloud adapters intentionally have no local `root` attribute.
         source_destination_root = (self.storage.root if getattr(self.storage, 'root', None) is not None
                                    else self.settings.storage_root)
-        self.source_files = SourceLocalFileReader(self.settings.source_file_storage_root,
-                                                  source_destination_root)
+        # Filesystem SOURCE connectors are isolated JSON fixtures only. Deployed
+        # SOURCE files resolve exclusively through Drive or Object Storage.
+        fixture_files = (SourceLocalFileReader(self.settings.source_file_storage_root, source_destination_root)
+                         if self.settings.source_adapter == 'json'
+                         and self.settings.app_environment in ('development', 'test') else None)
+        self.source_files = fixture_files
         source_object = create_source_object_reader(self.settings)
-        if (source_object is not None or self.settings.source_drive_enabled
+        if (fixture_files is None or source_object is not None or self.settings.source_drive_enabled
                 or self.settings.source_drive_buckets or self.settings.source_local_buckets):
             self.source_files = SourceFileDispatcher(
                 self.source_files, SourceGoogleDriveFileReader(self.settings),
                 object_reader=source_object,
-                local_buckets=self.settings.source_local_buckets,
+                local_buckets=self.settings.source_local_buckets if fixture_files is not None else (),
                 object_buckets=((self.settings.source_file_storage_bucket,)
                                 if source_object is not None else ()),
             )
@@ -621,6 +625,7 @@ class Container:
         self.source_resolution.source_status_policy = self.source_resolver._status_allowed
         self.bilingual.source_resolver = self.source_resolver
         self.search.source_content_authorizer = self.source_resolver.derived_index_authorized
+        self.search.source_content_authorizer_many = self.source_resolver.derived_index_authorized_many
         self.indexing.source_content_authorizer = self.source_resolver.derived_index_authorized
         self.reconciliation_engine.source_resolver = self.source_resolver
         self.reconciliation_engine.file_read_budget_seconds = self.settings.source_read_timeout_seconds

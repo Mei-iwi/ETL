@@ -5,6 +5,7 @@ import re
 from datetime import timedelta
 from hashlib import sha256
 from time import monotonic
+from types import SimpleNamespace
 
 from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import (
@@ -268,7 +269,8 @@ class SourceFileImportService:
                 if metadata_only:
                     bucket, key = self._metadata_locator(row['source_version_id'], source.get('storage_object_key'))
                     fields.update({"storage_bucket": bucket, "storage_object_key": key})
-                    if row['last_error_code'] not in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING'):
+                    if (row['last_error_code'] in (None, METADATA_ONLY_ERROR)
+                            and row['status'] not in ('FAILED', 'RETRY_WAIT', 'RETRY_EXHAUSTED')):
                         fields.update({"status": "METADATA_ONLY", "last_error_code": METADATA_ONLY_ERROR,
                                        "claim_token": None, "lease_expires_at": None,
                                        "next_retry_at": None, "updated_at": now()})
@@ -597,9 +599,11 @@ class SourceFileImportService:
             'reference': sha256(row['source_version_id'].encode()).hexdigest()[:12]})
 
     def _processing(self, repo, row):
-        if not row["processing_job_id"]:
-            return None, False
-        job = repo.get("ocr_jobs", row["processing_job_id"])
+        job = repo.get("ocr_jobs", row["processing_job_id"]) if row['processing_job_id'] else None
+        if not job and row.get('target_version_id'):
+            jobs = repo.find('ocr_jobs', {'resource_version_id': row['target_version_id']},
+                             order=('-created_at', '-id'), limit=1)
+            job = jobs[0] if jobs else None
         if not job:
             return None, False
         state = processing_state(repo, job)
@@ -619,21 +623,33 @@ class SourceFileImportService:
         return state, exhausted and count < self.settings.processing_manual_retry_limit
 
     def _eligible(self, repo, row):
-        return False
-        # No external import row is retryable while SOURCE is metadata-only.
-        if not self._source_allowed(row):
+        if not self._source_allowed(row) or not row.get('target_version_id'):
             return False
         resource = repo.get('master_learning_resources', row['resource_id'])
-        if resource is None or not resource['is_active'] or resource_deleted(resource):
+        version = repo.get('resource_versions', row['target_version_id'])
+        if (resource is None or version is None or resource.get('source_origin') != 'POSTGRESQL'
+                or not resource['is_active'] or resource_deleted(resource)
+                or resource.get('publication_status') != 'PUBLISHED'
+                or resource.get('source_missing_at') is not None
+                or version['resource_id'] != row['resource_id']
+                or version['version_number'] != row['source_version_number']
+                or version['lifecycle_status'] not in ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED')
+                or version['source_hash'].lower() != row['source_hash'].lower()):
             return False
-        if (row["storage_object_key"].lower().endswith(('.mp3', '.mp4'))
-                and self.settings.source_metadata_media_enabled):
+        if row['manual_retries'] >= self.settings.processing_manual_retry_limit:
             return False
-        if row["last_error_code"] in {"SOURCE_VERSION_MUTATED", "BLOCKED_SOURCE_MAPPING", "UNSUPPORTED_SOURCE_FORMAT"}:
+        if row['last_error_code'] in {'SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING',
+                                      'UNSUPPORTED_SOURCE_FORMAT', 'SOURCE_LOCAL_FILES_DISABLED'}:
             return False
-        if row["status"] in {"FAILED", "RETRY_EXHAUSTED"}:
-            return row["manual_retries"] < self.settings.processing_manual_retry_limit
-        return row["status"] == "PROCESSING" and self._processing(repo, row)[1]
+        try:
+            self.resolver.require_content_capabilities(SimpleNamespace(
+                ownership='SOURCE_BACKED', source_id=row['source_system']), index=True)
+        except SourceFileError:
+            return False
+        state, retryable = self._processing(repo, row)
+        if state is not None:
+            return retryable
+        return row['status'] in {'METADATA_ONLY', 'FAILED', 'RETRY_EXHAUSTED', 'RETRY_WAIT'}
 
     def list_files(self, after=None, size=20, failed_only=False, retry_eligible=None, include_total=False,
                    integrity_only=False, evidence_reader=None):
@@ -724,26 +740,51 @@ class SourceFileImportService:
 
     def retry(self, file_id):
         with self.uow() as repo:
-            if repo.get("source_file_imports", file_id) is None:
-                raise SourceImportNotFound("Import job not found")
-        raise SourceImportConflict('EXTERNAL_SOURCE_CONTENT_DISABLED')
-        available = self.availability()["file_sync_supported"]
-        with self.uow() as repo:
             row = repo.get("source_file_imports", file_id, lock=True)
             if row is None:
                 raise SourceImportNotFound("Import job not found")
+            try:
+                self.resolver.require_content_capabilities(SimpleNamespace(
+                    ownership='SOURCE_BACKED', source_id=row['source_system']), index=True)
+            except SourceFileError:
+                raise SourceImportConflict('EXTERNAL_SOURCE_CONTENT_DISABLED') from None
             if not self._eligible(repo, row):
                 raise SourceImportConflict("Import job cannot be retried")
-            if not available and row["target_version_id"] is None:
-                raise SourceImportConflict("Source file storage unavailable")
-            repo.update("source_file_imports", file_id, {
-                "status": "RETRY_PROCESSING" if row["status"] == "PROCESSING" else "PENDING",
-                "processing_retry_requested": row["status"] == "PROCESSING" or row["processing_retry_requested"],
-                "attempts": 0, "manual_retries": row["manual_retries"] + 1,
-                "next_retry_at": None, "last_error_code": None, "updated_at": now(),
-            })
+            jobs = repo.find('ocr_jobs', {'resource_version_id': row['target_version_id']},
+                             order=('-created_at', '-id'), limit=1)
+            if not jobs:
+                self._queue_content_retry(repo, row)
+        if jobs:
+            fenced = False
+            def fence(repo):
+                nonlocal fenced
+                current = repo.get('source_file_imports', file_id, lock=True)
+                if not current or current['target_version_id'] != row['target_version_id']:
+                    raise SourceImportConflict('Source mapping changed')
+                if not fenced:
+                    if not self._eligible(repo, current):
+                        raise SourceImportConflict('Import job cannot be retried')
+                    self._queue_content_retry(repo, current, jobs[0]['id'])
+                    fenced = True
+            try:
+                self.retry_processing.run(jobs[0]['id'], fence=fence)
+            except ProcessingRetryConflict:
+                raise SourceImportConflict('Processing job cannot be retried') from None
         self._file_count_cache.clear()
         return {"import_job_id": file_id, "action": "QUEUED"}
+
+    @staticmethod
+    def _queue_content_retry(repo, row, job_id=None):
+        version = repo.get('resource_versions', row['target_version_id'], lock=True)
+        options = dict(version.get('processing_options') or {})
+        options.pop('source_processing_status', None)
+        options.pop('source_processing_error', None)
+        repo.update('resource_versions', version['id'], {'processing_options': options,
+            **({'lifecycle_status': 'METADATA_ONLY'} if job_id is None else {})})
+        repo.update('source_file_imports', row['id'], {
+            'status': 'PROCESSING' if job_id else 'METADATA_ONLY', 'processing_job_id': job_id,
+            'attempts': 0, 'manual_retries': row['manual_retries'] + 1,
+            'next_retry_at': None, 'last_error_code': None, 'updated_at': now()})
 
     def retry_failed(self, after=None, size=100):
         with self.uow() as repo:

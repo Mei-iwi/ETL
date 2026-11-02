@@ -6,7 +6,7 @@ const processSteps = [
     {
         step: 1,
         name: 'Tiếp nhận học liệu',
-        content: 'Đồng bộ tham chiếu tệp nguồn hoặc tải tệp LOCAL, nhập thông tin và tạo phiên bản',
+        content: 'Đồng bộ tham chiếu tệp từ Drive hoặc Object Storage, nhập thông tin và tạo phiên bản',
         output: 'Học liệu và Metadata',
     },
     {

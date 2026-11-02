@@ -62,6 +62,28 @@ def test_bulk_phase_never_crosses_version_or_generation_and_rechecks_text():
     assert final(['root-0'], version_id='v-0', generation=1)['root-0'] is None
 
 
+def test_phase_content_reader_reuses_validated_documents_but_final_phase_is_fresh():
+    from tests.unit.test_mongo_foundation import leaf
+    store, db, _, units = store_with_data()
+    for raw in units:
+        complete = leaf().bson()
+        complete.update(raw, content_unit_id=raw['_id'], page_from=1, page_to=1)
+        raw.clear()
+        raw.update(complete)
+    initial = store.search_phase(['v-0', 'v-1'], limit=10)
+    before = initial.units('v-0')[0]
+    assert initial.units('v-0')[0] == before
+    assert db.mongo_content_units.find.call_count == 1
+    units[0]['text'] = 'New text after the initial read'
+    final = store.search_phase(['v-0', 'v-1'], limit=10)
+    assert initial.units('v-0')[0].text == before.text
+    assert final.units('v-0')[0].text != before.text
+    units[0]['unexpected_private_flag'] = True
+    invalid = store.search_phase(['v-0', 'v-1'], limit=10)
+    with pytest.raises(DomainError):
+        invalid.units('v-0')
+
+
 def test_bulk_phase_rejects_unknown_bag_fields_instead_of_projecting_them_out():
     store, _, bags, _ = store_with_data()
     bags[0]['license_restricted'] = True

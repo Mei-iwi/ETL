@@ -170,6 +170,28 @@ def test_final_race_drops_stale(metadata, monkeypatch, race):
     assert search(c)['total'] == 0
 
 
+def test_metadata_and_content_share_only_the_same_final_validation_phase(metadata, monkeypatch):
+    c, _, _, service = metadata
+    service.reconcile(apply=True)
+    access = SearchAccess('authenticated_admin')
+    items, snapshots, _, _ = service.retrieve('phân số', 'bow', {}, access,
+        dictionary=c.search.dictionary, policy=c.settings.search_expansion)
+    original, reads = service.snapshots, []
+    def counted(*args, **kwargs):
+        reads.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(service, 'snapshots', counted)
+    phase = {}
+    assert service.final_validate(items, snapshots, {}, access, validation_cache=phase) == items
+    assert service.final_validate(items, snapshots, {}, access, content=True, validation_cache=phase) == items
+    assert len(reads) == 1
+    # A new request/phase still reads live grants and rejects a revoked corpus.
+    with c.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {'publication_status': 'UNPUBLISHED'})
+    assert service.final_validate(items, snapshots, {}, access, validation_cache={}) == []
+    assert len(reads) == 2
+
+
 def test_build_race_and_retry(metadata, monkeypatch):
     _, _, extension, service = metadata
     original = service.embedding.embed_documents

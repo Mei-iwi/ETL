@@ -13,6 +13,24 @@ export function sha256CoverageLabel(coverage: AuditCoverage | null) {
     return `${verified}/${coverage.total_files} tệp (${percent}%)`
 }
 
+export function fileScanProgressLabel(job: AuditJob | null, coverage: AuditCoverage | null) {
+    if (!job || job.stream !== 'files') return null
+    const current = job.progress.records_scanned
+    const preceding = job.progress.cycle_records_scanned ?? 0
+    if (typeof current !== 'number' || !Number.isSafeInteger(current) || current < 0
+        || typeof preceding !== 'number' || !Number.isSafeInteger(preceding) || preceding < 0) return null
+    const processed = current + preceding
+    if (!Number.isSafeInteger(processed)) return null
+    // Coverage is repository-wide evidence, never a processed-file counter.
+    // Its current inventory can supply the denominator only for a running FULL scan.
+    const total = coverage?.total_files
+    if (job.progress.manual_full_scan === true && auditJobInProgress(job)
+        && typeof total === 'number' && Number.isSafeInteger(total) && total >= processed) {
+        return `${processed}/${total} tệp`
+    }
+    return `${processed} tệp`
+}
+
 export function metadataMatchLabel(report: ReconciliationLatestReport | null) {
     const rows = report?.stream_reports.filter(row => row.stream_name !== 'files') ?? []
     const total = rows.reduce((sum, row) => sum + Math.max(row.source_count, row.target_count), 0)

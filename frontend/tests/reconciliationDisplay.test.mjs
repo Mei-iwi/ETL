@@ -1,10 +1,25 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { auditJobInProgress, auditJobLabel, auditSummary, auditViewJobs, formatAuditBytes, metadataMatchLabel, pendingHash, sha256CoverageLabel } from '../src/pages/system/reconciliationDisplay.ts'
+import { auditJobInProgress, auditJobLabel, auditSummary, auditViewJobs, fileScanProgressLabel, formatAuditBytes, metadataMatchLabel, pendingHash, sha256CoverageLabel } from '../src/pages/system/reconciliationDisplay.ts'
 
 const pending = { discrepancy_flag: 'NOT_VERIFIED', target_value: {
     verification: 'SIZE_ONLY', reason_code: 'SHA256_NOT_CHECKED', size_status: 'SIZE_MATCHED', storage_file_size: 5525995,
 } }
+
+test('new FULL scan progress starts independently of existing complete SHA evidence', () => {
+    const coverage = { total_files: 50, recent_sha256_evidence_count: 50 }
+    const job = { stream: 'files', status: 'RUNNING', progress: {
+        manual_full_scan: true, records_scanned: 2, cycle_records_scanned: 0 } }
+    assert.equal(sha256CoverageLabel(coverage), '50/50 tệp (100%)')
+    assert.equal(fileScanProgressLabel(job, coverage), '2/50 tệp')
+    assert.equal(fileScanProgressLabel({ ...job, progress: { ...job.progress,
+        records_scanned: 1, cycle_records_scanned: 10 } }, coverage), '11/50 tệp')
+    assert.equal(fileScanProgressLabel({ ...job, status: 'COMPLETED' }, coverage), '2 tệp')
+    assert.equal(fileScanProgressLabel({ ...job, progress: { records_scanned: 2 } }, coverage), '2 tệp')
+    assert.equal(fileScanProgressLabel(job, null), '2 tệp')
+    assert.equal(fileScanProgressLabel({ ...job, progress: { records_scanned: -1 } }, coverage), null)
+    assert.equal(fileScanProgressLabel(null, coverage), null)
+})
 
 test('SHA coverage uses current per-file proof instead of LIGHT job counts', () => {
     assert.equal(sha256CoverageLabel({ total_files: 38, recent_sha256_evidence_count: 38 }), '38/38 tệp (100%)')

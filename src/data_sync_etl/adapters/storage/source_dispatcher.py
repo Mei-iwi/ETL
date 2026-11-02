@@ -24,7 +24,7 @@ class SourceFileDispatcher:
         if self.local_buckets and bucket not in self.local_buckets:
             raise SourceFileError('SOURCE_BUCKET_NOT_ALLOWED')
         if self.local is None:
-            raise SourceFileError('SOURCE_BUCKET_NOT_ALLOWED')
+            raise SourceFileError('SOURCE_LOCAL_FILES_DISABLED')
         return 'local'
 
     def open_stream(self, bucket, object_key, *, cancelled=None):
@@ -59,6 +59,8 @@ class SourceFileDispatcher:
         if self.object is not None:
             readers.append(('object', self.object))
         for provider, reader in readers:
+            if reader is None:
+                continue
             try:
                 if provider == 'google_drive' and not probe:
                     reader.configuration_check()
