@@ -15,6 +15,8 @@ class Database:
         return self
 
     def list_collection_names(self, **_kwargs):
+        if _kwargs:
+            raise OperationFailure('filtered listCollections unavailable')
         if self.names is None:
             raise OperationFailure('private connection details')
         return self.names
@@ -36,3 +38,9 @@ def test_existing_reader_checks_unit_version_and_currentness():
     adapter.reader = SimpleNamespace(get_unit=lambda _: SimpleNamespace(resource_version_id='v1', is_current=False))
     with pytest.raises(DomainError, match='UNIT_CONFLICT'):
         adapter.get_unit('u1', version_id='v1')
+
+
+def test_collection_guard_uses_unfiltered_name_list_for_atlas_compatibility():
+    adapter = MongoExistingSourceOCRReader(Database(['ocr_pages', 'mongo_content_units']))
+
+    adapter._require_existing()

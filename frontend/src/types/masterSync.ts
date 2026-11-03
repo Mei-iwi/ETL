@@ -4,6 +4,18 @@ export type MasterSyncMode = 'INCREMENTAL' | 'FULL'
 export type MasterSyncRequest = {
     stream: MasterSyncStream
     full: boolean
+    source_id?: string
+}
+
+export type SourceFederationHealthResponse = {
+    federation_enabled?: boolean
+    sources: Array<{
+        source_id: string
+        backend: string
+        namespace: string
+        enabled: boolean
+        health: { status: string; safe_error_code: string | null }
+    }>
 }
 
 export type MasterSyncRunResult = {

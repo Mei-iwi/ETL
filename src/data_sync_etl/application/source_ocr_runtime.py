@@ -535,7 +535,11 @@ class SourceOCRPipeline:
                 raise DomainError('SOURCE_OCR_STATE_CHANGED')
             values = {key: source[key] for key in ('status', 'total_pages', 'completed_pages', 'failed_pages',
                                                   'started_at', 'completed_at', 'updated_at')}
-            values.update(resource_version_id=version['id'], triggered_by=identity['actor_id'])
+            # MASTER ocr_jobs.triggered_by stores the canonical MASTER user ID
+            # (the FK identity), while authorization/checkpoints retain the
+            # full `master:<id>` application principal.
+            values.update(resource_version_id=version['id'],
+                          triggered_by=identity['actor_id'].removeprefix('master:'))
             existing = repo.get('ocr_jobs', master_id)
             if existing:
                 if existing['resource_version_id'] != version['id']:
@@ -604,7 +608,12 @@ class SourceOCRPipeline:
             except Exception as exc:
                 from data_sync_etl.logging import event
                 safe = source_sql_error(exc)
-                event(stage='source_ocr', action='CLAIM_UNAVAILABLE', error_type=type(safe).__name__)
+                code = str(safe)
+                if (not code or len(code) > 80 or not code.replace('_', '').isalnum()
+                        or not code.isupper()):
+                    code = 'SOURCE_OCR_CLAIM_UNAVAILABLE'
+                event(stage='source_ocr', action='CLAIM_UNAVAILABLE', error_type=type(safe).__name__,
+                      error_code=code)
                 continue
             if task:
                 self._claim_cursor = (start + index + 1) % len(states)

@@ -21,6 +21,22 @@ SYNC_ERRORS = {
 }
 
 
+SYNC_ERRORS.update({
+    'SOURCE_ID_REQUIRED': (422, 'Chọn SOURCE đã được đăng ký để đồng bộ.'),
+    'SOURCE_FEDERATION_DISABLED': (409, 'Tính năng đồng bộ nhiều SOURCE đang tắt.'),
+    'SOURCE_REGISTRY_NAMESPACE_UNKNOWN': (404, 'SOURCE chưa được đăng ký.'),
+    'SOURCE_REGISTRY_SOURCE_DISABLED': (409, 'SOURCE đang bị tắt.'),
+    'SOURCE_REGISTRY_ADAPTER_UNAVAILABLE': (503, 'Adapter của SOURCE đã chọn hiện không khả dụng.'),
+    'SOURCE_REGISTRY_UNAVAILABLE': (503, 'Không thể đọc Source Registry.'),
+    'SOURCE_MAPPING_UNAVAILABLE': (503, 'Bảng ánh xạ SOURCE chưa khả dụng.'),
+    'BLOCKED_SOURCE_IDENTITY': (409, 'SOURCE và MASTER có cùng ID nhưng khác thời điểm tạo. Cần đối soát nguồn đã được tạo lại trước khi đồng bộ.'),
+    'BLOCKED_SOURCE_OWNERSHIP': (409, 'Bản ghi MASTER không thuộc SOURCE PostgreSQL hiện tại. Cần đối soát nguồn sở hữu trước khi đồng bộ.'),
+    'BLOCKED_LOCAL_SOURCE_CHANGE': (409, 'Bản ghi nguồn trong MASTER đã bị sửa cục bộ. Cần đối soát thay đổi trước khi đồng bộ.'),
+    'BLOCKED_MONGO_ID_MAPPING': (409, 'Ánh xạ MongoDB của bản ghi nguồn không nhất quán. Cần đối soát ID trước khi đồng bộ.'),
+    'BLOCKED_SOURCE_MAPPING': (503, 'Không đọc được SOURCE. Kiểm tra kết nối, chứng thư SSL, quyền đọc và schema nguồn.'),
+})
+
+
 class MasterSyncRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 

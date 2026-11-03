@@ -136,6 +136,7 @@ def test_production_container_api_worker_mongo_postprocess_and_reuse(runtime, mo
         assert r.source.jobs[next(iter(r.source.jobs))]['status'] == 'COMPLETED'
         assert len(r.content.pages) == 1
         assert r.uow.get('ocr_jobs', job_id)['status'] == 'COMPLETED'
+        assert r.uow.get('ocr_jobs', job_id)['triggered_by'] == 'a1'
         # Explicitly run finalization too so errors cannot be hidden by callback handling.
         result = container.processing_finalizer.finalize(job_id)
         assert result['status'] in ('CONTENT_READY', 'ALREADY_COMPLETED')
@@ -189,6 +190,25 @@ def test_lost_lease_cannot_persist_mongo_or_proofs(runtime):
     with pytest.raises(DomainError, match='LEASE_LOST'):
         r.pipeline.succeed(task, result)
     assert not r.content.pages and r.pipeline.state('mv1') == before
+
+
+def test_projection_stores_canonical_30_character_user_for_37_character_principal(runtime):
+    r = runtime
+    r.pipeline.create_job('mv1', access=r.access)
+    master_user_id = 'F' + 'b' * 29
+    state = r.pipeline.state('mv1')
+    state['identity']['actor_id'] = f'master:{master_user_id}'
+    r.pipeline.reader.authorize = lambda _identity: True
+    with r.uow() as repo:
+        user = repo.tables['master_users'].pop('a1')
+        user['id'] = master_user_id
+        repo.tables['master_users'][master_user_id] = user
+        repo.tables['master_learning_resources']['r1']['created_by'] = master_user_id
+        r.pipeline._save(repo, 'mv1', state)
+    projected = r.pipeline.sync(state)
+    assert len(state['identity']['actor_id']) == 37
+    assert projected['triggered_by'] == master_user_id
+    assert len(projected['triggered_by']) == 30
 
 
 def test_mongo_committed_before_source_commit_is_reused_without_file_or_recognition(runtime, monkeypatch):

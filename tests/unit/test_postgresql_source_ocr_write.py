@@ -106,6 +106,22 @@ def test_job_creation_is_idempotent_and_requires_trusted_identity(monkeypatch):
         denied.ensure_job(**request())
 
 
+def test_job_creation_accepts_full_37_character_principal_with_canonical_source_user(monkeypatch):
+    engine = Engine()
+    monkeypatch.setattr(module, 'PostgreSQLSourceIDCounter', lambda _: object())
+    monkeypatch.setattr(module, 'SourceIDService', lambda _: SimpleNamespace(next_id=lambda *_args, **_kw: 'OCR1'))
+    principal = 'master:' + ('F' + 'a' * 29)
+    approved = SourceOCRContract.from_owner_contract({
+        'backend': 'postgresql', 'schema': 'public', 'entity_type': 'ocr_processing', 'namespace': 'source-a',
+        'tables': ['ocr_jobs'], 'columns': {'ocr_jobs': list(module._JOB_COLUMNS)},
+        'actions': ['select', 'insert'], 'allowed_roles': ['ADMIN'], 'allowed_actor_ids': [principal],
+        'allowed_version_ids': ['v1'], 'allowed_lifecycles': ['APPROVED'], 'statement_timeout_seconds': 10,
+    }, expected_namespace='source-a')
+    identity = {**request(), 'actor_id': principal}
+    writer = module.PostgreSQLSourceOCRWriter(engine, approved, authorize_identity=lambda row: row == identity)
+    assert writer.ensure_job(**identity) == 'OCR1'
+
+
 def test_reauthorization_failure_rolls_back_job(monkeypatch):
     engine = Engine()
     monkeypatch.setattr(module, 'PostgreSQLSourceIDCounter', lambda _: object())

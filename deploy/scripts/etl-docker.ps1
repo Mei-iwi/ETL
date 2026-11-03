@@ -4,9 +4,9 @@ param(
     [string]$EnvFile,
     [string]$Archive,
     [string]$ModelDirectory,
-    [string]$ModelId = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-    [string]$ModelRevision = 'e8f8c211226b894fcb81acc59f3b34ba3efd5f42',
-    [int]$ModelDimension = 384,
+    [string]$ModelId = 'BAAI/bge-m3',
+    [string]$ModelRevision = '5617a9f61b028005a4858fdac845db406aefb181',
+    [int]$ModelDimension = 1024,
     [string]$NetworkName = 'etl-data',
     [switch]$Workers,
     [switch]$Drive,
@@ -113,8 +113,8 @@ switch ($Action) {
     Logs { Invoke-Docker ($composeArgs + @('--profile','workers','logs','--tail','100')) }
     Stop { Invoke-Docker ($composeArgs + @('--profile','workers','stop')) }
     Down { Invoke-Docker ($composeArgs + @('--profile','workers','down')) }
-    DbStart { Invoke-Docker @('compose','--env-file',$EnvFile,'-f',(Join-Path $deployDir 'compose.database.yml'),'up','-d') }
-    DbStop { Invoke-Docker @('compose','--env-file',$EnvFile,'-f',(Join-Path $deployDir 'compose.database.yml'),'stop') }
+    DbStart { Invoke-Docker @('compose','--env-file',$EnvFile,'-f',(Join-Path $deployDir 'compose.master-only.yml'),'up','-d','master-postgres') }
+    DbStop { Invoke-Docker @('compose','--env-file',$EnvFile,'-f',(Join-Path $deployDir 'compose.master-only.yml'),'stop','master-postgres') }
     Export {
         if (-not $Archive) { throw 'Archive path required' }
         if ((Test-Path -LiteralPath $Archive) -or (Test-Path -LiteralPath ($Archive+'.sha256'))) { throw 'Archive output already exists' }

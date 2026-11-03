@@ -17,6 +17,7 @@ services:
       timeout: 3s
       retries: 10
   source-postgres:
+    profiles: [local-dev]
     image: postgres:16
     environment:
       POSTGRES_USER: ${SOURCE_POSTGRES_USER:-etl_source_admin}
@@ -32,18 +33,20 @@ services:
       timeout: 3s
       retries: 10
   master-migrate:
+    profiles: [ops]
     build:
       context: .
       target: runtime
     image: etl-master-data-runtime:local
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-etl}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-etl}
-    command: ["python", "-m", "alembic", "upgrade", "head"]
+    command: ["python", "-m", "alembic", "upgrade", "0020"]
     depends_on:
       postgres:
         condition: service_healthy
     restart: "no"
   source-migrate:
+    profiles: [local-dev, ops]
     image: etl-master-data-runtime:local
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-etl}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-etl}
@@ -58,6 +61,7 @@ services:
         condition: service_healthy
     restart: "no"
   mongo-init:
+    profiles: [local-dev, ops]
     image: etl-master-data-runtime:local
     environment:
       MONGO_URI: mongodb://mongo:27017
@@ -73,6 +77,7 @@ services:
       disable: true
     restart: "no"
   mongo:
+    profiles: [local-dev]
     image: mongo:8.0
     ports:
       - "127.0.0.1:${MONGO_PORT:-27018}:27017"

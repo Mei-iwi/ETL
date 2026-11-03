@@ -25,6 +25,16 @@ def test_owner_ocr_contract_requires_all_dimensions():
         assert not policy.allows(**{**request, field: value})
 
 
+def test_contract_keeps_full_master_principal_separate_from_source_id_lengths():
+    principal = 'master:' + ('F' + 'a' * 29)
+    assert len(principal) == 37
+    value = {**contract(), 'allowed_actor_ids': [principal]}
+    policy = SourceOCRContract.from_owner_contract(value, expected_namespace='source-a')
+    assert principal in policy.actor_ids
+    assert policy.allows(namespace='source-a', table='ocr_jobs', action='insert', fields={'status'},
+                         role='ADMIN', actor_id=principal, source_version_id='version-1', lifecycle='APPROVED')
+
+
 @pytest.mark.parametrize('change', [
     {'entity_type': 'resources'}, {'actions': ['delete']}, {'tables': ['component_ocr_pages']},
     {'allowed_actor_ids': ['*'] * 2}, {'allowed_version_ids': []},

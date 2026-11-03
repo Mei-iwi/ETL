@@ -25,6 +25,7 @@ def parser():
     mode = sync.add_mutually_exclusive_group(required=True)
     mode.add_argument("--full", action="store_true")
     mode.add_argument("--incremental", action="store_true")
+    sync.add_argument('--source-id', help='Explicit federation source registry ID (required when federation is enabled)')
     reconcile = commands.add_parser('reconcile-master', help='Read-only preview by default; apply needs approved fingerprint')
     reconcile.add_argument('--stream', choices=['all', 'grades', 'subjects', 'users', 'resources'], default='all')
     action = reconcile.add_mutually_exclusive_group()
@@ -194,7 +195,7 @@ def dispatch(container, args):
         raise DomainError('MONGO_METADATA_APPLY_REQUIRES_DEV')
     match args.command:
         case "sync-master":
-            return container.sync.run(args.stream, args.full)
+            return container.sync.run(args.stream, args.full, source_id=args.source_id)
         case 'reconcile-master':
             return container.reconcile_master.run(args.stream, apply=args.apply, fingerprint=args.fingerprint)
         case 'project-master-mongo':

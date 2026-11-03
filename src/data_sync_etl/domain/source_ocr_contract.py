@@ -67,7 +67,10 @@ class SourceOCRContract:
         if (not tables.issubset(_TABLES) or not actions.issubset(_ACTIONS)
                 or any(not _COLUMN.fullmatch(field) for _, fields in column_policy for field in fields)
                 or not lifecycles.issubset(_LIFECYCLES) or any(role != role.upper() for role in roles)
-                or any(len(item) > 30 for item in (*actors, *versions))
+                # Principal IDs are application identities (`master:<id>`) and
+                # can be longer than database entity IDs. Source version IDs
+                # remain constrained by the SOURCE schema.
+                or any(len(item) > 255 for item in actors) or any(len(item) > 30 for item in versions)
                 or type(timeout) is not int or not 1 <= timeout <= 600
                 or type(allow_created) is not bool):
             raise DomainError('SOURCE_OCR_CONTRACT_INVALID')

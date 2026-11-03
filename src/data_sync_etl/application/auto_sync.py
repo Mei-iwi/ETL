@@ -21,6 +21,7 @@ class AutoSyncCoordinator:
         interval_seconds: int,
         worker_stale_seconds: int,
         lease_seconds: int,
+        baseline_source_ids: tuple[str, ...] | None = None,
     ):
         self.uow = uow
         self.environment_supported = environment_supported
@@ -28,21 +29,24 @@ class AutoSyncCoordinator:
         self.interval_seconds = interval_seconds
         self.worker_stale_seconds = worker_stale_seconds
         self.lease_seconds = lease_seconds
+        self.baseline_source_ids = (None if baseline_source_ids is None
+                                    else tuple(sorted(set(baseline_source_ids))))
 
     def _ensure(self, repo):
         repo.ensure_auto_sync_config(self.interval_seconds)
         return repo.get("sync_auto_config", CONFIG_ID, lock=True)
 
-    @staticmethod
-    def _baseline_ready(repo, streams):
-        return all(
-            repo.find(
-                "sync_runs",
-                {"stream_name": stream, "sync_mode": "FULL", "status": "COMPLETED"},
-                limit=1,
-            )
-            for stream in streams
-        )
+    def _baseline_ready(self, repo, streams):
+        source_ids = self.baseline_source_ids
+        if source_ids is not None and not source_ids:
+            return False
+        expected = ([(f'{source_id}:{stream}') for source_id in source_ids for stream in streams]
+                    if source_ids is not None else list(streams))
+        return bool(expected) and all(repo.find(
+            "sync_runs",
+            {"stream_name": stream, "sync_mode": "FULL", "status": "COMPLETED"},
+            limit=1,
+        ) for stream in expected)
 
     @staticmethod
     def _stream_state(repo):

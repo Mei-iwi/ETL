@@ -67,7 +67,8 @@ class PostgreSQLSourceOCRWriter:
                         actor_id=actor_id, role=role, source_user_id=source_user_id)
         if (not isinstance(source_hash, str) or not _HASH.fullmatch(source_hash)
                 or any(not isinstance(identity[key], str) or not 1 <= len(identity[key]) <= 30
-                       for key in ('master_version_id', 'source_version_id', 'actor_id', 'source_user_id'))
+                       for key in ('master_version_id', 'source_version_id', 'source_user_id'))
+                or not isinstance(identity['actor_id'], str) or not 1 <= len(identity['actor_id']) <= 255
                 or not self.authorize_identity(dict(identity))):
             raise DomainError('SOURCE_OCR_UNAUTHORIZED')
         try:
@@ -126,7 +127,8 @@ class PostgreSQLSourceOCRWriter:
                         actor_id=actor_id, role=role, source_user_id=source_user_id)
         if (not isinstance(source_hash, str) or not _HASH.fullmatch(source_hash)
                 or any(not isinstance(identity[key], str) or not 1 <= len(identity[key]) <= 30
-                       for key in ('master_version_id', 'source_version_id', 'actor_id', 'source_user_id'))
+                       for key in ('master_version_id', 'source_version_id', 'source_user_id'))
+                or not isinstance(identity['actor_id'], str) or not 1 <= len(identity['actor_id']) <= 255
                 or not isinstance(source_job_id, str) or not 1 <= len(source_job_id) <= 30
                 or type(page_num) is not int or not 1 <= page_num <= 2000
                 or not self.authorize_identity(dict(identity))):
@@ -203,7 +205,8 @@ class PostgreSQLSourceOCRWriter:
                         actor_id=actor_id, role=role, source_user_id=source_user_id)
         if (not isinstance(source_hash, str) or not _HASH.fullmatch(source_hash)
                 or any(not isinstance(identity[key], str) or not 1 <= len(identity[key]) <= 30
-                       for key in ('master_version_id', 'source_version_id', 'actor_id', 'source_user_id'))
+                       for key in ('master_version_id', 'source_version_id', 'source_user_id'))
+                or not isinstance(identity['actor_id'], str) or not 1 <= len(identity['actor_id']) <= 255
                 or not isinstance(source_job_id, str) or not 1 <= len(source_job_id) <= 30
                 or type(total_pages) is not int or not 1 <= total_pages <= 2000
                 or not self.authorize_identity(dict(identity))):

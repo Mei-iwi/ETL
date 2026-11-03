@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet } from 'react-router'
 import {
     configureMasterSyncAuto,
     getMasterSyncStatus,
+    getSourceFederationHealth,
     getSourceSyncFiles,
     retrySourceFile,
     retryFailedSourceFiles,
@@ -13,6 +14,7 @@ import type {
     MasterSyncStream,
     MasterSyncMode,
     SourceSyncFilesResponse,
+    SourceFederationHealthResponse,
 } from '../../types/masterSync'
 import styles from './SystemMasterSyncPage.module.css'
 import { acceptStatusPoll, configuredModeLabel, selectSyncResults } from './masterSyncResults'
@@ -62,9 +64,36 @@ export function SystemMasterSyncPage() {
     const [result, setResult] = useState<ManualSyncResult | null>(null)
     const [runningMode, setRunningMode] = useState<MasterSyncMode | null>(null)
     const [syncStatus, setSyncStatus] = useState<MasterSyncStatusResponse | null>(null)
+    const [sourceFederation, setSourceFederation] = useState<SourceFederationHealthResponse | null>(null)
+    const [sourceRegistryError, setSourceRegistryError] = useState('')
+    const [sourceRegistryLoading, setSourceRegistryLoading] = useState(true)
+    const [selectedSourceId, setSelectedSourceId] = useState('')
     const submittingRef = useRef(false)
     const statusRevisionRef = useRef(0)
     const [statusRefresh, setStatusRefresh] = useState(0)
+
+    useEffect(() => {
+        const controller = new AbortController()
+        void getSourceFederationHealth(controller.signal).then((response) => {
+            const enabled = response.sources.filter((source) => source.enabled)
+            const normalized = {
+                ...response,
+                federation_enabled: response.federation_enabled ?? enabled.length > 0,
+            }
+            setSourceFederation(normalized)
+            setSelectedSourceId((current) => enabled.some((source) => source.source_id === current)
+                ? current
+                : enabled.length === 1 ? enabled[0].source_id : '')
+            setSourceRegistryError('')
+            setSourceRegistryLoading(false)
+        }).catch((error: unknown) => {
+            if (!controller.signal.aborted) {
+                setSourceRegistryLoading(false)
+                setSourceRegistryError(error instanceof Error ? error.message : 'Không tải được danh sách SOURCE.')
+            }
+        })
+        return () => controller.abort()
+    }, [])
 
     useEffect(() => {
         let active = true
@@ -128,7 +157,11 @@ export function SystemMasterSyncPage() {
         setActionError('')
         setResult(null)
         try {
-            const response = await syncMasterData({ stream: 'all', full: mode === 'FULL' })
+            const response = await syncMasterData({
+                stream: 'all',
+                full: mode === 'FULL',
+                ...(sourceFederation?.federation_enabled ? { source_id: selectedSourceId } : {}),
+            })
             setResult({ response, mode })
         } catch (caughtError) {
             setActionError(caughtError instanceof Error ? caughtError.message : 'Không thể đồng bộ dữ liệu')
@@ -170,6 +203,10 @@ export function SystemMasterSyncPage() {
     const displayedResults = selectSyncResults(syncStatus?.runs ?? [], result)
     const pendingStatus = Object.values(displayedResults).some((run) => run.status === 'PENDING_STATUS')
     const enabledStreams = syncStatus?.auto_streams.filter((item) => item.enabled) ?? []
+    const enabledSources = sourceFederation?.sources.filter((source) => source.enabled) ?? []
+    const sourceSelectionRequired = Boolean(sourceFederation?.federation_enabled)
+    const sourceSelectionValid = Boolean(sourceFederation)
+        && (!sourceSelectionRequired || enabledSources.some((source) => source.source_id === selectedSourceId))
     const syncInProgress = loading || Boolean(currentRun) || Boolean(syncStatus?.auto_running)
     const modes = new Set(syncStatus?.auto_streams.map((item) => item.sync_mode))
     const allMode = modes.size === 1 ? syncStatus?.auto_streams[0]?.sync_mode : ''
@@ -284,11 +321,26 @@ export function SystemMasterSyncPage() {
                     </div>
                 )}
                 <details className={styles.manualSync}>
-                    <summary>Đồng bộ thủ công</summary>
-                    <button className={styles.button} type="button" disabled={syncInProgress || autoPending || !syncStatus}
-                        onClick={() => void handleManualSync('FULL')}>{loading && runningMode === 'FULL' ? 'Đang chạy Full...' : 'Đồng bộ Full'}</button>
-                    <button className={styles.button} type="button" disabled={syncInProgress || autoPending || !syncStatus}
-                        onClick={() => void handleManualSync('INCREMENTAL')}>{loading && runningMode === 'INCREMENTAL' ? 'Đang chạy Incremental...' : 'Chạy Incremental'}</button>
+                    <summary>{'\u0110\u1ed3ng b\u1ed9 th\u1ee7 c\u00f4ng'}</summary>
+                    {sourceRegistryLoading && <p role="status">{'\u0110ang t\u1ea3i danh s\u00e1ch SOURCE...'}</p>}
+                    {sourceRegistryError && !sourceSelectionRequired && <p role="alert">{sourceRegistryError}</p>}
+                    {sourceSelectionRequired && <label className={styles.sourcePicker}>
+                        <span>{'SOURCE \u0111\u00e3 \u0111\u0103ng k\u00fd'}</span>
+                        <select aria-label={'SOURCE \u0111\u00e3 \u0111\u0103ng k\u00fd \u0111\u1ec3 \u0111\u1ed3ng b\u1ed9'} value={selectedSourceId}
+                            disabled={syncInProgress || autoPending || enabledSources.length === 0}
+                            onChange={(event) => setSelectedSourceId(event.target.value)}>
+                            <option value="">{'Ch\u1ecdn SOURCE'}</option>
+                            {enabledSources.map((source) => <option key={source.source_id} value={source.source_id}>
+                                {source.source_id}{' \u00b7 '}{source.namespace}
+                            </option>)}
+                        </select>
+                        {sourceRegistryError && <small role="alert">{sourceRegistryError}</small>}
+                        {!sourceRegistryError && enabledSources.length === 0 && <small role="status">{'Kh\u00f4ng c\u00f3 SOURCE n\u00e0o \u0111ang \u0111\u01b0\u1ee3c b\u1eadt.'}</small>}
+                    </label>}
+                    <button className={styles.button} type="button" disabled={syncInProgress || autoPending || !syncStatus || !sourceSelectionValid}
+                        onClick={() => void handleManualSync('FULL')}>{loading && runningMode === 'FULL' ? '\u0110ang ch\u1ea1y Full...' : '\u0110\u1ed3ng b\u1ed9 Full'}</button>
+                    <button className={styles.button} type="button" disabled={syncInProgress || autoPending || !syncStatus || !sourceSelectionValid}
+                        onClick={() => void handleManualSync('INCREMENTAL')}>{loading && runningMode === 'INCREMENTAL' ? '\u0110ang ch\u1ea1y Incremental...' : 'Ch\u1ea1y Incremental'}</button>
                 </details>
             </div>
 

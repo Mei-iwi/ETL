@@ -13,8 +13,10 @@ class MongoExistingSourceOCRReader:
 
     def _require_existing(self):
         try:
-            names = set(self.database.list_collection_names(
-                filter={'name': {'$in': ['ocr_pages', 'mongo_content_units']}}))
+            # Atlas may reject the $in filter on listCollections even when the
+            # principal can list and read the five contract collections. Names
+            # are metadata only; list once and test the required subset locally.
+            names = set(self.database.list_collection_names())
         except PyMongoError:
             raise DomainError('SOURCE_MONGO_UNAVAILABLE') from None
         if not {'ocr_pages', 'mongo_content_units'} <= names:
