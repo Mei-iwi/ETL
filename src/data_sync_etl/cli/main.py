@@ -59,6 +59,21 @@ def parser():
     sync_worker = commands.add_parser("run-master-sync-worker")
     sync_worker.add_argument("--worker-id", required=True)
     sync_worker.add_argument("--once", action="store_true")
+    users_worker = commands.add_parser('run-users-refresh-worker',
+        help='Refresh MASTER auth identities through real incremental SOURCE sync')
+    users_worker.add_argument('--source-id')
+    users_worker.add_argument('--interval-seconds', type=int,
+        help='Default: one third of auth freshness; maximum: one half')
+    users_worker.add_argument('--once', action='store_true')
+    audit = commands.add_parser('audit-source-ocr',
+        help='Re-evaluate bounded OCR inventory under the current owner contract; never starts /process')
+    audit.add_argument('--limit', type=int, choices=range(1, 51), default=10, metavar='1..50')
+    audit.add_argument('--force', action='store_true', help='Recheck live authority even before the next audit is due')
+    audit.add_argument('--prioritize-new', action='store_true')
+    contract = commands.add_parser('validate-source-ocr-contract',
+        help='Offline structural validation only; does not approve or activate the policy')
+    contract.add_argument('--file', required=True)
+    contract.add_argument('--namespace', required=True)
     file_worker = commands.add_parser("run-source-file-worker")
     file_worker.add_argument("--worker-id", required=True)
     file_worker.add_argument("--once", action="store_true")
@@ -212,6 +227,16 @@ def dispatch(container, args):
             return container.worker.run(args.worker_id, args.once)
         case "run-master-sync-worker":
             return container.master_sync_worker.run(args.worker_id, args.once)
+        case 'run-users-refresh-worker':
+            from data_sync_etl.workers.users_refresh import UsersRefreshWorker
+            return UsersRefreshWorker(container.sync, container.settings, source_id=args.source_id,
+                interval_seconds=args.interval_seconds).run(once=args.once)
+        case 'audit-source-ocr':
+            if not getattr(container.ocr, 'source_owned', False):
+                raise DomainError('SOURCE_OCR_PIPELINE_REQUIRED')
+            container.ocr.inventory.once(limit=args.limit, force=args.force,
+                                         prioritize_new=args.prioritize_new)
+            return dict(container.ocr.inventory.summary)
         case "run-source-file-worker":
             return container.source_file_worker.run(args.worker_id, args.once)
         case "source-file-precheck":
@@ -232,11 +257,26 @@ def main():
     args = parser().parse_args()
     container = None
     try:
+        if args.command == 'validate-source-ocr-contract':
+            from pathlib import Path
+            from data_sync_etl.domain.source_ocr_contract import SourceOCRContract
+            path = Path(args.file)
+            with path.open('rb') as stream:
+                raw = stream.read(131073)
+            if len(raw) > 131072:
+                raise DomainError('SOURCE_OCR_CONTRACT_INVALID')
+            contract = SourceOCRContract.from_owner_contract(json.loads(raw.decode('utf-8-sig')),
+                                                            expected_namespace=args.namespace)
+            print(json.dumps({'status': 'STRUCTURE_VALID', 'activated': False,
+                              'namespace_scope': contract.namespace_scope is not None}))
+            return 0
         container = Container()
         configure(container.settings.log_level)
         with flow():
             result = dispatch(container, args)
         print(json.dumps(result, default=str, ensure_ascii=True, indent=2))
+        if args.command == 'run-users-refresh-worker' and result['status'] == 'FAILED':
+            return 1
         if args.command == 'metadata-search-index' and result['status'] == 'PARTIAL':
             return 1
         if args.command == 'semantic-index' and result['status'] != 'PASS':
