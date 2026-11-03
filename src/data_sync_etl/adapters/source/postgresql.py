@@ -43,6 +43,43 @@ QUERIES = {
 class SnapshotReader:
     def __init__(self, connection):
         self.connection = connection
+        self._page_lookups = {}
+        self._page_relations = {}
+
+    def prepare_page(self, stream, rows):
+        """Bounded prefetch within this repeatable-read snapshot, reset per page."""
+        if len(rows) > 1000:
+            raise DomainError('BLOCKED_SOURCE_PAGE_LIMIT')
+        self._page_lookups, self._page_relations = {}, {}
+        dependencies = {'resources': (('providers', 'provider_id'), ('resource_types', 'resource_type_id')),
+                        'users': (('roles', 'role_id'),), 'grades': (('education_levels', 'education_level_id'),)}
+        for name, field in dependencies.get(stream, ()):
+            ids = sorted({row[field] for row in rows if row.get(field) is not None})
+            found = {}
+            if ids:
+                query = text(f'SELECT * FROM {TABLES[name]} WHERE id IN :ids').bindparams(
+                    bindparam('ids', expanding=True))
+                for raw in self.connection.execute(query, {'ids': ids}).mappings():
+                    item = self.record(name, raw)
+                    if item.id not in ids or item.id in found:
+                        raise DomainError('BLOCKED_SOURCE_MAPPING: source dependency conflict')
+                    found[item.id] = item
+            if set(found) != set(ids):
+                raise DomainError('BLOCKED_SOURCE_MAPPING: source dependency missing')
+            self._page_lookups[name] = found
+        if stream == 'resources' and rows:
+            ids = [row['id'] for row in rows]
+            for table, model in (('resource_subjects', ResourceSubjectRelation),
+                                 ('resource_grade_levels', ResourceGradeLevelRelation)):
+                grouped = {key: [] for key in ids}
+                query = text(f'SELECT j.*, r.updated_at FROM {table} j '
+                    'JOIN learning_resources r ON r.id=j.resource_id WHERE j.resource_id IN :ids '
+                    'LIMIT 10001').bindparams(bindparam('ids', expanding=True))
+                for index, raw in enumerate(self.connection.execute(query, {'ids': ids}).mappings()):
+                    if index >= 10000 or raw['resource_id'] not in grouped:
+                        raise DomainError('BLOCKED_SOURCE_RELATION_LIMIT')
+                    grouped[raw['resource_id']].append(model.model_validate(raw))
+                self._page_relations[table] = grouped
 
     def reconciliation_summary(self, stream):
         table = TABLES[stream]
@@ -81,6 +118,8 @@ class SnapshotReader:
         return MODELS[name].model_validate(values)
 
     def lookup(self, name, source_id):
+        if source_id in self._page_lookups.get(name, {}):
+            return self._page_lookups[name][source_id].model_copy(deep=True)
         row = (
             self.connection.execute(
                 text(f"SELECT * FROM {TABLES[name]} WHERE id=:id"), {"id": source_id}
@@ -105,6 +144,8 @@ class SnapshotReader:
         return self.lookup("education_levels", source_id)
 
     def relations(self, table, resource_id, model):
+        if resource_id in self._page_relations.get(table, {}):
+            return [row.model_copy(deep=True) for row in self._page_relations[table][resource_id]]
         rows = self.connection.execute(
             text(
                 f"SELECT j.*, r.updated_at FROM {table} j "
@@ -164,27 +205,22 @@ class PostgreSQLSourceAdapter:
                 connection.begin(),
             ):
                 statement_timeout_ms = str(min(self.timeout_seconds * 1000, 600_000))
-                connection.execute(text(
-                    "SELECT set_config('statement_timeout', :timeout_ms, true)"),
-                    {'timeout_ms': statement_timeout_ms})
-                if catalog:
-                    connection.execute(text("SELECT set_config('lock_timeout','3000',true)"))
-                role = connection.execute(
-                    text(
-                    "SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls AS privileged "
-                        "FROM pg_roles WHERE rolname=current_user"
-                    )
-                ).scalar_one()
-                if role:
-                    raise DomainError("BLOCKED_SOURCE_MAPPING: source account must be read-only")
-                # Keep the live privilege check in every snapshot, with one
-                # round trip instead of one per table over a remote SOURCE.
-                writable = connection.scalar(text(
-                    "SELECT bool_or(has_table_privilege(current_user, source_table, "
+                # All guards remain live in this transaction. One round trip
+                # replaces separate timeout, role and table-privilege queries.
+                guard = connection.execute(text(
+                    "SELECT set_config('statement_timeout', :timeout_ms, true), "
+                    "set_config('lock_timeout', CASE WHEN :catalog THEN '3000' "
+                    "ELSE current_setting('lock_timeout') END, true), "
+                    "rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls AS privileged, "
+                    "(SELECT bool_or(has_table_privilege(current_user, source_table, "
                     "'INSERT,UPDATE,DELETE,TRUNCATE')) "
-                    "FROM unnest(CAST(:tables AS text[])) AS checked(source_table)"
-                ), {"tables": list(TABLES.values())})
-                if writable:
+                    "FROM unnest(CAST(:tables AS text[])) AS checked(source_table)) AS writable "
+                    "FROM pg_roles WHERE rolname=current_user"
+                ), {'timeout_ms': statement_timeout_ms, 'catalog': catalog,
+                    'tables': list(TABLES.values())}).mappings().one()
+                if guard['privileged']:
+                    raise DomainError("BLOCKED_SOURCE_MAPPING: source account must be read-only")
+                if guard['writable']:
                     raise DomainError(
                         "BLOCKED_SOURCE_MAPPING: source account has write privileges"
                     )
@@ -208,7 +244,7 @@ class PostgreSQLSourceAdapter:
             ) from None
 
     def batches(self, stream, cursor=None, batch_size=100):
-        if stream not in QUERIES or batch_size < 1:
+        if stream not in QUERIES or not 1 <= batch_size <= 1000:
             raise DomainError("Invalid source stream or batch size")
         # Replay recent timestamps to tolerate short transactions committing out of order.
         # Long-running writers still require periodic full reconciliation (see docs).
@@ -234,6 +270,7 @@ class PostgreSQLSourceAdapter:
                 )
                 if not rows:
                     return
+                reader.prepare_page(stream, rows)
                 batch = [
                     build_aggregate(reader, stream, reader.record(stream, row)) for row in rows
                 ]
@@ -251,6 +288,7 @@ class PostgreSQLSourceAdapter:
                                  bindparam('ids', expanding=True))
                 rows = reader.connection.execute(query, {'ids': ids[start:start + batch_size]}).mappings().all()
                 if rows:
+                    reader.prepare_page(stream, rows)
                     yield [build_aggregate(reader, stream, reader.record(stream, row)) for row in rows]
 
     def iter_learning_resources(self, cursor=None, batch_size=100):

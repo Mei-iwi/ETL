@@ -85,7 +85,7 @@ case "$action" in
   db-start|db-stop)
     command=up; [[ "$action" == db-stop ]] && command=stop
     args=(); [[ "$command" == up ]] && args+=(-d)
-    docker compose --env-file "$env_file" -f "$deploy_dir/compose.database.yml" "$command" "${args[@]}"
+    docker compose --env-file "$env_file" -f "$deploy_dir/compose.master-only.yml" "$command" "${args[@]}" master-postgres
     ;;
   export)
     archive="${1:?Provide an output image archive path}"

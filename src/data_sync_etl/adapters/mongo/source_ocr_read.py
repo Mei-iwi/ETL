@@ -13,8 +13,10 @@ class MongoExistingSourceOCRReader:
 
     def _require_existing(self):
         try:
-            names = set(self.database.list_collection_names(
-                filter={'name': {'$in': ['ocr_pages', 'mongo_content_units']}}))
+            # Atlas may reject the $in filter on listCollections even when the
+            # principal can list and read the five contract collections. Names
+            # are metadata only; list once and test the required subset locally.
+            names = set(self.database.list_collection_names())
         except PyMongoError:
             raise DomainError('SOURCE_MONGO_UNAVAILABLE') from None
         if not {'ocr_pages', 'mongo_content_units'} <= names:
@@ -44,6 +46,18 @@ class MongoExistingSourceOCRReader:
         if document is not None and (document.resource_version_id != version_id or not document.is_current):
             raise DomainError('SOURCE_OCR_UNIT_CONFLICT')
         return document
+
+    def units(self, version_id, *, limit=100, offset=0):
+        """Fresh bounded reads; collection presence and full DTOs stay verified."""
+        self._require_existing()
+        try:
+            documents = self.reader.units(version_id, limit=limit, offset=offset)
+        except PyMongoError:
+            raise DomainError('SOURCE_MONGO_UNAVAILABLE') from None
+        if any(document.resource_version_id != version_id or not document.is_current
+               for document in documents):
+            raise DomainError('SOURCE_OCR_UNIT_CONFLICT')
+        return documents
 
     def ocr_page(self, *, version_id, job_id, page_num):
         self._require_existing()

@@ -90,7 +90,7 @@ class SourceOpenResolver:
             imported = imports[0]
             imported_status = normalize_source_status(imported.get('source_lifecycle_status'))
             uploaded = bool((version.get('processing_options') or {}).get('etl_source_upload')
-                            and imported_status == 'UNREVIEWED'
+                            and imported_status in {'UNREVIEWED', 'PENDING_PRE_REVIEW'}
                             and resolved.get('source_record_available'))
             if (imported_status in {'PRIVATE', 'REJECTED', 'DELETED'}
                     or not (uploaded or source_status_allowed(imported.get('source_lifecycle_status'),

@@ -3,6 +3,9 @@ from threading import Event, Thread
 from time import monotonic
 from typing import Any, Callable
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from data_sync_etl.domain.core import DomainError
 from data_sync_etl.logging import event, flow
 from data_sync_etl.workers.lifecycle import tick, worker_lifecycle
 
@@ -28,6 +31,7 @@ class OCRWorker:
         self.component_page_executor = component_page_executor
         self._next_recovery_at = 0.0
         self._tasks_since_reconcile = 0
+        self._reconcile_task_limit = 1 if getattr(pipeline, 'source_owned', False) is True else 5
         self._tasks_since_inventory = 0
         self._prefer_component_projection = False
 
@@ -65,7 +69,7 @@ class OCRWorker:
                 )
             # Bounded fair turn for existing finalization/indexing work, even under
             # a continuous OCR backlog. No new queue or scheduler is introduced.
-            if self._tasks_since_reconcile >= 5 and (self.reconcile is not None
+            if self._tasks_since_reconcile >= self._reconcile_task_limit and (self.reconcile is not None
                                                       or self.component_projection_worker is not None):
                 self._tasks_since_reconcile = 0
                 if self._background_once():
@@ -93,21 +97,9 @@ class OCRWorker:
 
             stop = Event()
 
-            def heartbeat():
-                while not stop.wait(self.pipeline.heartbeat_timeout / 3):
-                    try:
-                        if not self.pipeline.heartbeat(task):
-                            return
-                    except Exception:
-                        event(
-                            task_id=task["id"],
-                            action="HEARTBEAT_FAILED",
-                            stage="ocr",
-                        )
-                        return
-
             thread = Thread(
-                target=heartbeat,
+                target=self._heartbeat,
+                args=(task, stop),
                 daemon=True,
             )
             thread.start()
@@ -146,6 +138,26 @@ class OCRWorker:
             self._tasks_since_reconcile += 1
             self._tasks_since_inventory += 1
             return True
+
+    def _heartbeat(self, task, stop):
+        interval = self.pipeline.heartbeat_timeout / 3
+        while not stop.wait(interval):
+            try:
+                if not self.pipeline.heartbeat(task):
+                    return
+            except Exception as exc:
+                event(task_id=task['id'], action='HEARTBEAT_FAILED', stage='ocr')
+                transient = isinstance(exc, (OSError, SQLAlchemyError)) or (
+                    isinstance(exc, DomainError) and str(exc) in (
+                        'SOURCE_OCR_DATABASE_UNAVAILABLE', 'SOURCE_MONGO_UNAVAILABLE'))
+                if not transient:
+                    return
+                # A temporary connection failure must not abandon the heartbeat
+                # for a long media task. The next attempt still checks the live
+                # owner, lease and authority; a lost/revoked lease is never renewed.
+                interval = min(5, self.pipeline.heartbeat_timeout / 12)
+            else:
+                interval = self.pipeline.heartbeat_timeout / 3
 
     def run(self, worker_id: str, once: bool = False) -> bool | None:
         if once:

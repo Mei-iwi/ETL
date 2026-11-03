@@ -12,7 +12,7 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       ETL_MAINTENANCE_APPROVAL: ${ETL_MAINTENANCE_APPROVAL:-NOT_APPROVED}
-      INDEX_EMBEDDING_DIMENSION: ${INDEX_EMBEDDING_DIMENSION:-384}
+      INDEX_EMBEDDING_DIMENSION: ${INDEX_EMBEDDING_DIMENSION:-1024}
     secrets:
       - source: ops-connections
         target: ops-connections.json

@@ -47,20 +47,21 @@ class IndexingService:
                     version_id, access=SearchAccess(scope='authenticated_admin'))):
             raise IndexingError('SOURCE_CAPABILITY_BLOCKED', 403)
 
-    def _version(self, repo, version_id):
+    def _version(self, repo, version_id, *, content_reader=None):
         version = repo.get('resource_versions', version_id)
         resource = repo.get('master_learning_resources', version['resource_id']) if version else None
         if not resource or not resource['is_active'] or resource_deleted(resource):
             raise IndexingError('VERSION_NOT_FOUND', 404)
         jobs = repo.find('ocr_jobs', {'resource_version_id': version_id}, order=('-created_at', '-id'), limit=1)
-        return version, processing_state(repo, jobs[0], self.text_store) if jobs else 'NOT_STARTED'
+        return version, processing_state(repo, jobs[0], self.text_store,
+                                         content_reader=content_reader) if jobs else 'NOT_STARTED'
 
     def _runs(self, repo, version_id):
         return repo.find('etl_stage_runs', {'resource_version_id': version_id, 'stage': 'INDEX_BUILD'},
                          order=('-created_at', '-id'))
 
     def _snapshot(self, repo, version_id, *, text_reader=None, content_reader=None):
-        version, state = self._version(repo, version_id)
+        version, state = self._version(repo, version_id, content_reader=content_reader)
         if state != 'CONTENT_READY':
             raise IndexingError('CONTENT_NOT_READY')
         if self.reader is None:
@@ -80,11 +81,12 @@ class IndexingService:
         by_id = {doc.id: doc for doc in docs}
         if not projections or len(docs) != len(units) or len(by_id) != len(docs):
             raise IndexingError('CONTENT_NOT_READY')
-        # HTTP Search alone opts in. All other callers retain point-read timing.
+        # Reuse the metadata already read in this snapshot, never a cross-request cache.
         if (hasattr(self.text_store, 'source_version')
                 and self.text_store.source_version(repo, version_id)):
             try:
-                texts = self.text_store.unit_texts(repo, [unit['id'] for unit in units], by_id)
+                texts = self.text_store.unit_texts(repo, [unit['id'] for unit in units], by_id,
+                                                 units={unit['id']: unit for unit in units})
             except DomainError:
                 raise IndexingError('CONTENT_NOT_READY') from None
         else:
@@ -159,7 +161,13 @@ class IndexingService:
 
     def _verified(self, snapshot, run, *, expected_bags=None, bag_reader=None):
         roots = self._roots(snapshot)
-        source_fp = self.reader.content_fingerprint(snapshot[0]['id'], generation=snapshot[1])
+        # A bulk Search phase already read the complete current unit BSON and
+        # hashed it. Its final phase performs a separate fresh read, so this
+        # reuses no content or authority across phases/requests.
+        phase_fingerprint = (getattr(bag_reader, 'content_fingerprint', None)
+                             if getattr(bag_reader, 'content_phase', False) is True else None)
+        fingerprint = phase_fingerprint if callable(phase_fingerprint) else self.reader.content_fingerprint
+        source_fp = fingerprint(snapshot[0]['id'], generation=snapshot[1])
         try:
             bags = (bag_reader(list(roots), version_id=snapshot[0]['id'], generation=snapshot[1])
                     if bag_reader is not None else None)
@@ -219,7 +227,9 @@ class IndexingService:
                     if runs[0]['status'] == 'FAILED':
                         raise IndexingError('REINDEX_REQUIRED')
                     if runs[0]['status'] == 'COMPLETED' and runs[0]['input_fingerprint'] == snapshot[3]:
-                        self._verified(snapshot, runs[0])
+                        batch_reader = getattr(self.bags, 'search_bags', None)
+                        self._verified(snapshot, runs[0],
+                                       bag_reader=batch_reader if callable(batch_reader) else None)
                         return self._queued(version_id, runs[0], 'ALREADY_INDEXED')
                 stage = repo.insert('etl_stage_runs', {
                     'resource_version_id': version_id, 'stage': 'INDEX_BUILD', 'status': 'PENDING',
@@ -306,15 +316,23 @@ class IndexingService:
                 [current[4][key] for key in leaf_ids], generation=current[1], content_fingerprint=source_fp)
             if result.status != 'BUILT' or len(result.bags) != len(roots):
                 raise IndexingError('LEAF_KEYWORDS_UNAVAILABLE')
-            for bag in result.bags:
+            bulk_writer = getattr(self.bags, 'upsert_bags', None)
+            if callable(bulk_writer):
+                for offset in range(0, len(result.bags), 100):
+                    self._deadline(started)
+                    bulk_writer(result.bags[offset:offset + 100])
                 self._deadline(started)
-                self.bags.upsert_bag(bag)
+            else:
+                for bag in result.bags:
+                    self._deadline(started)
+                    self.bags.upsert_bag(bag)
             with self.uow() as repo:
                 fresh = self._snapshot(repo, version_id)
                 owner = repo.get('etl_stage_runs', run['id'], lock=True)
                 if fresh[3] != snapshot[3] or owner['status'] != 'RUNNING':
                     raise IndexingError('INDEX_SOURCE_CHANGED')
-                self._verified(fresh, run)
+                batch_reader = getattr(self.bags, 'search_bags', None)
+                self._verified(fresh, run, bag_reader=batch_reader if callable(batch_reader) else None)
                 self.bags.invalidate_other_roots(version_id, list(roots), fresh[1])
                 self._deadline(started)
                 repo.update('etl_stage_runs', run['id'], {'status': 'COMPLETED', 'finished_at': now(), 'error_message': None})
@@ -351,7 +369,9 @@ class IndexingService:
                     if latest['input_fingerprint'] != snapshot[3]:
                         status, code = 'STALE', 'INDEX_SOURCE_CHANGED'
                     elif latest['status'] == 'COMPLETED':
-                        summaries = self._verified(snapshot, latest)
+                        batch_reader = getattr(self.bags, 'search_bags', None)
+                        summaries = self._verified(snapshot, latest,
+                            bag_reader=batch_reader if callable(batch_reader) else None)
                         status, published = 'READY', latest['id']
                     else:
                         status = latest['status']

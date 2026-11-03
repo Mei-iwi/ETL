@@ -175,7 +175,7 @@ def check_database():
     with MongoClient(os.environ['MONGO_URI'], serverSelectionTimeoutMS=5000) as client:
         client.admin.command('ping')
         check_mongo_schema(client[os.environ['MONGO_DATABASE']],
-                           dimension=int(os.environ.get('INDEX_EMBEDDING_DIMENSION', '384')),
+                           dimension=int(os.environ.get('INDEX_EMBEDDING_DIMENSION', '1024')),
                            historical_dimensions=json.loads(os.environ.get('INDEX_HISTORICAL_EMBEDDING_DIMENSIONS', '[]')))
 
 

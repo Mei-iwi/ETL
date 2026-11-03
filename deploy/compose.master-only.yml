@@ -1,0 +1,22 @@
+# Host-run API/workers with a single Docker database: MASTER PostgreSQL.
+# SOURCE remains Neon and MongoDB remains Atlas; neither local service exists
+# in this project. The isolated volume preserves any older compose data.
+name: ${MASTER_ONLY_PROJECT:-etl-master-only}
+services:
+  master-postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-etl}
+      POSTGRES_USER: ${POSTGRES_USER:-etl}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the private env file}
+    ports:
+      - "127.0.0.1:${MASTER_ONLY_PORT:-5434}:5432"
+    volumes: [master-only-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+volumes:
+  master-only-data:

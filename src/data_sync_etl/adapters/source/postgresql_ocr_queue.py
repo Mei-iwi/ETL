@@ -14,6 +14,19 @@ TASK_FIELDS = frozenset({'id', 'job_id', 'page_num', 'local_image_path', 'status
                          'completed_at', 'created_at', 'updated_at'})
 
 
+def _running_task_query(version_ids, actor_id):
+    if not version_ids:
+        # An empty list is the namespace-wide contract, not an empty SQL IN
+        # predicate. Count all live tasks in this SOURCE database so the
+        # namespace's max_active limit still applies without ambiguous binds.
+        return text("SELECT count(*) FROM public.ocr_page_tasks WHERE status='PROCESSING'"), {}
+    query = text('SELECT count(*) FROM public.ocr_page_tasks p '
+        'JOIN public.ocr_jobs j ON j.id=p.job_id WHERE (j.resource_version_id IN :versions '
+        'OR j.triggered_by=:actor) '
+        "AND p.status='PROCESSING'").bindparams(bindparam('versions', expanding=True))
+    return query, {'versions': sorted(version_ids), 'actor': actor_id}
+
+
 class PostgreSQLSourceOCRQueue:
     def __init__(self, writer, *, heartbeat_timeout, max_retries, max_active=1):
         self.writer, self.engine = writer, writer.engine
@@ -92,11 +105,8 @@ class PostgreSQLSourceOCRQueue:
                                  'big', signed=True)
             if not conn.execute(text('SELECT pg_try_advisory_xact_lock(:key)'), {'key': key}).scalar():
                 return None
-            running = conn.execute(text('SELECT count(*) FROM public.ocr_page_tasks p '
-                'JOIN public.ocr_jobs j ON j.id=p.job_id WHERE (j.resource_version_id IN :versions '
-                'OR j.triggered_by=:actor) '
-                "AND p.status='PROCESSING'").bindparams(bindparam('versions', expanding=True)),
-                {'versions': sorted(self.writer.contract.version_ids), 'actor': identity['source_user_id']}).scalar_one()
+            query, params = _running_task_query(self.writer.contract.version_ids, identity['source_user_id'])
+            running = conn.execute(query, params).scalar_one()
             if running >= self.max_active:
                 return None
             task = conn.execute(text("SELECT * FROM public.ocr_page_tasks WHERE job_id=:job "

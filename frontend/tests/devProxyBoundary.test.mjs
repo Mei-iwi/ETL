@@ -4,7 +4,7 @@ import { localProxyGuard } from '../devProxyBoundary.ts'
 import { loadConfigFromFile } from 'vite'
 import { mkdtempSync, writeFileSync, rmSync, rmdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 for (const [peer, expected] of [['127.0.0.1', true], ['::1', true], ['::ffff:127.0.0.1', true],
     ['198.51.100.2', false], ['10.1.2.3', false], ['', false]]) {
@@ -68,6 +68,33 @@ test('local auth proxy preserves browser host and overwrites client proxy creden
         else process.env.AUTH_PROXY_KEY_FILE = originalPath
         rmSync(join(directory, 'proxy-key'), { force: true })
         rmdirSync(directory)
+    }
+})
+
+test('auth proxy resolves project-relative secrets when Vite runs from frontend', async () => {
+    const root = process.cwd()
+    const directory = mkdtempSync(join(tmpdir(), 'etl-vite-relative-auth-'))
+    const originalMode = process.env.AUTH_MODE
+    const originalPath = process.env.AUTH_PROXY_KEY_FILE
+    try {
+        const keyPath = join(directory, 'proxy-key')
+        writeFileSync(keyPath, 'b'.repeat(64))
+        process.env.AUTH_MODE = 'master_users'
+        process.env.AUTH_PROXY_KEY_FILE = relative(root, keyPath)
+        const loaded = await loadConfigFromFile({ command: 'serve', mode: 'test' }, 'frontend/vite.config.ts')
+        process.chdir(join(root, 'frontend'))
+        const handlers = {}
+        loaded.config.server.proxy['/api'].configure({ on(name, handler) { handlers[name] = handler } })
+        const headers = {}
+        handlers.proxyReq({ setHeader(name, value) { headers[name] = value } })
+        assert.equal(headers['x-etl-proxy-key'], 'b'.repeat(64))
+    } finally {
+        process.chdir(root)
+        if (originalMode === undefined) delete process.env.AUTH_MODE
+        else process.env.AUTH_MODE = originalMode
+        if (originalPath === undefined) delete process.env.AUTH_PROXY_KEY_FILE
+        else process.env.AUTH_PROXY_KEY_FILE = originalPath
+        rmSync(directory, { recursive: true, force: true })
     }
 })
 

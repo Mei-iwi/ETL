@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -12,8 +13,57 @@ class Settings(BaseSettings):
     # SOURCE-owned OCR requires an approved contract and MASTER migration 0020.
     ocr_component_pipeline_enabled: bool = False
     source_ocr_contract_file: Path | None = None
-    source_ocr_actor_id: str | None = Field(default=None, min_length=1, max_length=30)
+    # Authenticated MASTER principals include the `master:` prefix; the mapped
+    # canonical user ID (stored in SQL) remains at most 30 characters.
+    source_ocr_actor_id: str | None = Field(default=None, min_length=1, max_length=255)
     source_ocr_role: Literal['ADMIN', 'OPERATOR'] | None = None
+    connections_file: Path | None = Field(
+        default=None, repr=False,
+        validation_alias=AliasChoices('ETL_CONNECTIONS_FILE', 'CONNECTIONS_FILE'),
+    )
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings,
+                                   dotenv_settings, file_secret_settings):
+        def connections_file_settings():
+            # Keep database endpoints from the host dotenv file authoritative
+            # (SOURCE Neon and MASTER loopback), while allowing the dedicated
+            # private file to replace dotenv's local Mongo URI with Atlas.
+            init_values = init_settings()
+            env_values = env_settings()
+            dotenv_values = dotenv_settings()
+            path = (init_values.get('connections_file') or env_values.get('ETL_CONNECTIONS_FILE')
+                    or env_values.get('CONNECTIONS_FILE') or env_values.get('connections_file')
+                    or dotenv_values.get('ETL_CONNECTIONS_FILE')
+                    or dotenv_values.get('CONNECTIONS_FILE') or dotenv_values.get('connections_file'))
+            if not path:
+                return {}
+            candidate = Path(path)
+            if candidate.is_symlink() or not candidate.is_file() or candidate.stat().st_size > 65536:
+                raise ValueError('CONNECTIONS_FILE_INVALID')
+            try:
+                data = json.loads(candidate.read_text(encoding='utf-8'))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                raise ValueError('CONNECTIONS_FILE_INVALID') from None
+            allowed = {'DATABASE_URL', 'SOURCE_DATABASE_URL', 'MONGO_URI', 'MONGO_DATABASE'}
+            if (not isinstance(data, dict) or set(data) - allowed
+                    or any(not isinstance(value, str) or not value or len(value) > 8192
+                           for value in data.values())):
+                raise ValueError('CONNECTIONS_FILE_INVALID')
+            names = {'DATABASE_URL': 'database_url', 'SOURCE_DATABASE_URL': 'source_database_url',
+                     'MONGO_URI': 'mongo_uri', 'MONGO_DATABASE': 'mongo_database'}
+            result = {}
+            for key, value in data.items():
+                field = names[key]
+                if field in init_values or field in env_values:
+                    continue
+                if key in {'DATABASE_URL', 'SOURCE_DATABASE_URL'} and field in dotenv_values:
+                    continue
+                result[field] = value
+            return result
+
+        return (init_settings, env_settings, connections_file_settings,
+                dotenv_settings, file_secret_settings)
 
     @field_validator('source_ocr_contract_file', 'source_ocr_actor_id', 'source_ocr_role', mode='before')
     @classmethod
@@ -236,7 +286,7 @@ class Settings(BaseSettings):
     index_embedding_model_path: Path | None = Field(default=None, repr=False)
     index_embedding_model_id: str = Field(default="", max_length=255)
     index_embedding_model_version: str = Field(default="", max_length=128)
-    index_embedding_dimension: int = Field(default=384, ge=1, le=4096)
+    index_embedding_dimension: int = Field(default=1024, ge=1, le=4096)
     index_historical_embedding_dimensions: list[int] = Field(default_factory=list, max_length=8)
     index_max_chunks: int = Field(default=10000, ge=1, le=50000)
     index_max_units: int = Field(default=10000, ge=1, le=50000)

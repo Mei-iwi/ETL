@@ -69,6 +69,10 @@ class SourceObjectStorageReader:
         # still computes and verifies the canonical SHA-256 after streaming.
         return item.size, item.etag, item.content_type
 
+    def file_metadata(self, bucket, object_key):
+        size, _etag, mime = self.revision(bucket, object_key)
+        return {'mime_type': mime, 'file_size': size}
+
     def original_url(self, bucket, object_key):
         self._check_bucket(bucket)
         return None

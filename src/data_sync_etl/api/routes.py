@@ -838,7 +838,8 @@ def source_federation_health(request: Request):
     access = search_access(request)
     if not access.internal:
         raise HTTPException(status_code=403, detail='Authentication required')
-    registry = services(request).source_registry
+    container = services(request)
+    registry = container.source_registry
     sources = []
     for registration in registry.registrations():
         status = registry.health(registration.source_id)
@@ -849,7 +850,10 @@ def source_federation_health(request: Request):
             'enabled': registration.enabled,
             'health': status,
         })
-    return {'sources': sources}
+    return {
+        'federation_enabled': container.settings.source_federation_enabled,
+        'sources': sources,
+    }
 
 
 @router.get(

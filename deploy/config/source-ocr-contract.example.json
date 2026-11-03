@@ -1,0 +1,84 @@
+{
+  "backend": "postgresql",
+  "schema": "public",
+  "entity_type": "ocr_processing",
+  "namespace": "postgresql:OWNER_APPROVED_NAMESPACE",
+  "tables": [
+    "ocr_jobs",
+    "ocr_page_tasks",
+    "content_units"
+  ],
+  "columns": {
+    "ocr_jobs": [
+      "completed_at",
+      "completed_pages",
+      "created_at",
+      "failed_pages",
+      "id",
+      "resource_version_id",
+      "started_at",
+      "status",
+      "total_pages",
+      "triggered_by",
+      "updated_at"
+    ],
+    "ocr_page_tasks": [
+      "completed_at",
+      "created_at",
+      "error_message",
+      "heartbeat_at",
+      "id",
+      "job_id",
+      "local_image_path",
+      "page_num",
+      "retry_count",
+      "started_at",
+      "status",
+      "updated_at",
+      "worker_id"
+    ],
+    "content_units": [
+      "id",
+      "mongo_id",
+      "resource_version_id",
+      "parent_unit_id",
+      "unit_type",
+      "title",
+      "sequence_no",
+      "page_from",
+      "page_to",
+      "review_status",
+      "retrieval_eligible",
+      "created_at",
+      "updated_at"
+    ]
+  },
+  "actions": [
+    "select",
+    "insert",
+    "update"
+  ],
+  "allowed_roles": [
+    "ADMIN"
+  ],
+  "allowed_actor_ids": [
+    "master:REPLACE_WITH_VERIFIED_USER_ID"
+  ],
+  "allowed_version_ids": [],
+  "allowed_lifecycles": [
+    "APPROVED"
+  ],
+  "statement_timeout_seconds": 15,
+  "allow_etl_created_versions": false,
+  "namespace_scope": {
+    "service_actor_id": "master:REPLACE_WITH_VERIFIED_USER_ID",
+    "service_role": "ADMIN",
+    "version_lifecycles": [
+      "APPROVED"
+    ],
+    "resource_publication_statuses": [
+      "DRAFT",
+      "PUBLISHED"
+    ]
+  }
+}

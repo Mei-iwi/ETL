@@ -122,7 +122,8 @@ class SourceOCRPipeline:
                     and receipt.get('source_version_id') == identity['source_version_id']
                     and receipt.get('source_hash') == identity['source_hash'])
 
-    def authorize_namespace_version(self, identity, *, reference=None, access=None, authority=None):
+    def authorize_namespace_version(self, identity, *, reference=None, access=None, authority=None,
+                                    source_snapshot=None):
         scope = self.contract.namespace_scope
         if (scope is None or identity.get('namespace') != self.contract.namespace
                 or (identity.get('actor_id'), identity.get('role')) != (scope.service_actor_id, scope.service_role)
@@ -161,26 +162,28 @@ class SourceOCRPipeline:
         adapter = self.resolver._source_adapter(rows[0]['source_system'])
         if getattr(adapter, 'source_namespace', self.settings.source_namespace) != self.contract.namespace:
             return False
-        source = None
+        source = source_snapshot
         if (reference is not None and reference.source_version_id == identity['source_version_id']
                 and reference.target_version_id == identity['master_version_id']
                 and reference.expected_sha256 == identity['source_hash']):
             source = getattr(reference, 'source_snapshot', None)
         if source is None:
             source = adapter.get_versions([identity['source_version_id']]).get(identity['source_version_id'])
-        return bool(source and source.get('resource_id') == resource.get('source_record_key')
+        return bool(source and source.get('source_version_id') == identity['source_version_id']
+                    and source.get('resource_id') == resource.get('source_record_key')
                     and source.get('source_version_number') == version['version_number']
                     and source.get('source_hash', '').lower() == identity['source_hash']
                     and source.get('resource_active', True) and source.get('resource_deleted_at') is None
                     and source.get('resource_publication_status') in scope.publications
                     and source.get('source_lifecycle_status') in scope.lifecycles)
 
-    def version_allowed(self, identity, *, reference=None, access=None, authority=None):
+    def version_allowed(self, identity, *, reference=None, access=None, authority=None, source_snapshot=None):
         return (identity['source_version_id'] in self.contract.version_ids
-                or self.authorize_namespace_version(identity, reference=reference, access=access, authority=authority)
+                or self.authorize_namespace_version(identity, reference=reference, access=access, authority=authority,
+                                                    source_snapshot=source_snapshot)
                 or self.authorize_created_version(identity))
 
-    def created_version_allowed(self, master_version_id, actor_id):
+    def created_version_allowed(self, master_version_id, actor_id, *, source_snapshot=None):
         with self.uow() as repo:
             version = repo.get('resource_versions', master_version_id)
             rows = repo.find('source_file_imports', {'target_version_id': master_version_id}, limit=2)
@@ -192,7 +195,8 @@ class SourceOCRPipeline:
         return self.version_allowed(dict(namespace=self.contract.namespace,
             master_version_id=master_version_id, source_version_id=rows[0]['source_version_id'],
             source_hash=version['source_hash'], actor_id=actor_id, source_user_id=source_user,
-            role=self._scheduler_identity()[1] if actor_id == self._scheduler_identity()[0] else None))
+            role=self._scheduler_identity()[1] if actor_id == self._scheduler_identity()[0] else None),
+            source_snapshot=source_snapshot)
 
     def status_allowed(self, source, namespace):
         if (namespace != self.contract.namespace
@@ -209,7 +213,7 @@ class SourceOCRPipeline:
             role = 'ADMIN' if access.scope == 'authenticated_admin' else 'OPERATOR'
             if (len(rows) == 1 and rows[0]['source_version_id'] == source['source_version_id']
                     and access.actor_id in self.contract.actor_ids and role in self.contract.roles
-                    and self.created_version_allowed(version_id, access.actor_id)):
+                    and self.created_version_allowed(version_id, access.actor_id, source_snapshot=source)):
                 self.container.search.authorize_source_processing_version(version_id, access=access)
                 return True
         # Authorization of one file must not hydrate every imported version.
@@ -223,7 +227,7 @@ class SourceOCRPipeline:
         if state:
             identity = state['identity']
             if (identity['namespace'] != namespace or identity['source_version_id'] != source['source_version_id']
-                    or not self.version_allowed(identity)):
+                    or not self.version_allowed(identity, source_snapshot=source)):
                 return False
             access = self._access(identity['actor_id'], identity['role'], self._resource_id(version_id))
             self.container.search.authorize_source_processing_version(version_id, access=access)
@@ -231,7 +235,7 @@ class SourceOCRPipeline:
         # A scheduler identity is explicitly configured and still needs a current grant.
         actor, role = self._scheduler_identity()
         if actor in self.contract.actor_ids and role in self.contract.roles:
-            if not self.created_version_allowed(version_id, actor):
+            if not self.created_version_allowed(version_id, actor, source_snapshot=source):
                 return False
             access = self._access(actor, role, self._resource_id(version_id))
             self.container.search.authorize_source_processing_version(version_id, access=access)
@@ -535,7 +539,11 @@ class SourceOCRPipeline:
                 raise DomainError('SOURCE_OCR_STATE_CHANGED')
             values = {key: source[key] for key in ('status', 'total_pages', 'completed_pages', 'failed_pages',
                                                   'started_at', 'completed_at', 'updated_at')}
-            values.update(resource_version_id=version['id'], triggered_by=identity['actor_id'])
+            # MASTER ocr_jobs.triggered_by stores the canonical MASTER user ID
+            # (the FK identity), while authorization/checkpoints retain the
+            # full `master:<id>` application principal.
+            values.update(resource_version_id=version['id'],
+                          triggered_by=identity['actor_id'].removeprefix('master:'))
             existing = repo.get('ocr_jobs', master_id)
             if existing:
                 if existing['resource_version_id'] != version['id']:
@@ -604,7 +612,12 @@ class SourceOCRPipeline:
             except Exception as exc:
                 from data_sync_etl.logging import event
                 safe = source_sql_error(exc)
-                event(stage='source_ocr', action='CLAIM_UNAVAILABLE', error_type=type(safe).__name__)
+                code = str(safe)
+                if (not code or len(code) > 80 or not code.replace('_', '').isalnum()
+                        or not code.isupper()):
+                    code = 'SOURCE_OCR_CLAIM_UNAVAILABLE'
+                event(stage='source_ocr', action='CLAIM_UNAVAILABLE', error_type=type(safe).__name__,
+                      error_code=code)
                 continue
             if task:
                 self._claim_cursor = (start + index + 1) % len(states)

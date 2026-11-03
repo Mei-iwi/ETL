@@ -3,7 +3,28 @@ from copy import deepcopy
 import pytest
 
 from data_sync_etl.domain.search import SearchError
+from data_sync_etl.domain.indexing import IndexingError
 from tests.unit.test_search import searchable as searchable
+
+
+def test_bulk_verification_uses_phase_fingerprint_and_rejects_a_changed_final_phase(searchable, monkeypatch):
+    c, version = searchable
+    with c.uow() as repo:
+        snapshot = c.indexing._snapshot(repo, version['id'])
+        run = c.indexing._runs(repo, version['id'])[0]
+    fingerprint = c.indexing.reader.content_fingerprint(version['id'], generation=snapshot[1])
+
+    def phase(ids, **_kwargs):
+        return {key: deepcopy(c.indexing.bags.rows.get(key)) for key in ids}
+
+    phase.content_phase = True
+    phase.content_fingerprint = lambda *_a, **_k: fingerprint
+    monkeypatch.setattr(c.indexing.reader, 'content_fingerprint',
+                        lambda *_a, **_k: pytest.fail('bulk phase repeated a per-version Mongo read'))
+    assert c.indexing._verified(snapshot, run, bag_reader=phase)
+    phase.content_fingerprint = lambda *_a, **_k: 'f' * 64
+    with pytest.raises(IndexingError, match='INDEX_ARTIFACT_INVALID'):
+        c.indexing._verified(snapshot, run, bag_reader=phase)
 
 
 def test_http_style_phases_are_independent_and_final_bag_mutation_is_rejected(searchable, monkeypatch):

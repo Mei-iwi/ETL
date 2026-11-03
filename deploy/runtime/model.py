@@ -6,9 +6,9 @@ import os
 import re
 from pathlib import Path, PurePosixPath
 
-MODEL_ID = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
-REVISION = 'e8f8c211226b894fcb81acc59f3b34ba3efd5f42'
-DIMENSION = 384
+MODEL_ID = 'BAAI/bge-m3'
+REVISION = '5617a9f61b028005a4858fdac845db406aefb181'
+DIMENSION = 1024
 
 
 def contract(model_id=None, revision=None, dimension=None):

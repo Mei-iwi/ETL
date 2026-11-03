@@ -50,3 +50,31 @@ def test_launcher_selects_database_overlay_without_executing_env(tmp_path, shell
             assert "compose.source-neon.yml" not in output
             assert "compose.remote-db.yml" not in output
     assert not (tmp_path / "unexpected").exists()
+
+
+@pytest.mark.parametrize("shell", ["powershell", "bash"])
+def test_db_start_uses_master_only_compose(tmp_path, shell):
+    executable = shutil.which("powershell.exe" if shell == "powershell" else "bash")
+    if shell == "bash" and os.name == "nt":
+        executable = "C:/Program Files/Git/bin/bash.exe"
+    if not executable or not Path(executable).exists():
+        pytest.skip("Launcher shell unavailable")
+    (tmp_path / "docker.cmd").write_text("@echo off\n@echo %*\n", encoding="ascii")
+    stub = tmp_path / "docker"
+    stub.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$@"\n', encoding="ascii")
+    stub.chmod(0o755)
+    env_file = tmp_path / "settings.env"
+    env_file.write_text("MASTER_PASSWORD_FILE=C:/private/master-password\n", encoding="ascii")
+    env = os.environ.copy()
+    env["ETL_DOCKER_ENV_FILE"] = str(env_file)
+    env["PATH"] = str(tmp_path) + os.pathsep + env["PATH"]
+    if shell == "powershell":
+        command = [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "deploy/scripts/etl-docker.ps1"), "-Action", "DbStart"]
+    else:
+        command = [executable, str(ROOT / "deploy/scripts/etl-docker.sh"), "db-start"]
+    result = subprocess.run(command, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "compose.master-only.yml" in output
+    assert "master-postgres" in output
+    assert "compose.database.yml" not in output

@@ -5,6 +5,7 @@ import type {
     MasterSyncStatusResponse,
     SourceSyncFilesResponse,
     SourceFilesBatchRetryResponse,
+    SourceFederationHealthResponse,
 } from '../types/masterSync'
 
 async function getErrorMessage(response: Response) {
@@ -16,7 +17,7 @@ async function getErrorMessage(response: Response) {
         && 'message' in body.detail && typeof body.detail.message === 'string') {
         return body.detail.message
     }
-    return `Yêu cầu đồng bộ thất bại: HTTP ${response.status}`
+    return `Y\u00eau c\u1ea7u \u0111\u1ed3ng b\u1ed9 th\u1ea5t b\u1ea1i: HTTP ${response.status}`
 }
 
 export async function getSourceSyncFiles(
@@ -87,6 +88,18 @@ export async function getMasterSyncStatus(
         throw new Error(await getErrorMessage(response))
     }
     return response.json() as Promise<MasterSyncStatusResponse>
+}
+
+export async function getSourceFederationHealth(
+    signal?: AbortSignal,
+): Promise<SourceFederationHealthResponse> {
+    const response = await fetch('/api/v1/source-federation/health', {
+        signal,
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) throw new Error(await getErrorMessage(response))
+    return response.json() as Promise<SourceFederationHealthResponse>
 }
 
 export async function configureMasterSyncAuto(

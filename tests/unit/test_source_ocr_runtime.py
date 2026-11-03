@@ -136,6 +136,7 @@ def test_production_container_api_worker_mongo_postprocess_and_reuse(runtime, mo
         assert r.source.jobs[next(iter(r.source.jobs))]['status'] == 'COMPLETED'
         assert len(r.content.pages) == 1
         assert r.uow.get('ocr_jobs', job_id)['status'] == 'COMPLETED'
+        assert r.uow.get('ocr_jobs', job_id)['triggered_by'] == 'a1'
         # Explicitly run finalization too so errors cannot be hidden by callback handling.
         result = container.processing_finalizer.finalize(job_id)
         assert result['status'] in ('CONTENT_READY', 'ALREADY_COMPLETED')
@@ -189,6 +190,25 @@ def test_lost_lease_cannot_persist_mongo_or_proofs(runtime):
     with pytest.raises(DomainError, match='LEASE_LOST'):
         r.pipeline.succeed(task, result)
     assert not r.content.pages and r.pipeline.state('mv1') == before
+
+
+def test_projection_stores_canonical_30_character_user_for_37_character_principal(runtime):
+    r = runtime
+    r.pipeline.create_job('mv1', access=r.access)
+    master_user_id = 'F' + 'b' * 29
+    state = r.pipeline.state('mv1')
+    state['identity']['actor_id'] = f'master:{master_user_id}'
+    r.pipeline.reader.authorize = lambda _identity: True
+    with r.uow() as repo:
+        user = repo.tables['master_users'].pop('a1')
+        user['id'] = master_user_id
+        repo.tables['master_users'][master_user_id] = user
+        repo.tables['master_learning_resources']['r1']['created_by'] = master_user_id
+        r.pipeline._save(repo, 'mv1', state)
+    projected = r.pipeline.sync(state)
+    assert len(state['identity']['actor_id']) == 37
+    assert projected['triggered_by'] == master_user_id
+    assert len(projected['triggered_by']) == 30
 
 
 def test_mongo_committed_before_source_commit_is_reused_without_file_or_recognition(runtime, monkeypatch):
@@ -342,8 +362,13 @@ def test_verified_empty_raw_is_a_successful_source_page_without_fake_content(run
     assert not r.content.units
 
 
-def test_worker_automatically_schedules_with_the_single_approved_live_actor(runtime):
+@pytest.mark.parametrize('lifecycle', ['APPROVED', 'PENDING_PRE_REVIEW'])
+def test_worker_automatically_schedules_with_the_single_approved_live_actor(runtime, lifecycle):
     r = runtime
+    r.source.versions['v1']['lifecycle_status'] = lifecycle
+    r.pipeline.contract = replace(r.pipeline.contract, lifecycles=frozenset({lifecycle}))
+    r.pipeline.writer.contract = r.pipeline.contract
+    r.pipeline.reader.lifecycle_allowed = lambda value: value in r.pipeline.contract.lifecycles
     assert r.pipeline.state('mv1') is None
     assert r.container.worker.once('scheduler')
     assert len(r.source.jobs) == len(r.source.tasks) == 1
@@ -545,6 +570,77 @@ def test_terminal_projection_avoids_repeated_claim_and_recovery_but_reconcile_co
     assert r.pipeline.recover_stale() == {'recovered': 0}
     r.pipeline.reconcile_once()
     assert r.uow.get('ocr_jobs', job['id'])['status'] == 'COMPLETED'
+
+
+def test_source_index_snapshot_uses_fresh_search_content_without_point_reads(runtime, monkeypatch):
+    r = runtime
+    r.pipeline.create_job('mv1', access=r.access)
+    assert r.container.worker.once('phase-worker')
+    documents = list(r.content.units.values())
+    assert documents
+    monkeypatch.setattr(r.pipeline.mongo, 'get_unit',
+                        lambda *_a, **_k: pytest.fail('search phase repeated an Atlas point read'))
+
+    def phase(version_id, *, limit=100, offset=0):
+        assert version_id == 'mv1'
+        return deepcopy(documents[offset:offset + limit])
+
+    with r.uow() as repo:
+        snapshot = r.container.indexing._snapshot(repo, 'mv1', content_reader=phase)
+    assert {unit['id'] for unit in snapshot[2]} == {doc.id for doc in documents}
+    assert all(unit['text'] for unit in snapshot[2])
+
+
+def test_source_chunk_readiness_batches_fresh_documents_and_rejects_changed_text(runtime, monkeypatch):
+    r = runtime
+    job = r.pipeline.create_job('mv1', access=r.access)
+    assert r.container.worker.once('chunk-worker')
+    documents = list(r.content.units.values())
+    calls = []
+    def read(version_id, *, limit=100, offset=0):
+        calls.append((version_id, limit, offset))
+        return deepcopy(documents[offset:offset + limit])
+    monkeypatch.setattr(r.pipeline.mongo, 'units', read)
+    monkeypatch.setattr(r.pipeline.mongo, 'get_unit',
+                        lambda *_a, **_k: pytest.fail('chunk readiness repeated point reads'))
+    with r.uow() as repo:
+        complete = repo.get('ocr_jobs', job['id'])
+        assert r.container.ocr_text_store.processing_state(repo, complete) == 'CONTENT_READY'
+        assert len(calls) == 1
+        documents[0] = documents[0].model_copy(update={'text': 'modified raw content'})
+        assert r.container.ocr_text_store.processing_state(repo, complete) == 'FINALIZATION_FAILED'
+
+
+@pytest.mark.parametrize('mutation', ['text', 'version', 'current', 'generation', 'page',
+                                     'page_result', 'missing', 'duplicate'])
+def test_source_search_content_phase_rechecks_proof_after_mutation(runtime, monkeypatch, mutation):
+    r = runtime
+    job = r.pipeline.create_job('mv1', access=r.access)
+    assert r.container.worker.once('phase-worker')
+    documents = list(r.content.units.values())
+    monkeypatch.setattr(r.pipeline.mongo, 'get_unit',
+                        lambda *_a, **_k: pytest.fail('search phase fell back to point reads'))
+
+    def reader(rows):
+        return lambda _version_id, limit=100, offset=0: deepcopy(rows[offset:offset + limit])
+
+    with r.uow() as repo:
+        complete = repo.get('ocr_jobs', job['id'])
+        assert r.container.ocr_text_store.processing_state_from_content(
+            repo, complete, reader(documents)) == 'CONTENT_READY'
+        changes = {
+            'text': {'text': 'changed after the initial read'},
+            'version': {'resource_version_id': 'another-version'},
+            'current': {'is_current': False},
+            'generation': {'projection_generation': documents[0].projection_generation + 1},
+            'page': {'page_from': documents[0].page_from + 1},
+            'page_result': {'page_result_id': 'another-result'},
+        }
+        changed = ([documents[0].model_copy(update=changes[mutation]), *documents[1:]]
+                   if mutation in changes else [] if mutation == 'missing'
+                   else [*documents, documents[0]])
+        assert r.container.ocr_text_store.processing_state_from_content(
+            repo, complete, reader(changed)) != 'CONTENT_READY'
 
 
 def test_wrong_resource_namespace_is_rejected_before_source_lookup_or_file_io(runtime, monkeypatch):

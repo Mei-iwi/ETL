@@ -166,6 +166,23 @@ class SourceFileResolver:
         if not re.fullmatch('[0-9a-fA-F]{64}', version['source_hash']):
             raise SourceFileError('INVALID_SOURCE_HASH')
         filename = (version.get('processing_options') or {}).get('source_filename') or PurePosixPath(key).name
+        inferred_mime = None
+        if row and not PurePosixPath(filename).suffix:
+            reference = ResolvedFileReference(
+                ownership='SOURCE_BACKED', target_version_id=version.get('id'), resource_id=version['resource_id'],
+                source_version_id=row['source_version_id'], provider='external', bucket=bucket, opaque_locator=key,
+                filename=filename, mime='application/octet-stream', expected_sha256=version['source_hash'].lower(),
+                source_id=row['source_system'], source_snapshot=source)
+            self.require_content_capabilities(reference, index=True)
+            lookup = getattr(self.files, 'file_metadata', None)
+            metadata = lookup(bucket, key) if callable(lookup) else None
+            if metadata:
+                try:
+                    validator = self.formats.find_validator_for_mime(metadata.get('mime_type'))
+                except DomainError:
+                    raise SourceFileError('UNSUPPORTED_SOURCE_FORMAT') from None
+                filename = 'source' + validator.extension
+                inferred_mime = metadata['mime_type'].split(';', 1)[0].strip().lower()
         try:
             validator = self.formats.find_validator(filename)
         except DomainError:
@@ -180,7 +197,7 @@ class SourceFileResolver:
             source_version_id=row['source_version_id'] if row else None,
             provider=provider, bucket=bucket, opaque_locator=key,
             filename=filename,
-            mime='text/csv' if validator.extension == '.csv' else sorted(validator.mime_types)[0],
+            mime=inferred_mime or ('text/csv' if validator.extension == '.csv' else sorted(validator.mime_types)[0]),
             expected_sha256=version['source_hash'].lower(),
             source_id=row['source_system'] if row else None,
             provider_id=((version.get('processing_options') or {}).get('storage_provider_id')
@@ -267,7 +284,7 @@ class SourceFileResolver:
             return False
         uploaded = bool((version.get('processing_options') or {}).get('etl_source_upload')
                             and len(rows) == 1
-                            and rows[0].get('source_lifecycle_status') == 'UNREVIEWED')
+                            and rows[0].get('source_lifecycle_status') in {'UNREVIEWED', 'PENDING_PRE_REVIEW'})
         if (resource.get('source_origin') != 'POSTGRESQL'
                     or not access.publication_allowed(resource)
                     or not resource.get('is_active') or resource_deleted(resource)
@@ -429,6 +446,7 @@ class SourceFileResolver:
                 raise SourceFileError('SOURCE_SIZE_MISMATCH')
             if sha256(buffer.getbuffer()).hexdigest() != ref.expected_sha256:
                 raise SourceFileError('SOURCE_HASH_MISMATCH')
+            validator.validate(validator.extension, ref.mime, buffer.getbuffer()[:8192].tobytes(), observed)
             after = self._revision(ref, cancelled)
             if before is not None and after is not None and before != after:
                 raise SourceFileError('SOURCE_VERSION_MUTATED')

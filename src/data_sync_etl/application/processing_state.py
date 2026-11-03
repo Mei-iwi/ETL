@@ -44,7 +44,10 @@ def intake_status(version, job=None, stages=()):
                 'RECEIVED' if options.get('source_version_identity') or version.get('source_version_id') else 'NOT_STARTED')
 
 
-def processing_state(repo, job: dict, text_store=None) -> str:
+def processing_state(repo, job: dict, text_store=None, *, content_reader=None) -> str:
+    phase_reader = getattr(text_store, 'processing_state_from_content', None)
+    if content_reader is not None and callable(phase_reader):
+        return phase_reader(repo, job, content_reader)
     if text_store is not None and hasattr(text_store, 'processing_state'):
         return text_store.processing_state(repo, job)
     if job['status'] == 'COMPLETED':

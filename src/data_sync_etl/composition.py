@@ -4,6 +4,7 @@ from pathlib import Path
 from time import monotonic
 
 from pymongo import MongoClient
+from sqlalchemy.engine import make_url
 
 from data_sync_etl.adapters.bge_m3 import BgeM3Embedding
 from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
@@ -119,8 +120,24 @@ def _source_writer_database_url(settings):
             raise DomainError('SOURCE_WRITE_DATABASE_URL_UNAVAILABLE') from exc
         if not value:
             raise DomainError('SOURCE_WRITE_DATABASE_URL_UNAVAILABLE')
-        return value
-    return settings.source_write_database_url
+    else:
+        value = settings.source_write_database_url
+    if not value:
+        return None
+
+    writer_url = make_url(value)
+    source_url = make_url(settings.source_database_url) if settings.source_database_url else None
+    if source_url and source_url.host and source_url.host.endswith('.neon.tech'):
+        if (not writer_url.host or not writer_url.host.endswith('.neon.tech')
+                or writer_url.database != source_url.database):
+            raise DomainError('SOURCE_WRITE_TARGET_MISMATCH')
+        ca_file = source_url.query.get('sslrootcert')
+        if not ca_file or not Path(ca_file).is_file():
+            raise DomainError('SOURCE_WRITE_CA_UNAVAILABLE')
+        query = dict(writer_url.query)
+        query.update(sslmode='verify-full', channel_binding='require', sslrootcert=ca_file)
+        writer_url = writer_url.set(query=query)
+    return writer_url.render_as_string(hide_password=False)
 
 
 def create_source(settings):
@@ -434,6 +451,10 @@ class Container:
             interval_seconds=self.settings.master_sync_auto_interval_seconds,
             worker_stale_seconds=self.settings.master_sync_auto_worker_stale_seconds,
             lease_seconds=self.settings.master_sync_auto_lease_seconds,
+            baseline_source_ids=(
+                tuple(item.source_id for item in self.source_registry.registrations() if item.enabled)
+                if self.settings.source_federation_enabled else None
+            ),
         )
         self.master_sync_worker = MasterSyncWorker(
             # Scheduled audits have their own worker. Auto Sync must commit real
