@@ -42,7 +42,7 @@ class SourceVersionSynchronizer:
             if lifecycle_status is None and isinstance(raw_lifecycle_status, str) \
                     and raw_lifecycle_status.strip().upper().replace('-', '_').replace(' ', '_') \
                     in _SOURCE_PROCESSING_STATUSES:
-                # Only an acknowledged ETL upload may continue its local
+                # Legacy statuses: only an acknowledged ETL upload may continue its local
                 # processing while SOURCE awaits review. External pending
                 # versions retain the default closed policy.
                 status_key = raw_lifecycle_status.strip().upper().replace('-', '_').replace(' ', '_')

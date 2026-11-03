@@ -551,7 +551,7 @@ class MongoBagStore:
         return read
 
     def search_bags(self, root_ids, *, version_id, generation):
-        """Fresh, version-bounded read phase for Search ONLY; never a cache.
+        """Fresh, version-bounded read phase for Search/status; never a cache.
 
         Read the exact requested Bags, then independently read current content.
         _verified still performs its separate pre-read fingerprint and validates

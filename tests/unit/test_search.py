@@ -231,9 +231,10 @@ def test_mongo_selector_is_bounded_and_read_only():
     cursor.max_time_ms.return_value = cursor
     cursor.__iter__.return_value = iter([])
     assert MongoBagStore(database, 384).search_candidates(['version'], model='model@revision', limit=2001) == []
-    selector, projection = database.content_bags.find.call_args.args
+    # Full BSON must reach the strict DTO validator. Projecting selected fields
+    # would hide unknown/restriction fields and weaken the fail-closed read.
+    (selector,) = database.content_bags.find.call_args.args
     assert selector == {'resource_version_id': {'$in': ['version']}, 'is_current': True, 'embedding_model': 'model@revision'}
-    assert projection['embedding'] == 1
     cursor.limit.assert_called_once_with(2001)
     cursor.max_time_ms.assert_called_once_with(5000)
     database.content_bags.update_one.assert_not_called()

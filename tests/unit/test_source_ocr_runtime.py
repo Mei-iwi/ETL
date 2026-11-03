@@ -362,8 +362,13 @@ def test_verified_empty_raw_is_a_successful_source_page_without_fake_content(run
     assert not r.content.units
 
 
-def test_worker_automatically_schedules_with_the_single_approved_live_actor(runtime):
+@pytest.mark.parametrize('lifecycle', ['APPROVED', 'PENDING_PRE_REVIEW'])
+def test_worker_automatically_schedules_with_the_single_approved_live_actor(runtime, lifecycle):
     r = runtime
+    r.source.versions['v1']['lifecycle_status'] = lifecycle
+    r.pipeline.contract = replace(r.pipeline.contract, lifecycles=frozenset({lifecycle}))
+    r.pipeline.writer.contract = r.pipeline.contract
+    r.pipeline.reader.lifecycle_allowed = lambda value: value in r.pipeline.contract.lifecycles
     assert r.pipeline.state('mv1') is None
     assert r.container.worker.once('scheduler')
     assert len(r.source.jobs) == len(r.source.tasks) == 1
@@ -584,6 +589,26 @@ def test_source_index_snapshot_uses_fresh_search_content_without_point_reads(run
         snapshot = r.container.indexing._snapshot(repo, 'mv1', content_reader=phase)
     assert {unit['id'] for unit in snapshot[2]} == {doc.id for doc in documents}
     assert all(unit['text'] for unit in snapshot[2])
+
+
+def test_source_chunk_readiness_batches_fresh_documents_and_rejects_changed_text(runtime, monkeypatch):
+    r = runtime
+    job = r.pipeline.create_job('mv1', access=r.access)
+    assert r.container.worker.once('chunk-worker')
+    documents = list(r.content.units.values())
+    calls = []
+    def read(version_id, *, limit=100, offset=0):
+        calls.append((version_id, limit, offset))
+        return deepcopy(documents[offset:offset + limit])
+    monkeypatch.setattr(r.pipeline.mongo, 'units', read)
+    monkeypatch.setattr(r.pipeline.mongo, 'get_unit',
+                        lambda *_a, **_k: pytest.fail('chunk readiness repeated point reads'))
+    with r.uow() as repo:
+        complete = repo.get('ocr_jobs', job['id'])
+        assert r.container.ocr_text_store.processing_state(repo, complete) == 'CONTENT_READY'
+        assert len(calls) == 1
+        documents[0] = documents[0].model_copy(update={'text': 'modified raw content'})
+        assert r.container.ocr_text_store.processing_state(repo, complete) == 'FINALIZATION_FAILED'
 
 
 @pytest.mark.parametrize('mutation', ['text', 'version', 'current', 'generation', 'page',

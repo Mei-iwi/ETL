@@ -627,12 +627,17 @@ class SourceFileImportService:
             baseline = int(cycles[0]["input_fingerprint"], 16) if cycles else 0
             attempts = projections[:max(0, len(projections) - baseline)]
             exhausted = len(attempts) >= self.settings.finalization_max_attempts
+        if not exhausted:
+            return state, False
         count = sum(repo.count("etl_stage_runs", {"resource_version_id": row["target_version_id"], "stage": stage})
                     for stage in ("OCR_RETRY", "FINALIZATION_RETRY"))
         return state, exhausted and count < self.settings.processing_manual_retry_limit
 
-    def _eligible(self, repo, row):
+    def _eligible(self, repo, row, *, processing=None):
         if not self._source_allowed(row) or not row.get('target_version_id'):
+            return False
+        state, retryable = processing if processing is not None else self._processing(repo, row)
+        if state is not None and not retryable:
             return False
         resource = repo.get('master_learning_resources', row['resource_id'])
         version = repo.get('resource_versions', row['target_version_id'])
@@ -658,7 +663,6 @@ class SourceFileImportService:
                 ownership='SOURCE_BACKED', source_id=row['source_system']), index=True)
         except SourceFileError:
             return False
-        state, retryable = self._processing(repo, row)
         if state is not None:
             return retryable
         return row['status'] in {'METADATA_ONLY', 'FAILED', 'RETRY_EXHAUSTED', 'RETRY_WAIT'}
@@ -727,7 +731,7 @@ class SourceFileImportService:
                 self._file_count_cache[key] = (monotonic(), total)
             items = []
             for row in rows[:size]:
-                state, _ = self._processing(repo, row)
+                state, retryable = self._processing(repo, row)
                 failed = repo.find('ocr_page_tasks', {'job_id': row['processing_job_id'], 'status': 'FAILED'}, limit=1) if row['processing_job_id'] else []
                 processing_code = failed[0]['error_message'] if failed and failed[0]['error_message'] in PUBLIC_PROCESSING_ERROR_CODES else None
                 items.append({
@@ -738,7 +742,7 @@ class SourceFileImportService:
                     "import_status": row["status"], "etl_status": state,
                     "retry_count": row["attempts"], "last_error_code": row["last_error_code"] or processing_code,
                     "retry_eligible": (availability["file_sync_supported"] or row["target_version_id"] is not None)
-                    and self._eligible(repo, row),
+                    and self._eligible(repo, row, processing=(state, retryable)),
                     "target_version_id": row["target_version_id"], "processing_job_id": row["processing_job_id"],
                     "integrity": evidence_reader(repo, row) if evidence_reader else None,
                 })

@@ -47,6 +47,18 @@ class MongoExistingSourceOCRReader:
             raise DomainError('SOURCE_OCR_UNIT_CONFLICT')
         return document
 
+    def units(self, version_id, *, limit=100, offset=0):
+        """Fresh bounded reads; collection presence and full DTOs stay verified."""
+        self._require_existing()
+        try:
+            documents = self.reader.units(version_id, limit=limit, offset=offset)
+        except PyMongoError:
+            raise DomainError('SOURCE_MONGO_UNAVAILABLE') from None
+        if any(document.resource_version_id != version_id or not document.is_current
+               for document in documents):
+            raise DomainError('SOURCE_OCR_UNIT_CONFLICT')
+        return documents
+
     def ocr_page(self, *, version_id, job_id, page_num):
         self._require_existing()
         try:

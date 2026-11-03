@@ -44,3 +44,25 @@ def test_collection_guard_uses_unfiltered_name_list_for_atlas_compatibility():
     adapter = MongoExistingSourceOCRReader(Database(['ocr_pages', 'mongo_content_units']))
 
     adapter._require_existing()
+
+
+def test_batched_units_check_version_and_pass_bounds():
+    adapter = MongoExistingSourceOCRReader(Database(['ocr_pages', 'mongo_content_units']))
+    calls = []
+    def read(version_id, **kwargs):
+        calls.append((version_id, kwargs))
+        return [SimpleNamespace(resource_version_id='v1', is_current=True)]
+    adapter.reader = SimpleNamespace(units=read)
+    assert len(adapter.units('v1', limit=20, offset=40)) == 1
+    assert calls == [('v1', {'limit': 20, 'offset': 40})]
+    with pytest.raises(DomainError, match='UNIT_CONFLICT'):
+        adapter.units('other')
+
+
+def test_batched_units_sanitize_connection_errors():
+    adapter = MongoExistingSourceOCRReader(Database(['ocr_pages', 'mongo_content_units']))
+    def unavailable(*_args, **_kwargs):
+        raise OperationFailure('private connection details')
+    adapter.reader = SimpleNamespace(units=unavailable)
+    with pytest.raises(DomainError, match='^SOURCE_MONGO_UNAVAILABLE$'):
+        adapter.units('v1')

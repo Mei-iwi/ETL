@@ -84,6 +84,23 @@ def test_queue_worker_bags_and_api_contract(container):
     assert all(len(d["keywords"] or []) <= 5 for d in container.documents.units.values())
 
 
+def test_status_batches_bags_and_rejects_modified_artifact(container, monkeypatch):
+    index, version, _ = ready(container, False)
+    index.enqueue(version['id'])
+    assert index.once()
+    calls = []
+    def batch(root_ids, *, version_id, generation):
+        calls.append((root_ids, version_id, generation))
+        return {key: deepcopy(index.bags.rows.get(key)) for key in root_ids}
+    monkeypatch.setattr(index.bags, 'search_bags', batch, raising=False)
+    monkeypatch.setattr(index.bags, 'get_bag', lambda *_: pytest.fail('status made per-bag reads'))
+    assert index.status(version['id'])['index_status'] == 'READY'
+    assert len(calls) == 1 and len(calls[0][0]) == 3
+    doc = next(iter(index.bags.rows.values()))
+    index.bags.rows[doc.id] = doc.model_copy(update={'content_fingerprint': 'f' * 64})
+    assert index.status(version['id'])['index_status'] == 'STALE'
+
+
 def test_flat_preview_does_not_write_then_manual_fallback(container):
     index, version, _ = ready(container, False)
     before = deepcopy(container.documents.units)

@@ -70,7 +70,7 @@ def test_upload_binds_legacy_inventory_and_resolves_actual_master_version(contai
     with container.uow() as repo:
         row = repo.get('source_file_imports', 'legacy-unbound')
         assert row['resource_id'] == 'resource-1'
-        assert row['source_lifecycle_status'] == 'UNREVIEWED'
+        assert row['source_lifecycle_status'] == 'PENDING_PRE_REVIEW'
         version_id = row['target_version_id']
         assert version_id != 'RSV001'
         assert len(repo.find('source_file_imports', {'source_version_id': 'RSV001'})) == 1
@@ -119,8 +119,13 @@ def test_external_pending_source_without_exact_receipt_remains_blocked(container
     SourceVersionSynchronizer(container.uow).sync('postgresql', source)
     with container.uow() as repo:
         row = repo.get('source_file_imports', 'legacy-unbound')
-        assert row['source_lifecycle_status'] == 'PRIVATE'
-        assert row['source_resource_active'] is False
+        assert row['source_lifecycle_status'] == 'PENDING_PRE_REVIEW'
+        assert row['source_resource_active'] is True
+        version_id = row['target_version_id']
+    resolver = SourceFileResolver(container.uow, source, container.source_files, container.storage,
+                                  container.source_file_import.formats, container.settings, None)
+    with pytest.raises(SourceFileError, match='BLOCKED_SOURCE_POLICY'):
+        resolver.resolve(version_id)
 
 
 def test_upload_preferences_precede_auto_ocr_and_later_sync_preserves_local_edits(container):

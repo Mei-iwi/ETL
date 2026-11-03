@@ -94,6 +94,26 @@ def test_future_import_uses_same_policy_and_does_not_scan_other_versions(runtime
     assert not r.opens and not r.source.jobs
 
 
+def test_pending_namespace_policy_reuses_only_the_current_source_snapshot(runtime, monkeypatch):
+    r = runtime
+    value = enable_proposed_scope(r)
+    value['allowed_lifecycles'].append('PENDING_PRE_REVIEW')
+    value['namespace_scope']['version_lifecycles'].append('PENDING_PRE_REVIEW')
+    r.pipeline.contract = SourceOCRContract.from_owner_contract(value, expected_namespace='source-a')
+    r.pipeline.writer.contract = r.pipeline.contract
+    r.source.versions['v1']['lifecycle_status'] = 'PENDING_PRE_REVIEW'
+    adapter = r.pipeline.resolver._source_adapter('SRC_TEST')
+    source = adapter.get_versions(['v1'])['v1']
+    monkeypatch.setattr(adapter, 'get_versions', lambda *_: pytest.fail('repeated SOURCE read within same phase'))
+    assert r.pipeline.status_allowed(source, 'source-a')
+    for mutation in ({'source_hash': 'f' * 64}, {'source_version_id': 'wrong'},
+                     {'resource_active': False}, {'resource_deleted_at': 'deleted'},
+                     {'source_lifecycle_status': 'REJECTED'}, {'resource_id': 'wrong'}):
+        assert not r.pipeline.status_allowed({**source, **mutation}, 'source-a')
+    assert not r.pipeline.status_allowed(source, 'other-namespace')
+    assert not r.opens and not r.source.jobs
+
+
 @pytest.mark.parametrize('change', [
     {'service_actor_id': 'unapproved'}, {'service_role': 'VIEWER'},
     {'resource_publication_statuses': ['ARCHIVED']}, {'version_lifecycles': ['REJECTED']},

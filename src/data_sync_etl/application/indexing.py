@@ -81,11 +81,12 @@ class IndexingService:
         by_id = {doc.id: doc for doc in docs}
         if not projections or len(docs) != len(units) or len(by_id) != len(docs):
             raise IndexingError('CONTENT_NOT_READY')
-        # HTTP Search alone opts in. All other callers retain point-read timing.
+        # Reuse the metadata already read in this snapshot, never a cross-request cache.
         if (hasattr(self.text_store, 'source_version')
                 and self.text_store.source_version(repo, version_id)):
             try:
-                texts = self.text_store.unit_texts(repo, [unit['id'] for unit in units], by_id)
+                texts = self.text_store.unit_texts(repo, [unit['id'] for unit in units], by_id,
+                                                 units={unit['id']: unit for unit in units})
             except DomainError:
                 raise IndexingError('CONTENT_NOT_READY') from None
         else:
@@ -358,7 +359,9 @@ class IndexingService:
                     if latest['input_fingerprint'] != snapshot[3]:
                         status, code = 'STALE', 'INDEX_SOURCE_CHANGED'
                     elif latest['status'] == 'COMPLETED':
-                        summaries = self._verified(snapshot, latest)
+                        batch_reader = getattr(self.bags, 'search_bags', None)
+                        summaries = self._verified(snapshot, latest,
+                            bag_reader=batch_reader if callable(batch_reader) else None)
                         status, published = 'READY', latest['id']
                     else:
                         status = latest['status']

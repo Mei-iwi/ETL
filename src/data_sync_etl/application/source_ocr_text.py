@@ -61,6 +61,9 @@ class SourceOCRText:
                 return 'FINALIZATION_PENDING'
             try:
                 documents = None
+                if content_reader is None:
+                    batch_reader = getattr(self.pipeline.mongo, 'units', None)
+                    content_reader = batch_reader if callable(batch_reader) else None
                 if content_reader is not None:
                     documents, expected = {}, {unit['id'] for unit in units}
                     for offset in range(0, len(units) + 1, 100):
@@ -82,10 +85,10 @@ class SourceOCRText:
                 return 'FINALIZATION_PENDING' if str(exc) == 'SOURCE_MONGO_UNAVAILABLE' else 'FINALIZATION_FAILED'
         return status
 
-    def unit_texts(self, repo, unit_ids, documents=None):
+    def unit_texts(self, repo, unit_ids, documents=None, *, units=None):
         result, states = {}, {}
         for unit_id in unit_ids:
-            unit = repo.get('content_units', unit_id)
+            unit = units.get(unit_id) if units is not None else repo.get('content_units', unit_id)
             version_id = unit['resource_version_id'] if unit else None
             if version_id not in states:
                 states[version_id] = self.pipeline.state(version_id, repo) if version_id else None

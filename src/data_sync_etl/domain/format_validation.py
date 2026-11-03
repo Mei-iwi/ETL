@@ -288,3 +288,12 @@ class FormatValidatorRegistry:
         if validator is None:
             raise DomainError("Unsupported file extension")
         return validator
+
+    def find_validator_for_mime(self, mime_type):
+        """An opaque key needs an unambiguous type from authorized storage metadata."""
+        mime = mime_type.split(';', 1)[0].strip().lower() if isinstance(mime_type, str) else ''
+        matches = {validator.extension: validator for validator in self._validators.values()
+                   if mime in validator.mime_types}
+        if len(matches) != 1:
+            raise DomainError('Unsupported or ambiguous source MIME type')
+        return next(iter(matches.values()))
