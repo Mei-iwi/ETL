@@ -47,20 +47,21 @@ class IndexingService:
                     version_id, access=SearchAccess(scope='authenticated_admin'))):
             raise IndexingError('SOURCE_CAPABILITY_BLOCKED', 403)
 
-    def _version(self, repo, version_id):
+    def _version(self, repo, version_id, *, content_reader=None):
         version = repo.get('resource_versions', version_id)
         resource = repo.get('master_learning_resources', version['resource_id']) if version else None
         if not resource or not resource['is_active'] or resource_deleted(resource):
             raise IndexingError('VERSION_NOT_FOUND', 404)
         jobs = repo.find('ocr_jobs', {'resource_version_id': version_id}, order=('-created_at', '-id'), limit=1)
-        return version, processing_state(repo, jobs[0], self.text_store) if jobs else 'NOT_STARTED'
+        return version, processing_state(repo, jobs[0], self.text_store,
+                                         content_reader=content_reader) if jobs else 'NOT_STARTED'
 
     def _runs(self, repo, version_id):
         return repo.find('etl_stage_runs', {'resource_version_id': version_id, 'stage': 'INDEX_BUILD'},
                          order=('-created_at', '-id'))
 
     def _snapshot(self, repo, version_id, *, text_reader=None, content_reader=None):
-        version, state = self._version(repo, version_id)
+        version, state = self._version(repo, version_id, content_reader=content_reader)
         if state != 'CONTENT_READY':
             raise IndexingError('CONTENT_NOT_READY')
         if self.reader is None:
@@ -159,7 +160,13 @@ class IndexingService:
 
     def _verified(self, snapshot, run, *, expected_bags=None, bag_reader=None):
         roots = self._roots(snapshot)
-        source_fp = self.reader.content_fingerprint(snapshot[0]['id'], generation=snapshot[1])
+        # A bulk Search phase already read the complete current unit BSON and
+        # hashed it. Its final phase performs a separate fresh read, so this
+        # reuses no content or authority across phases/requests.
+        phase_fingerprint = (getattr(bag_reader, 'content_fingerprint', None)
+                             if getattr(bag_reader, 'content_phase', False) is True else None)
+        fingerprint = phase_fingerprint if callable(phase_fingerprint) else self.reader.content_fingerprint
+        source_fp = fingerprint(snapshot[0]['id'], generation=snapshot[1])
         try:
             bags = (bag_reader(list(roots), version_id=snapshot[0]['id'], generation=snapshot[1])
                     if bag_reader is not None else None)

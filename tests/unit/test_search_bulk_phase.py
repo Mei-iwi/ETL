@@ -53,12 +53,16 @@ def test_bulk_phase_has_two_reads_and_independent_final_phase_detects_writer():
 
 
 def test_bulk_phase_never_crosses_version_or_generation_and_rechecks_text():
-    store, _, _, units = store_with_data()
+    store, _, bags, units = store_with_data()
     read = store.search_phase(['v-0', 'v-1'], limit=10)
+    assert read.content_fingerprint('v-0', generation=1) == bags[0]['content_fingerprint']
+    with pytest.raises(DomainError, match='generation mismatch'):
+        read.content_fingerprint('v-0', generation=2)
     assert read(['root-1'], version_id='v-0', generation=1)['root-1'] is None
     assert read(['root-0'], version_id='v-0', generation=2)['root-0'] is None
     units[0]['text'] = 'writer changed source without updating the bag'
     final = store.search_phase(['v-0', 'v-1'], limit=10)
+    assert final.content_fingerprint('v-0', generation=1) != read.content_fingerprint('v-0', generation=1)
     assert final(['root-0'], version_id='v-0', generation=1)['root-0'] is None
 
 

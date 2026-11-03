@@ -32,7 +32,12 @@ class SourceOCRText:
     def source_version(self, repo, version_id):
         return self.pipeline.state(version_id, repo) is not None
 
-    def processing_state(self, repo, job):
+    def processing_state_from_content(self, repo, job, content_reader):
+        # HTTP Search supplies a fresh, bounded content phase. Initial and final
+        # phases have independent readers; nothing is retained across them.
+        return self.processing_state(repo, job, content_reader=content_reader)
+
+    def processing_state(self, repo, job, *, content_reader=None):
         state = self.pipeline.state(job['resource_version_id'], repo)
         if not state:
             if source_owned_id(job['id'], 'SJ'):
@@ -55,8 +60,20 @@ class SourceOCRText:
             if len(units) > 10000 or set(state['units']) != {unit['id'] for unit in units}:
                 return 'FINALIZATION_PENDING'
             try:
+                documents = None
+                if content_reader is not None:
+                    documents, expected = {}, {unit['id'] for unit in units}
+                    for offset in range(0, len(units) + 1, 100):
+                        batch = content_reader(job['resource_version_id'], limit=100, offset=offset)
+                        for document in batch:
+                            if document.id not in expected or document.id in documents:
+                                raise DomainError('SOURCE_OCR_UNIT_CONFLICT')
+                            documents[document.id] = document
+                        if len(batch) < 100:
+                            break
                 for unit in units:
-                    document = self.pipeline.mongo.get_unit(unit['id'], version_id=unit['resource_version_id'])
+                    document = (documents.get(unit['id']) if documents is not None else
+                                self.pipeline.mongo.get_unit(unit['id'], version_id=unit['resource_version_id']))
                     if (document is None or document.projection_generation != generation
                             or document.page_from != unit['page_from'] or document.page_to != unit['page_to']):
                         return 'FINALIZATION_PENDING'

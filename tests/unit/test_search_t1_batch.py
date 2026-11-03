@@ -11,6 +11,31 @@ from data_sync_etl.main import create_app
 from tests.unit.test_search import searchable as searchable
 
 
+def test_authority_phase_serves_unit_metadata_without_queries_and_final_phase_is_fresh(searchable):
+    c, version = searchable
+    with c.uow() as repo:
+        initial = repo.search_authority_phase([version['id']])
+        unit = initial.histories['content_units'][version['id']][0]
+        statements = []
+
+        def before(*_args):
+            statements.append(True)
+
+        event.listen(c.engine, 'before_cursor_execute', before)
+        try:
+            observed = initial.bind(repo).get('content_units', unit['id'])
+            assert observed == unit and not statements
+            observed['title'] = 'caller changed its detached copy'
+            assert initial.bind(repo).get('content_units', unit['id']) == unit
+        finally:
+            event.remove(c.engine, 'before_cursor_execute', before)
+        repo.update('content_units', unit['id'], {'title': 'writer changed between phases'})
+    with c.uow() as repo:
+        final = repo.search_authority_phase([version['id']])
+        assert final.bind(repo).get('content_units', unit['id'])['title'] == 'writer changed between phases'
+        assert initial.bind(repo).get('content_units', unit['id']) == unit
+
+
 @pytest.mark.parametrize('searchable', [False, True], indirect=True)
 def test_http_batch_matches_baseline_and_does_not_change_other_callers(searchable, monkeypatch):
     c, version = searchable

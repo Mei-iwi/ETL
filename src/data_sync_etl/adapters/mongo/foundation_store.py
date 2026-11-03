@@ -537,8 +537,17 @@ class MongoBagStore:
                 raise DomainError('Search content phase identity mismatch')
             records = full_content[version_id]
             return [checked(ContentUnitDocument, row) for row in records[offset:offset + limit]]
+
+        def content_fingerprint(version_id, *, generation=None):
+            records = content.get(version_id)
+            if (not records or generation is not None and any(
+                    row.get('projection_generation') != generation for row in records)):
+                raise DomainError('Current content generation mismatch')
+            return fingerprints[version_id]
+
         read.units = units
         read.content_phase = True
+        read.content_fingerprint = content_fingerprint
         return read
 
     def search_bags(self, root_ids, *, version_id, generation):

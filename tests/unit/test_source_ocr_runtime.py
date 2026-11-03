@@ -547,6 +547,57 @@ def test_terminal_projection_avoids_repeated_claim_and_recovery_but_reconcile_co
     assert r.uow.get('ocr_jobs', job['id'])['status'] == 'COMPLETED'
 
 
+def test_source_index_snapshot_uses_fresh_search_content_without_point_reads(runtime, monkeypatch):
+    r = runtime
+    r.pipeline.create_job('mv1', access=r.access)
+    assert r.container.worker.once('phase-worker')
+    documents = list(r.content.units.values())
+    assert documents
+    monkeypatch.setattr(r.pipeline.mongo, 'get_unit',
+                        lambda *_a, **_k: pytest.fail('search phase repeated an Atlas point read'))
+
+    def phase(version_id, *, limit=100, offset=0):
+        assert version_id == 'mv1'
+        return deepcopy(documents[offset:offset + limit])
+
+    with r.uow() as repo:
+        snapshot = r.container.indexing._snapshot(repo, 'mv1', content_reader=phase)
+    assert {unit['id'] for unit in snapshot[2]} == {doc.id for doc in documents}
+    assert all(unit['text'] for unit in snapshot[2])
+
+
+@pytest.mark.parametrize('mutation', ['text', 'version', 'current', 'generation', 'page',
+                                     'page_result', 'missing', 'duplicate'])
+def test_source_search_content_phase_rechecks_proof_after_mutation(runtime, monkeypatch, mutation):
+    r = runtime
+    job = r.pipeline.create_job('mv1', access=r.access)
+    assert r.container.worker.once('phase-worker')
+    documents = list(r.content.units.values())
+    monkeypatch.setattr(r.pipeline.mongo, 'get_unit',
+                        lambda *_a, **_k: pytest.fail('search phase fell back to point reads'))
+
+    def reader(rows):
+        return lambda _version_id, limit=100, offset=0: deepcopy(rows[offset:offset + limit])
+
+    with r.uow() as repo:
+        complete = repo.get('ocr_jobs', job['id'])
+        assert r.container.ocr_text_store.processing_state_from_content(
+            repo, complete, reader(documents)) == 'CONTENT_READY'
+        changes = {
+            'text': {'text': 'changed after the initial read'},
+            'version': {'resource_version_id': 'another-version'},
+            'current': {'is_current': False},
+            'generation': {'projection_generation': documents[0].projection_generation + 1},
+            'page': {'page_from': documents[0].page_from + 1},
+            'page_result': {'page_result_id': 'another-result'},
+        }
+        changed = ([documents[0].model_copy(update=changes[mutation]), *documents[1:]]
+                   if mutation in changes else [] if mutation == 'missing'
+                   else [*documents, documents[0]])
+        assert r.container.ocr_text_store.processing_state_from_content(
+            repo, complete, reader(changed)) != 'CONTENT_READY'
+
+
 def test_wrong_resource_namespace_is_rejected_before_source_lookup_or_file_io(runtime, monkeypatch):
     r = runtime
     r.uow.tables['master_learning_resources']['r1']['source_namespace'] = 'other-tenant'

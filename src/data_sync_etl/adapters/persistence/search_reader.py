@@ -88,7 +88,8 @@ class SearchRepositoryMixin:
                     raise IndexingError('SEMANTIC_METADATA_LIMIT', 422)
                 row['subjects'], row['grades'] = sorted(set(row['subjects'])), sorted(set(row['grades']))
         return SearchAuthorityPhase({'resource_versions': versions, 'master_learning_resources': resources,
-                                     'content_unit_texts': texts},
+                                     'content_unit_texts': texts,
+                                     'content_units': {row['id']: row for group in units.values() for row in group}},
             {'ocr_jobs': jobs, 'etl_stage_runs': stages, 'content_units': units,
              'ocr_page_tasks': tasks, 'ocr_page_results': results}, semantic)
 
