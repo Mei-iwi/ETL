@@ -1,128 +1,70 @@
-# Database Docker mới, tách khỏi ứng dụng
+# Database local: chỉ PostgreSQL MASTER
 
-Chỉ áp dụng cho **DB mới/trống do bạn quản lý**. DB có dữ liệu: dùng schema/role do chủ DB xác minh, không bootstrap/migration theo hướng dẫn cài mới. Không dùng QA bootstrap cho DB thật.
+Mô hình: **SOURCE Neon + MASTER Docker + MongoDB Atlas**. API, giao diện và worker chạy trên host theo [README](../README.md).
 
-Chạy từ gốc repo bằng Git Bash. Trước bước 3 cần build Backend image theo [README](../README.md). Giữ tên DB/user mặc định nếu không cần thay đổi.
+## Cấu hình
 
-## 1. Password files và cấu hình
-
-```bash
-mkdir -p /d/etl/private
-notepad.exe D:/etl/private/master-password
-notepad.exe D:/etl/private/source-password
-notepad.exe D:/etl/private/mongo-password
-test -f /d/etl/private/ops-connections.json || cp deploy/config/ops-connections.example.json /d/etl/private/ops-connections.json
-```
-
-Mỗi password file chứa một mật khẩu riêng, không dấu nháy, không `KEY=`, không BOM; lưu đúng tên, không thêm `.txt`. Bảo vệ private bằng ACL; không đưa vào Git/chat/log.
-
-Trong `D:/etl/private/app.env`, cập nhật:
+Chạy PowerShell tại gốc repo, dùng `.env` của dự án:
 
 ```dotenv
-ETL_DATA_NETWORK=etl-data
-DB_PROJECT=etl-databases
-MASTER_DB_NAME=etl_master
-MASTER_DB_ADMIN=etl_master_owner
-SOURCE_DB_NAME=etl_source
-SOURCE_DB_ADMIN=etl_source_owner
-MONGO_DB_ADMIN=etl_mongo_owner
-MASTER_PASSWORD_FILE=D:/etl/private/master-password
-SOURCE_PASSWORD_FILE=D:/etl/private/source-password
-MONGO_PASSWORD_FILE=D:/etl/private/mongo-password
-OPS_CONNECTIONS_FILE=D:/etl/private/ops-connections.json
+MASTER_ONLY_PROJECT=etl-master-only
+MASTER_ONLY_PORT=5434
+POSTGRES_DB=etl
+POSTGRES_USER=etl
+POSTGRES_PASSWORD=CHANGE_ME
+DATABASE_URL=postgresql+psycopg://etl:CHANGE_ME@127.0.0.1:5434/etl
 ```
 
-Sửa `ops-connections.json`: thay ba `CHANGE_ME` bằng password owner từ các file trên (percent-encode trong URI); giữ host `master-postgres`, `source-postgres`, `mongo`. Đây là JSON owner riêng, không mount cho API/worker.
+Thay mật khẩu trước khi khởi tạo và percent-encode trong URI. `DATABASE_URL` phải khớp thông tin MASTER. SOURCE dùng `SOURCE_DATABASE_URL`; Atlas dùng `MONGO_URI`, `MONGO_DATABASE=etl_content` trong cùng `.env`.
 
-## 2. Chạy server database
+## Khởi tạo MASTER
 
-```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
-  -Action Network -NetworkName etl-data
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 \
-  -Action DbStart -EnvFile D:/etl/private/app.env
-docker compose --env-file D:/etl/private/app.env -f deploy/compose.database.yml ps
+Image PostgreSQL có sẵn, không cần build Dockerfile:
+
+```powershell
+# Chỉ được liệt kê master-postgres.
+docker compose --env-file .env -f deploy/compose.master-only.yml config --services
+docker compose --env-file .env -f deploy/compose.master-only.yml pull master-postgres
+docker compose --env-file .env -f deploy/compose.master-only.yml up -d master-postgres
+docker compose --env-file .env -f deploy/compose.master-only.yml ps
+docker compose --env-file .env -f deploy/compose.master-only.yml exec master-postgres pg_isready -U etl -d etl
 ```
 
-Ba server phải healthy. Compose không publish cổng và không chạy migration/seed. Quản trị bằng `docker compose exec`, app kết nối qua network `etl-data`.
+Nếu đổi user/database, thay tham số `-U`/`-d` tương ứng. Kết nối host: `127.0.0.1:5434`; trong container là cổng `5432`. Compose chỉ tạo service `master-postgres` và volume dữ liệu, không tạo SOURCE hoặc Mongo local. Không dùng compose ba database cho mô hình này.
 
-## 3. Schema — owner chạy một lần trên DB mới/trống
+Chỉ với **MASTER mới/trống đã xác minh**, tạo schema bằng kết nối MASTER:
 
-Sau khi xác nhận đúng DB, đặt cờ phê duyệt cho từng lệnh (không lưu vào app.env):
-
-```bash
-ETL_MAINTENANCE_APPROVAL=APPROVED_DATABASE_MAINTENANCE \
-docker compose --env-file D:/etl/private/app.env -f deploy/compose.ops.yml \
-  --profile ops run --rm ops master-migrate
-ETL_MAINTENANCE_APPROVAL=APPROVED_DATABASE_MAINTENANCE \
-docker compose --env-file D:/etl/private/app.env -f deploy/compose.ops.yml \
-  --profile ops run --rm ops source-migrate
-ETL_MAINTENANCE_APPROVAL=APPROVED_DATABASE_MAINTENANCE \
-docker compose --env-file D:/etl/private/app.env -f deploy/compose.ops.yml \
-  --profile ops run --rm ops mongo-bootstrap-empty
+```powershell
+.venv\Scripts\python.exe -m alembic upgrade 0020
+.venv\Scripts\python.exe -m alembic current
 ```
 
-Kỳ vọng 18 bảng Master/15 bảng SOURCE, không tính Alembic, 5 collection Mongo/schema/index 384D. `mongo-bootstrap-empty` từ chối DB không trống. Startup app không chạy các bước này.
+Giữ revision `0020`; không dùng `upgrade head` hoặc nâng `0021`. Không migration/seed SOURCE. Không tự DROP bảng OCR cũ trên MASTER: ORM hoặc lịch sử tác vụ có thể còn tham chiếu. OCR của luồng mới ghi job/page task/content units vào SOURCE, nội dung vào Atlas, MASTER giữ projection và trạng thái.
 
-## 4. Runtime roles riêng
+## Đồng bộ và Atlas
 
-**Master:** mở psql:
+SOURCE phải sẵn sàng và được cấp quyền. FULL sync với registry ID thực tế, ví dụ:
 
-```bash
-docker compose --env-file D:/etl/private/app.env -f deploy/compose.database.yml \
-  exec master-postgres psql -U etl_master_owner -d etl_master
+```powershell
+.venv\Scripts\python.exe -m data_sync_etl.cli sync-master --full --stream all --source-id postgresql
 ```
 
-Nhập SQL dưới đây, đặt password tương tác khi được hỏi. Role đã tồn tại thì dừng và đối chiếu quyền:
+MASTER mới có thể sinh user ID khác: xác minh mapping SOURCE ADMIN trước khi cập nhật danh tính trong owner contract, giữ nguyên phạm vi quyền đã phê duyệt.
 
-```sql
-CREATE ROLE etl_master_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-\password etl_master_runtime
-GRANT CONNECT ON DATABASE etl_master TO etl_master_runtime;
-GRANT USAGE ON SCHEMA public TO etl_master_runtime;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO etl_master_runtime;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO etl_master_runtime;
-\q
+Atlas giữ đúng 5 collection: `users`, `learning_resources`, `ocr_pages`, `mongo_content_units`, `content_bags`; validator `strict/error`, indexes theo contract và embedding 1024D. Kiểm tra bằng:
+
+```powershell
+.venv\Scripts\python.exe -m data_sync_etl.adapters.mongo.schema --inventory
+.venv\Scripts\python.exe -m data_sync_etl.adapters.mongo.meaning_schema --check
 ```
 
-**SOURCE:** cấp SELECT rồi đặt password:
+Chuẩn bị Atlas mới bằng quyền được cấp; không tự reset dữ liệu hoặc sao chép OCR mất provenance. Khởi động API/worker và bật OCR tự động theo [README](../README.md).
 
-```bash
-docker compose --env-file D:/etl/private/app.env -f deploy/compose.database.yml \
-  exec -T source-postgres psql -v ON_ERROR_STOP=1 -U etl_source_owner -d etl_source \
-  < scripts/sql/source_reader.sql
-docker compose --env-file D:/etl/private/app.env -f deploy/compose.database.yml \
-  exec source-postgres psql -U etl_source_owner -d etl_source
+## Dừng và bật lại
+
+```powershell
+docker compose --env-file .env -f deploy/compose.master-only.yml stop master-postgres
+docker compose --env-file .env -f deploy/compose.master-only.yml up -d master-postgres
 ```
 
-Trong psql: `\password etl_source_reader`, nhập password riêng, rồi `\q`. Không cấp ghi/superuser/role membership cho reader.
-
-**Mongo:** đăng nhập owner, nhập password khi được hỏi:
-
-```bash
-docker compose --env-file D:/etl/private/app.env -f deploy/compose.database.yml \
-  exec mongo mongosh --username etl_mongo_owner --authenticationDatabase admin --password
-```
-
-Trong mongosh:
-
-```javascript
-use etl_content
-db.createUser({user: "etl_runtime", pwd: passwordPrompt(), roles: [{role: "readWrite", db: "etl_content"}]})
-exit
-```
-
-## 5. Runtime connections và khởi động app
-
-Sửa `D:/etl/private/connections.json`, thay password runtime vừa đặt, percent-encode khi cần:
-
-```json
-{
-  "DATABASE_URL": "postgresql+psycopg://etl_master_runtime:YOUR_MASTER_RUNTIME_PASSWORD@master-postgres:5432/etl_master",
-  "SOURCE_DATABASE_URL": "postgresql+psycopg://etl_source_reader:YOUR_SOURCE_READER_PASSWORD@source-postgres:5432/etl_source",
-  "MONGO_URI": "mongodb://etl_runtime:YOUR_MONGO_RUNTIME_PASSWORD@mongo:27017/etl_content?authSource=etl_content",
-  "MONGO_DATABASE": "etl_content"
-}
-```
-
-Quay lại Check/Start trong [README](../README.md). Preflight chỉ đọc, không tự sửa schema/role. Dừng DB bằng `-Action DbStop`, giữ volumes. Đổi password file không đổi password DB đã khởi tạo.
+Named volume giữ dữ liệu qua các lần khởi động. Cập nhật code không cần xóa database. Không dùng `down -v` nếu cần giữ dữ liệu. Đổi `POSTGRES_PASSWORD` trong `.env` không tự đổi mật khẩu database đã khởi tạo.
