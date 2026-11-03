@@ -16,6 +16,15 @@ from data_sync_etl.domain.core import now
 from data_sync_etl.domain.source_ids import SourceLocator, source_identity_hash
 
 
+@pytest.mark.parametrize('empty', ['', '   ', None])
+def test_optional_create_catalog_fields_normalize_empty_form_values(empty):
+    payload = SourceResourceCreateService._validate_payload({
+        'provider_id': 'p1', 'resource_type_id': 't1', 'title': 'Scan',
+        'publication_status': 'DRAFT', 'subject_id': empty, 'grade_level_id': empty,
+    })
+    assert payload['subject_id'] is None and payload['grade_level_id'] is None
+
+
 class Repo:
     def __init__(self):
         locator = SourceLocator(

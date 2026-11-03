@@ -146,6 +146,50 @@ class MemoryUow:
     def __init__(self):
         self.tables, self.serial = {}, 0
 
+    def source_index_authorities(self, version_ids):
+        result = {}
+        for version_id in version_ids:
+            version = self.get('resource_versions', version_id)
+            if version:
+                result[version_id] = (version, self.get('master_learning_resources', version['resource_id']),
+                                      self.find('source_file_imports', {'target_version_id': version_id}))
+        return result
+
+    def ensure_checkpoint(self, stream):
+        if not self.get('sync_checkpoints', stream):
+            self.insert('sync_checkpoints', {'id': stream, 'stream_name': stream, 'last_id': None})
+
+    def source_ocr_authority(self, version_id, actor_id):
+        version = self.get('resource_versions', version_id)
+        user = self.get('master_users', actor_id.removeprefix('master:'))
+        resource = self.get('master_learning_resources', version['resource_id']) if version else None
+        if not version or not user or not resource:
+            return None
+        return version, resource, user, self.find('source_file_imports', {'target_version_id':version_id}, limit=2)
+
+    def source_ocr_states(self, namespace, *, active_only=False):
+        result = []
+        for version in self.source_ocr_inventory_page(namespace, limit=10001):
+            state = (version.get('processing_options') or {}).get('_source_ocr')
+            jobs = self.find('ocr_jobs', {'resource_version_id': version['id']})
+            if (state and state.get('source_job_id') and
+                    (not active_only or not jobs or jobs[0]['status'] not in ('COMPLETED', 'FAILED', 'CANCELLED'))):
+                result.append((version['id'], state))
+        return result
+
+    def source_ocr_ready_versions(self, namespace, *, resource_ids=None, limit=10):
+        return [v['id'] for v in self.source_ocr_inventory_page(namespace, resource_ids=resource_ids, limit=10001)
+                if (v.get('processing_options') or {}).get('_source_ocr_audit', {}).get('needs_execution')
+                and v['processing_options']['_source_ocr_audit'].get('execution_authorized')][:limit]
+
+    def source_ocr_inventory_page(self, namespace, *, after=None, resource_ids=None, limit=10, unaudited_only=False):
+        return [version for version in self.find('resource_versions', order=('id',))
+                if (not after or version['id'] > after)
+                and (not unaudited_only or not (version.get('processing_options') or {}).get('_source_ocr_audit')
+                     or version['processing_options']['_source_ocr_audit'].get('status') == 'RECHECK_REQUIRED')
+                and self.get('master_learning_resources', version['resource_id']).get('source_namespace') == namespace
+                and (resource_ids is None or version['resource_id'] in resource_ids)][:limit]
+
     @contextmanager
     def __call__(self):
         before = deepcopy(self.tables)
@@ -197,6 +241,9 @@ class MemoryUow:
 class Content:
     def __init__(self):
         self.pages, self.units = {}, {}
+
+    def has_ocr_pages(self, version_id):
+        return any(doc.resource_version_id == version_id for doc in self.pages.values())
 
     def insert_source_ocr_page(self, value):
         page = OCRPageDocument.model_validate(value)

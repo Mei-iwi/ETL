@@ -97,7 +97,7 @@ class MasterIdentityReader:
                         MasterLearningResource.created_by == user['id'],
                         MasterLearningResource.is_active.is_(True), MasterLearningResource.deleted_at.is_(None),
                         MasterLearningResource.source_missing_at.is_(None),
-                        MasterLearningResource.publication_status == 'PUBLISHED').limit(1001)).all()
+                        MasterLearningResource.publication_status.in_(('DRAFT', 'PUBLISHED'))).limit(1001)).all()
                     # Synced users can access only resources they created. Legacy
                     # explicit grants must never expand ownership-based access.
                     grants = set(owned)

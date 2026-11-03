@@ -1,4 +1,4 @@
-from data_sync_etl.application.processing_state import processing_state
+from data_sync_etl.application.processing_state import intake_status, processing_state
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.logging import flow
@@ -58,6 +58,7 @@ class EtlOrchestrator:
             )
             return {
                 "resource": resource,
+                "intake_status": intake_status(version, jobs[0] if jobs else None, stages),
                 "processing_status": processing_state(repo, jobs[0], getattr(self, 'text_store', None)) if jobs else 'NOT_STARTED',
                 "version": version,
                 "latest_version": latest,

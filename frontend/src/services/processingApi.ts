@@ -1,6 +1,8 @@
 import type {
     ContentUnitsResult,
+    JobStatus,
     ProcessingJobResult,
+    ProcessingStatus,
     ProcessResult,
 } from "../types/processing";
 
@@ -18,6 +20,60 @@ export class ProcessingApiError extends Error {
 
 export function isRetryableProcessingError(error: unknown) {
     return !(error instanceof ProcessingApiError) || error.status >= 500
+}
+
+export function isProcessingPending(jobStatus: JobStatus, processingStatus: ProcessingStatus) {
+    return jobStatus === 'PENDING' || jobStatus === 'RUNNING'
+        || (jobStatus === 'COMPLETED' && ['OCR_PENDING', 'FINALIZATION_PENDING', 'FINALIZING'].includes(processingStatus))
+}
+
+export function intakeStatusLabel(status: unknown): string {
+    const labels: Record<string, string> = {
+        RECEIVED: 'Đã tiếp nhận - Chờ kiểm tra OCR', CHECKING_OCR: 'Đang kiểm tra OCR',
+        OCR_QUEUED: 'Đã xếp hàng OCR', OCR_RUNNING: 'Đang nhận dạng OCR',
+        WAITING_AUTHORIZATION: 'Chờ quyền xử lý', WAITING_SOURCE_MAPPING: 'Đang đồng bộ phiên bản',
+        PROVENANCE_REQUIRED: 'Cần xác minh nguồn OCR', SOURCE_INVALID: 'Nguồn không còn hợp lệ',
+        RETRY_WAIT: 'Chờ thử lại', PROCESSING_FAILED: 'Xử lý thất bại',
+        OCR_PENDING: 'Đã xếp hàng OCR', OCR_FAILED: 'OCR thất bại',
+        FINALIZATION_PENDING: 'Chờ chuẩn hóa nội dung', FINALIZING: 'Đang chuẩn hóa nội dung',
+        FINALIZATION_FAILED: 'Chuẩn hóa nội dung thất bại',
+        INDEXING: 'Đang tạo chỉ mục', INDEX_FAILED: 'Tạo chỉ mục thất bại',
+        READY: 'Sẵn sàng tra cứu', CONTENT_READY: 'Đã xử lý nội dung',
+        NOT_STARTED: 'Chưa yêu cầu xử lý', NO_EXTRACTABLE_CONTENT: 'Không có nội dung trích xuất',
+    }
+    return typeof status === 'string' ? labels[status] || 'Đang cập nhật trạng thái' : 'Đang cập nhật trạng thái'
+}
+
+export function intakeStatusTone(status: unknown): 'error' | 'success' | 'active' {
+    if (['SOURCE_INVALID', 'PROCESSING_FAILED', 'INDEX_FAILED', 'OCR_FAILED', 'FINALIZATION_FAILED'].includes(String(status))) return 'error'
+    return ['READY', 'CONTENT_READY'].includes(String(status)) ? 'success' : 'active'
+}
+
+export function ocrAuditMessage(status: unknown, reason?: unknown): string {
+    if (status === 'WAITING_FOR_PROCESS_AUTHORIZATION') {
+        const reasons: Record<string, string> = {
+            SOURCE_OCR_VERSION_NOT_AUTHORIZED: 'Phiên bản nguồn chưa đủ điều kiện theo policy OCR tự động đã được phê duyệt.',
+            SOURCE_OCR_LIFECYCLE_NOT_AUTHORIZED: 'Trạng thái duyệt của phiên bản nguồn chưa cho phép OCR.',
+            SOURCE_OCR_EXECUTION_MAPPING_REQUIRED: 'Đang chờ hoàn tất mapping phiên bản nguồn để xử lý OCR.',
+            SOURCE_OCR_ACTOR_CONTRACT_DENIED: 'Tài khoản dịch vụ chưa được phê duyệt để xử lý OCR trong phạm vi này.',
+        }
+        if (typeof reason === 'string' && reasons[reason]) return reasons[reason]
+    }
+    const messages: Record<string, string> = {
+        CHECKING: 'Đang kiểm tra OCR và quyền xử lý tại nguồn.',
+        RECHECK_REQUIRED: 'Đang chờ kiểm tra lại quyền và trạng thái OCR tại nguồn.',
+        QUEUED: 'Đã xếp hàng OCR. Worker sẽ tự động tiếp tục xử lý.',
+        WAITING_FOR_PROCESS_AUTHORIZATION: 'Đã kiểm tra OCR. Đang chờ quyền xử lý tài liệu.',
+        WAITING_FOR_SOURCE_MAPPING: 'Đang chờ hoàn tất đồng bộ phiên bản nguồn.',
+        ABSENT: 'Chưa có OCR. Đang chờ đưa vào xử lý.',
+        PARTIAL: 'OCR chưa đầy đủ. Hệ thống đang kiểm tra các trang còn thiếu.',
+        COMPLETE_VERIFIED: 'OCR đã được xác minh. Nội dung và chỉ mục được xử lý ở các bước tiếp theo.',
+        UNVERIFIED: 'Có dữ liệu OCR chưa đủ bằng chứng xác minh. Chưa thể tái sử dụng.',
+        INVALID_OR_REVOKED: 'Phiên bản nguồn đã thay đổi hoặc không còn được phép sử dụng.',
+        RETRYABLE_ERROR: 'Chưa kiểm tra được OCR. Hệ thống sẽ thử lại.',
+        RETRY_EXHAUSTED: 'Tự động xử lý đã dừng sau nhiều lần lỗi. Cần kiểm tra trước khi thử lại.',
+    }
+    return typeof status === 'string' ? messages[status] || '' : ''
 }
 
 export type OriginalOCRPage = {

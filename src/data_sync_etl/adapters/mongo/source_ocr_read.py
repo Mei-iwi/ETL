@@ -20,6 +20,14 @@ class MongoExistingSourceOCRReader:
         if not {'ocr_pages', 'mongo_content_units'} <= names:
             raise DomainError('SOURCE_MONGO_COLLECTION_MISSING')
 
+    def has_ocr_pages(self, version_id):
+        """Inventory existence only; never hydrate protected raw text."""
+        self._require_existing()
+        try:
+            return bool(self.database['ocr_pages'].count_documents({'resource_version_id': version_id}, limit=1))
+        except PyMongoError:
+            raise DomainError('SOURCE_MONGO_UNAVAILABLE') from None
+
     def ocr_pages(self, *, version_id, job_id=None, limit=100, offset=0):
         self._require_existing()
         try:

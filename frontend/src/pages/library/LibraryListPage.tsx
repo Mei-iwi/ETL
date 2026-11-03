@@ -8,6 +8,7 @@ import {
     type ResourceTypeOption,
 } from '../../services/libraryLookupApi'
 import styles from './LibraryListPage.module.css'
+import { intakeStatusLabel, intakeStatusTone } from '../../services/processingApi'
 
 type Resource = {
     id: string
@@ -23,6 +24,7 @@ type Resource = {
         version_number: number
         lifecycle_status: string
         processing_status: string
+        intake_status?: string
         created_at: string
         source_version_id: string | null
     } | null
@@ -220,13 +222,13 @@ export function LibraryListPage() {
                                                 title={resource.latest_version.source_version_id ? `Nguồn: ${resource.latest_version.source_version_id}` : undefined}>
                                                 Phiên bản {resource.latest_version.version_number}
                                             </span>
-                                            <span className={resource.latest_version.lifecycle_status === 'REJECTED' || resource.latest_version.processing_status.includes('FAILED') ? styles.failed
-                                                : resource.latest_version.processing_status === 'CONTENT_READY' ? styles.ready : styles.pending}>
-                                                {resource.latest_version.lifecycle_status === 'REJECTED' ? 'Bị từ chối' : ({
-                                                    NOT_STARTED: 'Chưa xử lý', OCR_PENDING: 'Đang trích xuất', OCR_FAILED: 'Lỗi trích xuất',
-                                                    FINALIZING: 'Đang hoàn thiện', FINALIZATION_PENDING: 'Chờ hoàn thiện',
-                                                    FINALIZATION_FAILED: 'Lỗi hoàn thiện', CONTENT_READY: 'Đã xử lý',
-                                                }[resource.latest_version.processing_status] || 'Chưa rõ trạng thái')}
+                                            <span className={resource.latest_version.lifecycle_status === 'REJECTED' ? styles.failed : ({
+                                                error: styles.failed, success: styles.ready, active: styles.pending,
+                                            }[intakeStatusTone(resource.latest_version.intake_status || resource.latest_version.processing_status)])}>
+                                                {resource.latest_version.lifecycle_status === 'REJECTED' ? 'Bị từ chối' : intakeStatusLabel(
+                                                    resource.latest_version.intake_status || (resource.latest_version.source_version_id
+                                                        && resource.latest_version.processing_status === 'NOT_STARTED' ? 'RECEIVED'
+                                                        : resource.latest_version.processing_status))}
                                             </span>
                                             <span className={styles.versionTime}>{resource.latest_version.source_version_id ? 'Tiếp nhận' : 'Tạo'}: {new Date(resource.latest_version.created_at).toLocaleString('vi-VN')}</span>
                                         </div> : <span className={styles.versionTime}>Chưa có phiên bản</span>}

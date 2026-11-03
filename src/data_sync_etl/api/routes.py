@@ -1793,6 +1793,9 @@ def reindex_version(id: ResourceId, request: Request, body: ReindexRequest | Non
 @router.get("/api/v1/resource-versions/{id}/etl-status", tags=[TAG_PROCESSING])
 def status(id: ResourceId, request: Request):
     result = services(request).orchestrator.status(id)
+    audit = ((result.get('version') or {}).get('processing_options') or {}).get('_source_ocr_audit')
+    result['ocr_audit'] = ({key: audit.get(key) for key in ('status', 'observed_status', 'reason',
+        'checked_at', 'next_check_at', 'execution_authorized')} if isinstance(audit, dict) else None)
     # A processing-status response is not a file-open capability. Source
     # locators must stay behind the authenticated source resolver.
     for key in ('version', 'latest_version'):
@@ -1802,8 +1805,24 @@ def status(id: ResourceId, request: Request):
                            if name not in ('storage_bucket', 'storage_object_key')}
             if isinstance(result[key].get('processing_options'), dict):
                 result[key]['processing_options'] = {name: value for name, value in result[key]['processing_options'].items()
-                                                     if name != '_source_ocr'}
+                                                     if name not in ('_source_ocr', '_source_ocr_audit')}
     return result
+
+
+@router.get('/api/v1/system/source-ocr-inventory', tags=[TAG_PROCESSING])
+def source_ocr_inventory_status(request: Request, response: Response):
+    principal = getattr(request.state, 'auth_principal', None)
+    if principal is None or principal.role != 'ADMIN':
+        raise HTTPException(403, detail={'code': 'SOURCE_OCR_INVENTORY_FORBIDDEN'})
+    inventory = getattr(services(request).ocr, 'inventory', None)
+    if inventory is None:
+        raise HTTPException(503, detail={'code': 'SOURCE_OCR_INVENTORY_UNAVAILABLE'})
+    response.headers['Cache-Control'] = 'private, no-store'
+    with services(request).uow() as repo:
+        checkpoint = repo.get('sync_checkpoints', inventory.stream)
+        counts = repo.source_ocr_inventory_counts(services(request).ocr.contract.namespace)
+    return {'last_batch': inventory.summary, 'checkpoint': checkpoint, 'counts': counts,
+            'discovered': sum(counts.values()), 'classified': sum(counts.values()) - counts.get('UNAUDITED', 0)}
 
 
 @router.get(
@@ -1854,8 +1873,24 @@ def bilingual_access(request, version_id):
     principal = getattr(request.state, 'auth_principal', None)
     source_processing = getattr(container.ocr, 'source_owned', False) and container.ocr.state(version_id)
     if source_processing:
-        container.search.authorize_source_processing_version(version_id, access=search_access(request))
-        container.ocr.authorize_identity(source_processing['identity'])
+        access = search_access(request)
+        try:
+            readable = container.source_resolver.derived_index_authorized(version_id, access=access)
+            if readable:
+                readable = container.ocr.authorize_identity(source_processing['identity'])
+        except SourceFileError as exc:
+            raise HTTPException(503 if exc.transient else 403,
+                                detail={'code': exc.code}) from None
+        if not readable:
+            raise HTTPException(403, detail={'code': 'SOURCE_CONTENT_ACCESS_DENIED'})
+        with container.uow() as repo:
+            version = repo.get('resource_versions', version_id)
+            resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+            units = repo.find('content_units', {'resource_version_id': version_id},
+                              limit=container.settings.index_max_units + 1)
+        if (len(units) > container.settings.index_max_units
+                or any(not access.allows(resource or {}, version or {}, unit) for unit in units)):
+            raise HTTPException(403, detail={'code': 'SOURCE_CONTENT_ACCESS_DENIED'})
     elif principal is not None and principal.role != 'ADMIN':
         try:
             container.search.authorize_content_version(version_id, access=search_access(request))

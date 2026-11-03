@@ -1,6 +1,7 @@
 import os
 from dataclasses import replace
 from pathlib import Path
+from time import monotonic
 
 from pymongo import MongoClient
 
@@ -670,15 +671,20 @@ class Container:
             component_projection_worker=component_projection_worker,
         )
         self._prefer_index_reconcile = False
+        self._next_source_reconcile_at = 0.0
 
     def reconcile_processing(self):
-        if getattr(self.ocr, 'source_owned', False):
-            self.ocr.reconcile_once()
         translated = self.bilingual.once()
         self._prefer_index_reconcile = not self._prefer_index_reconcile
         if self._prefer_index_reconcile:
-            return self.indexing.once() or self.processing_finalizer.reconcile_once() or translated
-        return self.processing_finalizer.reconcile_once() or self.indexing.once() or translated
+            worked = self.indexing.once() or self.processing_finalizer.reconcile_once() or translated
+        else:
+            worked = self.processing_finalizer.reconcile_once() or self.indexing.once() or translated
+        # Publish ready content/index work before polling historical SOURCE jobs.
+        if getattr(self.ocr, 'source_owned', False) and monotonic() >= self._next_source_reconcile_at:
+            self.ocr.reconcile_once()
+            self._next_source_reconcile_at = monotonic() + 30
+        return worked
 
     def finalize_bilingual(self, job_id):
         with self.uow() as repo:

@@ -2,7 +2,7 @@
 import json
 from contextvars import ContextVar
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
 
@@ -26,6 +26,7 @@ from data_sync_etl.application.source_ocr_probe import SourceOCRProbe
 from data_sync_etl.application.source_resource_create import SourceResourceCreateService
 from data_sync_etl.db.session import make_engine
 from data_sync_etl.domain.core import DomainError, now
+from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.domain.source_ocr_contract import SourceOCRContract
 
@@ -77,7 +78,9 @@ class SourceOCRPipeline:
         self.resolver, self.storage = container.source_resolver, container.storage
         self.heartbeat_timeout = self.settings.ocr_heartbeat_timeout_seconds
         self.staging_root = (self.settings.storage_root / '.source-ocr').resolve()
-        self.writer = PostgreSQLSourceOCRWriter(engine, contract, authorize_identity=self.authorize_identity)
+        self.writer = PostgreSQLSourceOCRWriter(engine, contract, authorize_identity=self.authorize_identity,
+                                                authorize_created_version=self.authorize_created_version,
+                                                authorize_namespace_version=self.authorize_namespace_version)
         self.queue = PostgreSQLSourceOCRQueue(self.writer, heartbeat_timeout=self.heartbeat_timeout,
                                               max_retries=self.settings.ocr_max_retries, max_active=self.settings.ocr_max_active)
         self.reader = PostgreSQLSourceOCRReader(engine, authorize=self.authorize_snapshot,
@@ -86,7 +89,10 @@ class SourceOCRPipeline:
         self.mongo = MongoExistingSourceOCRReader(container.documents.database)
         self.probe = SourceOCRProbe(self.mongo, authorize=self.authorize_snapshot, proof_provider=self.proof)
         self._reconcile_cursor = 0
+        self._claim_cursor = 0
         self._schedule_cursor = 0
+        from data_sync_etl.application.source_ocr_inventory import SourceOCRInventory
+        self.inventory = SourceOCRInventory(self)
 
     def _scheduler_identity(self):
         actor, role = self.settings.source_ocr_actor_id, self.settings.source_ocr_role
@@ -94,8 +100,104 @@ class SourceOCRPipeline:
             return next(iter(self.contract.actor_ids)), next(iter(self.contract.roles))
         return actor, role
 
+    def authorize_created_version(self, identity):
+        if (not self.contract.allow_etl_created_versions or identity.get('namespace') != self.contract.namespace
+                or identity.get('actor_id') not in self.contract.actor_ids):
+            return False
+        with self.uow() as repo:
+            version = repo.get('resource_versions', identity['master_version_id'])
+            resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+            if (not resource or resource.get('source_origin') != 'POSTGRESQL'
+                    or resource.get('created_by') != identity['actor_id'].removeprefix('master:')
+                    or version.get('source_hash') != identity.get('source_hash')):
+                return False
+            receipt_reader = getattr(repo, 'source_version_writeback_receipt', None)
+            receipt = (receipt_reader(resource.get('source_record_key'), identity['source_version_id'],
+                                      identity['source_hash'], namespace=identity['namespace'])
+                       if callable(receipt_reader) else None)
+        return bool(receipt and receipt.get('requested_by') == identity['actor_id']
+                    and receipt.get('source_user_id') == identity['source_user_id']
+                    and receipt.get('source_namespace') == identity['namespace']
+                    and receipt.get('source_resource_id') == resource.get('source_record_key')
+                    and receipt.get('source_version_id') == identity['source_version_id']
+                    and receipt.get('source_hash') == identity['source_hash'])
+
+    def authorize_namespace_version(self, identity, *, reference=None, access=None, authority=None):
+        scope = self.contract.namespace_scope
+        if (scope is None or identity.get('namespace') != self.contract.namespace
+                or (identity.get('actor_id'), identity.get('role')) != (scope.service_actor_id, scope.service_role)
+                or self._scheduler_identity() != (scope.service_actor_id, scope.service_role)
+                or scope.service_actor_id not in self.contract.actor_ids or scope.service_role not in self.contract.roles):
+            return False
+        with self.uow() as repo:
+            authority = authority or repo.source_ocr_authority(identity['master_version_id'], scope.service_actor_id)
+            if authority is None:
+                return False
+            version, resource, user, rows = authority
+            if (not resource or len(rows) != 1 or resource.get('source_origin') != 'POSTGRESQL'
+                    or not user or user.get('source_namespace') != self.contract.namespace
+                    or resource.get('source_namespace') != self.contract.namespace
+                    or not resource.get('is_active') or resource_deleted(resource) or resource.get('source_missing_at')
+                    or resource.get('publication_status') not in scope.publications
+                    or version['source_hash'] != identity.get('source_hash')
+                    or rows[0].get('source_version_id') != identity.get('source_version_id')
+                    or rows[0].get('resource_id') != resource['id']
+                    or rows[0].get('source_hash') != version['source_hash']
+                    or rows[0].get('source_version_number') != version['version_number']
+                    or rows[0].get('last_error_code') in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING')
+                    or SourceResourceCreateService._source_user_id(repo, scope.service_actor_id, user=user) != identity.get('source_user_id')):
+                return False
+        # The optional context comes only from this operation's freshly resolved
+        # reference/principal. Nothing is cached across file IO, leases or turns.
+        access = access or self._access(scope.service_actor_id, scope.service_role, resource['id'])
+        if access.actor_id != scope.service_actor_id or not access.internal:
+            return False
+        self.container.search.authorize_source_processing_version(version['id'], access=access)
+        registrations = [item for item in self.resolver.source_registry.registrations()
+                         if item.enabled and item.namespace == self.contract.namespace and item.backend.lower() == 'postgresql']
+        if (rows[0]['source_system'] not in {item.source_id for item in registrations}
+                and not (rows[0]['source_system'] == 'postgresql' and len(registrations) == 1)):
+            return False
+        adapter = self.resolver._source_adapter(rows[0]['source_system'])
+        if getattr(adapter, 'source_namespace', self.settings.source_namespace) != self.contract.namespace:
+            return False
+        source = None
+        if (reference is not None and reference.source_version_id == identity['source_version_id']
+                and reference.target_version_id == identity['master_version_id']
+                and reference.expected_sha256 == identity['source_hash']):
+            source = getattr(reference, 'source_snapshot', None)
+        if source is None:
+            source = adapter.get_versions([identity['source_version_id']]).get(identity['source_version_id'])
+        return bool(source and source.get('resource_id') == resource.get('source_record_key')
+                    and source.get('source_version_number') == version['version_number']
+                    and source.get('source_hash', '').lower() == identity['source_hash']
+                    and source.get('resource_active', True) and source.get('resource_deleted_at') is None
+                    and source.get('resource_publication_status') in scope.publications
+                    and source.get('source_lifecycle_status') in scope.lifecycles)
+
+    def version_allowed(self, identity, *, reference=None, access=None, authority=None):
+        return (identity['source_version_id'] in self.contract.version_ids
+                or self.authorize_namespace_version(identity, reference=reference, access=access, authority=authority)
+                or self.authorize_created_version(identity))
+
+    def created_version_allowed(self, master_version_id, actor_id):
+        with self.uow() as repo:
+            version = repo.get('resource_versions', master_version_id)
+            rows = repo.find('source_file_imports', {'target_version_id': master_version_id}, limit=2)
+            if not version or len(rows) != 1:
+                return False
+            if rows[0]['source_version_id'] in self.contract.version_ids:
+                return True
+            source_user = SourceResourceCreateService._source_user_id(repo, actor_id)
+        return self.version_allowed(dict(namespace=self.contract.namespace,
+            master_version_id=master_version_id, source_version_id=rows[0]['source_version_id'],
+            source_hash=version['source_hash'], actor_id=actor_id, source_user_id=source_user,
+            role=self._scheduler_identity()[1] if actor_id == self._scheduler_identity()[0] else None))
+
     def status_allowed(self, source, namespace):
-        if (namespace != self.contract.namespace or source.get('source_version_id') not in self.contract.version_ids
+        if (namespace != self.contract.namespace
+                or (source.get('source_version_id') not in self.contract.version_ids
+                    and not self.contract.allow_etl_created_versions and self.contract.namespace_scope is None)
                 or source.get('source_lifecycle_status') not in self.contract.lifecycles
                 or not source.get('resource_active', True) or source.get('resource_deleted_at') is not None):
             return False
@@ -106,25 +208,34 @@ class SourceOCRPipeline:
                 rows = repo.find('source_file_imports', {'target_version_id': version_id}, limit=2)
             role = 'ADMIN' if access.scope == 'authenticated_admin' else 'OPERATOR'
             if (len(rows) == 1 and rows[0]['source_version_id'] == source['source_version_id']
-                    and access.actor_id in self.contract.actor_ids and role in self.contract.roles):
+                    and access.actor_id in self.contract.actor_ids and role in self.contract.roles
+                    and self.created_version_allowed(version_id, access.actor_id)):
                 self.container.search.authorize_source_processing_version(version_id, access=access)
                 return True
-        for version_id, state in self.states():
-            if state and state['identity']['source_version_id'] == source['source_version_id']:
-                identity = state['identity']
-                access = self._access(identity['actor_id'], identity['role'], self._resource_id(version_id))
-                self.container.search.authorize_source_processing_version(version_id, access=access)
-                return True
+        # Authorization of one file must not hydrate every imported version.
+        # Ambiguous mappings remain denied, including across registered sources.
+        with self.uow() as repo:
+            rows = repo.find('source_file_imports', {'source_version_id': source['source_version_id']}, limit=2)
+            if len(rows) != 1 or not rows[0].get('target_version_id'):
+                return False
+            version_id = rows[0]['target_version_id']
+            state = self.state(version_id, repo)
+        if state:
+            identity = state['identity']
+            if (identity['namespace'] != namespace or identity['source_version_id'] != source['source_version_id']
+                    or not self.version_allowed(identity)):
+                return False
+            access = self._access(identity['actor_id'], identity['role'], self._resource_id(version_id))
+            self.container.search.authorize_source_processing_version(version_id, access=access)
+            return True
         # A scheduler identity is explicitly configured and still needs a current grant.
         actor, role = self._scheduler_identity()
         if actor in self.contract.actor_ids and role in self.contract.roles:
-            for version_id, _ in self.states():
-                with self.uow() as repo:
-                    rows = repo.find('source_file_imports', {'target_version_id': version_id}, limit=2)
-                if len(rows) == 1 and rows[0]['source_version_id'] == source['source_version_id']:
-                    access = self._access(actor, role, self._resource_id(version_id))
-                    self.container.search.authorize_source_processing_version(version_id, access=access)
-                    return True
+            if not self.created_version_allowed(version_id, actor):
+                return False
+            access = self._access(actor, role, self._resource_id(version_id))
+            self.container.search.authorize_source_processing_version(version_id, access=access)
+            return True
         return False
 
     def _resource_id(self, version_id):
@@ -145,6 +256,11 @@ class SourceOCRPipeline:
         repo.update('resource_versions', version_id, {'processing_options': options, 'updated_at': now()})
 
     def _reference(self, version_id):
+        with self.uow() as repo:
+            version = repo.get('resource_versions', version_id)
+            resource = repo.get('master_learning_resources', version['resource_id']) if version else None
+        if resource and resource.get('source_namespace') != self.contract.namespace:
+            raise DomainError('SOURCE_OCR_NAMESPACE_MISMATCH')
         reference = self.resolver.resolve(version_id)
         if reference.ownership != 'SOURCE_BACKED':
             raise DomainError('SOURCE_OCR_SOURCE_OWNERSHIP_REQUIRED')
@@ -157,19 +273,22 @@ class SourceOCRPipeline:
         return reference
 
     def authorize_identity(self, identity):
+        if identity.get('actor_id') not in self.contract.actor_ids or identity.get('role') not in self.contract.roles:
+            return False
         reference = self._reference(identity['master_version_id'])
         if (reference.source_version_id != identity['source_version_id']
                 or reference.expected_sha256 != identity['source_hash']
                 or identity['namespace'] != self.contract.namespace):
             return False
         with self.uow() as repo:
-            source_user = SourceResourceCreateService._source_user_id(repo, identity['actor_id'])
-            user = repo.get('master_users', identity['actor_id'].removeprefix('master:'))
-            resource = repo.get('master_learning_resources', reference.resource_id)
+            authority = repo.source_ocr_authority(identity['master_version_id'], identity['actor_id'])
+            if authority is None:
+                return False
+            version, resource, user, _ = authority
+            source_user = SourceResourceCreateService._source_user_id(repo, identity['actor_id'], user=user)
             if user.get('source_namespace') != self.contract.namespace:
                 return False
-            state = self.state(identity['master_version_id'], repo)
-            version = repo.get('resource_versions', identity['master_version_id'])
+            state = deepcopy((version.get('processing_options') or {}).get(STATE_KEY))
         if not state or state['identity'] != identity or source_user != identity['source_user_id']:
             return False
         if state['fingerprint'] != self.fingerprint(version):
@@ -177,7 +296,7 @@ class SourceOCRPipeline:
         # Revalidate the persisted actor's grant every time, including worker recovery.
         access = self._access(identity['actor_id'], identity['role'], resource['id'])
         self.container.search.authorize_source_processing_version(identity['master_version_id'], access=access)
-        return True
+        return self.version_allowed(identity, reference=reference, access=access, authority=authority)
 
     def _access(self, actor_id, role, resource_id):
         # The server-side grant provider is reused; a stored role does not mint a grant.
@@ -240,6 +359,10 @@ class SourceOCRPipeline:
         token = _PROCESSING_CALLER.set((version_id, access))
         try:
             return self._create_job(version_id, triggered_by, fence=fence, access=access)
+        except DomainError as exc:
+            if str(exc) in ('SOURCE_OCR_EXTERNAL_JOB_REQUIRES_PROVENANCE', 'SOURCE_OCR_STRUCTURAL_MAPPING_REQUIRED'):
+                self.record_scheduling_failure(version_id, exc)
+            raise
         finally:
             _PROCESSING_CALLER.reset(token)
 
@@ -248,6 +371,15 @@ class SourceOCRPipeline:
             raise DomainError('SOURCE_OCR_AUTHENTICATED_ACTOR_REQUIRED')
         with self.uow.processing_lock(version_id) as acquired:
             if not acquired:
+                existing_state = self.state(version_id)
+                if (existing_state and existing_state.get('source_job_id') and access is not None
+                        and existing_state['identity']['actor_id'] == access.actor_id
+                        and self.authorize_identity(existing_state['identity'])):
+                    public_id = stable_id('SJ', existing_state['identity']['namespace'], existing_state['source_job_id'])
+                    with self.uow() as repo:
+                        existing_job = repo.get('ocr_jobs', public_id)
+                    if existing_job:
+                        return existing_job
                 raise DomainError('SOURCE_OCR_ALREADY_RUNNING')
             state = self.state(version_id)
             if access is None:
@@ -279,10 +411,24 @@ class SourceOCRPipeline:
                         raise DomainError('SOURCE_OCR_PROCESSING_IDENTITY_CHANGED')
                 else:
                     if (actor not in self.contract.actor_ids or role not in self.contract.roles
-                            or reference.source_version_id not in self.contract.version_ids):
+                            or not self.version_allowed(identity)):
                         raise DomainError('SOURCE_OCR_CONTRACT_DENIED')
-                    state = dict(identity=identity, fingerprint=fingerprint, generation=1, pages={}, units={})
+                    state = dict(identity=identity, fingerprint=fingerprint, generation=1, pages={}, units={},
+                                 job_create_intent_at=now().isoformat())
                     self._save(repo, version_id, state)
+            if not state.get('source_job_id'):
+                existing_snapshot = self.snapshot(state)
+                existing_job = existing_snapshot['job']
+                if existing_job:
+                    intent = state.get('job_create_intent_at')
+                    created = existing_job.get('created_at')
+                    if (existing_job['status'] != 'PENDING' or existing_job['total_pages'] != 0
+                            or existing_snapshot['pages'] or existing_job.get('triggered_by') != identity['source_user_id']
+                            or not intent or not isinstance(created, datetime)
+                            or created < datetime.fromisoformat(intent)):
+                        raise DomainError('SOURCE_OCR_EXTERNAL_JOB_REQUIRES_PROVENANCE')
+                if existing_snapshot['units']:
+                    raise DomainError('SOURCE_OCR_STRUCTURAL_MAPPING_REQUIRED')
             job_id = self.writer.ensure_job(**identity)
             if state.get('source_job_id') not in (None, job_id):
                 raise DomainError('SOURCE_OCR_JOB_CONFLICT')
@@ -290,6 +436,10 @@ class SourceOCRPipeline:
             with self.uow() as repo:
                 self._save(repo, version_id, state)
             snapshot = self.snapshot(state)
+            # Publish the stable public identity before slow authorized staging.
+            # Concurrent HTTP calls can return this same pending projection;
+            # SOURCE workers still require scheduled=True before claiming.
+            self.sync(state, snapshot)
             if snapshot['job']['status'] == 'CANCELLED':
                 raise DomainError('SOURCE_OCR_JOB_CANCELLED')
             result = self.probe.probe(snapshot, generation=state['generation'], processing_fingerprint=fingerprint)
@@ -367,14 +517,9 @@ class SourceOCRPipeline:
             if document is not None:
                 document.close()
 
-    def states(self):
+    def states(self, *, active_only=False):
         with self.uow() as repo:
-            # Bounded rotating scan also revisits late commits after restart.
-            candidates = repo.find('source_file_imports', {}, order=('id',), limit=10001)
-            if len(candidates) > 10000:
-                raise DomainError('SOURCE_OCR_RECONCILE_LIMIT')
-            return [(row['target_version_id'], self.state(row['target_version_id'], repo))
-                    for row in candidates if row.get('target_version_id')]
+            return deepcopy(repo.source_ocr_states(self.contract.namespace, active_only=active_only))
 
     def sync(self, state, snapshot=None):
         snapshot = snapshot or self.snapshot(state)
@@ -439,8 +584,17 @@ class SourceOCRPipeline:
                 repo.update('resource_versions', version['id'], {'lifecycle_status': 'INGESTED'})
             return repo.get('ocr_jobs', master_id)
 
+    def _projection_terminal(self, state):
+        # A terminal projection is a scheduling hint. Reconciliation still polls
+        # SOURCE and makes externally retried jobs runnable again.
+        with self.uow() as repo:
+            job = repo.get('ocr_jobs', stable_id('SJ', state['identity']['namespace'], state['source_job_id']))
+        return bool(job and job['status'] in ('COMPLETED', 'FAILED', 'CANCELLED'))
+
     def claim(self, worker_id):
-        for version_id, state in self.states():
+        states = self.states(active_only=True)
+        start = self._claim_cursor % len(states) if states else 0
+        for index, (version_id, state) in enumerate(states[start:] + states[:start]):
             if not state or not state.get('source_job_id') or not state.get('scheduled'):
                 continue
             try:
@@ -453,6 +607,7 @@ class SourceOCRPipeline:
                 event(stage='source_ocr', action='CLAIM_UNAVAILABLE', error_type=type(safe).__name__)
                 continue
             if task:
+                self._claim_cursor = (start + index + 1) % len(states)
                 return {**task, 'master_version_id': version_id,
                         'job_id': stable_id('SJ', state['identity']['namespace'], state['source_job_id'])}
         return None
@@ -497,7 +652,7 @@ class SourceOCRPipeline:
             result, _ = self.recognizer._recognize_path({'page_num': 1}, version, path,
                                                        source_directory=path.parent)
         else:
-            result = self.recognizer._recognize_bytes({'page_num': 1}, version, path.name, payload)
+            result = self.recognizer._recognize_bytes({'page_num': 1}, version, path.name, payload, allow_empty=True)
         result = paired_result(result, version['id'], task['page_num'],
                                {'target_language': self.recognizer.default_target_language,
                                 **(version.get('processing_options') or {})})
@@ -563,7 +718,8 @@ class SourceOCRPipeline:
             permission = dict(namespace=identity['namespace'], table='content_units', fields=fields,
                               role=identity['role'], actor_id=identity['actor_id'],
                               source_version_id=identity['source_version_id'], lifecycle=lifecycle)
-            if not all(self.contract.allows(**permission, action=action) for action in ('select', 'insert')):
+            if not all(self.writer.contract_for(identity).allows(**permission, action=action)
+                       for action in ('select', 'insert')):
                 raise DomainError('SOURCE_OCR_CONTRACT_DENIED')
             values = {key: unit[key] for key in ('unit_type', 'title', 'sequence_no', 'page_from', 'page_to',
                                                 'review_status', 'retrieval_eligible')}
@@ -606,8 +762,8 @@ class SourceOCRPipeline:
 
     def recover_stale(self):
         recovered = 0
-        for _, state in self.states():
-            if state and state.get('source_job_id'):
+        for _, state in self.states(active_only=True):
+            if state and state.get('source_job_id') and not self._projection_terminal(state):
                 try:
                     recovered += self.queue.recover(state['identity'], state['source_job_id'])
                     self.sync(state)
@@ -655,21 +811,22 @@ class SourceOCRPipeline:
     def schedule_authorized_source_job(self, *, limit=50):
         if not self._scheduler_identity()[0]:
             return False
-        rows = self.states()
-        if not rows:
-            return False
-        start = self._schedule_cursor % len(rows)
-        self._schedule_cursor = (start + limit) % len(rows)
-        for version_id, state in (rows[start:] + rows[:start])[:limit]:
-            if state and state.get('scheduled'):
-                continue
-            if not self.scheduling_row(version_id):
-                continue
+        # Persisted ready flags survive cursor movement/restart. They are only
+        # hints: scheduling and writer revalidate live authority before execution.
+        candidates = self.inventory.ready(limit=min(10, limit))
+        if not candidates:
+            candidates = self.inventory.once(limit=1, prioritize_new=True)
+        for version_id in candidates:
             try:
+                if not self.scheduling_row(version_id):
+                    self.inventory.defer(version_id)
+                    continue
                 self.create_job(version_id)
+                self.inventory.dispatched(version_id)
                 return True
             except Exception as exc:
                 self.record_scheduling_failure(version_id, exc)
+                self.inventory.defer(version_id)
                 continue
         return False
 
@@ -679,7 +836,7 @@ class SourceOCRPipeline:
         if len(rows) != 1:
             return None
         row = rows[0]
-        if (row.get('source_version_id') not in self.contract.version_ids
+        if (not self.created_version_allowed(version_id, self._scheduler_identity()[0])
                 or row.get('attempts', 0) >= self.settings.source_file_import_max_attempts
                 or row.get('status') in ('FAILED', 'RETRY_EXHAUSTED', 'CANCELLED')
                 or (row.get('next_retry_at') is not None and row['next_retry_at'] > now())):
@@ -690,7 +847,11 @@ class SourceOCRPipeline:
         if isinstance(error, DomainError) and str(error) == 'SOURCE_OCR_ALREADY_RUNNING':
             return
         code = str(error) if isinstance(error, DomainError) else 'SOURCE_OCR_SCHEDULE_FAILED'
-        if len(code) > 80 or not code.replace('_', '').isalnum():
+        code = {'SOURCE_OCR_LEGACY_VERSION_REQUIRES_EXPLICIT_PROVENANCE':
+                'SOURCE_OCR_LEGACY_PROVENANCE_REQUIRED'}.get(code, code)
+        # Existing MASTER schema limits source_file_imports.last_error_code to 50.
+        # A diagnostic must never prevent the scheduler from handling the next item.
+        if len(code) > 50 or not code.replace('_', '').isalnum():
             code = 'SOURCE_OCR_SCHEDULE_FAILED'
         with self.uow() as repo:
             rows = repo.find('source_file_imports', {'target_version_id': version_id}, limit=2, lock=True)

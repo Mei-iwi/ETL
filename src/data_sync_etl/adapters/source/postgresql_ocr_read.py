@@ -55,7 +55,7 @@ class PostgreSQLSourceOCRReader:
                 if not self.lifecycle_allowed(version['lifecycle_status']):
                     raise DomainError('SOURCE_OCR_LIFECYCLE_BLOCKED')
                 jobs = conn.execute(text(
-                    'SELECT id, resource_version_id, status, total_pages, completed_pages, failed_pages, '
+                    'SELECT id, resource_version_id, triggered_by, created_at, status, total_pages, completed_pages, failed_pages, '
                     f'started_at, completed_at, updated_at FROM {prefix}ocr_jobs WHERE resource_version_id = :id LIMIT 2'
                 ), {'id': source_version_id}).mappings().all()
                 if len(jobs) > 1:

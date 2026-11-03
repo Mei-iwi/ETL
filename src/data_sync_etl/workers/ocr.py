@@ -1,3 +1,4 @@
+import re
 from threading import Event, Thread
 from time import monotonic
 from typing import Any, Callable
@@ -27,6 +28,7 @@ class OCRWorker:
         self.component_page_executor = component_page_executor
         self._next_recovery_at = 0.0
         self._tasks_since_reconcile = 0
+        self._tasks_since_inventory = 0
         self._prefer_component_projection = False
 
     def _background_once(self) -> bool:
@@ -53,8 +55,8 @@ class OCRWorker:
         with flow():
             current = monotonic()
             if current >= self._next_recovery_at:
-                self._next_recovery_at = current + self.recovery_interval_seconds
                 recovered = self.pipeline.recover_stale()["recovered"]
+                self._next_recovery_at = monotonic() + self.recovery_interval_seconds
                 event(
                     stage="ocr",
                     action="STALE_RECOVERY",
@@ -69,9 +71,19 @@ class OCRWorker:
                 if self._background_once():
                     return True
             schedule_source = getattr(self.pipeline, 'schedule_authorized_source_job', None)
-            if schedule_source is not None and schedule_source():
-                return True
+            scheduled = False
+            if schedule_source is not None and self._tasks_since_inventory >= 5:
+                self._tasks_since_inventory = 0
+                scheduled = bool(schedule_source())
             task = self.pipeline.claim(worker_id)
+            if task is None and scheduled:
+                return True
+            if task is None and schedule_source is not None and schedule_source():
+                # Claim the newly prepared page immediately. A metadata audit
+                # must never delay already queued OCR pages between turns.
+                task = self.pipeline.claim(worker_id)
+                if task is None:
+                    return True
 
             if task is None:
                 return self._background_once()
@@ -132,6 +144,7 @@ class OCRWorker:
                     event(stage="finalization", job_id=task["job_id"], action="CALLBACK_FAILED")
 
             self._tasks_since_reconcile += 1
+            self._tasks_since_inventory += 1
             return True
 
     def run(self, worker_id: str, once: bool = False) -> bool | None:
@@ -144,10 +157,14 @@ class OCRWorker:
                     tick()
                     try:
                         worked = self.once(worker_id)
-                    except Exception:
+                    except Exception as exc:
                         if not getattr(self.pipeline, 'source_owned', False):
                             raise
-                        event(stage='source_ocr', action='RUNTIME_UNAVAILABLE')
+                        code = getattr(exc, 'code', None) or str(exc)
+                        if not isinstance(code, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]{0,99}', code):
+                            code = 'UNEXPECTED_RUNTIME_ERROR'
+                        event(stage='source_ocr', action='RUNTIME_UNAVAILABLE',
+                              error_type=type(exc).__name__, error_code=code)
                         stop.wait(min(30, max(1, self.recovery_interval_seconds)))
                         continue
                     if not worked:

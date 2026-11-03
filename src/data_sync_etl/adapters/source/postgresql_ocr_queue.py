@@ -23,6 +23,7 @@ class PostgreSQLSourceOCRQueue:
     def _guard(self, conn, identity):
         if not self.writer.authorize_identity(dict(identity)):
             raise DomainError('SOURCE_OCR_UNAUTHORIZED')
+        contract = self.writer.contract_for(identity)
         conn.execute(text("SELECT set_config('statement_timeout', :ms, true)"),
                      {'ms': str(self.writer.contract.statement_timeout_seconds * 1000)})
         version = conn.execute(text('SELECT source_hash, lifecycle_status FROM public.resource_versions '
@@ -36,7 +37,7 @@ class PostgreSQLSourceOCRQueue:
             raise DomainError('SOURCE_OCR_ACTOR_INVALID')
         for table, fields in [('ocr_jobs', JOB_FIELDS), ('ocr_page_tasks', TASK_FIELDS)]:
             for action in ('select', 'update'):
-                if not self.writer.contract.allows(
+                if not contract.allows(
                         namespace=identity['namespace'], table=table, action=action, fields=fields,
                         actor_id=identity['actor_id'], role=identity['role'],
                         source_version_id=identity['source_version_id'], lifecycle=version['lifecycle_status']):
@@ -92,9 +93,10 @@ class PostgreSQLSourceOCRQueue:
             if not conn.execute(text('SELECT pg_try_advisory_xact_lock(:key)'), {'key': key}).scalar():
                 return None
             running = conn.execute(text('SELECT count(*) FROM public.ocr_page_tasks p '
-                'JOIN public.ocr_jobs j ON j.id=p.job_id WHERE j.resource_version_id IN :versions '
+                'JOIN public.ocr_jobs j ON j.id=p.job_id WHERE (j.resource_version_id IN :versions '
+                'OR j.triggered_by=:actor) '
                 "AND p.status='PROCESSING'").bindparams(bindparam('versions', expanding=True)),
-                {'versions': sorted(self.writer.contract.version_ids)}).scalar_one()
+                {'versions': sorted(self.writer.contract.version_ids), 'actor': identity['source_user_id']}).scalar_one()
             if running >= self.max_active:
                 return None
             task = conn.execute(text("SELECT * FROM public.ocr_page_tasks WHERE job_id=:job "

@@ -79,6 +79,10 @@ class Postprocessor:
                 resource = repo.get('master_learning_resources', version['resource_id'], lock=True)
                 if not resource or resource_deleted(resource):
                     raise DomainError('RESOURCE_NOT_AVAILABLE')
+                if (resource.get('source_origin') != 'LOCAL'
+                        and (not hasattr(self.text_store, 'pipeline')
+                             or not self.text_store.pipeline.state(version_id, repo))):
+                    raise DomainError('SOURCE_OCR_OWNER_REQUIRED')
                 stage = repo.insert(
                     "etl_stage_runs",
                     dict(

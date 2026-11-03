@@ -269,7 +269,7 @@ class SearchService:
         except IndexingError:
             return None
 
-    def _postgres_version_changed(self, repo, snapshot):
+    def _postgres_version_changed(self, repo, snapshot, access=None):
         """Proof of a version-local PG change, NOT a Mongo freshness marker.
 
         Called only on the T1 failure/recovery path. Discard ALL artifacts for
@@ -280,7 +280,7 @@ class SearchService:
         version = repo.get('resource_versions', old['id'])
         resource = repo.get('master_learning_resources', old['resource_id'])
         if (not version or not resource or denied(resource) or denied(version)
-                or resource['publication_status'] != 'PUBLISHED'
+                or not (access or SearchAccess()).publication_allowed(resource)
                 or version['resource_id'] != old['resource_id']
                 or version['source_hash'] != old['source_hash']
                 or version['lifecycle_status'] not in ('INGESTED', 'APPROVED', 'PUBLISHED')):
@@ -337,7 +337,8 @@ class SearchService:
     def _metadata(repo, filters, access, limit):
         if not access.internal:
             return []  # No existing contract can prove public full-text rights.
-        return repo.search_versions({k: v for k, v in filters.items() if k != 'domain'}, limit=limit)
+        return repo.search_versions({k: v for k, v in filters.items() if k != 'domain'},
+                                    limit=limit, metadata_access=access)
 
     def _authorized_metadata(self, rows, access):
         if self.source_content_authorizer is None:
@@ -665,7 +666,7 @@ class SearchService:
                 if not current or current != bag:
                     if _batch_texts:
                         with self.indexing.uow() as repo:
-                            isolated = self._postgres_version_changed(repo, snapshot)
+                            isolated = self._postgres_version_changed(repo, snapshot, access)
                         if isolated:
                             excluded.add(version_id)
                             break
@@ -880,7 +881,7 @@ class SearchService:
                                                  bag_reader=final_phase)
                     if version_id not in fresh_ids or fresh is None or fresh[3] != snapshots[version_id][3]:
                         if _batch_texts and (version_id not in fresh_ids or
-                                self._postgres_version_changed(repo, snapshots[version_id])):
+                                self._postgres_version_changed(repo, snapshots[version_id], access)):
                             excluded.add(version_id)
                             continue
                         raise SearchError('SEARCH_INDEX_STALE', 409)
@@ -905,7 +906,7 @@ class SearchService:
                         raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
                     if any(not set(fresh_structure[bag_id]) <= allowed
                            for bag_id, (bag, *_) in by_bag.items() if bag.resource_version_id == version_id):
-                        if _batch_texts and self._postgres_version_changed(repo, snapshots[version_id]):
+                        if _batch_texts and self._postgres_version_changed(repo, snapshots[version_id], access):
                             excluded.add(version_id)
                             continue
                         raise SearchError('SEARCH_ACCESS_RESTRICTED', 403)
@@ -1008,7 +1009,7 @@ class SearchService:
             try:
                 version, state = self.indexing._version(repo, version_id)
                 resource = repo.get('master_learning_resources', version['resource_id'])
-                if (not resource or resource['publication_status'] != 'PUBLISHED'
+                if (not resource or not access.publication_allowed(resource)
                         or not resource['is_active'] or denied(resource) or denied(version)):
                     raise SearchError('FILE_NOT_FOUND', 404)
                 if state != 'CONTENT_READY':
@@ -1062,7 +1063,7 @@ class SearchService:
                 unit_limit = min(self.settings.index_max_units, 10000)
                 units = repo.find('content_units', {'resource_version_id': version_id},
                                   limit=unit_limit + 1) if version else []
-                if (resource and resource['publication_status'] == 'PUBLISHED'
+                if (resource and access.publication_allowed(resource)
                         and resource['is_active'] is True and not denied(resource)
                         and version['lifecycle_status'] in ('INGESTED', 'APPROVED', 'PUBLISHED')
                         and not denied(version) and len(units) <= unit_limit

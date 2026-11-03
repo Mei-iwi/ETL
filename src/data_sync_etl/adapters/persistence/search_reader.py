@@ -223,7 +223,16 @@ class SearchRepositoryMixin:
 
     def search_versions(self, filters, *, limit, metadata_access=None):
         r, v = MasterLearningResource, ResourceVersion
-        conditions = [r.is_active.is_(True), r.deleted_at.is_(None), r.master_deleted_at.is_(None), r.publication_status == 'PUBLISHED']
+        publication = r.publication_status == 'PUBLISHED'
+        if metadata_access is not None and metadata_access.actor_id:
+            if metadata_access.scope == 'authenticated_admin':
+                publication = r.publication_status.in_(('DRAFT', 'PUBLISHED'))
+            elif metadata_access.scope == 'authenticated_user':
+                granted_draft = and_(r.publication_status == 'DRAFT', r.id.in_(metadata_access.resource_ids))
+                if metadata_access.owner_id is not None:
+                    granted_draft = and_(granted_draft, r.created_by == metadata_access.owner_id)
+                publication = or_(publication, granted_draft)
+        conditions = [r.is_active.is_(True), r.deleted_at.is_(None), r.master_deleted_at.is_(None), publication]
         if filters.get('_after_resource_id'):
             conditions.append(r.id > filters['_after_resource_id'])
         if filters.get('resource_id'):
@@ -242,7 +251,8 @@ class SearchRepositoryMixin:
                 MasterGradeLevel.grade_is_active.is_(True), MasterGradeLevel.grade_deleted_at.is_(None),
                 MasterGradeLevel.education_is_active.is_(True), MasterGradeLevel.education_deleted_at.is_(None)))
         # INGESTED is the local upload lifecycle. READY processing/index checks are
-        # independent and mandatory in the application. Draft/rejected versions never qualify.
+        # independent and mandatory in the application. DRAFT resources require
+        # the authenticated grant above; rejected versions never qualify.
         eligible = ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED')
         eligible_resources = select(r.id).where(*conditions).correlate(None)
         ranked = select(v.id.label('version_id'), v.resource_id, v.version_number,

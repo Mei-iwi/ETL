@@ -6,6 +6,7 @@ to MASTER projection; a caller must not advertise a completed pipeline merely
 because a job was created.
 """
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,12 +26,26 @@ _TASK_COLUMNS = frozenset({'id', 'job_id', 'page_num', 'local_image_path', 'stat
 
 
 class PostgreSQLSourceOCRWriter:
-    def __init__(self, engine, contract, *, authorize_identity):
+    def __init__(self, engine, contract, *, authorize_identity, authorize_created_version=None,
+                 authorize_namespace_version=None):
         if not isinstance(contract, SourceOCRContract) or not callable(authorize_identity):
             raise DomainError('SOURCE_OCR_CONTRACT_REQUIRED')
         if engine.dialect.name != 'postgresql':
             raise DomainError('SOURCE_OCR_DATABASE_INVALID')
         self.engine, self.contract, self.authorize_identity = engine, contract, authorize_identity
+        self.authorize_created_version = authorize_created_version
+        self.authorize_namespace_version = authorize_namespace_version
+
+    def contract_for(self, identity):
+        """Extend only this operation after independently revalidated authority."""
+        version = identity['source_version_id']
+        if (version not in self.contract.version_ids and self.contract.allow_etl_created_versions
+                and callable(self.authorize_created_version) and self.authorize_created_version(dict(identity))):
+            return replace(self.contract, version_ids=self.contract.version_ids | {version})
+        if (version not in self.contract.version_ids and self.contract.namespace_scope is not None
+                and callable(self.authorize_namespace_version) and self.authorize_namespace_version(dict(identity))):
+            return replace(self.contract, version_ids=self.contract.version_ids | {version})
+        return self.contract
 
     @staticmethod
     def next_id(connection, prefix):
@@ -67,7 +82,7 @@ class PostgreSQLSourceOCRWriter:
                 lifecycle = version['lifecycle_status']
                 permission = dict(namespace=namespace, table='ocr_jobs', role=role, actor_id=actor_id,
                                   source_version_id=source_version_id, lifecycle=lifecycle)
-                if not self.contract.allows(**permission, action='select', fields=_JOB_COLUMNS):
+                if not self.contract_for(identity).allows(**permission, action='select', fields=_JOB_COLUMNS):
                     raise DomainError('SOURCE_OCR_CONTRACT_DENIED')
                 actor = conn.execute(text('SELECT id, is_active FROM public.users WHERE id=:id'),
                                      {'id': source_user_id}).mappings().one_or_none()
@@ -82,7 +97,7 @@ class PostgreSQLSourceOCRWriter:
                     raise DomainError('SOURCE_OCR_UNAUTHORIZED')
                 if existing:
                     return existing[0]
-                if not self.contract.allows(**permission, action='insert', fields=_JOB_COLUMNS):
+                if not self.contract_for(identity).allows(**permission, action='insert', fields=_JOB_COLUMNS):
                     raise DomainError('SOURCE_OCR_CONTRACT_DENIED')
                 timestamp = datetime.now(UTC)
                 job_id = SourceIDService(PostgreSQLSourceIDCounter(conn)).next_id('OCR', created_at=timestamp)
@@ -134,10 +149,10 @@ class PostgreSQLSourceOCRWriter:
                     raise DomainError('SOURCE_VERSION_MUTATED')
                 permission = dict(namespace=namespace, table='ocr_page_tasks', role=role, actor_id=actor_id,
                                   source_version_id=source_version_id, lifecycle=version['lifecycle_status'])
-                if not self.contract.allows(**permission, action='select', fields=_TASK_COLUMNS):
+                if not self.contract_for(identity).allows(**permission, action='select', fields=_TASK_COLUMNS):
                     raise DomainError('SOURCE_OCR_CONTRACT_DENIED')
                 job_permission = {**permission, 'table': 'ocr_jobs'}
-                if not self.contract.allows(**job_permission, action='select',
+                if not self.contract_for(identity).allows(**job_permission, action='select',
                                             fields={'id', 'resource_version_id', 'status', 'total_pages'}):
                     raise DomainError('SOURCE_OCR_CONTRACT_DENIED')
                 actor = conn.execute(text('SELECT id, is_active FROM public.users WHERE id=:id'),
@@ -164,7 +179,7 @@ class PostgreSQLSourceOCRWriter:
                     if rows[0]['local_image_path'] != str(path):
                         raise DomainError('SOURCE_OCR_STAGING_CONFLICT')
                     return rows[0]['id']
-                if not self.contract.allows(**permission, action='insert', fields=_TASK_COLUMNS):
+                if not self.contract_for(identity).allows(**permission, action='insert', fields=_TASK_COLUMNS):
                     raise DomainError('SOURCE_OCR_CONTRACT_DENIED')
                 timestamp = datetime.now(UTC)
                 task_id = SourceIDService(PostgreSQLSourceIDCounter(conn)).next_id('OPT', created_at=timestamp)
@@ -204,7 +219,7 @@ class PostgreSQLSourceOCRWriter:
                     raise DomainError('SOURCE_VERSION_MUTATED')
                 permission = dict(namespace=namespace, table='ocr_jobs', role=role, actor_id=actor_id,
                                   source_version_id=source_version_id, lifecycle=version['lifecycle_status'])
-                if not self.contract.allows(**permission, action='select', fields=_JOB_COLUMNS):
+                if not self.contract_for(identity).allows(**permission, action='select', fields=_JOB_COLUMNS):
                     raise DomainError('SOURCE_OCR_CONTRACT_DENIED')
                 actor = conn.execute(text('SELECT id, is_active FROM public.users WHERE id=:id'),
                                      {'id': source_user_id}).mappings().one_or_none()
@@ -221,7 +236,7 @@ class PostgreSQLSourceOCRWriter:
                     return
                 if job['total_pages'] != 0 or job['status'] != 'QUEUED':
                     raise DomainError('SOURCE_OCR_PAGE_COUNT_CONFLICT')
-                if not self.contract.allows(**permission, action='update', fields={'total_pages', 'updated_at'}):
+                if not self.contract_for(identity).allows(**permission, action='update', fields={'total_pages', 'updated_at'}):
                     raise DomainError('SOURCE_OCR_CONTRACT_DENIED')
                 conn.execute(text('UPDATE public.ocr_jobs SET total_pages=:total, updated_at=:updated WHERE id=:id'),
                              {'id': source_job_id, 'total': total_pages, 'updated': datetime.now(UTC)})

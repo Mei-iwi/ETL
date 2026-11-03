@@ -16,11 +16,17 @@ class SessionStore:
         finally:
             initial.close()
         with self.connect() as db:
-            db.execute('CREATE TABLE IF NOT EXISTS auth_meta (id INTEGER PRIMARY KEY, epoch TEXT NOT NULL)')
-            db.execute('CREATE TABLE IF NOT EXISTS auth_sessions (token TEXT PRIMARY KEY, created REAL NOT NULL, seen REAL NOT NULL, expires REAL NOT NULL, idle INTEGER NOT NULL)')
-            db.execute('CREATE TABLE IF NOT EXISTS auth_rate (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, resets REAL NOT NULL)')
-            db.execute('CREATE TABLE IF NOT EXISTS auth_db_bindings (token TEXT PRIMARY KEY REFERENCES auth_sessions(token) ON DELETE CASCADE, user_id TEXT NOT NULL, auth_version INTEGER NOT NULL)')
-            db.execute('CREATE TABLE IF NOT EXISTS auth_external_bindings (token TEXT PRIMARY KEY REFERENCES auth_sessions(token) ON DELETE CASCADE, user_id TEXT NOT NULL, fingerprint TEXT NOT NULL)')
+            existing = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            definitions = {
+                'auth_meta': 'id INTEGER PRIMARY KEY, epoch TEXT NOT NULL',
+                'auth_sessions': 'token TEXT PRIMARY KEY, created REAL NOT NULL, seen REAL NOT NULL, expires REAL NOT NULL, idle INTEGER NOT NULL',
+                'auth_rate': 'bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, resets REAL NOT NULL',
+                'auth_db_bindings': 'token TEXT PRIMARY KEY REFERENCES auth_sessions(token) ON DELETE CASCADE, user_id TEXT NOT NULL, auth_version INTEGER NOT NULL',
+                'auth_external_bindings': 'token TEXT PRIMARY KEY REFERENCES auth_sessions(token) ON DELETE CASCADE, user_id TEXT NOT NULL, fingerprint TEXT NOT NULL',
+            }
+            for name, definition in definitions.items():
+                if name not in existing:
+                    db.execute(f'CREATE TABLE IF NOT EXISTS {name} ({definition})')
             previous = db.execute('SELECT epoch FROM auth_meta WHERE id=1').fetchone()
             if previous and previous[0] != epoch:
                 db.execute('DELETE FROM auth_sessions')

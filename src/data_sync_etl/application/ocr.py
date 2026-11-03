@@ -60,11 +60,6 @@ class OCRPipeline:
                 raise DomainError('CONTENT_NOT_AVAILABLE')
         reference = self.resolver.resolve(version_id)
         if reference.ownership == 'SOURCE_BACKED':
-            with self.uow() as repo:
-                historical = repo.find('ocr_jobs', {'resource_version_id': version_id},
-                                       order=('-created_at', '-id'), limit=1)
-            if historical and not historical[0]['id'].startswith('SJ'):
-                return historical[0]
             raise DomainError('SOURCE_OCR_OWNER_REQUIRED')
         if reference.ownership == 'LOCAL_OWNED':
             # Preserve LOCAL command idempotency even if its managed file later disappears.
@@ -75,77 +70,6 @@ class OCRPipeline:
                 return jobs[0]
         with self.resolver.temporary_path(reference) as path:
             return self._create_job(version_id, triggered_by, path, fence=fence)
-
-    def _create_source_job(self, version_id, triggered_by, reference, data, *, fence=None):
-        from pathlib import PurePosixPath
-        filename = reference.filename
-        extension = PurePosixPath(filename).suffix.lower()
-        if extension in ('.mp3', '.mp4'):
-            raise ProcessingFormatError('UNSUPPORTED_SOURCE_IN_MEMORY_FORMAT')
-        validator = self.formats.find_validator(filename)
-        if not validator.text_extraction_supported:
-            raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
-        if validator.ocr_requires_runtime:
-            if not getattr(self.engine, 'supports_images', False) or not callable(getattr(self.engine, 'recognize_bytes', None)):
-                raise ProcessingFormatError('BLOCKED_OCR_RUNTIME')
-            try:
-                self.engine.check_runtime()
-            except DomainError:
-                raise ProcessingFormatError('BLOCKED_OCR_RUNTIME') from None
-        if extension == '.pdf':
-            import pymupdf
-            try:
-                with pymupdf.open(stream=data, filetype='pdf') as document:
-                    if document.needs_pass:
-                        raise ProcessingFormatError('UNSUPPORTED_PROCESSING_FORMAT')
-                    total = len(document)
-            except ProcessingFormatError:
-                raise
-            except Exception:
-                raise DomainError('INVALID_DOCUMENT_CONTENT') from None
-        elif extension in ('.docx', '.xlsx', '.pptx', '.txt', '.csv') or validator.ocr_requires_runtime:
-            total = 1
-        else:
-            raise ProcessingFormatError('UNSUPPORTED_SOURCE_IN_MEMORY_FORMAT')
-        if total < 1 or total > 2000:
-            raise ProcessingFormatError('EXTRACTION_LIMIT_EXCEEDED')
-        # Recheck exact mapping/revision after processing, outside a MASTER transaction.
-        current_reference = self.resolver.resolve(version_id)
-        if current_reference != reference:
-            raise DomainError('SOURCE_VERSION_MUTATED')
-        from hashlib import sha256
-        if current_reference.expected_sha256 != sha256(data).hexdigest():
-            raise DomainError('SOURCE_HASH_MISMATCH')
-        # SOURCE I/O and validation finish before opening the MASTER transaction.
-        with self.uow() as repo:
-            if fence is not None:
-                fence(repo)
-            version = repo.get('resource_versions', version_id, lock=True)
-            resource = repo.get('master_learning_resources', version['resource_id'], lock=True) if version else None
-            if (version is None or resource is None or not resource['is_active'] or resource_deleted(resource)
-                    or version['source_hash'].lower() != current_reference.expected_sha256):
-                raise DomainError('SOURCE_VERSION_MUTATED')
-            existing = repo.find('ocr_jobs', {'resource_version_id': version_id},
-                                 order=('-created_at', '-id'), limit=1)
-            if existing:
-                return existing[0]
-            job = repo.insert('ocr_jobs', dict(resource_version_id=version_id, triggered_by=triggered_by,
-                status='PENDING', total_pages=total, completed_pages=0, failed_pages=0))
-            repo.update('resource_versions', version_id, {
-                'lifecycle_status': 'INGESTED',
-                'processing_options': {**(version.get('processing_options') or {}),
-                                       'content_availability': 'PROCESSING', 'translation_pending': True}})
-            imports = repo.find('source_file_imports', {'target_version_id': version_id}, limit=2)
-            if len(imports) != 1:
-                raise DomainError('BLOCKED_SOURCE_MAPPING')
-            repo.update('source_file_imports', imports[0]['id'], {
-                'status': 'PROCESSING', 'last_error_code': None, 'processing_job_id': job['id']})
-            for page in range(1, total + 1):
-                repo.insert('ocr_page_tasks', dict(job_id=job['id'], page_num=page,
-                                                   status='PENDING', retry_count=0))
-            if fence is not None:
-                fence(repo)
-            return job
 
     def _create_job(self, version_id, triggered_by, path, *, fence=None):
         with self.uow() as repo:
@@ -330,12 +254,7 @@ class OCRPipeline:
             version = repo.get("resource_versions", job["resource_version_id"])
         reference = self.resolver.resolve(version['id'])
         if reference.ownership == 'SOURCE_BACKED':
-            with self.resolver.open_verified_stream(reference, index=True) as stream:
-                payload = stream.read()
-            result = self._recognize_bytes(task, version, reference.filename, payload)
-            from data_sync_etl.application.bilingual import paired_result
-            options = {'target_language': self.default_target_language, **(version.get('processing_options') or {})}
-            return paired_result(result, version['id'], task['page_num'], options), None
+            raise DomainError('SOURCE_OCR_OWNER_REQUIRED')
         with self.resolver.temporary_path(reference) as path:
             # Source images share the verified attempt directory, avoiding a second slot.
             scope = nullcontext(path.parent if reference.ownership == 'SOURCE_BACKED' else None)
@@ -347,7 +266,7 @@ class OCRPipeline:
         options = {'target_language': self.default_target_language, **(version.get('processing_options') or {})}
         return paired_result(result, version['id'], task['page_num'], options), image
 
-    def _recognize_bytes(self, task, version, filename, payload):
+    def _recognize_bytes(self, task, version, filename, payload, *, allow_empty=False):
         from pathlib import PurePosixPath
         extension = PurePosixPath(filename).suffix.lower()
         if extension == '.pdf':
@@ -368,7 +287,10 @@ class OCRPipeline:
                     rendered = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False).tobytes('png')
                     result = self.engine.recognize_bytes(rendered)
                     if not result.text.strip() and not mixed:
-                        raise DomainError('EMPTY_EXTRACTED_CONTENT')
+                        if not allow_empty:
+                            raise DomainError('EMPTY_EXTRACTED_CONTENT')
+                        return OCRResult(result.text, result.confidence, result.engine_name, result.engine_version,
+                                         {**result.metadata, 'ocr_empty': True})
                     if mixed:
                         result = OCRResult(native + '\n' + result.text, confidence=result.confidence,
                             engine_name=result.engine_name, engine_version=result.engine_version,
@@ -396,7 +318,7 @@ class OCRPipeline:
                             rgb.save(output, format='PNG')
                 result = self.engine.recognize_bytes(output.getvalue())
                 output.close()
-                if not result.text.strip():
+                if not result.text.strip() and not allow_empty:
                     raise DomainError('EMPTY_EXTRACTED_CONTENT')
                 from data_sync_etl.domain.extraction_limits import MAX_TEXT_CHARS, MAX_UNIT_CHARS
                 if len(result.text) > MAX_TEXT_CHARS:
@@ -488,8 +410,7 @@ class OCRPipeline:
             version_check = check_repo.get('resource_versions', job_check['resource_version_id']) if job_check else None
             resource_check = check_repo.get('master_learning_resources', version_check['resource_id']) if version_check else None
         if resource_check and resource_check.get('source_origin') != 'LOCAL':
-            reference = self.resolver.resolve(version_check['id'])
-            self.resolver.require_content_capabilities(reference, index=True)
+            raise DomainError('SOURCE_OCR_OWNER_REQUIRED')
         with self.uow() as repo:
             task = repo.get("ocr_page_tasks", claimed["id"], lock=True)
             if not self.owns(task, claimed):

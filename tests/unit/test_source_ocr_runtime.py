@@ -2,6 +2,8 @@
 import json
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import replace
+from datetime import timedelta
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -41,11 +43,13 @@ def runtime(monkeypatch, tmp_path):
         'resource_versions': {'mv1': dict(id='mv1', resource_id='r1', version_number=1, lifecycle_status='METADATA_ONLY',
                                        source_hash=checksum, processing_options={}, updated_at=now())},
         'master_learning_resources': {'r1': dict(id='r1', is_active=True, source_origin='POSTGRESQL',
-            publication_status='DRAFT', created_by='a1', deletion_revision=0)},
+            source_namespace='source-a', source_record_key='r1', publication_status='DRAFT', created_by='a1', deletion_revision=0)},
         'master_users': {'a1': dict(id='a1', is_active=True, source_origin='POSTGRESQL', source_record_key='u1',
             source_backend='postgresql', source_namespace='source-a', source_entity_type='users',
             source_identity_version=1, source_identity_hash=source_identity_hash(user_locator))},
-        'source_file_imports': {'i1': dict(id='i1', resource_id='r1', target_version_id='mv1', source_version_id='v1')},
+        'source_file_imports': {'i1': dict(id='i1', resource_id='r1', target_version_id='mv1', source_version_id='v1',
+            source_system='SRC_TEST', source_hash=checksum, source_version_number=1,
+            source_lifecycle_status='APPROVED', source_resource_active=True, status='METADATA_ONLY')},
     }
     policy = dict(backend='postgresql', schema='public', entity_type='ocr_processing', namespace='source-a',
         tables=['ocr_jobs', 'ocr_page_tasks', 'content_units'],
@@ -63,7 +67,11 @@ def runtime(monkeypatch, tmp_path):
         source_database_url='postgresql+psycopg://unit.invalid/source',
         storage_root=tmp_path / 'storage', ocr_engine='native', index_auto_enabled=False)
     adapter = SimpleNamespace(locator=lambda entity, key: SourceLocator(
-        backend='postgresql', namespace='source-a', entity_type=entity, source_record_id=key))
+        backend='postgresql', namespace='source-a', entity_type=entity, source_record_id=key),
+        get_versions=lambda ids: {key: dict(source_version_id=key, resource_id='r1', source_version_number=1,
+            source_hash=source.versions[key]['source_hash'], resource_active=True, resource_publication_status='DRAFT',
+            source_lifecycle_status=source.versions[key]['lifecycle_status']) for key in ids})
+    adapter.get_version = lambda key: adapter.get_versions([key]).get(key)
     registration = SourceRegistration(source_id='SRC_TEST', namespace='source-a', backend='postgresql',
         adapter_type='TestDouble', capabilities=SourceCapabilities(read_content=True, process_content=True,
             index_derived_content=True, exact_version_lookup=True))
@@ -87,6 +95,7 @@ def runtime(monkeypatch, tmp_path):
     container = composition.Container(settings, engine, source_registry=registry,
                                       source_ocr_access_provider=lambda *_: access)
     pipeline = container.ocr
+    pipeline.inventory._scope = lambda: (registration, None, {'id': 'a1', 'role_code': 'ADMIN'})
     container.documents = content
     pipeline.mongo = content
     pipeline.probe.reader = content
@@ -229,9 +238,9 @@ def test_partial_raw_loss_only_recognizes_missing_page_and_reuses_all_other_arti
     calls = []
     recognize = r.pipeline.recognizer._recognize_bytes
 
-    def recognize_missing(task, version, filename, data):
+    def recognize_missing(task, version, filename, data, **kwargs):
         calls.append(filename)
-        return recognize(task, version, filename, data)
+        return recognize(task, version, filename, data, **kwargs)
     monkeypatch.setattr(r.pipeline.recognizer, '_recognize_bytes', recognize_missing)
     r.pipeline.create_job('mv1', access=r.access)
     assert r.source.jobs[next(iter(r.source.jobs))]['completed_pages'] == 1
@@ -337,9 +346,9 @@ def test_worker_automatically_schedules_with_the_single_approved_live_actor(runt
     r = runtime
     assert r.pipeline.state('mv1') is None
     assert r.container.worker.once('scheduler')
-    assert len(r.source.jobs) == len(r.source.tasks) == 1 and not r.content.pages
-    assert r.container.worker.once('scheduler')
+    assert len(r.source.jobs) == len(r.source.tasks) == 1
     assert len(r.content.pages) == 1
+    assert not r.pipeline.schedule_authorized_source_job()
     assert r.container.processing_job_detail.run(next(iter(r.uow.tables['ocr_jobs'])))['processing_status'] == 'CONTENT_READY'
 
 
@@ -406,6 +415,147 @@ def test_legacy_writer_cannot_take_over_a_source_owned_version(runtime):
     assert len(r.opens) == opens and not r.content.pages
 
 
+def test_legacy_processing_rejects_source_before_state_or_file_io(runtime):
+    from data_sync_etl.application.postprocess import Postprocessor
+
+    r = runtime
+    with pytest.raises(DomainError, match='SOURCE_OCR_OWNER_REQUIRED'):
+        r.pipeline.recognizer.create_job('mv1')
+    with pytest.raises(DomainError, match='SOURCE_OCR_OWNER_REQUIRED'):
+        Postprocessor(r.uow).run('mv1')
+    assert not r.opens and not r.source.jobs and not r.uow.find('ocr_jobs')
+
+
+@pytest.mark.parametrize('invalid', [None, 'actor', 'source_user', 'namespace', 'resource', 'version', 'hash', 'owner'])
+def test_upload_receipt_policy_is_scoped_to_exact_owner_identity(runtime, invalid):
+    r = runtime
+    r.pipeline.contract = replace(r.pipeline.contract, version_ids=frozenset({'another-version'}),
+                                  allow_etl_created_versions=True)
+    r.pipeline.writer.contract = r.pipeline.contract
+    resource = r.uow.tables['master_learning_resources']['r1']
+    resource['source_record_key'] = 'sr1'
+    receipt = dict(requested_by='master:a1', source_user_id='u1', source_namespace='source-a',
+                   source_resource_id='sr1', source_version_id='v1', source_hash=r.source.versions['v1']['source_hash'])
+    keys = dict(actor='requested_by', source_user='source_user_id', namespace='source_namespace',
+                resource='source_resource_id', version='source_version_id', hash='source_hash')
+    if invalid == 'owner':
+        resource['created_by'] = 'another-user'
+    elif invalid:
+        receipt[keys[invalid]] = 'wrong'
+    r.uow.source_version_writeback_receipt = lambda *_args, **_kwargs: receipt
+    if invalid:
+        with pytest.raises(DomainError, match='SOURCE_OCR_CONTRACT_DENIED'):
+            r.pipeline.create_job('mv1', access=r.access)
+        assert not r.source.jobs and not r.opens
+    else:
+        job = r.pipeline.create_job('mv1', access=r.access)
+        assert job and len(r.source.jobs) == 1
+        assert r.pipeline.contract.version_ids == frozenset({'another-version'})
+
+
+def test_upload_receipt_never_expands_an_allowlist_without_contract_opt_in(runtime):
+    r = runtime
+    r.pipeline.contract = replace(r.pipeline.contract, version_ids=frozenset({'another-version'}))
+    r.pipeline.writer.contract = r.pipeline.contract
+    with pytest.raises(DomainError, match='SOURCE_OCR_CONTRACT_DENIED'):
+        r.pipeline.create_job('mv1', access=r.access)
+    assert not r.source.jobs and not r.opens
+
+
+def test_external_source_job_without_provenance_is_observable_and_never_requeued(runtime):
+    r = runtime
+    stamp = now() - timedelta(days=1)
+    external = dict(id='external-job', resource_version_id='v1', triggered_by='u1', status='COMPLETED',
+                    total_pages=1, completed_pages=1, failed_pages=0, started_at=stamp,
+                    completed_at=stamp, created_at=stamp, updated_at=stamp)
+    r.source.jobs[external['id']] = external
+    page = dict(id='external-page', job_id=external['id'], page_num=1, status='COMPLETED', retry_count=0,
+                started_at=stamp, heartbeat_at=stamp, completed_at=stamp, updated_at=stamp)
+    r.source.tasks[page['id']] = page
+    with pytest.raises(DomainError, match='SOURCE_OCR_EXTERNAL_JOB_REQUIRES_PROVENANCE'):
+        r.pipeline.create_job('mv1', access=r.access)
+    assert r.source.jobs[external['id']] == external and r.source.tasks[page['id']] == page
+    assert not r.opens and not r.uow.find('ocr_jobs')
+    assert r.uow.get('source_file_imports', 'i1')['last_error_code'] == 'SOURCE_OCR_EXTERNAL_JOB_REQUIRES_PROVENANCE'
+
+
+def test_concurrent_process_returns_same_pending_projection_before_staging(runtime, monkeypatch):
+    r, held, concurrent = runtime, [], []
+
+    @contextmanager
+    def processing_lock(_version):
+        if held:
+            yield False
+        else:
+            held.append(True)
+            try:
+                yield True
+            finally:
+                held.pop()
+
+    monkeypatch.setattr(r.uow, 'processing_lock', processing_lock)
+    stage = r.pipeline._stage
+
+    def observe_stage(*args):
+        opens = len(r.opens)
+        concurrent.append(r.pipeline.create_job('mv1', access=r.access))
+        assert len(r.opens) == opens
+        assert concurrent[0]['total_pages'] == 0
+        return stage(*args)
+
+    monkeypatch.setattr(r.pipeline, '_stage', observe_stage)
+    first = r.pipeline.create_job('mv1', access=r.access)
+    assert first['id'] == concurrent[0]['id']
+    assert len(r.source.jobs) == len(r.source.tasks) == 1
+
+
+def test_legacy_claim_cannot_open_or_complete_source_projection(runtime):
+    r = runtime
+    r.pipeline.create_job('mv1', access=r.access)
+    task = r.uow.find('ocr_page_tasks')[0]
+    opens = len(r.opens)
+    with pytest.raises(DomainError, match='SOURCE_OCR_OWNER_REQUIRED'):
+        r.pipeline.recognizer.recognize(task)
+    with pytest.raises(DomainError, match='SOURCE_OCR_OWNER_REQUIRED'):
+        r.pipeline.recognizer.succeed(task, None)
+    assert len(r.opens) == opens
+    assert not r.uow.find('ocr_page_results')
+
+
+@pytest.mark.parametrize('code, expected', [
+    ('SOURCE_OCR_LEGACY_VERSION_REQUIRES_EXPLICIT_PROVENANCE', 'SOURCE_OCR_LEGACY_PROVENANCE_REQUIRED'),
+    ('SOURCE_OCR_' + 'X' * 60, 'SOURCE_OCR_SCHEDULE_FAILED'),
+])
+def test_scheduler_diagnostics_fit_existing_master_column(runtime, code, expected):
+    runtime.pipeline.record_scheduling_failure('mv1', DomainError(code))
+    row = runtime.uow.get('source_file_imports', 'i1')
+    assert row['last_error_code'] == expected
+    assert len(row['last_error_code']) <= 50
+    assert row['attempts'] == 1 and row['status'] == 'RETRY_WAIT'
+
+
+def test_terminal_projection_avoids_repeated_claim_and_recovery_but_reconcile_continues(runtime, monkeypatch):
+    r = runtime
+    job = r.pipeline.create_job('mv1', access=r.access)
+    assert r.container.worker.once('worker')
+    assert r.uow.get('ocr_jobs', job['id'])['status'] == 'COMPLETED'
+    monkeypatch.setattr(r.pipeline.queue, 'claim', lambda *_a, **_k: pytest.fail('terminal job claimed'))
+    monkeypatch.setattr(r.pipeline.queue, 'recover', lambda *_a, **_k: pytest.fail('terminal job recovered'))
+    assert r.pipeline.claim('worker') is None
+    assert r.pipeline.recover_stale() == {'recovered': 0}
+    r.pipeline.reconcile_once()
+    assert r.uow.get('ocr_jobs', job['id'])['status'] == 'COMPLETED'
+
+
+def test_wrong_resource_namespace_is_rejected_before_source_lookup_or_file_io(runtime, monkeypatch):
+    r = runtime
+    r.uow.tables['master_learning_resources']['r1']['source_namespace'] = 'other-tenant'
+    monkeypatch.setattr(r.pipeline.resolver, 'resolve', lambda *_a: pytest.fail('wrong namespace resolved'))
+    with pytest.raises(DomainError, match='SOURCE_OCR_NAMESPACE_MISMATCH'):
+        r.pipeline.create_job('mv1', access=r.access)
+    assert not r.source.jobs and not r.opens
+
+
 def test_source_unavailability_has_bounded_scheduler_retries_and_no_duplicate_jobs(runtime):
     r = runtime
     opens = []
@@ -418,6 +568,13 @@ def test_source_unavailability_has_bounded_scheduler_retries_and_no_duplicate_jo
     r.pipeline.resolver.open_verified_stream = unavailable
     maximum = r.container.settings.source_file_import_max_attempts
     for _ in range(maximum):
+        r.pipeline.inventory.next_scan = 0
+        if r.uow.get('sync_checkpoints', r.pipeline.inventory.stream):
+            r.uow.update('sync_checkpoints', r.pipeline.inventory.stream, {'last_id': None})
+        with r.uow() as repo:
+            options = dict(repo.get('resource_versions', 'mv1')['processing_options'])
+            options.pop('_source_ocr_audit', None)
+            repo.update('resource_versions', 'mv1', {'processing_options': options})
         assert not r.pipeline.schedule_authorized_source_job()
         r.uow.tables['source_file_imports']['i1']['next_retry_at'] = None
     assert not r.pipeline.schedule_authorized_source_job()
