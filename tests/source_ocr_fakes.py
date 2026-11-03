@@ -146,6 +146,22 @@ class MemoryUow:
     def __init__(self):
         self.tables, self.serial = {}, 0
 
+    def translation_candidates(self, limit=20):
+        return [version for version in self.find('resource_versions', order=('updated_at', 'id'))
+                if (version.get('processing_options') or {}).get('translation_pending') is True
+                and any(job['status'] in ('COMPLETED', 'COMPLETED_WITH_ERRORS')
+                        for job in self.find('ocr_jobs', {'resource_version_id': version['id']}))][:limit]
+
+    def index_candidates(self):
+        candidates = []
+        for run in self.find('etl_stage_runs', {'stage': 'INDEX_BUILD'}, order=('created_at', 'id')):
+            version = self.get('resource_versions', run['resource_version_id'])
+            resource = self.get('master_learning_resources', version['resource_id']) if version else None
+            if (run['status'] in ('PENDING', 'RUNNING') and resource and resource.get('is_active')
+                    and not resource.get('deleted_at') and not resource.get('master_deleted_at')):
+                candidates.append(run)
+        return candidates[:100]
+
     def source_index_authorities(self, version_ids):
         result = {}
         for version_id in version_ids:
