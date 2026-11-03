@@ -440,6 +440,8 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
         FILE_TOO_LARGE: 'Tệp quá lớn', BLOCKED_SOURCE_STORAGE: 'Chưa cấu hình kho tệp nguồn',
         BLOCKED_SOURCE_POLICY: 'Trạng thái nguồn chưa được phép nhập',
         BLOCKED_SOURCE_MAPPING: 'Xung đột phiên bản', SOURCE_VERSION_MUTATED: 'Phiên bản nguồn bị thay đổi',
+        SOURCE_LOCAL_FILES_DISABLED: 'Đã tắt đồng bộ từ thư mục local; cần dùng Drive hoặc Object Storage',
+        SOURCE_PROCESSING_UNAVAILABLE: 'Chưa khởi động được xử lý; hệ thống sẽ thử lại có giới hạn',
         WAITING_FOR_MASTER: 'Học liệu Master chưa sẵn sàng', SOURCE_STORAGE_UNAVAILABLE: 'Kho nguồn gián đoạn',
         UNSUPPORTED_SOURCE_FORMAT: 'Định dạng nguồn chưa hỗ trợ xử lý',
         INVALID_SOURCE_FILE: 'Tệp nguồn không hợp lệ', UNSUPPORTED_TEXT_ENCODING: 'Tệp cần dùng UTF-8',
@@ -507,7 +509,7 @@ export function SourceSyncFilesSection({ onError, failedOnly = false, retryableO
                                             ? errorLabels[file.last_error_code] ?? 'Lỗi xử lý, cần kiểm tra'
                                             : '—'}</td>
                                     <td>{file.retry_eligible && file.import_job_id ? <button className={`${styles.button} ${styles.fileAction}`}
-                                        type="button" disabled={retryPending} onClick={() => void retry(file.import_job_id!)}>Thử lại</button> : '—'}</td>
+                                        type="button" disabled={retryPending} onClick={() => void retry(file.import_job_id!)}>{file.import_status === 'METADATA_ONLY' ? 'Xử lý tệp' : 'Thử lại'}</button> : '—'}</td>
                                 </tr>
                             ))}
                         </tbody>

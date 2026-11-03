@@ -265,9 +265,16 @@ class ReconciliationEngine:
                     if audit_type == 'LIGHT':
                         revision = self.source_resolver.files.revision(reference.bucket, reference.opaque_locator,
                             cancelled=_ReadBudget(deadline, self.file_cancelled))
-                        if reference.provider not in ('local', 'google_drive') or not isinstance(revision, tuple) or len(revision) != 5:
+                        provider_reader = getattr(self.source_resolver.files, 'provider', None)
+                        provider = provider_reader(reference.bucket) if callable(provider_reader) else reference.provider
+                        if not isinstance(revision, tuple):
                             raise SourceFileError('SIZE_METADATA_UNSUPPORTED')
-                        size = int(revision[2])
+                        if len(revision) == 5 and provider in ('local', 'google_drive', 'external'):
+                            size = int(revision[2])
+                        elif len(revision) == 3 and provider in ('object', 'external'):
+                            size = int(revision[0])
+                        else:
+                            raise SourceFileError('SIZE_METADATA_UNSUPPORTED')
                         expected = ver.source_file_size
                         mismatch = expected is not None and expected != size
                         result['discrepancy_flag'] = FLAG_DESYNC_BLOB_SIZE if mismatch else FLAG_NOT_VERIFIED
@@ -280,9 +287,6 @@ class ReconciliationEngine:
                     # Resolver verifies canonical ownership, source revision and SHA-256,
                     # then removes the private temporary file. Never inspect a Master copy.
                     resolver = copy(self.source_resolver)
-                    if hasattr(resolver, 'files'):
-                        resolver.files = MeteredFiles(resolver.files, self.file_metrics, self.file_max_bytes,
-                                                      reference.provider)
                     revision_before = (resolver._revision(reference, _ReadBudget(deadline, self.file_cancelled))
                                        if hasattr(reference, 'bucket') else None)
                     # Stream SOURCE bytes directly into SHA-256.  The resolver
@@ -340,6 +344,7 @@ class ReconciliationEngine:
                     if bucket != storage.cloud.bucket:
                         raise DomainError('CLOUD_STORAGE_BUCKET_MISMATCH')
                     head = storage.cloud.head_object(storage._key(ver.storage_object_key))
+                    revision = self._cloud_revision(head)
                     expected_size = ver.source_file_size
                     if audit_type == 'LIGHT':
                         size_status = ('SIZE_MATCHED' if expected_size is not None and expected_size == head.size
@@ -348,6 +353,7 @@ class ReconciliationEngine:
                             'discrepancy_flag': FLAG_DESYNC_BLOB_SIZE if size_status == 'SIZE_MISMATCH' else FLAG_NOT_VERIFIED,
                             'source_value': {'source_file_size': expected_size},
                             'target_value': {'storage_file_size': head.size, 'verification': 'SIZE_ONLY',
+                                             'observed_revision': revision,
                                              'size_status': size_status, 'reason_code': 'SHA256_NOT_CHECKED'}})
                         continue
                     if expected_size is not None and expected_size != head.size:
@@ -357,17 +363,23 @@ class ReconciliationEngine:
                             'message': 'Cloud object size mismatch'})
                         continue
                     computed_hash = self._hash_cloud(storage, ver.storage_object_key, deadline)
+                    current_head = storage.cloud.head_object(storage._key(ver.storage_object_key))
+                    if not revision or revision != self._cloud_revision(current_head):
+                        raise SourceFileError('CLOUD_OBJECT_CHANGED' if revision else 'CLOUD_REVISION_UNAVAILABLE')
                     flag = FLAG_SYNCED if computed_hash == ver.source_hash.lower() else FLAG_DESYNC_CHECKSUM
                     results.append({'record_id': ver.id, 'discrepancy_flag': flag,
                         'source_value': {'source_file_size': expected_size, 'source_hash': ver.source_hash},
                         'target_value': {'storage_file_size': head.size, 'computed_hash': computed_hash,
+                                         'observed_revision': revision,
                                          'verification': 'CLOUD_STREAM_SHA256'},
                         'message': 'Cloud object verified and synced' if flag == FLAG_SYNCED else 'Cloud object checksum mismatch'})
-                except DomainError as exc:
+                except (DomainError, OSError) as exc:
                     results.append({'record_id': ver.id, 'discrepancy_flag': FLAG_NOT_VERIFIED,
                         'source_value': {'source_file_size': ver.source_file_size,
                                          'source_hash': ver.source_hash},
-                        'target_value': {'verification': 'NOT_VERIFIED', 'reason_code': str(exc)}})
+                        'target_value': {'verification': 'NOT_VERIFIED', 'reason_code':
+                            exc.code if isinstance(exc, SourceFileError) else str(exc) if isinstance(exc, DomainError)
+                            else 'CLOUD_STORAGE_UNAVAILABLE'}})
                 continue
 
             blob_path = (root / bucket / ver.storage_object_key).resolve()
@@ -526,6 +538,13 @@ class ReconciliationEngine:
                 raise SourceFileError('LOCAL_FILE_CHANGED')
         self.file_metrics['sha256_computed_count'] += 1
         return sha.hexdigest()
+
+    @staticmethod
+    def _cloud_revision(item):
+        if not item.etag and not re.fullmatch('[0-9a-fA-F]{64}', item.sha256 or ''):
+            return None
+        return hashlib.sha256(repr((item.provider_id, item.bucket, item.object_key,
+            item.size, item.etag, item.sha256, item.content_type)).encode()).hexdigest()
 
     def _hash_cloud(self, storage, object_key, deadline):
         sha = hashlib.sha256()

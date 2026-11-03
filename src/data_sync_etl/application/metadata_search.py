@@ -365,8 +365,13 @@ class MetadataSearchService:
                                                for _, snap in snapshots.values()) else 'READY'}
         return items, snapshots, status, {'metadata_lexical': lexical, 'metadata_dense': dense}
 
-    def final_validate(self, items, snapshots, filters, access, *, checkpoint=lambda: None, content=False):
-        fresh = self.indexed_snapshots(filters, access, checkpoint=checkpoint) if isinstance(snapshots, IndexedMetadataCorpus) else self.snapshots(filters, access, checkpoint=checkpoint)
+    def final_validate(self, items, snapshots, filters, access, *, checkpoint=lambda: None, content=False,
+                       validation_cache=None):
+        fresh = validation_cache.get('snapshot') if validation_cache is not None else None
+        if fresh is None:
+            fresh = self.indexed_snapshots(filters, access, checkpoint=checkpoint) if isinstance(snapshots, IndexedMetadataCorpus) else self.snapshots(filters, access, checkpoint=checkpoint)
+            if validation_cache is not None:
+                validation_cache['snapshot'] = fresh
         if isinstance(snapshots, IndexedMetadataCorpus) and fresh.index_fingerprint != snapshots.index_fingerprint:
             return []
         if not content:
@@ -397,6 +402,7 @@ def fuse_results(content, metadata, branches=None):
     branches = {name: {key: score for key, score in scores.items() if key in representatives}
                 for name, scores in branches.items()}
     scores = rrf(*branches.values())
+    branch_ranks = {name: ranks(branch) for name, branch in branches.items()}
     grouped = {}
     for key in sorted(scores, key=lambda key: (-scores[key], key)):
         sources = representatives[key]
@@ -408,7 +414,7 @@ def fuse_results(content, metadata, branches=None):
                        matched_fields=['CONTENT'], evidence_kind='CONTENT_CHUNK', evidence_text=row.get('snippet', ''))
             if 'METADATA' in sources:
                 row['matched_fields'] += sources['METADATA']['matched_fields']
-        row.update(score=scores[key], score_components={name: 1 / (60 + ranks(branch)[key])
-                   for name, branch in branches.items() if key in branch})
+        row.update(score=scores[key], score_components={name: 1 / (60 + positions[key])
+                   for name, positions in branch_ranks.items() if key in positions})
         grouped[row['resource_id']] = row
     return list(grouped.values())

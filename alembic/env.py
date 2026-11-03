@@ -3,6 +3,7 @@ from sqlalchemy.engine import make_url
 
 from alembic import context
 from data_sync_etl.config import Settings
+from data_sync_etl.db import ocr_component_models  # noqa: F401 - register additive replicas
 from data_sync_etl.db.models import Base
 
 config = context.config

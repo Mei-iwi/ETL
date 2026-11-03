@@ -1,3 +1,4 @@
+import re
 from threading import Event, Thread
 from time import monotonic
 from typing import Any, Callable
@@ -13,20 +14,49 @@ class OCRWorker:
         on_job_terminal: Callable[[str], object] | None = None,
         reconcile: Callable[[], bool] | None = None,
         recovery_interval_seconds: int = 30,
+        component_projection_worker: Any | None = None,
+        component_page_executor: Any | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.on_job_terminal = on_job_terminal
         self.reconcile = reconcile
         self.recovery_interval_seconds = recovery_interval_seconds
+        self.component_projection_worker = component_projection_worker
+        component_owned = getattr(pipeline, 'component_owned', False) is True
+        if component_owned != (component_page_executor is not None):
+            raise ValueError('COMPONENT_OCR_WORKER_NOT_CONFIGURED')
+        self.component_page_executor = component_page_executor
         self._next_recovery_at = 0.0
         self._tasks_since_reconcile = 0
+        self._tasks_since_inventory = 0
+        self._prefer_component_projection = False
+
+    def _background_once(self) -> bool:
+        self._prefer_component_projection = not self._prefer_component_projection
+
+        def project() -> bool:
+            if self.component_projection_worker is None:
+                return False
+            try:
+                return bool(self.component_projection_worker.run_once())
+            except Exception:
+                # Errors may contain source paths or credentials; report only a code.
+                event(stage='component_projection', action='PROJECTION_UNAVAILABLE')
+                return False
+
+        def reconcile() -> bool:
+            return bool(self.reconcile()) if self.reconcile is not None else False
+
+        if self._prefer_component_projection:
+            return project() or reconcile()
+        return reconcile() or project()
 
     def once(self, worker_id: str) -> bool:
         with flow():
             current = monotonic()
             if current >= self._next_recovery_at:
-                self._next_recovery_at = current + self.recovery_interval_seconds
                 recovered = self.pipeline.recover_stale()["recovered"]
+                self._next_recovery_at = monotonic() + self.recovery_interval_seconds
                 event(
                     stage="ocr",
                     action="STALE_RECOVERY",
@@ -35,16 +65,31 @@ class OCRWorker:
                 )
             # Bounded fair turn for existing finalization/indexing work, even under
             # a continuous OCR backlog. No new queue or scheduler is introduced.
-            if self._tasks_since_reconcile >= 5 and self.reconcile is not None:
+            if self._tasks_since_reconcile >= 5 and (self.reconcile is not None
+                                                      or self.component_projection_worker is not None):
                 self._tasks_since_reconcile = 0
-                if self.reconcile():
+                if self._background_once():
                     return True
-            if self.pipeline.schedule_authorized_source_job():
-                return True
+            schedule_source = getattr(self.pipeline, 'schedule_authorized_source_job', None)
+            scheduled = False
+            if schedule_source is not None and self._tasks_since_inventory >= 5:
+                self._tasks_since_inventory = 0
+                scheduled = bool(schedule_source())
             task = self.pipeline.claim(worker_id)
+            if task is None and scheduled:
+                return True
+            if task is None and schedule_source is not None and schedule_source():
+                # Claim the newly prepared page immediately. A metadata audit
+                # must never delay already queued OCR pages between turns.
+                task = self.pipeline.claim(worker_id)
+                if task is None:
+                    return True
 
             if task is None:
-                return self.reconcile() if self.reconcile is not None else False
+                return self._background_once()
+
+            if getattr(self.pipeline, 'source_owned', False) and not task.get('source_job_id'):
+                raise ValueError('SOURCE_OCR_TASK_IDENTITY_REQUIRED')
 
             stop = Event()
 
@@ -69,13 +114,11 @@ class OCRWorker:
 
             image_path = None
             try:
-                result, image_path = self.pipeline.recognize(task)
-
-                self.pipeline.succeed(
-                    task,
-                    result,
-                    image_path,
-                )
+                if self.component_page_executor is not None:
+                    self.component_page_executor.execute_claimed(task)
+                else:
+                    result, image_path = self.pipeline.recognize(task)
+                    self.pipeline.succeed(task, result, image_path)
 
             except Exception as exc:
                 self.pipeline.fail(task, error=exc)
@@ -101,6 +144,7 @@ class OCRWorker:
                     event(stage="finalization", job_id=task["job_id"], action="CALLBACK_FAILED")
 
             self._tasks_since_reconcile += 1
+            self._tasks_since_inventory += 1
             return True
 
     def run(self, worker_id: str, once: bool = False) -> bool | None:
@@ -111,7 +155,19 @@ class OCRWorker:
             try:
                 while not stop.is_set():
                     tick()
-                    if not self.once(worker_id):
+                    try:
+                        worked = self.once(worker_id)
+                    except Exception as exc:
+                        if not getattr(self.pipeline, 'source_owned', False):
+                            raise
+                        code = getattr(exc, 'code', None) or str(exc)
+                        if not isinstance(code, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]{0,99}', code):
+                            code = 'UNEXPECTED_RUNTIME_ERROR'
+                        event(stage='source_ocr', action='RUNTIME_UNAVAILABLE',
+                              error_type=type(exc).__name__, error_code=code)
+                        stop.wait(min(30, max(1, self.recovery_interval_seconds)))
+                        continue
+                    if not worked:
                         stop.wait(1)
             except KeyboardInterrupt:
                 return None

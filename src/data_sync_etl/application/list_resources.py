@@ -1,4 +1,4 @@
-from data_sync_etl.application.processing_state import processing_state_from_stages
+from data_sync_etl.application.processing_state import intake_status, processing_state_from_stages
 from data_sync_etl.ports.repositories import UnitOfWork
 
 
@@ -39,6 +39,7 @@ class ListResources:
             if summary is None:
                 return None
             return {key: summary[key] for key in ('id', 'version_number', 'created_at', 'lifecycle_status', 'source_version_id')} | {
+                'intake_status': intake_status(summary, summary['job'], summary['stages']),
                 'processing_status': processing_state_from_stages(summary['job'], summary['stages']) if summary['job'] else 'NOT_STARTED'}
 
         items = [

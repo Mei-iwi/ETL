@@ -1,15 +1,16 @@
-from datetime import timedelta
 import os
+from datetime import timedelta
 
 import pytest
 
 from data_sync_etl.adapters.persistence.audit_queue import utc
 from data_sync_etl.adapters.persistence.scheduled_audit import ScheduledAudit
+from data_sync_etl.db.models import ReconciliationAuditJob as Job
 from data_sync_etl.db.models import ReconciliationFileState as FileState
 from data_sync_etl.domain.core import now
 from tests.unit.test_reconciliation_light_deep import local_file as local_file
-from tests.unit.test_source_reference import source_viewer as source_viewer
 from tests.unit.test_search import searchable as searchable
+from tests.unit.test_source_reference import source_viewer as source_viewer
 
 
 @pytest.mark.parametrize('change', ['same', 'stat', 'unknown', 'ttl', 'missing', 'checksum'])
@@ -40,6 +41,7 @@ def test_deep_proof_survives_only_unchanged_known_revision(local_file, monkeypat
     audit.once()
     assert audit.coverage()['recent_sha256_evidence_count'] == int(change == 'same')
     from types import SimpleNamespace
+
     from data_sync_etl.api.reconciliation_routes import file_evidence
     evidence = file_evidence(SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(container=c))), version)
     assert evidence['recent_sha256_evidence'] == (change == 'same')
@@ -53,6 +55,26 @@ def test_deep_proof_survives_only_unchanged_known_revision(local_file, monkeypat
         audit.once()
         with c.uow() as repo:
             assert repo.session.get(FileState, version).status == 'DESYNC_CHECKSUM'
+
+
+def test_incremental_deep_rechecks_expired_synced_proof_even_if_next_due_is_future(local_file):
+    c, _, version_id = local_file
+    audit = ScheduledAudit(c.reconciliation_engine, c.settings)
+    audit.once(audit.queue.enqueue('DEEP', 'files', mode='FULL'))
+    with c.uow() as repo:
+        state = repo.session.get(FileState, version_id)
+        state.last_verified_at = now() - timedelta(days=c.settings.reconciliation_deep_coverage_days + 1)
+        state.next_due_at = now() + timedelta(days=1)
+
+    assert audit.coverage()['recent_sha256_evidence_count'] == 0
+    job_id = audit.queue.enqueue('DEEP', 'files')
+    audit.once(job_id)
+
+    assert audit.coverage()['recent_sha256_evidence_count'] == 1
+    with c.uow() as repo:
+        job = repo.session.get(Job, job_id)
+        assert job.status == 'COMPLETED'
+        assert job.checkpoint['sha256_computed_count'] == 1
 
 
 @pytest.mark.parametrize('changed', [False, True])

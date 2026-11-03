@@ -2,6 +2,7 @@
 
 from time import monotonic
 
+from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.application.content_bags import (
     ContentBagBuilder,
     StructuredUnit,
@@ -28,12 +29,19 @@ from data_sync_etl.ports.mongo_foundation import (
 
 class IndexingService:
     def __init__(self, uow, reader: IndexContentPort | None, embedding: IndexEmbeddingPort, settings,
-                 *, bags: ContentBagPort | None = None, extractor: KeywordExtractorPort | None = None):
+                 *, bags: ContentBagPort | None = None, extractor: KeywordExtractorPort | None = None,
+                 text_store=None):
         self.uow, self.reader, self.embedding, self.settings = uow, reader, embedding, settings
         self.bags, self.extractor = bags, extractor or UnigramKeywords()
         self.source_content_authorizer = None
+        self.text_store = text_store or LegacyOCRText()
 
     def _authorize_source_index(self, version_id):
+        pipeline = getattr(self.text_store, 'pipeline', None)
+        if pipeline is not None and (state := pipeline.state(version_id)):
+            if not pipeline.authorize_identity(state['identity']):
+                raise IndexingError('SOURCE_CAPABILITY_BLOCKED', 403)
+            return
         if (self.source_content_authorizer is not None
                 and not self.source_content_authorizer(
                     version_id, access=SearchAccess(scope='authenticated_admin'))):
@@ -45,13 +53,13 @@ class IndexingService:
         if not resource or not resource['is_active'] or resource_deleted(resource):
             raise IndexingError('VERSION_NOT_FOUND', 404)
         jobs = repo.find('ocr_jobs', {'resource_version_id': version_id}, order=('-created_at', '-id'), limit=1)
-        return version, processing_state(repo, jobs[0]) if jobs else 'NOT_STARTED'
+        return version, processing_state(repo, jobs[0], self.text_store) if jobs else 'NOT_STARTED'
 
     def _runs(self, repo, version_id):
         return repo.find('etl_stage_runs', {'resource_version_id': version_id, 'stage': 'INDEX_BUILD'},
                          order=('-created_at', '-id'))
 
-    def _snapshot(self, repo, version_id, *, text_reader=None):
+    def _snapshot(self, repo, version_id, *, text_reader=None, content_reader=None):
         version, state = self._version(repo, version_id)
         if state != 'CONTENT_READY':
             raise IndexingError('CONTENT_NOT_READY')
@@ -65,7 +73,7 @@ class IndexingService:
                                 order=('-created_at', '-id'))
         generation, docs = len(projections), []
         for offset in range(0, len(units) + 1, 100):
-            batch = self.reader.units(version_id, limit=100, offset=offset)
+            batch = (content_reader or self.reader.units)(version_id, limit=100, offset=offset)
             docs.extend(batch)
             if len(batch) < 100:
                 break
@@ -73,10 +81,17 @@ class IndexingService:
         if not projections or len(docs) != len(units) or len(by_id) != len(docs):
             raise IndexingError('CONTENT_NOT_READY')
         # HTTP Search alone opts in. All other callers retain point-read timing.
-        texts = text_reader([unit['id'] for unit in units]) if text_reader is not None else None
+        if (hasattr(self.text_store, 'source_version')
+                and self.text_store.source_version(repo, version_id)):
+            try:
+                texts = self.text_store.unit_texts(repo, [unit['id'] for unit in units], by_id)
+            except DomainError:
+                raise IndexingError('CONTENT_NOT_READY') from None
+        else:
+            texts = text_reader([unit['id'] for unit in units]) if text_reader is not None else None
         content, total_chars = [], 0
         for unit in units:
-            body = texts.get(unit['id']) if texts is not None else repo.get('content_unit_texts', unit['id'])
+            body = texts.get(unit['id']) if texts is not None else self.text_store.unit_text(repo, unit['id'])
             doc = by_id.get(unit['id'])
             if (not body or not doc or unit['mongo_id'] != unit['id'] or doc.content_unit_id != unit['id']
                     or not doc.is_current or doc.projection_generation != generation or doc.resource_version_id != version_id

@@ -1,7 +1,9 @@
+from datetime import timedelta
+
 import pytest
 
 from data_sync_etl.adapters.source.registry import ConfiguredSourceRegistry
-from data_sync_etl.domain.core import DomainError, SourceFileError
+from data_sync_etl.domain.core import DomainError, SourceFileError, now
 from data_sync_etl.domain.source_registry import SourceCapabilities, SourceRegistration
 from tests.unit.test_source_file_import import discover_and_import
 
@@ -155,6 +157,68 @@ def test_source_scheduler_does_not_starve_existing_jobs(source_importing, monkey
     monkeypatch.setattr(container.ocr, 'create_job', lambda *a, **k: pytest.fail('Existing job rescheduled'))
     assert container.ocr.schedule_authorized_source_job() is False
     assert container.ocr.claim('worker-after-recovery') is not None
+
+
+def test_source_prejob_failure_is_durable_bounded_and_can_be_retried(source_importing):
+    container, source_rows, path = source_importing
+    row = discover_and_import(container)
+    grant_source_content(container)
+    payload = path.read_bytes()
+    path.unlink()
+    assert container.ocr.schedule_authorized_source_job() is False
+    with container.uow() as repo:
+        failed = repo.get('source_file_imports', row['id'])
+        assert failed['status'] == 'RETRY_WAIT'
+        assert failed['attempts'] == 1 and failed['last_error_code'] == 'FILE_NOT_FOUND'
+        assert failed['next_retry_at'] is not None
+        container.source_file_import._discover(repo, source_rows[0])
+    # Metadata discovery must not erase failure/backoff or pretend OCR ran.
+    assert container.ocr.schedule_authorized_source_job() is False
+    with container.uow() as repo:
+        assert repo.get('source_file_imports', row['id'])['attempts'] == 1
+        repo.update('source_file_imports', row['id'], {
+            'attempts': container.settings.source_file_import_max_attempts - 1,
+            'next_retry_at': now() - timedelta(seconds=1)})
+    assert container.ocr.schedule_authorized_source_job() is False
+    with container.uow() as repo:
+        assert repo.get('source_file_imports', row['id'])['status'] == 'RETRY_EXHAUSTED'
+    path.write_bytes(payload)
+    assert container.source_file_import.retry(row['id'])['action'] == 'QUEUED'
+    assert container.ocr.schedule_authorized_source_job() is True
+    assert container.ocr.schedule_authorized_source_job() is False
+    with container.uow() as repo:
+        assert repo.count('ocr_jobs', {'resource_version_id': row['target_version_id']}) == 1
+
+
+def test_source_batch_authorization_never_reuses_revoked_authority(source_importing):
+    from data_sync_etl.domain.search_access import SearchAccess
+    container, _, _ = source_importing
+    row = discover_and_import(container)
+    grant_source_content(container)
+    access = SearchAccess('authenticated_admin')
+    assert container.source_resolver.derived_index_authorized_many([row['target_version_id']], access=access) == {
+        row['target_version_id']: True}
+    with container.uow() as repo:
+        repo.update('source_file_imports', row['id'], {'source_resource_active': False})
+    assert container.source_resolver.derived_index_authorized_many([row['target_version_id']], access=access) == {
+        row['target_version_id']: False}
+
+
+def test_source_manual_ocr_retry_reuses_file_version_and_job(source_importing, monkeypatch):
+    container, _, path = source_importing
+    row = discover_and_import(container)
+    grant_source_content(container)
+    job = container.ocr.create_job(row['target_version_id'])
+    container.ocr.max_retries = 1
+    task = container.ocr.claim('fail-once')
+    container.ocr.fail(task, error=DomainError('EMPTY_EXTRACTED_CONTENT'))
+    monkeypatch.setattr(container.ocr, 'create_job', lambda *a, **k: pytest.fail('Duplicate job'))
+    assert container.source_file_import.retry(row['id'])['action'] == 'QUEUED'
+    with container.uow() as repo:
+        assert repo.get('ocr_jobs', job['id'])['status'] == 'PENDING'
+        assert repo.get('source_file_imports', row['id'])['processing_job_id'] == job['id']
+        assert repo.count('ocr_jobs', {'resource_version_id': row['target_version_id']}) == 1
+    assert path.is_file() and not list(container.storage.root.rglob('*.pdf'))
 
 
 def test_source_cannot_process_when_derived_index_grant_is_missing(source_importing):

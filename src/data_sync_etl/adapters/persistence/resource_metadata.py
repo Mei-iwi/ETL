@@ -41,6 +41,7 @@ class ResourceMetadataRepositoryMixin:
         return {version['resource_id']: {
             'id': version['id'], 'version_number': version['version_number'], 'created_at': version['created_at'],
             'lifecycle_status': version['lifecycle_status'], 'job': jobs.get(version['id']),
+            'processing_options': version.get('processing_options'),
             'stages': [row for row in stages if row['resource_version_id'] == version['id']],
             'source_version_id': imports.get(version['id'], {}).get('source_version_id'),
         } for version in versions}

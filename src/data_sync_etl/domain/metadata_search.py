@@ -44,7 +44,7 @@ def candidate_query(query, dictionary, policy, domain=None):
 
 def metadata_allowed(resource, version, access):
     if (not access.internal or not resource or not version
-            or resource.get('is_active') is not True or resource.get('publication_status') != 'PUBLISHED'
+            or resource.get('is_active') is not True or not access.publication_allowed(resource)
             or version.get('resource_id') != resource.get('id')
             or version.get('lifecycle_status') not in ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED')
             or denied(resource) or denied(version) or version.get('rejection_reason')):
@@ -57,7 +57,8 @@ def metadata_allowed(resource, version, access):
         return False
     # Published metadata follows the explicit authenticated shared-read policy.
     # Resource/version restrictions above always take precedence.
-    return bool((access.allow_public and access.allow_shared_unreviewed)
+    return bool((resource.get('publication_status') == 'PUBLISHED'
+                 and access.allow_public and access.allow_shared_unreviewed)
                 or (owned and access.allow_owned_unreviewed)
                 or (version.get('final_approved_by') and version.get('final_approved_at')))
 

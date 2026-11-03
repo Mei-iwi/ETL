@@ -96,6 +96,9 @@ class SourceFileResolver:
     def _status_allowed(self, source, *, namespace=None):
         if source_status_allowed(source.get('source_lifecycle_status'), self.settings.source_file_allowed_statuses):
             return True
+        processing_policy = getattr(self, 'source_ocr_status_policy', None)
+        if processing_policy is not None and processing_policy(source, namespace):
+            return True
         # ETL uploads may be processed while SOURCE is awaiting review, but
         # only with an exact committed writeback receipt and a live resource.
         if source.get('source_lifecycle_status') not in {
@@ -211,21 +214,62 @@ class SourceFileResolver:
 
     def derived_index_authorized(self, version_id, *, access):
         """Check retrieval grants, SOURCE eligibility and current registry policy."""
+        return self.derived_index_authorized_many([version_id], access=access).get(version_id, False)
+
+    def derived_index_authorized_many(self, version_ids, *, access):
+        ids = list(dict.fromkeys(version_ids))
+        if len(ids) > self.settings.search_max_bags + 1:
+            raise SourceFileError('SOURCE_AUTHORIZATION_LIMIT')
+        result = {}
+        # No cache crosses requests or final snapshot phases. Three authority
+        # reads per batch replace three reads per candidate version.
+        for offset in range(0, len(ids), 250):
+            with self.uow() as repo:
+                authorities = repo.source_index_authorities(ids[offset:offset + 250])
+            groups, live = {}, {}
+            for key, (_version, resource, rows) in authorities.items():
+                if resource and resource.get('source_origin') == 'POSTGRESQL' and len(rows) == 1:
+                    groups.setdefault(rows[0]['source_system'], []).append((key, rows[0]['source_version_id']))
+            for source_id, members in groups.items():
+                try:
+                    adapter = self._source_adapter(source_id)
+                    bulk = getattr(adapter, 'get_versions', None)
+                    source_ids = [source_version_id for _, source_version_id in members]
+                    snapshots = (bulk(source_ids) if callable(bulk) else
+                                 {source_version_id: adapter.get_version(source_version_id)
+                                  for source_version_id in source_ids})
+                    for key, source_version_id in members:
+                        live[key] = snapshots.get(source_version_id)
+                except (DomainError, SourceFileError):
+                    continue  # Unknown authority never permits stale text replay.
+            for key in ids[offset:offset + 250]:
+                version, resource, rows = authorities.get(key, (None, None, []))
+                result[key] = self._derived_index_authorized(version, resource, rows, access, source=live.get(key))
+        return result
+
+    def _derived_index_authorized(self, version, resource, rows, access, *, source=None):
         from data_sync_etl.domain.metadata_search import metadata_allowed
         from data_sync_etl.domain.search_access import denied
-        with self.uow() as repo:
-            version = repo.get('resource_versions', version_id)
-            resource = repo.get('master_learning_resources', version['resource_id']) if version else None
-            if not version or not resource:
-                return False
-            if resource.get('source_origin') == 'LOCAL':
-                return True
-            rows = repo.find('source_file_imports', {'target_version_id': version_id}, limit=2)
-            uploaded = bool((version.get('processing_options') or {}).get('etl_source_upload')
+        if not version or not resource:
+            return False
+        if resource.get('source_origin') == 'LOCAL':
+            return True
+        if len(rows) == 1 and not self._namespace_matches(resource, rows[0]):
+            return False
+        if (not source or not source.get('resource_active', True)
+                or source.get('resource_deleted_at') is not None or len(rows) != 1
+                or source.get('source_version_id') != rows[0]['source_version_id']
+                or source.get('resource_id') != (resource.get('source_record_key') or resource['id'])
+                or source.get('source_version_number') != version.get('version_number')
+                or source.get('source_hash', '').lower() != version.get('source_hash', '').lower()
+                or not access.publication_allowed({**resource,
+                    'publication_status': source.get('resource_publication_status')})):
+            return False
+        uploaded = bool((version.get('processing_options') or {}).get('etl_source_upload')
                             and len(rows) == 1
                             and rows[0].get('source_lifecycle_status') == 'UNREVIEWED')
-            if (resource.get('source_origin') != 'POSTGRESQL'
-                    or resource.get('publication_status') != 'PUBLISHED'
+        if (resource.get('source_origin') != 'POSTGRESQL'
+                    or not access.publication_allowed(resource)
                     or not resource.get('is_active') or resource_deleted(resource)
                     or denied(resource) or denied(version)
                     or not metadata_allowed(resource, version, access)
@@ -234,13 +278,12 @@ class SourceFileResolver:
                     or rows[0].get('resource_id') != resource['id']
                     or rows[0].get('source_hash', '').lower() != version.get('source_hash', '').lower()
                     or not rows[0].get('source_resource_active', True)
-                    or not (uploaded or source_status_allowed(rows[0].get('source_lifecycle_status'),
-                                                              self.settings.source_file_allowed_statuses))
+                    or not (uploaded or self._status_allowed(source, namespace=self.settings.source_namespace))
                     or rows[0].get('last_error_code') in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING')):
-                return False
-            source_id = rows[0]['source_system']
+            return False
+        source_id = rows[0]['source_system']
         reference = ResolvedFileReference(
-            ownership='SOURCE_BACKED', target_version_id=version_id, resource_id=resource['id'],
+            ownership='SOURCE_BACKED', target_version_id=version['id'], resource_id=resource['id'],
             source_version_id=rows[0]['source_version_id'], provider='external', bucket='',
             opaque_locator='', filename='', mime='', expected_sha256=version['source_hash'].lower(),
             source_id=source_id,
@@ -250,6 +293,13 @@ class SourceFileResolver:
             return True
         except SourceFileError:
             return False
+
+    def _namespace_matches(self, resource, row):
+        namespace = resource.get('source_namespace')
+        if namespace is None:
+            return True  # Legacy mappings without a locator retain their existing policy.
+        adapter = self._source_adapter(row['source_system'])
+        return namespace == getattr(adapter, 'source_namespace', self.settings.source_namespace)
 
     def resolve(self, version_id):
         with self.uow() as repo:
@@ -264,6 +314,8 @@ class SourceFileResolver:
             if origin != 'POSTGRESQL' or len(rows) != 1:
                 raise SourceFileError('BLOCKED_SOURCE_MAPPING')
             row = rows[0]
+            if not self._namespace_matches(resource, row):
+                raise SourceFileError('BLOCKED_SOURCE_MAPPING')
             if row['last_error_code'] in ('SOURCE_VERSION_MUTATED', 'BLOCKED_SOURCE_MAPPING'):
                 raise SourceFileError(row['last_error_code'])
             if (row['resource_id'], row['source_version_number'], row['source_hash'].lower()) != (version['resource_id'], version['version_number'], version['source_hash'].lower()):

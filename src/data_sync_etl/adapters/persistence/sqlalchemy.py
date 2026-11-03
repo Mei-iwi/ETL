@@ -337,6 +337,88 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
             .on_conflict_do_nothing(index_elements=["stream_name"])
         )
 
+    def source_ocr_authority(self, version_id, actor_id):
+        rows = self.session.execute(select(ResourceVersion, MasterLearningResource, MasterUser, SourceFileImport)
+            .join(MasterLearningResource, MasterLearningResource.id == ResourceVersion.resource_id)
+            .join(MasterUser, MasterUser.id == actor_id.removeprefix('master:'))
+            .outerjoin(SourceFileImport, SourceFileImport.target_version_id == ResourceVersion.id)
+            .where(ResourceVersion.id == version_id).limit(2)).all()
+        if not rows:
+            return None
+        version, resource, user, _ = rows[0]
+        return (self._dict(version), self._dict(resource), self._dict(user),
+                [self._dict(row[3]) for row in rows if row[3] is not None])
+
+    def source_ocr_states(self, namespace, *, active_only=False):
+        stmt = select(ResourceVersion).join(SourceFileImport,
+            SourceFileImport.target_version_id == ResourceVersion.id).join(MasterLearningResource,
+            MasterLearningResource.id == ResourceVersion.resource_id).where(
+            MasterLearningResource.source_namespace == namespace,
+            ResourceVersion.processing_options['_source_ocr']['source_job_id'].as_string().is_not(None))
+        if active_only:
+            stmt = stmt.outerjoin(OcrJob, OcrJob.resource_version_id == ResourceVersion.id).where(
+                or_(OcrJob.id.is_(None), OcrJob.status.notin_(('COMPLETED', 'FAILED', 'CANCELLED'))))
+        rows = self.session.scalars(stmt.distinct().order_by(ResourceVersion.id).limit(10001)).all()
+        if len(rows) > 10000:
+            raise DomainError('SOURCE_OCR_RECONCILE_LIMIT')
+        return [(row.id, row.processing_options['_source_ocr']) for row in rows]
+
+    def source_ocr_ready_versions(self, namespace, *, resource_ids=None, limit=10):
+        audit = ResourceVersion.processing_options['_source_ocr_audit']
+        stmt = select(ResourceVersion.id).join(MasterLearningResource,
+            MasterLearningResource.id == ResourceVersion.resource_id).join(SourceFileImport,
+            SourceFileImport.target_version_id == ResourceVersion.id).where(
+            MasterLearningResource.source_origin == 'POSTGRESQL',
+            MasterLearningResource.source_namespace == namespace,
+            audit['needs_execution'].as_boolean().is_(True),
+            audit['execution_authorized'].as_boolean().is_(True),
+            SourceFileImport.status.notin_(('FAILED', 'RETRY_EXHAUSTED', 'CANCELLED')),
+            or_(SourceFileImport.next_retry_at.is_(None), SourceFileImport.next_retry_at <= now()))
+        if resource_ids is not None:
+            stmt = stmt.where(MasterLearningResource.id.in_(resource_ids))
+        return list(self.session.scalars(stmt.order_by(ResourceVersion.id).limit(min(50, max(1, limit)))))
+
+    def source_ocr_inventory_page(self, namespace, *, after=None, resource_ids=None, limit=10, unaudited_only=False):
+        # Metadata inventory precedes execution policy. Include DRAFT, terminal,
+        # revoked and versions without source_file_imports or local OCR state.
+        key = ResourceVersion.id.collate('C') if self.session.bind.dialect.name == 'postgresql' else ResourceVersion.id
+        stmt = select(ResourceVersion).join(MasterLearningResource,
+            MasterLearningResource.id == ResourceVersion.resource_id).where(
+            MasterLearningResource.source_origin == 'POSTGRESQL',
+            MasterLearningResource.source_namespace == namespace)
+        if after:
+            stmt = stmt.where(key > after)
+        if unaudited_only:
+            status = ResourceVersion.processing_options['_source_ocr_audit']['status'].as_string()
+            stmt = stmt.where(or_(status.is_(None), status == 'RECHECK_REQUIRED'))
+        if resource_ids is not None:
+            stmt = stmt.where(MasterLearningResource.id.in_(resource_ids))
+        ordering = (ResourceVersion.created_at.desc(), key) if unaudited_only else (key,)
+        return [self._dict(row) for row in self.session.scalars(stmt.order_by(*ordering).limit(min(50, max(1, limit))))]
+
+    def source_ocr_inventory_counts(self, namespace):
+        status = ResourceVersion.processing_options['_source_ocr_audit']['status'].as_string()
+        rows = self.session.execute(select(status, func.count()).join(MasterLearningResource,
+            MasterLearningResource.id == ResourceVersion.resource_id).where(
+            MasterLearningResource.source_origin == 'POSTGRESQL',
+            MasterLearningResource.source_namespace == namespace).group_by(status)).all()
+        return {key or 'UNAUDITED': count for key, count in rows}
+
+    def source_processing_candidates(self, source_ids, *, limit=50):
+        model = SourceFileImport
+        stmt = select(model).join(ResourceVersion, ResourceVersion.id == model.target_version_id).join(
+            MasterLearningResource, MasterLearningResource.id == model.resource_id).where(
+            model.source_system.in_(source_ids), model.status.in_(('METADATA_ONLY', 'RETRY_WAIT')),
+            or_(model.next_retry_at.is_(None), model.next_retry_at <= now()),
+            ResourceVersion.lifecycle_status == 'METADATA_ONLY',
+            MasterLearningResource.source_origin == 'POSTGRESQL',
+            MasterLearningResource.is_active.is_(True), MasterLearningResource.deleted_at.is_(None),
+            MasterLearningResource.master_deleted_at.is_(None),
+            MasterLearningResource.publication_status == 'PUBLISHED',
+            ~exists().where(OcrJob.resource_version_id == model.target_version_id))
+        return [self._dict(row) for row in self.session.scalars(
+            stmt.order_by(model.updated_at, model.id).limit(min(100, max(1, limit))))]
+
     def source_import_page(self, after=None, size=20, retry_candidates=False, failed_only=False, count_only=False):
         model = SourceFileImport
         key = model.source_version_id
@@ -346,7 +428,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         if after is not None:
             stmt = stmt.where(key > after)
         if retry_candidates:
-            stmt = stmt.where(model.status.in_(["FAILED", "RETRY_EXHAUSTED", "PROCESSING"]))
+            stmt = stmt.where(model.status.in_(["FAILED", "RETRY_EXHAUSTED", "PROCESSING", "METADATA_ONLY", "RETRY_WAIT"]))
         if failed_only:
             def latest_stage(stage):
                 return select(EtlStageRun.status).where(
@@ -372,7 +454,7 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
                         finalization_failed,
                     ))),
             )
-            stmt = stmt.where(or_(model.status.in_(["FAILED", "RETRY_EXHAUSTED"]),
+            stmt = stmt.where(or_(model.status.in_(["FAILED", "RETRY_EXHAUSTED", "RETRY_WAIT"]),
                                   and_(model.status == "PROCESSING", processing_failed)))
         if count_only:
             return self.session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
@@ -438,16 +520,22 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
     def pending_live_ocr_tasks(self, max_active=1, heartbeat_timeout=120):
         admission_lock(self.session, 'ocr')
         stamp = now()
+        legacy_owned = exists().where(OcrJob.id == OcrPageTask.job_id,
+            ResourceVersion.id == OcrJob.resource_version_id,
+            MasterLearningResource.id == ResourceVersion.resource_id,
+            MasterLearningResource.source_origin == 'LOCAL',
+            ResourceVersion.processing_options['_source_ocr'].as_string().is_(None),
+            ~OcrJob.id.like('SJ%'))
         active = and_(OcrPageTask.status == 'RUNNING',
                       OcrPageTask.heartbeat_at > stamp - timedelta(seconds=heartbeat_timeout))
-        if self.session.scalar(select(func.count()).select_from(OcrPageTask).where(active)) >= max_active:
+        if self.session.scalar(select(func.count()).select_from(OcrPageTask).where(active, legacy_owned)) >= max_active:
             return []
         live = exists().where(OcrJob.id == OcrPageTask.job_id,
             ResourceVersion.id == OcrJob.resource_version_id,
             MasterLearningResource.id == ResourceVersion.resource_id,
             MasterLearningResource.is_active.is_(True), MasterLearningResource.deleted_at.is_(None),
             MasterLearningResource.master_deleted_at.is_(None))
-        query = select(OcrPageTask).where(OcrPageTask.status == 'PENDING', live).order_by(
+        query = select(OcrPageTask).where(OcrPageTask.status == 'PENDING', live, legacy_owned).order_by(
             OcrPageTask.created_at, OcrPageTask.id).limit(1).with_for_update(skip_locked=True)
         return [self._dict(row) for row in self.session.scalars(query)]
 
@@ -803,9 +891,15 @@ class SQLAlchemyRepository(ResourceMetadataRepositoryMixin, SearchRepositoryMixi
         return [self._dict(row) for row in self.session.scalars(query)]
 
     def stale_tasks(self, cutoff):
+        legacy_owned = exists().where(OcrJob.id == OcrPageTask.job_id,
+            ResourceVersion.id == OcrJob.resource_version_id,
+            MasterLearningResource.id == ResourceVersion.resource_id,
+            MasterLearningResource.source_origin == 'LOCAL',
+            ResourceVersion.processing_options['_source_ocr'].as_string().is_(None),
+            ~OcrJob.id.like('SJ%'))
         stmt = (
             select(OcrPageTask)
-            .where(OcrPageTask.status == "RUNNING", OcrPageTask.heartbeat_at < cutoff)
+            .where(OcrPageTask.status == "RUNNING", OcrPageTask.heartbeat_at < cutoff, legacy_owned)
             .order_by(OcrPageTask.id)
             .with_for_update(skip_locked=True)
             .limit(1)

@@ -23,13 +23,30 @@ class RetryProcessingJob:
             "status_url": f"/api/v1/resource-versions/{version_id}/etl-status",
         }
 
-    def run(self, job_id: str, *, fence=None) -> dict:
+    def run(self, job_id: str, *, fence=None, access=None) -> dict:
         with self.uow() as repo:
             job = repo.get("ocr_jobs", job_id)
         if job is None:
             raise ProcessingJobNotFound("Processing job not found")
 
         version_id = job["resource_version_id"]
+        pipeline = getattr(self, 'source_pipeline', None)
+        if pipeline is None:
+            with self.uow() as repo:
+                version = repo.get('resource_versions', version_id)
+            if version and (version.get('processing_options') or {}).get('_source_ocr'):
+                raise ProcessingRetryConflict('SOURCE_OCR_OWNER_REQUIRED')
+        source = pipeline.state(version_id) if pipeline is not None else None
+        if source:
+            from data_sync_etl.application.source_ocr_runtime import stable_id
+            if access is None:
+                actor, role = pipeline._scheduler_identity()
+                with self.uow() as repo:
+                    version = repo.get('resource_versions', version_id)
+                access = pipeline._access(actor, role, version['resource_id'])
+            pipeline.container.search.authorize_source_processing_version(version_id, access=access)
+            if job['id'] != stable_id('SJ', source['identity']['namespace'], source['source_job_id']):
+                raise ProcessingRetryConflict('SOURCE_OCR_JOB_CONFLICT')
         with self.uow.processing_lock(version_id) as acquired:
             if not acquired:
                 raise ProcessingRetryConflict("Processing job is busy")
@@ -53,22 +70,37 @@ class RetryProcessingJob:
                 ):
                     raise ProcessingRetryConflict("Learning resource is unavailable")
 
-                state = processing_state(repo, job)
+                state = processing_state(repo, job, pipeline.container.ocr_text_store if source else None)
                 if job["status"] in ("PENDING", "RUNNING"):
                     return self._result(job, "ALREADY_IN_PROGRESS", state)
                 if state in ("CONTENT_READY", "NO_EXTRACTABLE_CONTENT"):
                     return self._result(job, "ALREADY_COMPLETED", state)
                 if job["status"] in ("FAILED", "COMPLETED_WITH_ERRORS"):
-                    result = self._retry_ocr(repo, job)
-                    if fence is not None:
-                        fence(repo)
-                    return result
+                    if source:
+                        self._check_manual_limit(repo, version_id)
+                        repo.insert('etl_stage_runs', dict(resource_version_id=version_id, stage='OCR_RETRY',
+                                                          status='RUNNING', started_at=now(), created_at=now()))
+                    else:
+                        result = self._retry_ocr(repo, job)
+                        if fence is not None:
+                            fence(repo)
+                        return result
                 if job["status"] == "COMPLETED":
                     result = self._retry_finalization(repo, job, state)
                     if fence is not None:
                         fence(repo)
                     return result
-                raise ProcessingRetryConflict("Processing job cannot be retried")
+                elif not source:
+                    raise ProcessingRetryConflict("Processing job cannot be retried")
+            if source:
+                pipeline.queue.retry(source['identity'], source['source_job_id'])
+                job = pipeline.sync(source)
+                with self.uow() as repo:
+                    stages = repo.find('etl_stage_runs', {'resource_version_id': version_id,
+                                       'stage': 'OCR_RETRY', 'status': 'RUNNING'}, limit=1)
+                    if stages:
+                        repo.update('etl_stage_runs', stages[0]['id'], {'status': 'COMPLETED', 'finished_at': now()})
+                return self._result(job, 'OCR_REQUEUED', 'OCR_PENDING')
 
     def _check_manual_limit(self, repo, version_id: str) -> None:
         count = sum(

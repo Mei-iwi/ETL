@@ -9,6 +9,8 @@ from data_sync_etl.db.models import (
     MasterGradeLevel,
     MasterLearningResource,
     OcrJob,
+    OcrPageResult,
+    OcrPageTask,
     ResourceGradeLevel,
     ResourceSubject,
     ResourceVersion,
@@ -22,6 +24,86 @@ SEARCH_TEXT_BATCH_SIZE = 500
 
 
 class SearchRepositoryMixin:
+    def search_authority_phase(self, version_ids, *, include_semantic=False, max_chars=10_000_000):
+        from data_sync_etl.adapters.persistence.search_phase import SearchAuthorityPhase
+        from data_sync_etl.domain.search import SearchError
+        ids = list(dict.fromkeys(version_ids))
+        if len(ids) > 10001 or type(max_chars) is not int or not 1 <= max_chars <= 50_000_000:
+            raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+        versions = {row.id: self._dict(row) for row in self.session.scalars(
+            select(ResourceVersion).where(ResourceVersion.id.in_(ids)))}
+        resources = {row.id: self._dict(row) for row in self.session.scalars(select(MasterLearningResource).where(
+            MasterLearningResource.id.in_({row['resource_id'] for row in versions.values()})))}
+        ranked = select(OcrJob.id, func.row_number().over(partition_by=OcrJob.resource_version_id,
+            order_by=(OcrJob.created_at.desc(), OcrJob.id.desc())).label('position')).where(
+            OcrJob.resource_version_id.in_(ids)).subquery()
+        jobs, stages = {}, {}
+        for row in self.session.scalars(select(OcrJob).join(ranked, ranked.c.id == OcrJob.id).where(ranked.c.position == 1)):
+            jobs.setdefault(row.resource_version_id, []).append(self._dict(row))
+        for index, row in enumerate(self.session.scalars(select(EtlStageRun).where(EtlStageRun.resource_version_id.in_(ids))
+                .order_by(EtlStageRun.created_at.desc(), EtlStageRun.id.desc()).limit(20001))):
+            if index >= 20000:
+                raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+            stages.setdefault(row.resource_version_id, []).append(self._dict(row))
+        units, unit_ids = {}, []
+        for index, row in enumerate(self.session.scalars(select(ContentUnit).where(ContentUnit.resource_version_id.in_(ids))
+                .order_by(ContentUnit.sequence_no, ContentUnit.id).limit(10001))):
+            if index >= 10000:
+                raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+            units.setdefault(row.resource_version_id, []).append(self._dict(row))
+            unit_ids.append(row.id)
+        if unit_ids:
+            total_chars = self.session.scalar(select(func.coalesce(func.sum(func.length(ContentUnitText.text)), 0))
+                .where(ContentUnitText.content_unit_id.in_(unit_ids)))
+            if total_chars > max_chars:
+                raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+        texts = self.search_unit_texts(unit_ids)
+        tasks, results = {}, {}
+        completed = [row['id'] for group in jobs.values() for row in group if row['status'] == 'COMPLETED']
+        if completed:
+            first = select(OcrPageTask.id, func.row_number().over(partition_by=OcrPageTask.job_id,
+                order_by=(OcrPageTask.page_num, OcrPageTask.id)).label('position')).where(
+                OcrPageTask.job_id.in_(completed)).subquery()
+            for row in self.session.scalars(select(OcrPageTask).join(first, first.c.id == OcrPageTask.id).where(first.c.position == 1)):
+                tasks.setdefault(row.job_id, []).append(self._dict(row))
+            task_ids = [row['id'] for group in tasks.values() for row in group]
+            if task_ids:
+                for row in self.session.scalars(select(OcrPageResult).where(OcrPageResult.page_task_id.in_(task_ids))):
+                    results.setdefault(row.page_task_id, []).append(self._dict(row))
+        semantic = None
+        if include_semantic:
+            semantic = {key: {'title': row.get('title'), 'subjects': [], 'grades': []} for key, row in resources.items()}
+            for key, name in self.session.execute(select(ResourceSubject.resource_id, Subject.subject_name).join(
+                    Subject, Subject.id == ResourceSubject.subject_id).where(ResourceSubject.resource_id.in_(resources),
+                    Subject.is_active.is_(True), Subject.deleted_at.is_(None))):
+                semantic[key]['subjects'].append(name)
+            for key, name in self.session.execute(select(ResourceGradeLevel.resource_id, MasterGradeLevel.grade_name_vi).join(
+                    MasterGradeLevel, MasterGradeLevel.id == ResourceGradeLevel.grade_level_id).where(
+                    ResourceGradeLevel.resource_id.in_(resources), MasterGradeLevel.grade_is_active.is_(True),
+                    MasterGradeLevel.grade_deleted_at.is_(None), MasterGradeLevel.education_is_active.is_(True),
+                    MasterGradeLevel.education_deleted_at.is_(None))):
+                semantic[key]['grades'].append(name)
+            for row in semantic.values():
+                if len(row['subjects']) > 32 or len(row['grades']) > 32:
+                    raise IndexingError('SEMANTIC_METADATA_LIMIT', 422)
+                row['subjects'], row['grades'] = sorted(set(row['subjects'])), sorted(set(row['grades']))
+        return SearchAuthorityPhase({'resource_versions': versions, 'master_learning_resources': resources,
+                                     'content_unit_texts': texts},
+            {'ocr_jobs': jobs, 'etl_stage_runs': stages, 'content_units': units,
+             'ocr_page_tasks': tasks, 'ocr_page_results': results}, semantic)
+
+    def source_index_authorities(self, version_ids):
+        versions = {row.id: self._dict(row) for row in self.session.scalars(
+            select(ResourceVersion).where(ResourceVersion.id.in_(version_ids)))}
+        resource_ids = {row['resource_id'] for row in versions.values()}
+        resources = {row.id: self._dict(row) for row in self.session.scalars(
+            select(MasterLearningResource).where(MasterLearningResource.id.in_(resource_ids)))}
+        imports = {}
+        for row in self.session.scalars(select(SourceFileImport).where(SourceFileImport.target_version_id.in_(version_ids))):
+            imports.setdefault(row.target_version_id, []).append(self._dict(row))
+        return {key: (version, resources.get(version['resource_id']), imports.get(key, []))
+                for key, version in versions.items()}
+
     def metadata_refresh_page(self, after, limit):
         query = select(MasterLearningResource.id).order_by(MasterLearningResource.id).limit(limit)
         if after:
@@ -141,7 +223,16 @@ class SearchRepositoryMixin:
 
     def search_versions(self, filters, *, limit, metadata_access=None):
         r, v = MasterLearningResource, ResourceVersion
-        conditions = [r.is_active.is_(True), r.deleted_at.is_(None), r.master_deleted_at.is_(None), r.publication_status == 'PUBLISHED']
+        publication = r.publication_status == 'PUBLISHED'
+        if metadata_access is not None and metadata_access.actor_id:
+            if metadata_access.scope == 'authenticated_admin':
+                publication = r.publication_status.in_(('DRAFT', 'PUBLISHED'))
+            elif metadata_access.scope == 'authenticated_user':
+                granted_draft = and_(r.publication_status == 'DRAFT', r.id.in_(metadata_access.resource_ids))
+                if metadata_access.owner_id is not None:
+                    granted_draft = and_(granted_draft, r.created_by == metadata_access.owner_id)
+                publication = or_(publication, granted_draft)
+        conditions = [r.is_active.is_(True), r.deleted_at.is_(None), r.master_deleted_at.is_(None), publication]
         if filters.get('_after_resource_id'):
             conditions.append(r.id > filters['_after_resource_id'])
         if filters.get('resource_id'):
@@ -160,12 +251,14 @@ class SearchRepositoryMixin:
                 MasterGradeLevel.grade_is_active.is_(True), MasterGradeLevel.grade_deleted_at.is_(None),
                 MasterGradeLevel.education_is_active.is_(True), MasterGradeLevel.education_deleted_at.is_(None)))
         # INGESTED is the local upload lifecycle. READY processing/index checks are
-        # independent and mandatory in the application. Draft/rejected versions never qualify.
+        # independent and mandatory in the application. DRAFT resources require
+        # the authenticated grant above; rejected versions never qualify.
         eligible = ('METADATA_ONLY', 'INGESTED', 'APPROVED', 'PUBLISHED')
+        eligible_resources = select(r.id).where(*conditions).correlate(None)
         ranked = select(v.id.label('version_id'), v.resource_id, v.version_number,
                         func.row_number().over(partition_by=v.resource_id,
                             order_by=(v.version_number.desc(), v.id.desc())).label('position')
-                        ).where(v.lifecycle_status.in_(eligible)).subquery()
+                        ).where(v.lifecycle_status.in_(eligible), v.resource_id.in_(eligible_resources)).subquery()
         stmt = select(r.id.label('resource_id'), r.title.label('resource_title'),
                       r.provider_name, r.resource_type_code, ranked.c.version_id,
                       ranked.c.version_number).join(ranked, ranked.c.resource_id == r.id).where(*conditions)

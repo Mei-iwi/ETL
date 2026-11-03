@@ -177,16 +177,17 @@ class PostgreSQLSourceAdapter:
                 ).scalar_one()
                 if role:
                     raise DomainError("BLOCKED_SOURCE_MAPPING: source account must be read-only")
-                for table in TABLES.values():
-                    if connection.scalar(
-                        text(
-                            "SELECT has_table_privilege(current_user, :table, 'INSERT,UPDATE,DELETE,TRUNCATE')"
-                        ),
-                        {"table": table},
-                    ):
-                        raise DomainError(
-                            "BLOCKED_SOURCE_MAPPING: source account has write privileges"
-                        )
+                # Keep the live privilege check in every snapshot, with one
+                # round trip instead of one per table over a remote SOURCE.
+                writable = connection.scalar(text(
+                    "SELECT bool_or(has_table_privilege(current_user, source_table, "
+                    "'INSERT,UPDATE,DELETE,TRUNCATE')) "
+                    "FROM unnest(CAST(:tables AS text[])) AS checked(source_table)"
+                ), {"tables": list(TABLES.values())})
+                if writable:
+                    raise DomainError(
+                        "BLOCKED_SOURCE_MAPPING: source account has write privileges"
+                    )
                 yield SnapshotReader(connection)
         except SourceCatalogError:
             raise
@@ -386,6 +387,29 @@ class PostgreSQLSourceAdapter:
                 "FROM resource_versions v JOIN learning_resources r ON r.id=v.resource_id WHERE v.id=:id"
             ), {"id": source_version_id}).mappings().one_or_none()
             return cast(SourceVersionMetadata, dict(row)) if row else None
+
+    def get_versions(self, source_version_ids):
+        """Fresh bounded authority read for one Search snapshot phase."""
+        ids = list(dict.fromkeys(source_version_ids))
+        if len(ids) > 250:
+            raise DomainError('SOURCE_VERSION_LOOKUP_LIMIT')
+        if not ids:
+            return {}
+        with self.snapshot() as reader:
+            if not reader.connection.scalar(text(
+                "SELECT has_table_privilege(current_user, 'resource_versions', 'SELECT') "
+                "AND NOT has_table_privilege(current_user, 'resource_versions', 'INSERT,UPDATE,DELETE,TRUNCATE')"
+            )):
+                raise DomainError('BLOCKED_SOURCE_VERSION_ACCESS')
+            statement = text(
+                "SELECT v.id AS source_version_id,v.resource_id,v.version_number AS source_version_number, "
+                "v.parent_version_id,v.source_hash,v.lifecycle_status::text AS source_lifecycle_status, "
+                "r.is_active AS resource_active,r.deleted_at AS resource_deleted_at, "
+                "r.publication_status::text AS resource_publication_status "
+                "FROM resource_versions v JOIN learning_resources r ON r.id=v.resource_id WHERE v.id IN :ids"
+            ).bindparams(bindparam('ids', expanding=True))
+            return {row['source_version_id']: dict(row)
+                    for row in reader.connection.execute(statement, {'ids': ids}).mappings()}
 
     def close(self):
         self.engine.dispose()

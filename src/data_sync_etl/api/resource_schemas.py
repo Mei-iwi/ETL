@@ -8,6 +8,7 @@ class ResourceVersionSummary(BaseModel):
     version_number: int
     lifecycle_status: str
     processing_status: str
+    intake_status: str = 'NOT_STARTED'
     created_at: datetime
     source_version_id: str | None = None
 

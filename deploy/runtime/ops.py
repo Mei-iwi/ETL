@@ -7,7 +7,7 @@ from pathlib import Path
 
 def main():
     actions = {
-        'master-migrate': ['python', '-m', 'alembic', 'upgrade', 'head'],
+        'master-migrate': ['python', '-m', 'alembic', 'upgrade', '0020'],
         'source-migrate': ['python', '-m', 'alembic', '-c', 'alembic_source.ini', 'upgrade', 'head'],
         'mongo-bootstrap-empty': ['python', '-m', 'data_sync_etl.adapters.mongo.schema', '--bootstrap-empty'],
     }

@@ -1,6 +1,7 @@
 import os
 from dataclasses import replace
 from pathlib import Path
+from time import monotonic
 
 from pymongo import MongoClient
 
@@ -21,6 +22,7 @@ from data_sync_etl.adapters.ocr.engines import (
     TesseractOCREngine,
     UnconfiguredOCREngine,
 )
+from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.adapters.persistence.reconciled_sync import SQLAlchemyReconciledSync
 from data_sync_etl.adapters.persistence.source_identity_mapping import (
     SQLAlchemySourceIdentityMappingStore,
@@ -220,13 +222,19 @@ class Container:
     def close(self):
         if hasattr(self, 'reconciliation_jobs'):
             self.reconciliation_jobs.close()
-        if hasattr(self.source, "close"):
-            self.source.close()
-        if self.mongo_client is not None:
-            self.mongo_client.close()
-        if self.source_mongo_client is not None and self.source_mongo_client is not self.mongo_client:
-            self.source_mongo_client.close()
-        self.engine.dispose()
+        source = getattr(self, 'source', None)
+        if callable(getattr(source, 'close', None)):
+            source.close()
+        mongo_client = getattr(self, 'mongo_client', None)
+        source_mongo_client = getattr(self, 'source_mongo_client', None)
+        if mongo_client is not None:
+            mongo_client.close()
+        if source_mongo_client is not None and source_mongo_client is not mongo_client:
+            source_mongo_client.close()
+        if getattr(self, 'source_ocr_engine', None) is not None:
+            self.source_ocr_engine.dispose()
+        if getattr(self, 'engine', None) is not None:
+            self.engine.dispose()
 
     def _reconcile_source_create(self):
         """Run the normal SOURCE -> MASTER resources sync after CREATE."""
@@ -239,8 +247,17 @@ class Container:
             return
         self.sync.run('resources', full=False)
 
-    def __init__(self, settings=None, engine=None, documents=None, *, source_registry=None, source_adapters=None):
+    def __init__(self, settings=None, engine=None, documents=None, *, source_registry=None, source_adapters=None,
+                 component_projection_worker=None, source_ocr_access_provider=None):
         self.settings = settings or Settings()
+        self.source_ocr_access_provider = source_ocr_access_provider
+        # MASTER remains on 0020: the older component projection worker reads
+        # the removed 0021 tables and must never be injected into this runtime.
+        if component_projection_worker is not None:
+            raise DomainError('BLOCKED_LEGACY_COMPONENT_PROJECTION')
+        if self.settings.ocr_component_pipeline_enabled:
+            from data_sync_etl.application.source_ocr_runtime import load_source_ocr_contract
+            source_ocr_contract = load_source_ocr_contract(self.settings)
         if self.settings.master_mongo_identity_projection and (
                 self.settings.app_environment not in ('development', 'test')
                 or self.settings.mongo_metadata_mode != 'shared'
@@ -254,6 +271,7 @@ class Container:
         self.source = create_source(self.settings)
         self.engine = engine or make_engine(self.settings.database_url)
         self.uow = SQLAlchemyUnitOfWork(sessions(self.engine))
+        self.ocr_text_store = LegacyOCRText()
         self.subject_reader = SQLAlchemySubjectReader(sessions(self.engine))
         self.subject_listing = ListSubjectsUseCase(self.subject_reader)
         self.subject_recommendation = RecommendSubjectsUseCase(
@@ -364,7 +382,7 @@ class Container:
         self.format_registry = FormatValidatorRegistry(
             media_probe=lambda path, extension: probe(path, self.settings, extension),
             media_max_size_bytes=self.settings.media_max_size_bytes)
-        self.bilingual = BilingualService(self.uow, self.settings, local_model_task)
+        self.bilingual = BilingualService(self.uow, self.settings, local_model_task, self.ocr_text_store)
         self.resource_create = CreateResourceUseCase(self.uow, self.storage, self.format_registry, self.resource_lookups)
         self.resource_version_create = CreateResourceVersionUseCase(
             self.uow, self.storage, self.format_registry
@@ -439,8 +457,9 @@ class Container:
             media=MediaExtractor(self.settings, self.storage, create_ocr_engine(self.settings)),
             default_target_language=self.settings.translation_target_language,
             max_active=self.settings.ocr_max_active,
+            text_store=self.ocr_text_store,
         )
-        self.postprocess = Postprocessor(self.uow)
+        self.postprocess = Postprocessor(self.uow, text_store=self.ocr_text_store)
         self.orchestrator = EtlOrchestrator(
             self.sync, self.ingestion, self.ocr, self.postprocess, self.uow
         )
@@ -520,6 +539,7 @@ class Container:
         self.mongo_projector = MongoContentProjector(
             self.uow,
             self.documents,
+            text_store=self.ocr_text_store,
         )
 
         self.indexing = IndexingService(
@@ -529,6 +549,7 @@ class Container:
                                    self.settings.index_embedding_model_version,
                                    self.settings.index_embedding_dimension), self.settings,
             bags=self.content_bags,
+            text_store=self.ocr_text_store,
         )
         self.capabilities = replace(self.capabilities, embedding_runtime=self.indexing.embedding)
         self.semantic = None
@@ -591,15 +612,19 @@ class Container:
         # cloud adapters intentionally have no local `root` attribute.
         source_destination_root = (self.storage.root if getattr(self.storage, 'root', None) is not None
                                    else self.settings.storage_root)
-        self.source_files = SourceLocalFileReader(self.settings.source_file_storage_root,
-                                                  source_destination_root)
+        # Filesystem SOURCE connectors are isolated JSON fixtures only. Deployed
+        # SOURCE files resolve exclusively through Drive or Object Storage.
+        fixture_files = (SourceLocalFileReader(self.settings.source_file_storage_root, source_destination_root)
+                         if self.settings.source_adapter == 'json'
+                         and self.settings.app_environment in ('development', 'test') else None)
+        self.source_files = fixture_files
         source_object = create_source_object_reader(self.settings)
-        if (source_object is not None or self.settings.source_drive_enabled
+        if (fixture_files is None or source_object is not None or self.settings.source_drive_enabled
                 or self.settings.source_drive_buckets or self.settings.source_local_buckets):
             self.source_files = SourceFileDispatcher(
                 self.source_files, SourceGoogleDriveFileReader(self.settings),
                 object_reader=source_object,
-                local_buckets=self.settings.source_local_buckets,
+                local_buckets=self.settings.source_local_buckets if fixture_files is not None else (),
                 object_buckets=((self.settings.source_file_storage_bucket,)
                                 if source_object is not None else ()),
             )
@@ -621,6 +646,7 @@ class Container:
         self.source_resolution.source_status_policy = self.source_resolver._status_allowed
         self.bilingual.source_resolver = self.source_resolver
         self.search.source_content_authorizer = self.source_resolver.derived_index_authorized
+        self.search.source_content_authorizer_many = self.source_resolver.derived_index_authorized_many
         self.indexing.source_content_authorizer = self.source_resolver.derived_index_authorized
         self.reconciliation_engine.source_resolver = self.source_resolver
         self.reconciliation_engine.file_read_budget_seconds = self.settings.source_read_timeout_seconds
@@ -628,26 +654,48 @@ class Container:
         self.reconciliation_jobs = FileReconciliationJobs(self.reconciliation_engine)
         self.file_previews = FilePreviewService(self.source_resolver, self.settings)
         self.ocr.resolver = self.source_resolver
+        self.source_ocr_engine = None
+        if self.settings.ocr_component_pipeline_enabled:
+            from data_sync_etl.application.source_ocr_runtime import wire_source_ocr
+            try:
+                wire_source_ocr(self, source_ocr_contract, _source_writer_database_url(self.settings))
+            except Exception:
+                self.close()
+                raise
         self.source_file_worker = SourceFileImportWorker(self.source_file_import)
         self.worker = OCRWorker(
             self.ocr,
             on_job_terminal=self.finalize_bilingual,
             reconcile=self.reconcile_processing,
             recovery_interval_seconds=self.settings.ocr_recovery_interval_seconds,
+            component_projection_worker=component_projection_worker,
         )
         self._prefer_index_reconcile = False
+        self._next_source_reconcile_at = 0.0
 
     def reconcile_processing(self):
         translated = self.bilingual.once()
         self._prefer_index_reconcile = not self._prefer_index_reconcile
         if self._prefer_index_reconcile:
-            return self.indexing.once() or self.processing_finalizer.reconcile_once() or translated
-        return self.processing_finalizer.reconcile_once() or self.indexing.once() or translated
+            worked = self.indexing.once() or self.processing_finalizer.reconcile_once() or translated
+        else:
+            worked = self.processing_finalizer.reconcile_once() or self.indexing.once() or translated
+        # Publish ready content/index work before polling historical SOURCE jobs.
+        if getattr(self.ocr, 'source_owned', False) and monotonic() >= self._next_source_reconcile_at:
+            self.ocr.reconcile_once()
+            self._next_source_reconcile_at = monotonic() + 30
+        return worked
 
     def finalize_bilingual(self, job_id):
         with self.uow() as repo:
             job = repo.get('ocr_jobs', job_id)
+        if getattr(self.ocr, 'source_owned', False) and job and not self.ocr.state(job['resource_version_id']):
+            return None
         if job and job['status'] in ('COMPLETED', 'COMPLETED_WITH_ERRORS'):
             self.bilingual.translate_version(job['resource_version_id'])
-        return self.processing_finalizer.finalize(job_id)
+        result = self.processing_finalizer.finalize(job_id)
+        if (getattr(self.ocr, 'source_owned', False) and job and result
+                and result['status'] in ('CONTENT_READY', 'ALREADY_COMPLETED', 'NO_EXTRACTABLE_CONTENT')):
+            self.ocr.cleanup_staging(self.ocr.state(job['resource_version_id']))
+        return result
 

@@ -10,7 +10,12 @@ from types import SimpleNamespace
 
 from sqlalchemy import func, select, text
 
-from data_sync_etl.adapters.persistence.audit_metadata import AUTH_FIELDS, metadata_pages
+from data_sync_etl.adapters.persistence.audit_metadata import (
+    AUTH_FIELDS,
+    audit_master_ids,
+    audit_source_key,
+    metadata_pages,
+)
 from data_sync_etl.adapters.persistence.audit_queue import AuditQueue, utc
 from data_sync_etl.db.models import (
     MODELS,
@@ -72,6 +77,19 @@ class ScheduledAudit:
         self.sync = sync
         self.writeback = writeback
         self.queue = AuditQueue(engine.uow, settings)
+
+    def _file_is_due(self, audit_type, checkpoint, version, origin, previous):
+        if (audit_type == 'LIGHT' or checkpoint.get('mode') == 'FULL' or not previous
+                or previous['observed_identity'] != identity(version, origin)
+                or previous['next_due_at'] is None or utc(previous['next_due_at']) <= now()):
+            return True
+        # A future retry/refresh timestamp cannot make expired or invalid SHA
+        # evidence current. Revisit stale rows previously marked SYNCED so the
+        # repository-wide coverage count can recover without requiring a FULL scan.
+        if previous.get('status') == 'SYNCED' and not recent_file_evidence(
+                SimpleNamespace(**previous), version, origin, self.settings):
+            return True
+        return False
 
     def schedule(self):
         if not self.settings.reconciliation_scheduler_enabled:
@@ -223,9 +241,7 @@ class ScheduledAudit:
                         and monotonic() - started >= settings.reconciliation_max_seconds_per_run):
                     break
                 observed = identity(version, origin)
-                due = (claim['audit_type'] == 'LIGHT' or checkpoint.get('mode') == 'FULL'
-                       or not previous or previous['observed_identity'] != observed
-                       or previous['next_due_at'] is None or utc(previous['next_due_at']) <= now())
+                due = self._file_is_due(claim['audit_type'], checkpoint, version, origin, previous)
                 if not due:
                     after = version.id
                     checkpoint['last_id'] = after
@@ -336,9 +352,7 @@ class ScheduledAudit:
             return {}
         reservation = remaining_bytes // 2
         for version, origin, previous in page:
-            due = (claim['audit_type'] == 'LIGHT' or claim['checkpoint'].get('mode') == 'FULL'
-                   or not previous or previous['observed_identity'] != identity(version, origin)
-                   or previous['next_due_at'] is None or utc(previous['next_due_at']) <= now())
+            due = self._file_is_due(claim['audit_type'], claim['checkpoint'], version, origin, previous)
             size = version.source_file_size
             if origin != 'LOCAL' or not due or size is None or size <= 0 or size > reservation:
                 return {}
@@ -413,22 +427,38 @@ class ScheduledAudit:
                 with self.engine.uow() as repo:
                     columns = [model.id, model.source_origin] + [getattr(model, key)
                         for key in (*METADATA_FIELDS[stream], *(AUTH_FIELDS if stream == 'users' else ()))]
-                    targets = {str(row['id']): dict(row) for row in repo.session.execute(
-                        select(*columns).where(model.id.in_(ids))).mappings()}
+                    master_ids = audit_master_ids(repo, self.engine.source_adapter, stream, ids)
+                    actual = {str(row['id']): dict(row) for row in repo.session.execute(
+                        select(*columns).where(model.id.in_(master_ids.values()))).mappings()}
+                    targets = {key: actual[master_id] for key, master_id in master_ids.items() if master_id in actual}
                     if stream == 'resources':
                         subject_model = MODELS['resource_subjects']
                         grade_model = MODELS['resource_grade_levels']
                         subjects, grades = {}, {}
                         for resource_id, subject_id, primary in repo.session.execute(select(
                                 subject_model.resource_id, subject_model.subject_id, subject_model.is_primary)
-                                .where(subject_model.resource_id.in_(ids))):
+                                .where(subject_model.resource_id.in_(master_ids.values()))):
                             subjects.setdefault(resource_id, []).append((subject_id, bool(primary)))
                         for resource_id, grade_id in repo.session.execute(select(grade_model.resource_id,
-                                grade_model.grade_level_id).where(grade_model.resource_id.in_(ids))):
+                                grade_model.grade_level_id).where(grade_model.resource_id.in_(master_ids.values()))):
                             grades.setdefault(resource_id, []).append(grade_id)
-                        for record_id, target in targets.items():
-                            target['_resource_subjects'] = sorted(subjects.get(record_id, []))
-                            target['_resource_grades'] = sorted(grades.get(record_id, []))
+                        for target in targets.values():
+                            target['_resource_subjects'] = sorted(subjects.get(target['id'], []))
+                            target['_resource_grades'] = sorted(grades.get(target['id'], []))
+                        subject_ids = {key for row in source_rows for key, _ in row.get('_resource_subjects', [])}
+                        grade_ids = {key for row in source_rows for key in row.get('_resource_grades', [])}
+                        subject_map = audit_master_ids(repo, self.engine.source_adapter, 'subjects', subject_ids)
+                        grade_map = audit_master_ids(repo, self.engine.source_adapter, 'grades', grade_ids)
+                        source_rows = [{**row,
+                            **({'_resource_subjects': sorted((subject_map[key], primary)
+                                for key, primary in row['_resource_subjects'])} if '_resource_subjects' in row else {}),
+                            **({'_resource_grades': sorted(grade_map[key] for key in row['_resource_grades'])}
+                               if '_resource_grades' in row else {})} for row in source_rows]
+                    elif stream == 'subjects':
+                        grade_ids = {row['grade_id'] for row in source_rows if row.get('grade_id')}
+                        grade_map = audit_master_ids(repo, self.engine.source_adapter, 'grades', grade_ids)
+                        source_rows = [{**row, **({'grade_id': grade_map[row['grade_id']]}
+                            if row.get('grade_id') else {})} for row in source_rows]
                 results = []
                 for source in source_rows:
                     record_id = str(source['id'])
@@ -495,8 +525,9 @@ class ScheduledAudit:
         # A metadata pass over remaining SOURCE users must not refresh auth for
         # a user missing at SOURCE but still present in MASTER. No deletion here.
         model = MODELS[STREAM_TABLE_MAPPING['users']['target_table']]
+        key, scope = audit_source_key(self.engine.source_adapter, 'users', model)
         with self.engine.uow() as repo:
-            ids = list(repo.session.scalars(select(model.id).where(
+            ids = list(repo.session.scalars(select(key).where(scope,
                 model.source_origin != 'LOCAL', model.source_missing_at.is_(None)).limit(10001)))
         digest = ''
         for record_id in sorted(ids):
@@ -520,16 +551,21 @@ class ScheduledAudit:
         for batch in self.sync.source.selected_batches(stream, ids, self.settings.reconciliation_audit_batch_size):
             with self.engine.uow() as repo:
                 self.queue.owned(repo.session, claim)
+                master_ids = audit_master_ids(repo, self.engine.source_adapter, stream,
+                    [aggregate.cursor.id for aggregate in batch])
                 for aggregate in batch:
                     record_id = aggregate.cursor.id
                     model = MODELS[STREAM_TABLE_MAPPING[stream]['target_table']]
                     # Repository DTOs deliberately omit secrets. Read private auth
                     # columns here only for comparison; never serialize this row.
                     target = repo.session.execute(select(*model.__table__.columns).where(
-                        model.id == record_id)).mappings().one_or_none()
+                        model.id == master_ids[record_id])).mappings().one_or_none()
                     if record_id not in ids or not target or target.get('source_origin') == 'LOCAL':
                         raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
                     source = aggregate.values
+                    if stream == 'subjects' and source.get('grade_id'):
+                        source = {**source, 'grade_id': audit_master_ids(repo, self.engine.source_adapter,
+                            'grades', [source['grade_id']])[source['grade_id']]}
                     if metadata_differences(stream, source, target) or any(
                             _comparable(key, source[key]) != _comparable(key, target.get(key))
                             for key in AUTH_FIELDS if key in source):
@@ -538,7 +574,11 @@ class ScheduledAudit:
                         for table, desired in [('resource_subjects', aggregate.subjects),
                                                ('resource_grade_levels', aggregate.grades)]:
                             expected = [row.model_dump(exclude={'updated_at'}) for row in desired]
-                            actual = repo.find(table, {'resource_id': record_id})
+                            field, related_stream = ('subject_id', 'subjects') if table == 'resource_subjects' else ('grade_level_id', 'grades')
+                            mapping = audit_master_ids(repo, self.engine.source_adapter, related_stream,
+                                [row[field] for row in expected])
+                            expected = [{**row, 'resource_id': target['id'], field: mapping[row[field]]} for row in expected]
+                            actual = repo.find(table, {'resource_id': target['id']})
                             if sorted(repr(sorted(row.items())) for row in expected) != sorted(
                                     repr(sorted(row.items())) for row in actual):
                                 raise DomainError('AUDIT_REPAIR_NOT_VERIFIED')
@@ -593,14 +633,17 @@ class ScheduledAudit:
                         continue
                     checkpoint['source_seen'] = checkpoint.get('source_seen', 0) + len(ids)
                     with self.engine.uow() as repo:
-                        present = set(repo.session.scalars(select(model.id).where(model.id.in_(ids))))
+                        mapped = audit_master_ids(repo, adapter, claim['stream_name'], ids)
+                        existing = set(repo.session.scalars(select(model.id).where(model.id.in_(mapped.values()))))
+                        present = {key for key, value in mapped.items() if value in existing}
                     for record_id in ids:
                         if record_id not in present:
                             results.append({'record_id': record_id, 'discrepancy_flag': 'ORPHAN_SOURCE'})
                 else:
                     with self.engine.uow() as repo:
-                        key = model.id.collate('C') if repo.session.get_bind().dialect.name == 'postgresql' else model.id
-                        query = select(model.id).where(model.source_origin == 'POSTGRESQL').order_by(key).limit(size)
+                        source_key, scope = audit_source_key(adapter, claim['stream_name'], model)
+                        key = source_key.collate('C') if repo.session.get_bind().dialect.name == 'postgresql' else source_key
+                        query = select(source_key).where(scope, model.source_origin == 'POSTGRESQL').order_by(key).limit(size)
                         if after:
                             query = query.where(key > after)
                         ids = list(repo.session.scalars(query))

@@ -12,7 +12,7 @@ SEARCH_DOCUMENT_VALIDATION = ContextVar('search_document_validation', default=No
 @contextmanager
 def document_validation_scope():
     """Allow exact-document validation reuse only during one search call."""
-    token = SEARCH_DOCUMENT_VALIDATION.set({'documents': {}, 'bytes': 0})
+    token = SEARCH_DOCUMENT_VALIDATION.set({'documents': {}, 'bytes': 0, 'proofs': {}})
     try:
         yield
     finally:

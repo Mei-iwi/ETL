@@ -29,6 +29,16 @@ class SearchAccess:
     def internal(self):
         return self.scope in ('local_demo', 'authenticated_admin', 'authenticated_user')
 
+    def publication_allowed(self, resource):
+        if resource.get('publication_status') == 'PUBLISHED':
+            return True
+        if resource.get('publication_status') != 'DRAFT' or not self.actor_id:
+            return False
+        if self.scope == 'authenticated_admin':
+            return True
+        return (self.scope == 'authenticated_user' and resource.get('id') in self.resource_ids
+                and (self.owner_id is None or resource.get('created_by') == self.owner_id))
+
     # Authenticated scope is created by the API's server-side session boundary,
     # never from request JSON. Public whole-file reads additionally require every
     # unit through file_version. Shared UNREVIEWED reads require a server-issued
@@ -41,7 +51,7 @@ class SearchAccess:
         """Internal decision code, never serialized with private metadata."""
         # Callers must additionally verify CONTENT_READY, completed INDEX_BUILD,
         # current projection/generation and Bag fingerprint through IndexingService.
-        if (resource.get('publication_status') != 'PUBLISHED' or resource.get('is_active') is not True
+        if (not self.publication_allowed(resource) or resource.get('is_active') is not True
                 or resource_deleted(resource)
                 or version.get('resource_id') != resource.get('id')
                 or version.get('lifecycle_status') not in ('INGESTED', 'APPROVED', 'PUBLISHED')
@@ -54,7 +64,8 @@ class SearchAccess:
                 return 'CONTENT_RESTRICTED'
         review = unit.get('review_status')
         if self.scope == 'authenticated_user':
-            if (self.allow_public and self.allow_shared_unreviewed and review == 'UNREVIEWED'
+            if (resource.get('publication_status') == 'PUBLISHED'
+                    and self.allow_public and self.allow_shared_unreviewed and review == 'UNREVIEWED'
                     and unit.get('retrieval_eligible') is False):
                 return 'ALLOW_AUTHENTICATED_USER'
             owned = (self.owner_id is not None and resource.get('created_by') == self.owner_id

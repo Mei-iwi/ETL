@@ -268,6 +268,14 @@ def test_drive_failure_does_not_block_local_in_same_batch(importing):
         assert repo.count('resource_versions', {}) == 2
 
 
+def test_dispatcher_without_fixture_reader_never_routes_unknown_buckets_to_filesystem():
+    drive = SourceGoogleDriveFileReader(Settings(_env_file=None, source_drive_enabled=False))
+    dispatcher = SourceFileDispatcher(None, drive)
+    with pytest.raises(SourceFileError, match='SOURCE_LOCAL_FILES_DISABLED'):
+        dispatcher.open_stream('books', 'test.pdf')
+    assert 'local' not in dispatcher.readiness()
+
+
 def test_dispatcher_never_falls_back_and_local_works_when_drive_disabled(importing):
     c, _, path = importing
     http = DriveHTTP()

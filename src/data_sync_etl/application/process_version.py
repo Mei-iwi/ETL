@@ -9,7 +9,7 @@ class ProcessResourceVersion:
         self.uow = uow
         self.ocr = ocr
 
-    def run(self, version_id: str, *, fence=None) -> dict:
+    def run(self, version_id: str, *, fence=None, access=None) -> dict:
         with self.uow() as repo:
             version = repo.get("resource_versions", version_id)
             if version is None:
@@ -30,11 +30,13 @@ class ProcessResourceVersion:
                     and resource.get("source_origin") != "POSTGRESQL"):
                 raise DomainError("CONTENT_NOT_AVAILABLE")
 
-        job = (self.ocr.create_job(version_id, fence=fence) if fence is not None
-               else self.ocr.create_job(version_id))
+        kwargs = {'fence': fence} if fence is not None else {}
+        if getattr(self.ocr, 'source_owned', False):
+            kwargs['access'] = access
+        job = self.ocr.create_job(version_id, **kwargs)
 
         with self.uow() as repo:
-            state = processing_state(repo, job)
+            state = processing_state(repo, job, getattr(self, 'text_store', None))
 
         actions = {
             "PENDING": "QUEUED",

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BilingualPanel } from '../../components/BilingualPanel'
+import { OriginalOCRPanel } from '../../components/OriginalOCRPanel'
 import { startVisiblePolling } from '../system/visiblePolling'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router'
 import {
@@ -7,6 +8,9 @@ import {
     getContentUnits,
     getProcessingJob,
     isRetryableProcessingError,
+    isProcessingPending,
+    ocrAuditMessage,
+    intakeStatusLabel,
     retryProcessing,
     startProcessing,
 } from '../../services/processingApi'
@@ -24,13 +28,15 @@ type ProcessingView = {
     job_id: string
     job_status: JobStatus
     processing_status: ProcessingStatus
+    total_pages?: number
+    completed_pages?: number
+    failed_pages?: number
 }
 
 type ProcessingLocationState = {
     processingNotice?: string
 }
 
-const terminalJobStatuses: JobStatus[] = ['COMPLETED', 'COMPLETED_WITH_ERRORS', 'FAILED']
 const statusRetryDelays = [4_000, 8_000, 16_000]
 const contentPageSize = 10
 
@@ -42,17 +48,26 @@ function getMainStatus(
     jobId: string,
     result: ProcessingView | null,
     statusError: string,
+    intakeStatus?: unknown,
 ) {
     if (statusError) return { label: 'Không thể cập nhật trạng thái', tone: 'error' }
     if (result?.processing_status === 'NO_EXTRACTABLE_CONTENT') return { label: 'Không có nội dung trích xuất được', tone: 'idle' }
     if (result?.error_code === 'NO_SPEECH_CONTENT') return { label: 'Không có nội dung lời nói', tone: 'idle' }
     if (result?.error_code === 'MEDIA_NO_AUDIO') return { label: 'Tệp không có âm thanh', tone: 'idle' }
-    if (!jobId) return { label: 'Chưa bắt đầu xử lý', tone: 'idle' }
+    if (['WAITING_AUTHORIZATION', 'WAITING_SOURCE_MAPPING', 'PROVENANCE_REQUIRED', 'SOURCE_INVALID', 'PROCESSING_FAILED'].includes(String(intakeStatus)))
+        return { label: intakeStatusLabel(intakeStatus), tone: intakeStatus === 'SOURCE_INVALID' || intakeStatus === 'PROCESSING_FAILED' ? 'error' : 'warning' }
+    if (!jobId) return { label: intakeStatusLabel(intakeStatus || 'RECEIVED'), tone: 'active' }
+    if (result?.processing_status === 'CONTENT_READY' && ['INDEXING', 'INDEX_FAILED', 'READY'].includes(String(intakeStatus)))
+        return { label: intakeStatusLabel(intakeStatus), tone: intakeStatus === 'READY' ? 'success' : intakeStatus === 'INDEX_FAILED' ? 'error' : 'active' }
     if (!result) return { label: 'Đang cập nhật trạng thái', tone: 'active' }
+    if (result.processing_status === 'FINALIZATION_PENDING' || result.processing_status === 'FINALIZING')
+        return { label: 'Đang hoàn thiện nội dung', tone: 'active' }
+    if (result.processing_status === 'FINALIZATION_FAILED')
+        return { label: 'Hoàn thiện nội dung thất bại', tone: 'error' }
 
     const labels: Record<JobStatus, { label: string, tone: string }> = {
-        PENDING: { label: 'Đang chờ xử lý', tone: 'active' },
-        RUNNING: { label: 'Đang xử lý', tone: 'active' },
+        PENDING: { label: 'Đã xếp hàng OCR', tone: 'active' },
+        RUNNING: { label: 'Đang nhận dạng OCR', tone: 'active' },
         COMPLETED: result.processing_status === 'CONTENT_READY'
             ? { label: 'Xử lý hoàn thành', tone: 'success' }
             : { label: 'Đã kết thúc xử lý', tone: 'idle' },
@@ -78,6 +93,7 @@ export function LibraryProcessingPage() {
     const [statusError, setStatusError] = useState('')
     const [stoppedJobId, setStoppedJobId] = useState('')
     const [statusRefreshKey, setStatusRefreshKey] = useState(0)
+    const [audit, setAudit] = useState<{ versionId: string; status: unknown; reason?: unknown; intakeStatus?: unknown } | null>(null)
     const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({})
     const [contentOffsets, setContentOffsets] = useState<Record<string, number>>({})
     const [loadedContent, setLoadedContent] = useState<{
@@ -94,23 +110,29 @@ export function LibraryProcessingPage() {
     useEffect(() => () => actionControllerRef.current?.abort(), [])
 
     useEffect(() => {
-        if (!versionId || jobId) return
-        const controller = new AbortController()
-        void fetch(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/etl-status`, {
-            signal: controller.signal,
-        }).then(async response => {
+        if (!versionId) return
+        let pending = true
+        let reads = 0
+        const polling = startVisiblePolling(async signal => {
+            try {
+            const response = await fetch(`/api/v1/resource-versions/${encodeURIComponent(versionId)}/etl-status`, { signal })
             if (!response.ok) throw new Error('Không tải được trạng thái xử lý hiện có.')
             const data = await response.json()
-            if (controller.signal.aborted || !data.ocr_job?.id) return
+            if (signal.aborted) return
+            setAudit({ versionId, status: data.ocr_audit?.status, reason: data.ocr_audit?.reason, intakeStatus: data.intake_status })
+            setStatusError('')
+            pending = !['READY', 'SOURCE_INVALID', 'PROVENANCE_REQUIRED', 'PROCESSING_FAILED', 'INDEX_FAILED'].includes(data.intake_status) && ++reads < 120
+            if (jobId || !data.ocr_job?.id) return
             setSearchParams(previous => {
                 const next = new URLSearchParams(previous)
                 next.set('jobId', data.ocr_job.id)
                 return next
             }, { replace: true })
-        }).catch(reason => {
-            if (!controller.signal.aborted) setStatusError(reason instanceof Error ? reason.message : 'Không tải được trạng thái xử lý.')
-        })
-        return () => controller.abort()
+            } catch {
+                if (!signal.aborted) { pending = false; setStatusError('Không tải được trạng thái kiểm tra OCR.') }
+            }
+        }, () => pending, document, { busy: 15000, idle: null })
+        return () => polling.stop()
     }, [versionId, jobId, setSearchParams, statusRefreshKey])
 
     useEffect(() => {
@@ -135,9 +157,12 @@ export function LibraryProcessingPage() {
                     job_status: data.status,
                     processing_status: data.processing_status,
                     error_code: data.error_code,
+                    total_pages: data.total_pages,
+                    completed_pages: data.completed_pages,
+                    failed_pages: data.failed_pages,
                 })
 
-                pending = !terminalJobStatuses.includes(data.status)
+                pending = isProcessingPending(data.status, data.processing_status)
                 timing.busy = 4000
             } catch (caughtError) {
                 if (signal.aborted || isAbortError(caughtError)) return
@@ -270,7 +295,9 @@ export function LibraryProcessingPage() {
         STT_BUSY: 'Worker STT đang bận.', STT_OPERATION_FAILED: 'Nhận dạng lời nói thất bại.',
     }
     const mediaRetryBlocked = ['MEDIA_NO_AUDIO', 'NO_SPEECH_CONTENT', 'MEDIA_DURATION_EXCEEDED', 'INVALID_MEDIA', 'STT_OUTPUT_LIMIT_EXCEEDED', 'STT_RESULT_INVALID'].includes(currentResult?.error_code ?? '') || unsupportedFormat
-    const mainStatus = getMainStatus(jobId, currentResult, statusError)
+    const mainStatus = getMainStatus(jobId, currentResult, statusError, audit?.versionId === versionId ? audit.intakeStatus : undefined)
+    const automaticIntakePending = audit?.versionId === versionId &&
+        ['RECEIVED', 'CHECKING_OCR', 'OCR_QUEUED', 'OCR_RUNNING', 'WAITING_SOURCE_MAPPING'].includes(String(audit.intakeStatus))
 
     if (!versionId) return <Navigate to="/library/list" replace />
 
@@ -298,9 +325,19 @@ export function LibraryProcessingPage() {
                 </div>
 
                 {processingNotice && !jobId && <p className={styles.notice}>{processingNotice}</p>}
+                {audit?.versionId === versionId && ocrAuditMessage(audit.status, audit.reason)
+                    && (!jobId || audit.status === 'WAITING_FOR_PROCESS_AUTHORIZATION' || audit.status === 'UNVERIFIED'
+                        || audit.status === 'INVALID_OR_REVOKED' || audit.status === 'RETRYABLE_ERROR'
+                        || audit.status === 'RETRY_EXHAUSTED')
+                    && <><p role="status" className={styles.notice}><strong>Kiểm tra OCR tại nguồn: </strong>{ocrAuditMessage(audit.status, audit.reason)}</p>
+                        <button type="button" onClick={() => setStatusRefreshKey(value => value + 1)}>Tải lại trạng thái OCR</button></>}
                 {error && <p className={styles.alert} role="alert">{error}</p>}
                 {currentResult?.error_code && <p className={styles.notice}>{mediaErrors[currentResult.error_code] ?? 'Lỗi xử lý nội dung.'}</p>}
                 {statusError && <p className={styles.alert} role="alert">{statusError}</p>}
+
+                {!!currentResult?.total_pages && <OriginalOCRPanel key={`${versionId}:${jobId}`} versionId={versionId}
+                    jobId={jobId} totalPages={currentResult.total_pages}
+                    refreshKey={`${currentResult.job_status}:${currentResult.completed_pages}:${currentResult.failed_pages}`} />}
 
                 {contentReady && (
                     <section className={styles.contentSection}>
@@ -362,14 +399,23 @@ export function LibraryProcessingPage() {
                             <span className={styles.resultLabel}>Trạng thái xử lý</span>
                             <span className={styles.resultValue}>{currentResult.processing_status}</span>
                         </p>
+                        {currentResult.total_pages != null && (
+                            <p className={styles.resultItem}>
+                                <span className={styles.resultLabel}>Tiến độ trích xuất</span>
+                                <span className={styles.resultValue}>
+                                    {currentResult.completed_pages ?? 0} / {currentResult.total_pages} trang
+                                    {(currentResult.failed_pages ?? 0) > 0 && ` · Lỗi: ${currentResult.failed_pages}`}
+                                </span>
+                            </p>
+                        )}
                     </div>
                 )}
 
                 {((!jobId && !unsupportedFormat) || (canRetry && !mediaRetryBlocked) || (jobId && stoppedJobId === jobId)) && (
                     <div className={styles.actions}>
                         {!jobId && !unsupportedFormat && (
-                            <button className={styles.primaryButton} type="button" onClick={() => void handleStartProcessing()} disabled={loading || !versionId}>
-                                {loading ? 'Đang gửi yêu cầu...' : 'Bắt đầu xử lý'}
+                            <button className={styles.primaryButton} type="button" onClick={() => void handleStartProcessing()} disabled={loading || !versionId || automaticIntakePending}>
+                                {loading ? 'Đang gửi yêu cầu...' : automaticIntakePending ? 'Đã tiếp nhận xử lý tự động' : 'Bắt đầu xử lý'}
                             </button>
                         )}
                         {canRetry && !mediaRetryBlocked && (

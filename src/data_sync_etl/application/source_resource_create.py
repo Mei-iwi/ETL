@@ -58,11 +58,13 @@ class SourceResourceCreateService:
         }
 
     @staticmethod
-    def _source_user_id(repo, actor_id):
+    def _source_user_id(repo, actor_id, *, user=None):
         if not isinstance(actor_id, str) or not actor_id.startswith('master:'):
             raise SourceCreateWriteBackError('SOURCE_CREATE_ACTOR_MAPPING_REQUIRED', 403)
         master_id = actor_id.removeprefix('master:')
-        user = repo.get('master_users', master_id)
+        user = repo.get('master_users', master_id) if user is None else user
+        if user and user.get('id') != master_id:
+            raise SourceCreateWriteBackError('SOURCE_CREATE_ACTOR_MAPPING_REQUIRED', 403)
         if not user or user.get('source_origin') != 'POSTGRESQL' or not user.get('is_active'):
             raise SourceCreateWriteBackError('SOURCE_CREATE_ACTOR_MAPPING_REQUIRED', 403)
         if user.get('deleted_at') is not None or user.get('source_missing_at') is not None:
@@ -97,8 +99,8 @@ class SourceResourceCreateService:
             'resource_type_id': payload['resource_type_id'].strip(),
             'title': payload['title'].strip(),
             'publication_status': payload['publication_status'],
-            'subject_id': payload.get('subject_id'),
-            'grade_level_id': payload.get('grade_level_id'),
+            'subject_id': (payload.get('subject_id') or '').strip() or None,
+            'grade_level_id': (payload.get('grade_level_id') or '').strip() or None,
         }
 
     @staticmethod

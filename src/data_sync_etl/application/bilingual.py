@@ -6,6 +6,7 @@ import tempfile
 from dataclasses import replace
 from time import monotonic
 
+from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.ports.processing import OCRResult
 
@@ -106,9 +107,10 @@ def paired_result(result, version_id, page, options):
 
 
 class BilingualService:
-    def __init__(self, uow, settings, runner=None):
+    def __init__(self, uow, settings, runner=None, text_store=None):
         self.uow, self.settings = uow, settings
         self.runner = runner
+        self.text_store = text_store or LegacyOCRText()
         self.source_resolver = None
 
     def configure(self, version_id, options, *, retry_translation=False):
@@ -181,8 +183,13 @@ class BilingualService:
                 if not version:
                     return False
                 resource = repo.get('master_learning_resources', version['resource_id'])
-                if not resource or resource.get('source_origin') != 'LOCAL':
+                if not resource:
                     return False
+                if resource.get('source_origin') != 'LOCAL':
+                    pipeline = getattr(self.text_store, 'pipeline', None)
+                    source = pipeline.state(version_id, repo) if pipeline is not None else None
+                    if not source or not pipeline.authorize_identity(source['identity']):
+                        return False
                 options = version.get("processing_options") or {}
                 jobs = repo.find(
                     "ocr_jobs",
@@ -206,10 +213,9 @@ class BilingualService:
             statuses = []
             for task in tasks:
                 with self.uow() as repo:
-                    rows = repo.find("ocr_page_results", {"page_task_id": task["id"]}, limit=1)
-                if not rows:
+                    row = self.text_store.page_by_task(repo, task['id'])
+                if not row:
                     continue
-                row = rows[0]
                 metadata = row["result_metadata"] or {}
                 if "paired_segments" not in metadata:
                     metadata = paired_result(
@@ -312,12 +318,11 @@ class BilingualService:
                     statuses.append(segment["translation_status"])
                     # Checkpoint every segment; a killed worker can resume remaining segments.
                     with self.uow() as repo:
-                        repo.update(
-                            "ocr_page_results",
-                            row["id"],
-                            {"result_metadata": {**metadata, "paired_segments": segments}},
-                        )
+                        self.text_store.set_metadata(repo, row['id'], {**metadata, 'paired_segments': segments})
             with self.uow() as repo:
+                latest = repo.get('resource_versions', version_id, lock=True)
+                if latest is None:
+                    return False
                 state = (
                     "completed"
                     if all(s in ("completed", "same_language") for s in statuses)
@@ -328,7 +333,7 @@ class BilingualService:
                     version_id,
                     {
                         "processing_options": {
-                            **options,
+                            **(latest.get('processing_options') or {}),
                             "translation_pending": False,
                             "translation_state": state,
                         }
@@ -341,6 +346,9 @@ class BilingualService:
         with self.uow() as repo:
             versions = repo.translation_candidates()
         for version in versions:
+            pipeline = getattr(self.text_store, 'pipeline', None)
+            if pipeline is not None and not pipeline.state(version['id']):
+                continue
             if (version.get("processing_options") or {}).get("translation_pending"):
                 with self.uow() as repo:
                     jobs = repo.find("ocr_jobs", {"resource_version_id": version["id"]}, limit=1)
@@ -382,10 +390,10 @@ class BilingualService:
             output, extraction = [], []
             for job in jobs:
                 for task in repo.find("ocr_page_tasks", {"job_id": job["id"]}, order=("page_num", "id")):
-                    rows = repo.find("ocr_page_results", {"page_task_id": task["id"]}, limit=1)
-                    if not rows:
+                    row = self.text_store.page_by_task(repo, task['id'])
+                    if not row:
                         continue
-                    metadata = rows[0]["result_metadata"] or {}
+                    metadata = row["result_metadata"] or {}
                     extraction.append(
                         {
                             key: metadata[key]
@@ -395,13 +403,13 @@ class BilingualService:
                     )
                     if "paired_segments" not in metadata:
                         metadata = paired_result(
-                            OCRResult(rows[0]["raw_text"], metadata=metadata),
+                            OCRResult(row["raw_text"], metadata=metadata),
                             version_id,
                             task["page_num"],
                             {"source_language": "und", **(version.get("processing_options") or {})},
                         ).metadata
                     output.extend(
-                        {**segment, "extracted_at": rows[0]["created_at"].isoformat()}
+                        {**segment, "extracted_at": row["created_at"].isoformat()}
                         for segment in metadata.get("paired_segments", [])
                     )
         # Storage paths stay server-side; downloads resolve through the authorized version.

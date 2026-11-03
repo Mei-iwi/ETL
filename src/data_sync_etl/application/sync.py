@@ -109,21 +109,33 @@ class MasterSync:
             return Cursor(updated_at=updated_at, id=checkpoint["last_id"])
         return None
 
-    def run_selected(self, stream, record_ids, *, fence=None):
+    def run_selected(self, stream, record_ids, *, fence=None, source_id=None):
         """Repair exact identities without moving the global incremental cursor."""
+        source = self.source
         if self.federation_enabled:
-            raise DomainError('SOURCE_ID_REQUIRED')
+            if self.source_registry is None:
+                raise DomainError('SOURCE_ID_REQUIRED')
+            if source_id is None:
+                matches = [row.source_id for row in self.source_registry.registrations()
+                    if row.enabled and row.backend.casefold() == getattr(source, 'source_backend', '').casefold()
+                    and row.namespace == getattr(source, 'source_namespace', None)]
+                if len(matches) != 1:
+                    raise DomainError('SOURCE_ID_REQUIRED')
+                source_id = matches[0]
+            source = self.source_registry.adapter_for_source_id(source_id, 'read_metadata')
+        elif source_id is not None:
+            raise DomainError('SOURCE_FEDERATION_DISABLED')
         ids = sorted(set(record_ids))
         if stream not in STREAMS or len(ids) > 10000:
             raise DomainError('INVALID_REPAIR_SCOPE')
         if not ids:
             return {}
-        if not hasattr(self.source, 'selected_batches'):
+        if not hasattr(source, 'selected_batches'):
             raise DomainError('TARGETED_SOURCE_UNSUPPORTED')
         with self.uow.sync_lock() as acquired:
             if not acquired:
                 raise SyncAlreadyRunning('Master data sync is already running')
-            result = self._stream(stream, False, record_ids=ids, fence=fence)
+            result = self._stream(stream, False, record_ids=ids, fence=fence, source=source, source_id=source_id)
         # Keep the existing projection policy; never perform Mongo RPC under the PG lock.
         self._project_metadata(stream)
         return result
