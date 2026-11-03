@@ -180,9 +180,8 @@ class ContentBagBuilder:
             or not 1 <= model.dimension <= 4096
         ):
             raise DomainError("Invalid embedding runtime configuration")
-        bags = []
+        root_keywords = {}
         for root_id, membership in roots.items():
-            root = by_id[root_id]
             collected = []
             for key in membership:
                 leaf = leaf_by_id.get(key)
@@ -192,8 +191,25 @@ class ContentBagBuilder:
             keywords = normalize_keywords(collected)
             if not keywords:
                 return BagBuildResult("DEFERRED", "Leaf keyword extraction pending", [])
-            text = " | ".join(keywords)
-            vector = model.embed(text)
+            root_keywords[root_id] = keywords
+        # Request-local batches only: identical inputs share an encoding inside
+        # this build, never across model versions, requests or index generations.
+        root_vectors = {}
+        encoder = getattr(model, 'embed_many', None)
+        if callable(encoder):
+            texts = list(dict.fromkeys(' | '.join(keywords) for keywords in root_keywords.values()))
+            for offset in range(0, len(texts), 16):
+                batch = texts[offset:offset + 16]
+                encoded = encoder(batch)
+                if len(encoded) != len(batch):
+                    raise DomainError('Embedding batch size mismatch')
+                root_vectors.update(zip(batch, encoded, strict=True))
+        bags = []
+        for root_id, membership in roots.items():
+            root = by_id[root_id]
+            keywords = root_keywords[root_id]
+            text = ' | '.join(keywords)
+            vector = root_vectors[text] if callable(encoder) else model.embed(text)
             if len(vector) != model.dimension:
                 raise DomainError("Embedding dimension mismatch")
             stamp = now()

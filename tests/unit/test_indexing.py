@@ -101,6 +101,27 @@ def test_status_batches_bags_and_rejects_modified_artifact(container, monkeypatc
     assert index.status(version['id'])['index_status'] == 'STALE'
 
 
+def test_index_worker_uses_bulk_writes_and_fresh_batched_readback(container, monkeypatch):
+    index, version, _ = ready(container, False)
+    write = index.bags.upsert_bag
+    calls = []
+    def bulk(documents):
+        calls.append(('write', len(documents)))
+        for document in documents:
+            write(document)
+    def read(root_ids, *, version_id, generation):
+        calls.append(('read', len(root_ids)))
+        return {key: deepcopy(index.bags.rows.get(key)) for key in root_ids}
+    monkeypatch.setattr(index.bags, 'upsert_bags', bulk, raising=False)
+    monkeypatch.setattr(index.bags, 'search_bags', read, raising=False)
+    monkeypatch.setattr(index.bags, 'upsert_bag', lambda *_: pytest.fail('individual Bag write'))
+    monkeypatch.setattr(index.bags, 'get_bag', lambda *_: pytest.fail('individual Bag readback'))
+    index.enqueue(version['id'])
+    assert index.once()
+    assert ('write', 3) in calls and ('read', 3) in calls
+    assert index.status(version['id'])['index_status'] == 'READY'
+
+
 def test_flat_preview_does_not_write_then_manual_fallback(container):
     index, version, _ = ready(container, False)
     before = deepcopy(container.documents.units)

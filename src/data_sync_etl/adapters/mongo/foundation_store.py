@@ -10,7 +10,8 @@ from bson import BSON, ObjectId
 from bson.codec_options import CodecOptions
 from bson.errors import BSONError
 from pydantic import TypeAdapter, ValidationError
-from pymongo.errors import DuplicateKeyError, OperationFailure
+from pymongo import UpdateOne
+from pymongo.errors import BulkWriteError, DuplicateKeyError, OperationFailure
 
 from data_sync_etl.adapters.mongo.content_store import generation_filter, invalidate_bags
 from data_sync_etl.domain.core import DomainError, now
@@ -687,6 +688,34 @@ class MongoBagStore:
             return None
         doc = checked(ContentBagDocument, data)
         return doc if len(doc.embedding) == self.dimension and self._current(doc) else None
+
+    def upsert_bags(self, documents):
+        """One bounded version/generation write with fresh checks on both sides."""
+        if not isinstance(documents, list) or not 1 <= len(documents) <= 10000:
+            raise DomainError('Bag write batch bounds exceeded')
+        docs = [checked(ContentBagDocument, document) for document in documents]
+        first = docs[0]
+        identity = first.resource_version_id, first.projection_generation, first.content_fingerprint
+        if (len({doc.id for doc in docs}) != len(docs) or first.projection_generation is None
+                or any(not doc.is_current or len(doc.embedding) != self.dimension
+                       or (doc.resource_version_id, doc.projection_generation, doc.content_fingerprint) != identity
+                       for doc in docs) or not self._current(first)):
+            raise DomainError('Bag dimension/generation/content snapshot inconsistent')
+        operations = []
+        for doc in docs:
+            values = {key: value for key, value in doc.bson().items() if key not in ('_id', 'created_at')}
+            operations.append(UpdateOne({'_id': doc.id, **generation_filter(doc.projection_generation)},
+                {'$set': values, '$setOnInsert': {'created_at': doc.created_at}}, upsert=True))
+        try:
+            for offset in range(0, len(operations), 100):
+                self.database.content_bags.bulk_write(operations[offset:offset + 100], ordered=True)
+        except BulkWriteError:
+            invalidate_bags(self.database, first.resource_version_id, first.projection_generation)
+            raise DomainError('Finalization ownership lost') from None
+        # No transaction spans PG/Mongo: readers still recheck every artifact.
+        if not self._current(first):
+            invalidate_bags(self.database, first.resource_version_id, first.projection_generation)
+            raise DomainError('Bag snapshot changed; indexing pending')
 
     def bag_candidates(self, keywords, *, version_id=None, limit=100):
         bounds(limit)

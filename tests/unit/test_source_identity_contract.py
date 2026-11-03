@@ -89,8 +89,8 @@ def test_readonly_reader_rejects_write_privileges_before_yielding():
     engine, connection = MagicMock(), MagicMock()
     engine.dialect = SimpleNamespace(name='postgresql')
     engine.connect.return_value.execution_options.return_value.__enter__.return_value = connection
-    connection.execute.return_value.scalar_one.return_value = False
-    connection.scalar.return_value = True  # Trusted catalog reports a write grant.
+    connection.execute.return_value.mappings.return_value.one.return_value = {
+        'privileged': False, 'writable': True}  # Trusted catalog reports a write grant.
     adapter = PostgreSQLSourceAdapter(engine=engine)
     with pytest.raises(DomainError, match='write privileges'):
         with adapter.snapshot():

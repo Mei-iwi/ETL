@@ -227,7 +227,9 @@ class IndexingService:
                     if runs[0]['status'] == 'FAILED':
                         raise IndexingError('REINDEX_REQUIRED')
                     if runs[0]['status'] == 'COMPLETED' and runs[0]['input_fingerprint'] == snapshot[3]:
-                        self._verified(snapshot, runs[0])
+                        batch_reader = getattr(self.bags, 'search_bags', None)
+                        self._verified(snapshot, runs[0],
+                                       bag_reader=batch_reader if callable(batch_reader) else None)
                         return self._queued(version_id, runs[0], 'ALREADY_INDEXED')
                 stage = repo.insert('etl_stage_runs', {
                     'resource_version_id': version_id, 'stage': 'INDEX_BUILD', 'status': 'PENDING',
@@ -314,15 +316,23 @@ class IndexingService:
                 [current[4][key] for key in leaf_ids], generation=current[1], content_fingerprint=source_fp)
             if result.status != 'BUILT' or len(result.bags) != len(roots):
                 raise IndexingError('LEAF_KEYWORDS_UNAVAILABLE')
-            for bag in result.bags:
+            bulk_writer = getattr(self.bags, 'upsert_bags', None)
+            if callable(bulk_writer):
+                for offset in range(0, len(result.bags), 100):
+                    self._deadline(started)
+                    bulk_writer(result.bags[offset:offset + 100])
                 self._deadline(started)
-                self.bags.upsert_bag(bag)
+            else:
+                for bag in result.bags:
+                    self._deadline(started)
+                    self.bags.upsert_bag(bag)
             with self.uow() as repo:
                 fresh = self._snapshot(repo, version_id)
                 owner = repo.get('etl_stage_runs', run['id'], lock=True)
                 if fresh[3] != snapshot[3] or owner['status'] != 'RUNNING':
                     raise IndexingError('INDEX_SOURCE_CHANGED')
-                self._verified(fresh, run)
+                batch_reader = getattr(self.bags, 'search_bags', None)
+                self._verified(fresh, run, bag_reader=batch_reader if callable(batch_reader) else None)
                 self.bags.invalidate_other_roots(version_id, list(roots), fresh[1])
                 self._deadline(started)
                 repo.update('etl_stage_runs', run['id'], {'status': 'COMPLETED', 'finished_at': now(), 'error_message': None})
