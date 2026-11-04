@@ -223,3 +223,10 @@ Mang theo mã nguồn, `.env`, `ETL_Secrets/`, `Models/`; cài lại dependencie
 | Không đọc/xử lý được tệp | Mapping, hash, MIME, quyền storage và provenance |
 
 Dùng CLI và worker trong mã nguồn để vận hành; các script chẩn đoán một lần trong `.local/` không phải thành phần khởi động.
+
+
+## Neo4j Light Node (t?y ch?n)
+
+Neo4j l? graph projection ri?ng t? MASTER, kh?ng thay SOURCE, ContentBag ho?c
+quy?n truy c?p. Xem [contract, k?t qu? backfill v? l?nh v?n h?nh](deploy/NEO4J_LIGHTNODE.md).
+M?c ??nh t?t; ch? b?t graph Search sau khi nghi?m thu ??ng nh?p th?c t?.

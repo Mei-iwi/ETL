@@ -107,3 +107,128 @@ Never substitute old chat credentials, mint sessions, create accounts or change
 roles. Keep live graph Search off until authenticated canary is accepted.
 Per the owner's follow-up, independent graph backfill may continue while this
 specific gate is `AUTH_BLOCKED`. Do not claim REAL_E2E_PASS.
+
+## Verified full backfill (2026-11-04)
+
+| Label | Expected | Actual | ID-set diff |
+| --- | ---: | ---: | ---: |
+| EducationLevel | 3 | 3 | 0 |
+| GradeLevel | 4 | 4 | 0 |
+| Subject | 10 | 10 | 0 |
+| LearningResource | 62 | 62 | 0 |
+| ResourceVersion | 63 | 63 | 0 |
+| ContentUnit | 584 | 584 | 0 |
+
+| Edge shape | Expected | Actual | Pair-set diff |
+| --- | ---: | ---: | ---: |
+| EducationLevel / HAS_GRADE / GradeLevel | 4 | 4 | 0 |
+| GradeLevel / HAS_SUBJECT / Subject | 10 | 10 | 0 |
+| LearningResource / HAS_SUBJECT / Subject | 45 | 45 | 0 |
+| LearningResource / FOR_GRADE / GradeLevel | 45 | 45 | 0 |
+| LearningResource / HAS_VERSION / ResourceVersion | 63 | 63 | 0 |
+| ResourceVersion / CONTAINS / ContentUnit | 584 | 584 | 0 |
+| ContentUnit / HAS_CHILD / ContentUnit | 90 | 90 | 0 |
+| ResourceVersion / DERIVED_FROM / ResourceVersion | 1 | 1 | 0 |
+
+Total: 726 nodes, 842 edges. Six uniqueness constraints verified. Every node has
+only `id`; no edge properties. All 460 current ContentBag roots resolve to the
+same version/resource/subject/grade sets as read-only PostgreSQL, in five batches.
+All 584 current Mongo content units match MASTER unit/version IDs.
+A second apply wrote zero node/edge changes; diff remained zero after GraphStop /
+GraphStart. SOURCE/MASTER table names, column signatures and row counts are
+identical before/after. MASTER remains 0020. Atlas collection names, validators,
+indexes and row counts are identical; there are still exactly five collections.
+No seed data, projection checkpoint, source write or new relational schema.
+
+Feature acceptance: 78 required graph tests plus five deployment guard tests
+passed without skips; three Search/file browser checks passed. Deployment suite:
+99 passed, two environment-specific optional tests skipped (not counted as PASS).
+Full backend regression retains the 39 reproduced main failures described above.
+This is verified graph backfill, not authenticated live Search acceptance.
+
+## Windows operations
+
+Run from the repository root with the virtualenv active. Set private `.env`
+values from `.env.example`. Use a new strong `NEO4J_PASSWORD`; templates contain
+none. Keep `NEO4J_SEARCH_ENABLED=false` until authenticated canary approval.
+Enable `NEO4J_ENABLED=true` and `NEO4J_SYNC_ENABLED=true` for graph operations.
+Do not store Neo4j credentials in the four-key `CONNECTIONS_FILE`.
+
+| Purpose | Command |
+| --- | --- |
+| Install optional driver | `python -m pip install -e ".[graph]"` |
+| Prepare ignored Docker secrets | `python deploy/scripts/prepare-neo4j.py` |
+| Validate loopback/pin/secrets | `python deploy/scripts/check-neo4j-config.py --env-file .env` |
+| Start only Neo4j | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-graph.ps1 -Action GraphStart` |
+| Stop only Neo4j | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-graph.ps1 -Action GraphStop` |
+| Graph container status | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-graph.ps1 -Action GraphStatus` |
+| Connectivity | `python -m data_sync_etl.cli graph-preflight` |
+| First bootstrap, empty dedicated graph only | `python -m data_sync_etl.cli graph-preflight --claim-empty` |
+| Full preview / refresh approved plan | `python -m data_sync_etl.cli graph-sync --full --dry-run` |
+| Apply the same validated MASTER snapshot | `python -m data_sync_etl.cli graph-sync --full --apply` |
+| Exact parity; nonzero on drift | `python -m data_sync_etl.cli graph-diff` |
+| Private counts / property audit | `python -m data_sync_etl.cli graph-status` |
+| Independent periodic full/delta refresh | `python -m data_sync_etl.cli run-graph-worker` |
+| One scheduled iteration | `python -m data_sync_etl.cli run-graph-worker --once` |
+
+Browser: `http://127.0.0.1:7474`; host Bolt: `bolt://127.0.0.1:7687`.
+The graph worker defaults to a 300-second full scan, applying only differences.
+Run it in a separate terminal/process; stop that process with Ctrl+C. It is a
+fifth, independent worker, never part of the four OCR/metadata workers.
+All graph writers must share the same `NEO4J_STATE_DIR` and run on one host in v1;
+cross-host concurrent writers are unsupported. Losing the ownership receipt
+blocks destructive reconcile; do not forge it or wipe an existing database.
+
+Node/edge diffs are computed automatically on each full scan, including parent
+changes and records removed from MASTER. A soft-deleted record retained in MASTER
+remains in this structural graph; Search still rejects it using live authority.
+There is no event/outbox or resource-scoped incremental subscription in v1.
+Do not change SOURCE/Mongo to track graph freshness.
+
+### Optional Docker API profile
+
+Run `python deploy/scripts/prepare-project-docker.py` after configuring `.env` and
+preparing Neo4j secrets. Add `-Graph` to the existing PowerShell app launcher
+Build/Start commands; it loads `deploy/compose.graph-app.yml` last. It installs the
+optional graph driver, mounts a password file and joins the explicit external
+`etl-neo4j-graph` network. `NEO4J_RUNTIME=docker` selects
+`NEO4J_URI_DOCKER=bolt://neo4j:7687`; never use container loopback for the server.
+This overlay starts no database and does not change OCR worker configuration.
+It does not implicitly enable Search or populate a graph. The current app images
+were not rebuilt/deployed for a live authenticated canary while AUTH_BLOCKED.
+
+V1 active mode consumes verified graph identity resolution, preserving the same
+ranking and filters. PostgreSQL validates all relationship IDs; final SOURCE/PG/
+Mongo checks remain. It is not a graph ranking or latency optimization. Shadow
+only compares mappings. Timeouts, stale/missing mappings and graph outage fall
+back, with bounded concurrency and a fraction of the existing Search budget.
+No authority/results cache or public graph endpoint is added.
+
+### Backup, rollback and troubleshooting
+
+Data volume: `etl-neo4j_graph-data`; logs volume: `etl-neo4j_graph-logs`. Never use
+`down -v`. GraphStop preserves data. Take an offline dump using the pinned image's
+`neo4j-admin database dump neo4j --to-path=/backups` with the existing data volume
+mounted and a private backup directory mounted at `/backups`; the server must be
+stopped and the destination permissions verified. This dump procedure is an
+operational instruction, not a claimed completed backup/restore acceptance.
+Graph can also be reconstructed from a new validated MASTER snapshot.
+
+Rollback Search by setting `NEO4J_SEARCH_ENABLED=false` and restarting only API;
+no source data rollback is necessary. Stop the independent graph worker if
+pausing projection. An existing volume ignores initial `NEO4J_AUTH` changes:
+use Neo4j's supported password rotation procedure, never delete its volume.
+Preparatory scripts refuse to replace differing existing secret files.
+
+- GRAPH_OWNERSHIP_UNPROVEN: verify database identity and the original private
+  receipt. No automatic adoption of nonempty unowned databases.
+- GRAPH_FRESH_DRY_RUN_REQUIRED: rerun dry-run against the current snapshot.
+- GRAPH_BAG_MAPPING_DRIFT: inspect source/index mapping; never synthesize units.
+- GRAPH_SYNC_BUSY: another writer owns the OS lock; do not remove its lock file.
+- GRAPH_UNAVAILABLE: check only graph health/auth/network. Baseline Search and OCR
+  remain independent; graph reads never mint rights.
+- GRAPH_FAIL_OPEN_REQUIRED: this rollout forbids graph becoming a required Search
+  dependency. Keep FAIL_OPEN enabled.
+
+Local evidence: `.local/neo4j/` and `.local/neo4j/FINAL_REPORT.md`, ignored by Git.
+Stages 9 and complete final acceptance remain AUTH_BLOCKED; no REAL_E2E_PASS.
