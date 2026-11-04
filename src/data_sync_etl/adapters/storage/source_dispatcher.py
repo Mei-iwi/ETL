@@ -25,8 +25,8 @@ class SourceFileDispatcher:
             raise SourceFileError('SOURCE_BUCKET_NOT_ALLOWED')
         if self.local is None:
             # An unknown bucket is never implicitly a local storage route.
-            code = ('SOURCE_LOCAL_FILES_DISABLED' if bucket in self.local_buckets
-                    else 'SOURCE_BUCKET_NOT_ALLOWED')
+            code = ('SOURCE_BUCKET_NOT_ALLOWED' if self.object is not None
+                    and bucket not in self.local_buckets else 'SOURCE_LOCAL_FILES_DISABLED')
             raise SourceFileError(code)
         return 'local'
 

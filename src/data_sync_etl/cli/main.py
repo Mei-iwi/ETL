@@ -221,7 +221,8 @@ def dispatch(container, args):
         raise DomainError('MONGO_METADATA_APPLY_REQUIRES_DEV')
     match args.command:
         case "sync-master":
-            return container.sync.run(args.stream, args.full, source_id=args.source_id)
+            options = {'source_id': args.source_id} if args.source_id is not None else {}
+            return container.sync.run(args.stream, args.full, **options)
         case 'reconcile-master':
             return container.reconcile_master.run(args.stream, apply=args.apply, fingerprint=args.fingerprint)
         case 'project-master-mongo':
@@ -273,6 +274,7 @@ def main():
             return run(args)
         if args.command == 'validate-source-ocr-contract':
             from pathlib import Path
+
             from data_sync_etl.domain.source_ocr_contract import SourceOCRContract
             path = Path(args.file)
             with path.open('rb') as stream:
