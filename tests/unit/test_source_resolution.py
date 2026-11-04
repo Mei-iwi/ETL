@@ -89,6 +89,31 @@ def test_source_resolution_uses_exact_id_without_file_access(container, monkeypa
     assert 'storage_bucket' not in result and 'storage_object_key' not in result
 
 
+def test_draft_resolution_uses_existing_owner_admin_policy_and_rejects_source_drift(container, monkeypatch):
+    import pytest
+
+    from data_sync_etl.application.source_resolution import SourceResolutionError
+
+    source = seed_source_mapping(container)
+    source['resource_publication_status'] = 'DRAFT'
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1',
+                    {'publication_status': 'DRAFT', 'created_by': 'user-1'})
+    monkeypatch.setattr(container.source, 'get_version', lambda _: source, raising=False)
+    admin = SearchAccess('authenticated_admin', actor_id='master:admin')
+    owner = SearchAccess('authenticated_user', frozenset({'resource-1'}),
+        actor_id='master:user-1', owner_id='user-1', allow_owned_unreviewed=True)
+    stranger = SearchAccess('authenticated_user', actor_id='master:stranger',
+        owner_id='stranger', allow_public=True, allow_shared_unreviewed=True)
+    for access in (admin, owner):
+        assert container.source_resolution.resolve('resource-1', access)['source_record_available'] is True
+    for access in (stranger, SearchAccess('local_demo')):
+        with pytest.raises(SourceResolutionError, match='RESOURCE_NOT_FOUND'):
+            container.source_resolution.resolve('resource-1', access)
+    source['resource_publication_status'] = 'PUBLISHED'
+    assert container.source_resolution.resolve('resource-1', owner)['source_record_available'] is False
+
+
 def test_source_resolution_fails_closed_for_stale_and_unauthorized(container, monkeypatch):
     source = seed_source_mapping(container)
     monkeypatch.setattr(container.source, 'get_version', lambda _: {**source, 'source_hash': 'c' * 64}, raising=False)
