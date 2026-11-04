@@ -6,6 +6,7 @@ tables.  They are not connected to the legacy worker or search path yet.
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, Index, Integer, String
 from sqlalchemy.orm import DeclarativeBase
 
+
 class ComponentReferenceBase(DeclarativeBase):
     """Experimental replica mappings never participate in MASTER 0020 metadata.
 
