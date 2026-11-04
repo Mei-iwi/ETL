@@ -79,12 +79,13 @@ class QueryEmbeddingContext:
 
 class SearchService:
     def __init__(self, indexing, settings, bags: SearchBagReader | None, *, query_cache_runtime=None,
-                 semantic=None, metadata=None, concept_resolver=None):
+                 semantic=None, metadata=None, concept_resolver=None, graph_advisor=None):
         self.indexing, self.settings, self.bags = indexing, settings, bags
         self.semantic = semantic
         self.metadata = metadata
         self.dictionary = empty_dictionary()
         self.concept_resolver = concept_resolver
+        self.graph_advisor = graph_advisor
         self.source_content_authorizer = None
         self.source_content_authorizer_many = None
 
@@ -860,6 +861,19 @@ class SearchService:
                 item['lexical_evidence'] = self._lexical_evidence(rendered_expansion, bag, snapshots[bag.resource_version_id], policy)
             return grouped, matches
         grouped, matches = ranked()
+        if self.graph_advisor is not None and self.settings.neo4j_search_enabled:
+            visible = sorted(grouped.values(), key=lambda row: (-row['score'], row['resource_id']))
+            offset = (page - 1) * size
+            call = CURRENT_SEARCH.get()
+            resolved = self.graph_advisor.inspect(visible[offset:offset + size],
+                remaining=call.remaining() if call is not None else None)
+            # Active v1 resolves graph identity only after exact PostgreSQL parity.
+            # All eligibility, file access and final live validation below remain.
+            for item in visible[offset:offset + size]:
+                identity = resolved.get(item['bag_id'])
+                if identity:
+                    item['resource_id'] = identity['resource_id']
+                    item['resource_version_id'] = identity['resource_version_id']
         whole_file_access = {}
         # Recheck metadata and snapshots after ranking; never publish a known stale vector.
         if snapshots or (_batch_texts and excluded):

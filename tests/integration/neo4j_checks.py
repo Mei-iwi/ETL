@@ -181,3 +181,13 @@ def test_cli_bootstrap_dry_run_apply_diff_and_noop(projection, tmp_path, monkeyp
     assert cli.run(SimpleNamespace(command='graph-diff'), settings=settings) == 0
     assert '"missing_edges": 0' in capsys.readouterr().out
     assert projection.read() == expected
+
+
+def test_resolver_returns_only_requested_business_ids_and_relationships(projection):
+    from data_sync_etl.adapters.neo4j.resolver import Neo4jResolver
+    result = Neo4jResolver(projection.driver).resolve(['master-root', 'derived-leaf'])
+    assert result == [
+        dict(content_unit_id=key, resource_version_id='master-v2', resource_id='master-resource',
+             subject_ids=['master-subject'], grade_ids=['master-grade'])
+        for key in ['derived-leaf', 'master-root']]
+    assert Neo4jResolver(projection.driver).resolve(['not-in-graph']) == []
