@@ -25,11 +25,12 @@ function pdfFixture() {
     return Buffer.from(pdf)
 }
 
-test('Master Data read-only and file readiness/errors in real browser', {
+test('Master Data read-only and legacy local file readiness/errors in real browser', {
     skip: !existsSync(executable) || !existsSync(join(root, 'index.html')), timeout: 90000,
 }, async () => {
     let catalogOnline = true
     let ready = false, fileStatus = 200, fileRequests = 0, writes = 0, originalAllowed = false, sourceInfoError = null
+    let sourceOwned = false
     let fileMime = 'image/png', fileBody = null, textRequests = 0, previewRequests = 0
     const server = createServer(async (req, res) => {
         const path = new URL(req.url, 'http://127.0.0.1').pathname
@@ -74,11 +75,23 @@ test('Master Data read-only and file readiness/errors in real browser', {
                 pagination: { page, size, total: items.length, total_pages: Math.ceil(items.length / size) } })
         }
         if (/^\/api\/v1\/resources\/r[01]$/.test(path)) return json({
-            id: path.endsWith('r0') ? 'r0' : 'r1', title: 'Học liệu kiểm thử', source_origin: 'POSTGRESQL',
+            // This matrix exercises legacy byte previews gated by index status.
+            // Required SOURCE pre-index viewer coverage is in sourceViewerUi.test.mjs.
+            id: path.endsWith('r0') ? 'r0' : 'r1', title: 'Học liệu kiểm thử', source_origin: sourceOwned ? 'POSTGRESQL' : 'LOCAL',
             provider_name: 'Đơn vị 1', resource_type_name_vi: 'Tài liệu', publication_status: 'PUBLISHED',
             is_active: true, subjects: [], grade_levels: [], created_at: '2026-01-01', updated_at: '2026-01-01',
         })
+        if (/^\/api\/v1\/resources\/r[01]\/description$/.test(path)) return json({
+            resource_id: path.split('/')[4], description: null, authors: [], tags: [],
+            revision: 'missing', editable: false, unavailable_reason: null,
+        })
         if (path === '/api/v1/resources/r0/versions') return json([])
+        if (path === '/api/v1/resources/r1/open') {
+            if (sourceInfoError) return json({ detail: { code: sourceInfoError } }, 503)
+            return json({ master_resource_id: 'r1', version_id: 'v1', status: originalAllowed ? 'EXTERNAL_VIEWER_AVAILABLE' : 'METADATA_ONLY',
+                files: originalAllowed ? [{ source_file_id: 'fixture', file_name: 'Original.pdf', mime_type: 'application/pdf',
+                    access_status: 'ALLOWED', viewer_url: 'https://drive.google.com/file/d/approved-file/view' }] : [] })
+        }
         if (path === '/api/v1/resources/r1/versions') return json([{ id: 'v1', version_number: 1, created_at: '2026-01-01' }])
         if (path === '/api/v1/resource-versions/v1/index-status') return json({ processing_status: 'CONTENT_READY', index_status: ready ? 'READY' : 'NOT_STARTED' })
         if (path === '/api/v1/resource-versions/v1/source-info' && sourceInfoError) return json({ detail: { code: sourceInfoError } }, 503)
@@ -208,8 +221,8 @@ test('Master Data read-only and file readiness/errors in real browser', {
         assert.equal(processingUrl.searchParams.get('jobId'), 'j1')
         await capture('source-target')
         await open('/library/r0')
-        await waitFor(() => evaluate('document.body?.textContent.includes("Chưa nhập tệp từ nguồn")'))
-        assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).find(e=>e.textContent==="Xem tệp").disabled'), true)
+        await waitFor(() => evaluate('document.body?.textContent.includes("Chưa có tệp học liệu")'))
+        assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).some(e=>e.textContent==="Xem tệp" && !e.disabled)'), false)
         await open('/library/r1')
         await waitFor(() => evaluate('document.body?.textContent.includes("Chỉ mục chưa sẵn sàng")'))
         assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).find(e=>e.textContent==="Xem tệp").disabled'), true)
@@ -221,9 +234,12 @@ test('Master Data read-only and file readiness/errors in real browser', {
         await waitFor(() => evaluate('!!document.querySelector("img[alt=\\"Nội dung tệp học liệu\\"]")'))
         await capture('file-ready')
         assert.equal(await evaluate('!!Array.from(document.querySelectorAll("a")).find(a=>a.textContent==="Xem tệp bên ngoài")'), false)
-        assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).find(e=>e.textContent==="Xem tệp bên ngoài")?.disabled'), true)
+        assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).some(e=>e.textContent==="Xem tệp bên ngoài" && !e.disabled)'), false)
         assert.equal(await evaluate('document.body.textContent.includes("Tệp được truy xuất từ nguồn · Quyền và tính toàn vẹn")'), false)
-        assert.equal(await evaluate('document.body.textContent.includes("Nguồn chưa cung cấp liên kết mở trực tiếp cho tệp này.")'), true)
+        sourceOwned = true
+        await open('/library/r1')
+        await waitFor(() => evaluate('document.body.textContent.includes("Nguồn chỉ cung cấp metadata hoặc chưa có viewer được xác minh.")'))
+        assert.equal(await evaluate('Array.from(document.querySelectorAll("a")).some(e=>e.textContent==="Xem tệp bên ngoài")'), false)
         originalAllowed = true
         await click('Kiểm tra lại')
         await waitFor(() => evaluate('!!Array.from(document.querySelectorAll("a")).find(a=>a.textContent==="Xem tệp bên ngoài")'))
@@ -240,6 +256,7 @@ test('Master Data read-only and file readiness/errors in real browser', {
         await click('Kiểm tra lại')
         await waitFor(() => evaluate('!document.querySelector("[role=alert]")'))
         fileMime = 'application/pdf'
+        sourceOwned = false
         fileBody = pdfFixture()
         await open('/library/r1')
         await waitFor(() => evaluate('Array.from(document.querySelectorAll("button")).find(e=>e.textContent===String.fromCharCode(88,101,109,32,116,7879,112))?.disabled === false'))

@@ -11,7 +11,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const root = process.env.ETL_T4_FRONTEND_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const dist = resolve(process.env.ETL_TEST_SEARCH_DIST || join(root, 'dist'))
+const dist = resolve(process.env.ETL_TEST_SEARCH_DIST || process.env.ETL_TEST_DIST || join(root, 'dist'))
 const baseline = process.env.ETL_T4_BASELINE === '1'
 const executable = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -30,6 +30,9 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
     let failSubjects = false
     const reconciliationBodies = []
     let reconciliationPolls = 0
+    const scheduleWrites = []
+    let auditComplete = false
+    let filePlan = { stream: 'files', enabled: false, interval_seconds: 300, mode: 'INCREMENTAL', repair: false }
     let releaseSearch
     const bodies = [], responses = []
     const server = createServer(async (req, res) => {
@@ -137,7 +140,19 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             return res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=', 'base64'))
         }
         if (url.pathname === '/api/v1/resources') return json({ items: [], pagination: { page: 1, size: 7, total: 0, total_pages: 0 } })
-        if (url.pathname === '/api/v1/reconciliation/runs/latest' && reconciliationBodies.length && ++reconciliationPolls < 3) return json({
+        if (url.pathname === '/api/v1/reconciliation/audit-jobs' && req.method === 'GET') return json({
+            items: reconciliationBodies.length ? [{ job_id: 'fixture-audit', stream: 'files', audit_type: 'LIGHT',
+                status: auditComplete ? 'COMPLETED' : 'RUNNING', error_code: null, created_at: '2026-11-05', next_retry_at: null, progress: {} }] : [], next_cursor: null })
+        if (url.pathname === '/api/v1/reconciliation/coverage') return json({ total_files: 1, light_verified_files: 0,
+            deep_verified_files: 0, due_deep_files: 1, failed_files: 0, pending_files: 0, scheduler_enabled: false })
+        if (url.pathname === '/api/v1/reconciliation/schedules') return json({ items: [filePlan] })
+        if (url.pathname === '/api/v1/reconciliation/schedules/files' && req.method === 'PUT') {
+            let body = ''; for await (const chunk of req) body += chunk
+            const value = JSON.parse(body); scheduleWrites.push(value)
+            filePlan = { ...filePlan, ...value }
+            return json(filePlan)
+        }
+        if (url.pathname === '/api/v1/reconciliation/runs/latest' && reconciliationBodies.length && !auditComplete) return json({
             latest_run_id: 'fixture-audit', overall_status: 'RUNNING', overall_match_rate_percent: 0,
             total_source_records: 0, total_target_records: 1, total_matched_records: 0, total_mismatched_records: 0,
             total_source_bytes: 0, total_target_bytes: 0,
@@ -158,11 +173,12 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
             overall_status: 'NO_RUNS_YET', overall_match_rate_percent: 0, total_source_records: 0,
             total_target_records: 0, total_matched_records: 0, total_mismatched_records: 0,
             total_source_bytes: 0, total_target_bytes: 0, stream_reports: [] })
-        if (url.pathname === '/api/v1/reconciliation/runs') {
+        if (url.pathname === '/api/v1/reconciliation/audit-jobs' && req.method === 'POST') {
             let body = ''; for await (const chunk of req) body += chunk
             reconciliationBodies.push(JSON.parse(body))
             reconciliationPolls = 0
-            return json({ status: 'RUNNING', reports: [{ run_id: 'fixture-audit', stream_name: 'files', status: 'RUNNING' }] }, 202)
+            auditComplete = false
+            return json({ status: 'PENDING', job_id: 'fixture-audit' }, 202)
         }
         if (url.pathname.startsWith('/api/')) return json({ detail: 'not found' }, 404)
         const file = url.pathname.startsWith('/assets/') ? resolve(dist, '.' + url.pathname) : join(dist, 'index.html')
@@ -644,25 +660,34 @@ test('search form, methods, results, pagination, empty, error/retry and mobile l
         await waitFor(() => evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Quét đối soát' && !button.disabled)"))
         assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).filter(button => button.textContent === 'Quét đối soát').length"), 1)
         await click('Quét đối soát')
-        await waitFor(() => evaluate("document.body.textContent.includes('Đang đối soát nền:')"))
-        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('Đang đối soát'))?.disabled"), true)
+        await waitFor(() => evaluate("document.body.textContent.includes('Đã xếp hàng hoặc đang đối soát nền')"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Quét đối soát')?.disabled"), true)
         await waitFor(() => evaluate("!!document.querySelector('dialog[open]')"))
         assert.equal(reconciliationBodies.length, 1)
-        assert.equal(reconciliationBodies[0].dry_run, true)
+        assert.deepEqual(reconciliationBodies[0], { stream: 'files', mode: 'INCREMENTAL', repair: false, audit_type: 'LIGHT' })
+        await evaluate("for (let i = 0; i < 10; i++) Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Quét đối soát').click()")
+        assert.equal(reconciliationBodies.length, 1)
+        await click('Đóng')
+        auditComplete = true
+        await call('Page.navigate', { url: origin + '/library/source-sync/reconciliation' })
         await waitFor(() => evaluate("document.body.textContent.includes('Chưa bật truy xuất nguồn')"))
         assert.equal(await evaluate("document.body.textContent.includes('Chưa xác minh')"), true)
         assert.equal(await evaluate("document.body.textContent.includes('Tự phục hồi')"), false)
         await capture('reconciliation-dialog')
-        await click('Đóng')
-        await evaluate("document.querySelector('input[type=checkbox]').click()")
-        await waitFor(() => evaluate("typeof window.fixtureAutoScan === 'function'"))
-        await evaluate("for (let i = 0; i < 10; i++) window.fixtureAutoScan()")
-        await waitFor(() => reconciliationBodies.length === 2)
-        assert.equal(reconciliationBodies[1].dry_run, true)
-        await waitFor(() => evaluate("!!document.querySelector('dialog[open]')"))
-        await click('Đóng')
+        // The current contract persists server schedules; it never runs a
+        // client auto-scan timer or repeats a job just because a page is open.
+        await evaluate("document.querySelector('button[aria-label=\"Thiết lập Kho tệp\"]').click()")
+        await waitFor(() => evaluate("!!document.querySelector('input[aria-label=\"Bật Kho tệp FAST\"]')"))
+        await evaluate("document.querySelector('input[aria-label=\"Bật Kho tệp FAST\"]').click()")
+        await click('Lưu')
+        await waitFor(() => scheduleWrites.length === 1)
+        assert.equal(scheduleWrites[0].fast_schedule.enabled, true)
+        assert.equal(scheduleWrites[0].fast_schedule.repair, false)
+        assert.equal(reconciliationBodies.length, 1)
+        assert.equal(await evaluate("typeof window.fixtureAutoScan"), 'undefined')
         await evaluate("history.pushState({}, '', '/overview/summary'); window.dispatchEvent(new PopStateEvent('popstate'))")
-        await waitFor(() => evaluate("window.fixtureAutoScan === null"))
+        await waitFor(() => evaluate("location.pathname === '/overview/summary'"))
+        assert.equal(reconciliationBodies.length, 1)
         // Unicode/mixed-language transport through every real React method.
         // Fixture responses attest UI/API mapping, not semantic relevance.
         mode = 'results'
