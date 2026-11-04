@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from pymongo import MongoClient
@@ -358,12 +359,21 @@ def _index_spec(index):
                        "collation", "hidden", "expireAfterSeconds")}
 
 
-def check_schema(database, *, dimension, validation_level="strict", audit_documents=False, historical_dimensions=()):
+def check_schema(database, *, dimension, validation_level="strict", audit_documents=False, historical_dimensions=(),
+                 _catalog=None):
     """Shared read-only guard. HTTP/worker checks never scan stored documents."""
     if validation_level not in ("strict", "moderate"):
         raise DomainError("Unsupported validation level")
     validators = contracts(dimension, historical_dimensions=historical_dimensions)
-    catalog = {row["name"]: row for row in database.list_collections()}
+    catalog = ({row["name"]: row for row in database.list_collections()}
+               if _catalog is None else _catalog)
+    # Fresh independent catalog reads; never cache schema/authorization between
+    # requests. Only real PyMongo databases use concurrent network operations.
+    index_catalog = {}
+    names = [name for name in validators if catalog.get(name, {}).get('type') == 'collection']
+    if not audit_documents and type(database).__module__.startswith('pymongo.') and names:
+        with ThreadPoolExecutor(max_workers=min(5, len(names))) as pool:
+            index_catalog = dict(zip(names, pool.map(lambda name: list(database[name].list_indexes()), names)))
     report = {
         "database": database.name, "schema_version": SCHEMA_VERSION, "mode": "check",
         "effective_expected_dimension": dimension, "audit_documents": audit_documents,
@@ -396,7 +406,8 @@ def check_schema(database, *, dimension, validation_level="strict", audit_docume
                     "path": f"{name}.{field}", "expected": expected, "actual": actual})
         report["validators"] += bool(entry and not differences
                                      and level == validation_level and action == "error")
-        indexes = list(database[name].list_indexes()) if entry else []
+        indexes = (index_catalog[name] if name in index_catalog else
+                   list(database[name].list_indexes()) if entry else [])
         report["installed_indexes"][name] = [_index_spec(i) for i in indexes]
         for expected in INDEXES[name]:
             matches = [idx for idx in indexes if idx["name"] == expected.name

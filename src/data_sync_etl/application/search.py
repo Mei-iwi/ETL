@@ -693,16 +693,27 @@ class SearchService:
                     member, variants = None, []
                     winning_vector = vector
                     if self.settings.index_meaning_bags_enabled:
+                        # Below every enabled admission threshold, contextual
+                        # excerpt selection cannot change acceptance or rank.
+                        # Still score every member; never prune the corpus.
+                        meaning_floor = min(
+                            self.settings.search_vector_min_similarity,
+                            self.settings.search_vector_anchor_min_similarity
+                            if self.settings.search_vector_anchor_fallback_enabled else 1.,
+                            self.settings.search_meaning_fallback_min_similarity
+                            if self.settings.search_meaning_context_fallback_enabled else 1.)
                         value, member, variants = match_meaning(vector, bag.meanings, context={
                             'query': query, 'keywords': keywords, 'expansion': expansion,
                             'dictionary': self.dictionary, 'policy': policy,
-                            'margin': self.settings.search_meaning_context_margin})
+                            'margin': self.settings.search_meaning_context_margin,
+                            'admission_floor': meaning_floor})
                         for extra in extra_vectors:
                             candidate = match_meaning(extra, bag.meanings, context={
                                 'query': dense_variant, 'keywords': dense_keywords,
                                 'expansion': dense_expansion,
                                 'dictionary': self.dictionary, 'policy': policy,
-                                'margin': self.settings.search_meaning_context_margin})
+                                'margin': self.settings.search_meaning_context_margin,
+                                'admission_floor': meaning_floor})
                             if candidate[0] > value:
                                 value, member, variants = candidate
                                 winning_vector = extra

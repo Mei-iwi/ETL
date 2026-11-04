@@ -64,11 +64,13 @@ def check_lexical_schema(database, *, dimension, audit_documents=False, historic
 
 
 def check_bag_schema(database, *, dimension, bag_validator, audit_documents=False,
-                     previous_bag_validator=None, historical_dimensions=()):
-    report = check_schema(database, dimension=dimension, historical_dimensions=historical_dimensions)
+                     previous_bag_validator=None, historical_dimensions=(), _catalog=None):
+    catalog = ({row['name']: row for row in database.list_collections()}
+               if _catalog is None else _catalog)
+    report = check_schema(database, dimension=dimension, historical_dimensions=historical_dimensions,
+                          _catalog=catalog)
     report['schema_version'] = SCHEMA_VERSION
     report['audit_documents'] = audit_documents
-    catalog = {row['name']: row for row in database.list_collections()}
     installed = catalog.get('content_bags', {}).get('options', {}).get('validator', {})
     differences = _validator_differences(bag_validator, installed, 'content_bags')
     base_matches = installed == contracts(dimension, historical_dimensions=historical_dimensions)['content_bags']

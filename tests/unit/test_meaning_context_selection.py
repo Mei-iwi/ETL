@@ -42,3 +42,28 @@ def test_literal_words_cannot_promote_a_semantically_distant_member():
     bag = build_meanings([('leaf', '\n'.join(parts))], 'root', None,
         NearTieModel(dict(zip(parts, [.1, .8], strict=True))), .99)
     assert match_meaning([1., 0., 0.], bag, context=context('unsupervised learning'))[1].text == parts[1]
+
+
+def test_below_all_admission_floors_keeps_dense_score_without_excerpt_work(monkeypatch):
+    parts = ['First source passage.', 'Second source passage.']
+    bag = build_meanings([('leaf', '\n'.join(parts))], 'root', None,
+        NearTieModel(dict(zip(parts, [.3, .29], strict=True))), .99)
+    expected = match_meaning([1., 0., 0.], bag)
+    import data_sync_etl.domain.meaning_bags as module
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Inadmissible candidates do not need contextual excerpt selection')
+
+    monkeypatch.setattr(module, 'ContextRanker', forbidden)
+    actual = match_meaning([1., 0., 0.], bag,
+                           context={**context('source passage'), 'admission_floor': .4})
+    assert actual == expected
+
+
+def test_admissible_near_ties_keep_original_context_selection():
+    parts = ['Unrelated passage.', 'A matching source passage.']
+    bag = build_meanings([('leaf', '\n'.join(parts))], 'root', None,
+        NearTieModel(dict(zip(parts, [.8, .79], strict=True))), .99)
+    ctx = context('matching source passage')
+    expected = match_meaning([1., 0., 0.], bag, context=ctx)
+    assert match_meaning([1., 0., 0.], bag, context={**ctx, 'admission_floor': .4}) == expected

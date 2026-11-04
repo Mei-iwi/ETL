@@ -156,7 +156,8 @@ def match_meaning(query_vector, bag, *, context=None):
     scores = cosine_many(query_vector, [member.embedding for member in bag.members])
     index = max(range(len(bag.members)), key=lambda i: (scores[i], -i))
     retrieval_score = scores[index]
-    if context is not None and context.get('margin', .08) > 0:
+    if (context is not None and context.get('margin', .08) > 0
+            and retrieval_score >= context.get('admission_floor', -1.)):
         # Only disambiguate near-equal dense matches. Never let arbitrary exact
         # words promote a semantically distant span or cross a source boundary.
         pool = [i for i, score in enumerate(scores)
