@@ -135,10 +135,49 @@ def test_projector_full_delta_noop_rollback_and_ownership(projection, tmp_path, 
     assert report['status'] == 'MATCH' and report['writes'] > 0
     assert projection.read() == changed
     assert sync.sync(apply=True)['writes'] == 0
-    # A valid empty source also reconciles safely inside the owned TEST graph.
     reader.read = lambda: GraphSnapshot(frozenset(), frozenset())
     assert sync.sync(apply=True)['status'] == 'MATCH'
     assert not projection.read().nodes
     reader.read = lambda: original
     sync.sync(apply=True)
     assert projection.read() == original
+
+
+def test_cli_bootstrap_dry_run_apply_diff_and_noop(projection, tmp_path, monkeypatch, capsys):
+    import json
+    from types import SimpleNamespace
+
+    from data_sync_etl.adapters.persistence.graph_snapshot import verify_bag_roots
+    from data_sync_etl.application.graph_sync import GraphSynchronizer
+    from data_sync_etl.cli import graph as cli
+    from data_sync_etl.domain.graph_contract import GraphSnapshot
+
+    expected = build_snapshot(graph_tables())
+    assert projection.read() == expected
+    settings = projection.driver.settings.model_copy(update={
+        'database_url':'sqlite://', 'neo4j_state_dir':tmp_path, 'neo4j_sync_enabled':True})
+    sync = GraphSynchronizer(SimpleNamespace(read=lambda: expected), projection, tmp_path)
+    identity = sync._identity()
+    sync._receipt(identity).write_text(json.dumps(identity), encoding='utf-8')
+    # Clear only the owned, isolated test fixture via normal reconcile.
+    sync.reader = SimpleNamespace(read=lambda: GraphSnapshot(frozenset(), frozenset()))
+    old_flag = projection.driver.settings.neo4j_sync_enabled
+    projection.driver.settings.neo4j_sync_enabled = True
+    sync.sync(apply=True)
+    projection.driver.settings.neo4j_sync_enabled = old_flag
+    monkeypatch.setattr(cli, 'MasterGraphReader', lambda *a, **kw: SimpleNamespace(read=lambda: expected))
+    monkeypatch.setattr(cli, 'coverage', lambda s, snap: verify_bag_roots(snap, [
+        {'_id':'master-root', 'resource_version_id':'master-v2'}]))
+    assert cli.run(SimpleNamespace(command='graph-sync', apply=True), settings=settings) == 1
+    assert 'GRAPH_FRESH_DRY_RUN_REQUIRED' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-sync', apply=False, dry_run=True), settings=settings) == 0
+    assert '"missing_nodes": 8' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-diff'), settings=settings) == 1
+    assert '"status": "DIFF"' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-sync', apply=True), settings=settings) == 0
+    assert '"status": "MATCH"' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-sync', apply=True), settings=settings) == 0
+    assert '"writes": 0' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-diff'), settings=settings) == 0
+    assert '"missing_edges": 0' in capsys.readouterr().out
+    assert projection.read() == expected

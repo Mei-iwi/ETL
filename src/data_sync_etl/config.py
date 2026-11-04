@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     neo4j_query_timeout_seconds: float = Field(default=3, gt=0, le=30)
     neo4j_sync_interval_seconds: int = Field(default=300, ge=30)
     neo4j_graph_log_level: Literal['INFO', 'WARNING', 'ERROR'] = 'INFO'
+    neo4j_state_dir: Path = Path('.local/neo4j')
 
     @model_validator(mode='after')
     def validate_graph_settings(self):
