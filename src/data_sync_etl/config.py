@@ -9,6 +9,49 @@ from data_sync_etl.domain.concepts import ExpansionPolicy
 
 
 class Settings(BaseSettings):
+    neo4j_enabled: bool = False
+    neo4j_sync_enabled: bool = False
+    neo4j_search_enabled: bool = False
+    neo4j_search_mode: Literal['shadow', 'active'] = 'shadow'
+    neo4j_fail_open: bool = True
+    neo4j_user: str = 'neo4j'
+    neo4j_password: str = Field(default='', repr=False)
+    neo4j_database: str = 'neo4j'
+    neo4j_uri_host: str = Field(default='bolt://127.0.0.1:7687', repr=False)
+    neo4j_uri_docker: str = Field(default='bolt://neo4j:7687', repr=False)
+    neo4j_runtime: Literal['host', 'docker'] = 'host'
+    neo4j_batch_size: int = Field(default=200, ge=1, le=1000)
+    neo4j_connect_timeout_seconds: float = Field(default=5, gt=0, le=30)
+    neo4j_query_timeout_seconds: float = Field(default=3, gt=0, le=30)
+    neo4j_sync_interval_seconds: int = Field(default=300, ge=30)
+    neo4j_graph_log_level: Literal['INFO', 'WARNING', 'ERROR'] = 'INFO'
+
+    @model_validator(mode='after')
+    def validate_graph_settings(self):
+        from urllib.parse import urlsplit
+
+        for uri in (self.neo4j_uri_host, self.neo4j_uri_docker):
+            try:
+                parsed = urlsplit(uri)
+                port = parsed.port
+            except ValueError:
+                raise ValueError('GRAPH_URI_INVALID') from None
+            if (parsed.scheme not in {'bolt', 'bolt+s', 'neo4j', 'neo4j+s'}
+                    or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.query or parsed.fragment or parsed.path not in {'', '/'}
+                    or (port is not None and not 1 <= port <= 65535)
+                    or (parsed.scheme in {'bolt', 'neo4j'}
+                        and parsed.hostname not in {'127.0.0.1', 'localhost', 'neo4j', '::1'})):
+                raise ValueError('GRAPH_URI_INVALID')
+        import re
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,62}', self.neo4j_database):
+            raise ValueError('GRAPH_DATABASE_INVALID')
+        if (self.neo4j_sync_enabled or self.neo4j_search_enabled) and not self.neo4j_enabled:
+            raise ValueError('GRAPH_DISABLED')
+        if self.neo4j_enabled and (not self.neo4j_user or len(self.neo4j_password) < 12):
+            raise ValueError('GRAPH_CREDENTIAL_REQUIRED')
+        return self
+
     search_result_sessions_enabled: bool = False
     # SOURCE-owned OCR requires an approved contract and MASTER migration 0020.
     ocr_component_pipeline_enabled: bool = False
