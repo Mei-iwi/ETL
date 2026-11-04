@@ -20,6 +20,12 @@ EDGE_MERGE = {
             f'(b:{shape[2]} {{id:e[1]}}) MERGE (a)-[:{shape[1]}]->(b)')
     for shape in RELATIONS
 }
+NODE_DELETE = {label: f'UNWIND $ids AS id MATCH (n:{label} {{id:id}}) DELETE n' for label in LABELS}
+EDGE_DELETE = {
+    shape: (f'UNWIND $edges AS e MATCH (a:{shape[0]} {{id:e[0]}})'
+            f'-[r:{shape[1]}]->(b:{shape[2]} {{id:e[1]}}) DELETE r')
+    for shape in RELATIONS
+}
 
 
 class Neo4jProjection:
@@ -71,7 +77,7 @@ class Neo4jProjection:
             raise GraphContractError('GRAPH_DUPLICATE_DATA')
         return GraphSnapshot(frozenset(nodes), frozenset(edges))
 
-    def merge(self, snapshot, *, batch_size=200, tx=None):
+    def merge(self, snapshot, *, batch_size=200, tx=None, added_nodes=None, added_edges=None):
         # Revalidate even when a caller bypasses the normal MASTER reader.
         GraphSnapshot(snapshot.nodes, snapshot.edges)
         if not 1 <= batch_size <= 1000:
@@ -79,12 +85,28 @@ class Neo4jProjection:
         if tx is None:
             with self.driver.session(write=True) as session:
                 return session.execute_write(unit_of_work(timeout=self.timeout)(
-                    lambda t: self.merge(snapshot, batch_size=batch_size, tx=t)))
+                    lambda t: self.merge(snapshot, batch_size=batch_size, tx=t,
+                                         added_nodes=added_nodes, added_edges=added_edges)))
+        nodes = snapshot.nodes if added_nodes is None else added_nodes
+        relationships = snapshot.edges if added_edges is None else added_edges
+        if not set(nodes) <= snapshot.nodes or not set(relationships) <= snapshot.edges:
+            raise GraphContractError('GRAPH_DELTA_INVALID')
         for label in LABELS:
-            ids = sorted(key for kind, key in snapshot.nodes if kind == label)
+            ids = sorted(key for kind, key in nodes if kind == label)
             for start in range(0, len(ids), batch_size):
                 tx.run(NODE_MERGE[label], ids=ids[start:start+batch_size]).consume()
         for shape in RELATIONS:
-            edges = sorted((e[1], e[4]) for e in snapshot.edges if (e[0], e[2], e[3]) == shape)
+            edges = sorted((e[1], e[4]) for e in relationships if (e[0], e[2], e[3]) == shape)
             for start in range(0, len(edges), batch_size):
                 tx.run(EDGE_MERGE[shape], edges=edges[start:start+batch_size]).consume()
+
+    def remove(self, nodes, edges, *, tx, batch_size=200):
+        # All shapes were audited by read(); never DETACH DELETE or wipe a database.
+        for shape in RELATIONS:
+            pairs = sorted((e[1], e[4]) for e in edges if (e[0], e[2], e[3]) == shape)
+            for start in range(0, len(pairs), batch_size):
+                tx.run(EDGE_DELETE[shape], edges=pairs[start:start+batch_size]).consume()
+        for label in LABELS:
+            ids = sorted(key for kind, key in nodes if kind == label)
+            for start in range(0, len(ids), batch_size):
+                tx.run(NODE_DELETE[label], ids=ids[start:start+batch_size]).consume()

@@ -87,3 +87,58 @@ def test_extra_label_property_relation_rejected(projection, cypher):
         with pytest.raises(GraphContractError):
             projection.read(tx=tx)
         tx.rollback()
+
+
+def test_projector_full_delta_noop_rollback_and_ownership(projection, tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from data_sync_etl.application.graph_sync import GraphSynchronizer
+    from data_sync_etl.domain.graph_contract import GraphSnapshot
+
+    original = build_snapshot(graph_tables())
+    assert projection.read() == original  # Dedicated test container, known fixture.
+    reader = SimpleNamespace(read=lambda: original)
+    sync = GraphSynchronizer(reader, projection, tmp_path)
+    assert sync.sync()['status'] == 'MATCH'
+    with pytest.raises(GraphContractError, match='GRAPH_NONEMPTY_OWNERSHIP_UNPROVEN'):
+        sync.claim_empty()
+    with pytest.raises(GraphContractError, match='GRAPH_OWNERSHIP_UNPROVEN'):
+        sync.sync(apply=True)
+    # Test-only attestation of this known fixture, never used on live data.
+    identity = sync._identity()
+    sync._receipt(identity).write_text(json.dumps(identity), encoding='utf-8')
+    monkeypatch.setattr(projection.driver.settings, 'neo4j_sync_enabled', True)
+    assert sync.sync(apply=True)['writes'] == 0
+    t = graph_tables()
+    t['content_units'][1]['parent_unit_id'] = None
+    t['resource_subjects'] = []
+    t['subjects'].append(dict(id='new-test-subject', grade_id=None))
+    changed = build_snapshot(t)
+    reader.read = lambda: changed
+    assert sync.sync(apply=False)['status'] == 'DIFF'
+    with pytest.raises(GraphContractError, match='GRAPH_SNAPSHOT_CHANGED'):
+        sync.sync(apply=True, expected_fingerprint='wrong')
+    assert projection.read() == original
+    merge = projection.merge
+
+    def fail_after_merge(*args, **kwargs):
+        merge(*args, **kwargs)
+        raise RuntimeError('SIMULATED_INTERRUPTION')
+
+    with monkeypatch.context() as m:
+        m.setattr(projection, 'merge', fail_after_merge)
+        with pytest.raises(RuntimeError):
+            sync.sync(apply=True)
+    assert projection.read() == original
+    report = sync.sync(apply=True, expected_fingerprint=changed.fingerprint)
+    assert report['status'] == 'MATCH' and report['writes'] > 0
+    assert projection.read() == changed
+    assert sync.sync(apply=True)['writes'] == 0
+    # A valid empty source also reconciles safely inside the owned TEST graph.
+    reader.read = lambda: GraphSnapshot(frozenset(), frozenset())
+    assert sync.sync(apply=True)['status'] == 'MATCH'
+    assert not projection.read().nodes
+    reader.read = lambda: original
+    sync.sync(apply=True)
+    assert projection.read() == original
