@@ -32,6 +32,26 @@ def catalog_database(dimension=384):
     return database, catalog, collections
 
 
+@pytest.mark.parametrize('variant', ['base', 'lexical', 'meaning'])
+def test_supported_variant_is_checked_once_and_remains_live(variant):
+    from data_sync_etl.adapters.mongo.lexical_schema import lexical_contract
+    from data_sync_etl.adapters.mongo.meaning_schema import meaning_contract
+    database, catalog, collections = catalog_database(1024)
+    bag = next(row for row in catalog if row['name'] == 'content_bags')
+    if variant != 'base':
+        bag['options']['validator'] = (lexical_contract if variant == 'lexical' else meaning_contract)(1024)
+    store = MongoBagStore(database, 1024)
+    store.ensure_ready()
+    assert database.list_collections.call_count == 1
+    assert all(collection.list_indexes.call_count == 1 for collection in collections.values())
+    # No TTL cache: the next request must observe revoked strict/error policy.
+    bag['options']['validationAction'] = 'warn'
+    with pytest.raises(IndexingError, match='BLOCKED_INDEX_SCHEMA'):
+        store.ensure_ready()
+    assert database.list_collections.call_count == 2
+    database.command.assert_not_called()
+
+
 def test_quick_check_uses_all_five_contracts_without_scanning_or_writing():
     database, catalog, collections = catalog_database()
     assert check_schema(database, dimension=384)['schema_ready']

@@ -9,19 +9,25 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 
 const dist = resolve(process.env.ETL_TEST_DIST || 'frontend/dist')
 const browserPath = process.env.ETL_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
-const previewUrl = 'https://drive.google.com/file/d/viewer-fixture/preview'
-const viewUrl = 'https://drive.google.com/file/d/viewer-fixture/view'
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-test('source viewer loads inside the page under the deployed CSP before OCR/index readiness', {
+for (const viewer of [
+    { name: 'Drive', previewUrl: 'https://drive.google.com/file/d/viewer-fixture/preview', viewUrl: 'https://drive.google.com/file/d/viewer-fixture/view' },
+    { name: 'configured object storage', previewUrl: 'https://object-viewer.example.test/source.pdf?signature=fixture', viewUrl: 'https://object-viewer.example.test/source.pdf?signature=fixture' },
+]) {
+const { previewUrl, viewUrl } = viewer
+test(`source viewer ${viewer.name} loads inside the page under deployed CSP before OCR/index readiness`, {
     skip: !existsSync(browserPath) || !existsSync(join(dist, 'index.html')), timeout: 60000,
 }, async () => {
     const configurations = await Promise.all(['nginx.conf', 'nginx.auth.template'].map(name => readFile(`deploy/docker/${name}`, 'utf8')))
-    const policies = configurations.map(text => /add_header Content-Security-Policy "([^"]+)"/.exec(text)[1])
+    const policies = configurations.map(text => /add_header Content-Security-Policy "([^"]+)"/.exec(text)[1]
+        .replace('${ETL_FRAME_SOURCES}', "'self' blob: https://drive.google.com https://docs.google.com https://object-viewer.example.test"))
     for (const policy of policies) {
         const frames = /frame-src ([^;]+)/.exec(policy)[1].split(' ')
         assert.ok(frames.includes('https://drive.google.com') && frames.includes('https://docs.google.com'))
         assert.ok(!frames.includes('*') && !frames.includes('https:'))
+        assert.ok(frames.includes('https://object-viewer.example.test'))
+        assert.match(policy, /object-src 'self' blob:/)
     }
     let releaseOpen, openFailed = false, openRequests = 0
     const server = createServer(async (req, res) => {
@@ -92,7 +98,7 @@ test('source viewer loads inside the page under the deployed CSP before OCR/inde
         })
         await new Promise(resolve => socket.addEventListener('open', resolve, { once: true }))
         await call('Page.enable')
-        await call('Fetch.enable', { patterns: [{ urlPattern: 'https://drive.google.com/*', requestStage: 'Request' }] })
+        await call('Fetch.enable', { patterns: [{ urlPattern: new URL(previewUrl).origin + '/*', requestStage: 'Request' }] })
         await call('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/library/r1` })
         const pendingButton = 'Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Đang tải…")'
         await waitFor(() => evaluate(`Boolean(${pendingButton}?.disabled && ${pendingButton}?.getAttribute("aria-busy") === "true")`))
@@ -101,12 +107,15 @@ test('source viewer loads inside the page under the deployed CSP before OCR/inde
         await waitFor(() => Boolean(releaseOpen))
         releaseOpen()
         await waitFor(() => evaluate('Array.from(document.querySelectorAll("button")).some(b => b.textContent === "Xem tệp" && !b.disabled)'))
-        await evaluate('window.addEventListener("message", event => { if (event.origin === "https://drive.google.com" && event.data === "SOURCE_VIEWER_READY") window.sourcePreviewLoaded = true }); Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Xem tệp").click()')
+        await evaluate(`window.addEventListener("message", event => { if (event.origin === ${JSON.stringify(new URL(previewUrl).origin)} && event.data === "SOURCE_VIEWER_READY") window.sourcePreviewLoaded = true }); Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Xem tệp").click()`)
         await waitFor(() => evaluate('window.sourcePreviewLoaded === true'))
         assert.equal(previewRequests, 1)
         assert.equal(await evaluate('document.querySelector("#source-file-preview").src'), previewUrl)
         assert.equal(await evaluate('document.querySelector("#source-file-preview").hasAttribute("sandbox")'), false)
         assert.equal(await evaluate('Array.from(document.querySelectorAll("a")).find(a => a.textContent.includes("Xem tệp bên ngoài")).href'), viewUrl)
+        await evaluate('window.addEventListener("securitypolicyviolation", event => { if (event.effectiveDirective === "frame-src") window.blockedViewer = event.blockedURI }); document.querySelector("#source-file-preview").src = "https://unapproved-viewer.example.test/file.pdf"')
+        await waitFor(() => evaluate('Boolean(window.blockedViewer?.startsWith("https://unapproved-viewer.example.test"))'))
+        assert.equal(previewRequests, 1)
         await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Đóng tệp").click()')
         await waitFor(() => evaluate('!document.querySelector("#source-file-preview")'))
         openFailed = true
@@ -135,3 +144,5 @@ test('source viewer loads inside the page under the deployed CSP before OCR/inde
         await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     }
 })
+
+}

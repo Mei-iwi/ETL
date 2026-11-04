@@ -5,6 +5,7 @@ import pytest
 from data_sync_etl.domain.search import SearchError
 from data_sync_etl.domain.indexing import IndexingError
 from tests.unit.test_search import searchable as searchable
+from data_sync_etl.ports.search import document_validation_scope
 
 
 def test_bulk_verification_uses_phase_fingerprint_and_rejects_a_changed_final_phase(searchable, monkeypatch):
@@ -90,3 +91,35 @@ def test_candidate_reuse_preserves_results_and_rejects_final_mutation(searchable
     with pytest.raises(SearchError, match='SEARCH_INDEX_STALE'):
         container.search.search('page', method, _batch_texts=True, _batch_bags=True)
     assert calls == ['initial', 'final']
+def test_derivation_reuse_is_request_local_and_full_bson_bound(searchable, monkeypatch):
+    c, version = searchable
+    with c.uow() as repo:
+        snapshot = c.indexing._snapshot(repo, version['id'])
+        run = c.indexing._runs(repo, version['id'])[0]
+    import data_sync_etl.application.indexing as module
+    original = module.lexical_document
+    calls = []
+
+    def checked(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, 'lexical_document', checked)
+    with document_validation_scope():
+        first = c.indexing._verified(snapshot, run)
+        count = len(calls)
+        assert count > 0
+        assert c.indexing._verified(snapshot, run) == first
+        assert len(calls) == count
+        # Even in the same request, changing a single vector coordinate must
+        # invalidate the proof and run vector validation again.
+        bag = c.indexing.bags.rows[first[0]['id']]
+        old = bag.embedding[:]
+        bag.embedding[:] = [0.] * len(old)
+        with pytest.raises(IndexingError):
+            c.indexing._verified(snapshot, run)
+        bag.embedding[:] = old
+    count = len(calls)
+    with document_validation_scope():
+        assert c.indexing._verified(snapshot, run) == first
+    assert len(calls) > count

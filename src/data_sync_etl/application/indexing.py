@@ -1,6 +1,9 @@
 """Transient Chunk views and version-locked keyword/ContentBag indexing."""
 
 from time import monotonic
+from hashlib import sha256
+
+from bson import BSON
 
 from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.application.content_bags import (
@@ -20,6 +23,7 @@ from data_sync_etl.domain.meaning_bags import verify_meanings
 from data_sync_etl.domain.mongo_documents import normalize_keywords
 from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search_access import SearchAccess
+from data_sync_etl.ports.search import SEARCH_DOCUMENT_VALIDATION
 from data_sync_etl.ports.indexing import IndexContentPort, IndexEmbeddingPort
 from data_sync_etl.ports.mongo_foundation import (
     ContentBagPort,
@@ -174,6 +178,8 @@ class IndexingService:
         except DomainError:
             raise IndexingError('INDEX_ARTIFACT_INVALID', 503) from None
         nodes, result = {u['id']: u for u in snapshot[2]}, []
+        scope = SEARCH_DOCUMENT_VALIDATION.get()
+        verified = scope.setdefault('verified_artifacts', set()) if scope is not None else None
         for root, leaves in roots.items():
             keywords = normalize_keywords([k for leaf in leaves for k in snapshot[5][leaf]])
             try:
@@ -185,15 +191,26 @@ class IndexingService:
                     or bag.resource_version_id != snapshot[0]['id'] or bag.projection_generation != snapshot[1]
                     or bag.unit_type != nodes[root]['unit_type'] or bag.title != nodes[root]['title']
                     or bag.keywords != keywords or bag.embedding_text != ' | '.join(keywords)
-                    or bag.lexical != lexical_document([snapshot[4][leaf].text for leaf in leaves], nodes[root]['title'])
                     or bag.embedding_model != f'{self.embedding.model_id}@{self.embedding.version}'
                     or any(snapshot[4][leaf].keywords != snapshot[5][leaf] for leaf in leaves)):
                 raise IndexingError('INDEX_ARTIFACT_INVALID', 503)
-            validate_vector(bag.embedding, self.embedding.dimension)
-            if self.settings.index_meaning_bags_enabled and not verify_meanings(
-                    bag.meanings, [(leaf, snapshot[4][leaf].text) for leaf in leaves], root, nodes[root]['title'],
-                    bag.embedding_model, self.embedding.dimension, self.settings.index_meaning_group_threshold):
-                raise IndexingError('INDEX_ARTIFACT_INVALID', 503)
+            # Pure derivation checks may be reused only for FULL identical live
+            # BSON and source snapshots inside this request. Final content and
+            # authority still undergo independent fresh reads and validation.
+            proof = ((id(self), root, snapshot[3], source_fp, run['input_fingerprint'],
+                      self.embedding.model_id, self.embedding.version, self.embedding.dimension,
+                      self.settings.index_meaning_bags_enabled, self.settings.index_meaning_group_threshold,
+                      sha256(BSON.encode(bag.bson())).digest()) if verified is not None else None)
+            if proof is None or proof not in verified:
+                if bag.lexical != lexical_document([snapshot[4][leaf].text for leaf in leaves], nodes[root]['title']):
+                    raise IndexingError('INDEX_ARTIFACT_INVALID', 503)
+                validate_vector(bag.embedding, self.embedding.dimension)
+                if self.settings.index_meaning_bags_enabled and not verify_meanings(
+                        bag.meanings, [(leaf, snapshot[4][leaf].text) for leaf in leaves], root, nodes[root]['title'],
+                        bag.embedding_model, self.embedding.dimension, self.settings.index_meaning_group_threshold):
+                    raise IndexingError('INDEX_ARTIFACT_INVALID', 503)
+                if proof is not None and len(verified) < 10001:
+                    verified.add(proof)
             result.append({'id': root, 'unit_type': bag.unit_type, 'title': bag.title, 'keywords': bag.keywords,
                            'representation_mode': representation_mode(snapshot[2], {root: leaves}),
                            'embedding_text': bag.embedding_text, 'embedding_model': bag.embedding_model,

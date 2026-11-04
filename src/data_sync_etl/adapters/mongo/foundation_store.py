@@ -38,6 +38,15 @@ def _copy_search_bag(document):
     return deepcopy(document, {id(vector): vector.copy() for vector in vectors})
 
 
+def _search_cursor(collection, selector, limit):
+    cursor = collection.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000)
+    # Avoid the default 101-document first batch on complete bounded corpora.
+    # Mongo still enforces its response byte limit; the cap+1 guard is unchanged.
+    if callable(getattr(type(cursor), 'batch_size', None)):
+        cursor = cursor.batch_size(limit)
+    return cursor
+
+
 def _record_validation(scope, key, document):
     proofs = scope.get('proofs')
     if proofs is not None and len(proofs) < 10001:
@@ -483,7 +492,7 @@ class MongoBagStore:
             raise DomainError('Search phase bounds exceeded')
         documents, content = {}, {version: [] for version in versions}
         selector = {'resource_version_id': {'$in': list(versions)}, 'is_current': True}
-        rows = (list(self.database.content_bags.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000))
+        rows = (list(_search_cursor(self.database.content_bags, selector, limit))
                 if candidates is None else list(candidates))
         if len(rows) >= limit:
             from data_sync_etl.domain.search import SearchError
@@ -497,7 +506,7 @@ class MongoBagStore:
                 raise DomainError('Search phase identity mismatch')
             documents[doc.id] = doc
         # Keep the global read bounded even when many versions contain leaves.
-        rows = self.database.mongo_content_units.find(selector).sort('_id', 1).limit(10001).max_time_ms(5000)
+        rows = _search_cursor(self.database.mongo_content_units, selector, 10001)
         total_chars = 0
         full_content = {version: [] for version in versions}
         for ordinal, raw in enumerate(rows, 1):
@@ -599,7 +608,7 @@ class MongoBagStore:
         selector = {'resource_version_id': {'$in': [identifier(v) for v in version_ids]},
                     'is_current': True, 'embedding_model': model}
         return [checked(ContentBagDocument, data) for data in
-                self.database.content_bags.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000)]
+                _search_cursor(self.database.content_bags, selector, limit)]
 
     def __init__(self, database, dimension: int, *, historical_dimensions=()):
         if type(dimension) is not int or not 1 <= dimension <= 4096:
@@ -617,15 +626,19 @@ class MongoBagStore:
         )
 
     def ensure_ready(self):
-        from data_sync_etl.adapters.mongo.lexical_schema import check_lexical_schema
-        from data_sync_etl.adapters.mongo.meaning_schema import check_meanings_schema
-        from data_sync_etl.adapters.mongo.schema import check_schema
+        from data_sync_etl.adapters.mongo.lexical_schema import check_bag_schema, lexical_contract
+        from data_sync_etl.adapters.mongo.meaning_schema import meaning_contract
+        from data_sync_etl.adapters.mongo.schema import contracts
         from data_sync_etl.domain.indexing import IndexingError
 
-        if (not check_meanings_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
-                and not check_lexical_schema(self.database, dimension=self.dimension, historical_dimensions=self.historical_dimensions)['schema_ready']
-                and not check_schema(self.database, dimension=self.dimension,
-                                    historical_dimensions=self.historical_dimensions)['schema_ready']):
+        catalog = {row['name']: row for row in self.database.list_collections()}
+        installed = catalog.get('content_bags', {}).get('options', {}).get('validator', {})
+        options = dict(dimension=self.dimension, historical_dimensions=self.historical_dimensions)
+        supported = (contracts(**options)['content_bags'], lexical_contract(**options), meaning_contract(**options))
+        # Select the supported variant from this fresh catalog, then verify ALL
+        # collections/indexes once instead of rescanning them for each fallback.
+        if installed not in supported or not check_bag_schema(
+                self.database, **options, bag_validator=installed, _catalog=catalog)['schema_ready']:
             raise IndexingError('BLOCKED_INDEX_SCHEMA', 503)
 
     def ensure_lexical_ready(self):

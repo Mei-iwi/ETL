@@ -60,6 +60,49 @@ Atlas giữ đúng 5 collection: `users`, `learning_resources`, `ocr_pages`, `mo
 
 Chuẩn bị Atlas mới bằng quyền được cấp; không tự reset dữ liệu hoặc sao chép OCR mất provenance. Khởi động API/worker và bật OCR tự động theo [README](../README.md).
 
+## Import MASTER sang máy khác
+
+Có hai lựa chọn cho **database đích trống**, chỉ chọn một:
+
+| Mục đích | File | Nội dung |
+| --- | --- | --- |
+| Tạo cấu trúc, sau đó đồng bộ lại | [master_schema_0020.sql](sql/master_schema_0020.sql) | 24 bảng public, constraints/indexes và revision `0020`; không có dữ liệu nghiệp vụ |
+| Khôi phục MASTER hiện tại | `output/master-backup/master_0020_20261103T194639Z.dump` | Backup PostgreSQL custom-format gồm schema và dữ liệu tại thời điểm xuất |
+
+Backup nằm trong `output/` được Git bỏ qua. Chuyển file này riêng, bảo vệ như dữ liệu riêng tư vì có dữ liệu người dùng, mapping và lịch sử xử lý. Mã SHA256 của bản xuất này:
+
+```text
+7172db90f6f54d68d0be88b09857ef8148a9f54d9f568fe9cfe950d43444f888
+```
+
+Trên máy nhận, chuẩn bị `.env`, khởi động riêng MASTER bằng compose như trên, **chưa chạy migration hoặc ứng dụng/worker**. Các lệnh dưới dùng tên container mặc định, user/database `etl`; thay tương ứng nếu cấu hình khác.
+
+**Lựa chọn 1 — chỉ tạo cấu trúc:**
+
+```powershell
+docker cp deploy/sql/master_schema_0020.sql etl-master-only-master-postgres-1:/tmp/master_schema_0020.sql
+docker exec etl-master-only-master-postgres-1 psql -U etl -d etl -X -v ON_ERROR_STOP=1 --single-transaction -f /tmp/master_schema_0020.sql
+```
+
+**Lựa chọn 2 — khôi phục đầy đủ:**
+
+```powershell
+Get-FileHash output/master-backup/master_0020_20261103T194639Z.dump -Algorithm SHA256
+docker cp output/master-backup/master_0020_20261103T194639Z.dump etl-master-only-master-postgres-1:/tmp/master_backup.dump
+docker exec etl-master-only-master-postgres-1 pg_restore -U etl -d etl --no-owner --no-privileges --exit-on-error --single-transaction /tmp/master_backup.dump
+```
+
+Không chạy cả hai lựa chọn vào cùng database; không dùng `--clean` để ghi đè database đang có dữ liệu. Sau import, kiểm tra:
+
+```powershell
+.venv\Scripts\python.exe -m alembic current
+docker exec etl-master-only-master-postgres-1 psql -U etl -d etl -X -c "SELECT count(*) AS public_tables FROM pg_tables WHERE schemaname = 'public';"
+```
+
+Kỳ vọng revision `0020`, 24 bảng public. Schema giữ các bảng OCR legacy vì mã nguồn hiện tại vẫn dùng; không tạo ba bảng component của migration `0021`.
+
+Backup này không bao gồm Neon, Atlas, tệp storage, model, khóa, cấu hình `.env` hay PostgreSQL roles. Cấp role/quyền máy đích theo môi trường được phép và giữ kết nối SOURCE/Atlas phù hợp. Với bản schema trống cần FULL sync; với backup giữ nguyên ID/mapping nhưng vẫn phải kiểm tra owner contract, khóa và kết nối trước khi bật API/worker. Backup là snapshot lúc xuất; cần xuất lại nếu muốn mang theo các thay đổi phát sinh sau đó.
+
 ## Dừng và bật lại
 
 ```powershell

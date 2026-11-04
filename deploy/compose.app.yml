@@ -297,6 +297,8 @@ services:
     restart: unless-stopped
     mem_limit: 256m
     cpus: 1
+    environment:
+      ETL_VIEWER_FRAME_ORIGINS: ${ETL_VIEWER_FRAME_ORIGINS:-}
     ports: ["127.0.0.1:${WEB_PORT:-8080}:8080"]
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=67108864,uid=101,gid=101,mode=0700"]
     networks: [edge, backend]
