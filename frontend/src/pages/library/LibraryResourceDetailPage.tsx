@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { RelatedLearning } from '../../components/library/RelatedLearning'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useAuth } from '../../auth/AuthProvider'
 import { canManageResourceDeletion } from '../../services/resourceDeletionApi'
@@ -209,6 +210,7 @@ export function LibraryResourceDetailPage() {
             {deleting && canManageResourceDeletion(principal) && <ResourceDeletionDialog
                 resource={resource} restore={false} onClose={() => setDeleting(false)}
                 onSuccess={() => navigate('/library/list', { replace: true })} />}
+            <RelatedLearning resourceId={resource.id} />
         </section>
     )
 }
