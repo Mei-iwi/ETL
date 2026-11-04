@@ -1,0 +1,16 @@
+# Existing Docker MASTER + Neon SOURCE + Atlas; no database is created here.
+services:
+  api: &neon-atlas
+    environment:
+      ETL_DATABASE_MODE: neon-atlas
+    secrets:
+      - source: source-database-ca
+        target: source-database-ca.pem
+  master-sync-worker: *neon-atlas
+  source-file-worker: *neon-atlas
+  ocr-worker: *neon-atlas
+  reconciliation-worker: *neon-atlas
+  preflight: *neon-atlas
+secrets:
+  source-database-ca:
+    file: ${SOURCE_DATABASE_CA_FILE:?Set SOURCE_DATABASE_CA_FILE to the trusted Neon CA bundle}

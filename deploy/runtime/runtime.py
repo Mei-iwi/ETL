@@ -14,7 +14,7 @@ WORKERS = {'run-master-sync-worker': 'master-sync', 'run-source-file-worker': 's
 SOURCE_CA_FILE = Path('/run/secrets/source-database-ca.pem')
 
 
-def validate_source_neon(values):
+def validate_source_neon(values, *, atlas=False):
     """Remote SOURCE only; local service names cannot hide other remote databases."""
     source = urlsplit(values['SOURCE_DATABASE_URL'])
     query = parse_qs(source.query, keep_blank_values=True)
@@ -35,7 +35,18 @@ def validate_source_neon(values):
     if (master.scheme != 'postgresql+psycopg' or master.hostname not in ('postgres', 'master-postgres')
             or overrides.intersection(parse_qs(master.query, keep_blank_values=True))):
         raise ValueError('SOURCE_NEON_MASTER_LOCAL_REQUIRED')
-    if mongo.scheme != 'mongodb' or mongo.hostname != 'mongo' or ',' in mongo.netloc:
+    if atlas:
+        options = {key.lower(): value for key, value in parse_qs(mongo.query).items()}
+        if (mongo.scheme != 'mongodb+srv' or not mongo.hostname
+                or not mongo.hostname.endswith('.mongodb.net')
+                or not mongo.username or not mongo.password or mongo.port is not None
+                or options.get('tls', ['true']) != ['true']
+                or options.get('ssl', ['true']) != ['true']
+                or any(key.startswith(('tlsallowinvalid', 'tlsinsecure')) for key in options)):
+            raise ValueError('SOURCE_NEON_ATLAS_TLS_REQUIRED')
+        if values['MONGO_DATABASE'] != 'etl_content':
+            raise ValueError('SOURCE_NEON_ATLAS_DATABASE_REQUIRED')
+    elif mongo.scheme != 'mongodb' or mongo.hostname != 'mongo' or ',' in mongo.netloc:
         raise ValueError('SOURCE_NEON_MONGO_LOCAL_REQUIRED')
 
 
@@ -78,7 +89,7 @@ def load_connections():
     if 'SOURCE_MIGRATION_DATABASE_URL' in os.environ:
         raise ValueError('SOURCE_MIGRATION_CREDENTIAL_FORBIDDEN')
     mode = os.environ.get('ETL_DATABASE_MODE', 'same-host')
-    if mode not in ('same-host', 'remote', 'source-neon'):
+    if mode not in ('same-host', 'remote', 'source-neon', 'neon-atlas'):
         raise ValueError('DATABASE_MODE_INVALID')
     for key in ('DATABASE_URL', 'SOURCE_DATABASE_URL', 'MONGO_URI'):
         url = urlsplit(values[key])
@@ -90,8 +101,8 @@ def load_connections():
                 raise ValueError('REMOTE_POSTGRES_TLS_REQUIRED')
             if key == 'MONGO_URI' and (query.get('tls') != ['true'] or any(k.lower().startswith(('tlsallowinvalid', 'tlsinsecure')) for k in query)):
                 raise ValueError('REMOTE_MONGO_TLS_REQUIRED')
-    if mode == 'source-neon':
-        validate_source_neon(values)
+    if mode in ('source-neon', 'neon-atlas'):
+        validate_source_neon(values, atlas=mode == 'neon-atlas')
     os.environ.update(values)
 
 

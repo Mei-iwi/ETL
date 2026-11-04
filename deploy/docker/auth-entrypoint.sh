@@ -1,6 +1,26 @@
 #!/bin/sh
 set -eu
-if [ "${AUTH_MODE:-legacy_local}" = legacy_local ]; then exec nginx -g 'daemon off;'; fi
+# Only exact HTTPS origins provisioned by the deployment may host SOURCE viewers.
+# Never accept CSP tokens, wildcards, paths, signed URLs or inline configuration.
+ETL_FRAME_SOURCES="'self' blob: https://drive.google.com https://docs.google.com"
+viewer_origins=${ETL_VIEWER_FRAME_ORIGINS:-}
+[ "${#viewer_origins}" -le 4096 ] || { echo VIEWER_ORIGINS_INVALID >&2; exit 1; }
+viewer_count=0
+set -f
+for viewer_origin in $viewer_origins; do
+    viewer_count=$((viewer_count + 1))
+    [ "$viewer_count" -le 16 ] || { echo VIEWER_ORIGINS_INVALID >&2; exit 1; }
+    printf '%s' "$viewer_origin" | grep -Eq '^https://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]{1,5})?$' || {
+        echo VIEWER_ORIGINS_INVALID >&2; exit 1;
+    }
+    ETL_FRAME_SOURCES="$ETL_FRAME_SOURCES $viewer_origin"
+done
+export ETL_FRAME_SOURCES
+umask 077
+if [ "${AUTH_MODE:-legacy_local}" = legacy_local ]; then
+    envsubst '${ETL_FRAME_SOURCES}' < /etc/nginx/nginx.conf > /tmp/nginx-legacy.conf
+    exec nginx -c /tmp/nginx-legacy.conf -g 'daemon off;'
+fi
 case "${AUTH_MODE:-}" in single_admin|db_users|master_users|local_demo) ;; *) echo AUTH_MODE_INVALID >&2; exit 1;; esac
 ETL_AUTH_ORIGIN="${AUTH_ORIGIN:?AUTH_ORIGIN_REQUIRED}"
 printf '%s' "$ETL_AUTH_ORIGIN" | grep -Eq '^https?://[a-zA-Z0-9.-]+(:[0-9]{1,5})?$' || { echo AUTH_ORIGIN_INVALID >&2; exit 1; }
@@ -19,5 +39,5 @@ else
 fi
 export ETL_AUTH_ORIGIN ETL_AUTH_HOST ETL_PROXY_KEY ETL_LISTEN ETL_TLS
 umask 077
-envsubst '${ETL_AUTH_ORIGIN} ${ETL_AUTH_HOST} ${ETL_PROXY_KEY} ${ETL_LISTEN} ${ETL_TLS}' < /opt/etl/nginx.auth.template > /tmp/nginx-auth.conf
+envsubst '${ETL_AUTH_ORIGIN} ${ETL_AUTH_HOST} ${ETL_PROXY_KEY} ${ETL_LISTEN} ${ETL_TLS} ${ETL_FRAME_SOURCES}' < /opt/etl/nginx.auth.template > /tmp/nginx-auth.conf
 exec nginx -c /tmp/nginx-auth.conf -g 'daemon off;'

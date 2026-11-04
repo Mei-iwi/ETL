@@ -36,7 +36,7 @@ foreach ($line in Get-Content -LiteralPath $EnvFile) {
         $mediaEnabled = $Matches[1]
     }
     if ($line -match '^\s*DATABASE_MODE\s*=') {
-        if ($line -notmatch '^\s*DATABASE_MODE\s*=\s*["'']?(same-host|remote|source-neon)["'']?\s*(?:#.*)?$') { throw 'Invalid DATABASE_MODE in Docker env file.' }
+        if ($line -notmatch '^\s*DATABASE_MODE\s*=\s*["'']?(same-host|remote|source-neon|neon-atlas)["'']?\s*(?:#.*)?$') { throw 'Invalid DATABASE_MODE in Docker env file.' }
         $databaseMode = $Matches[1]
     }
     if ($line -match '^\s*SOURCE_DRIVE_ENABLED\s*=') {
@@ -51,7 +51,8 @@ foreach ($line in Get-Content -LiteralPath $EnvFile) {
     }
 }
 if ($env:DATABASE_MODE) { $databaseMode = $env:DATABASE_MODE }
-if ($databaseMode -notin @('same-host','remote','source-neon')) { throw 'Invalid DATABASE_MODE.' }
+if ($databaseMode -notin @('same-host','remote','source-neon','neon-atlas')) { throw 'Invalid DATABASE_MODE.' }
+if ($databaseMode -eq 'neon-atlas' -and ($RemoteDatabase -or $SourceNeon)) { throw 'Database switch conflicts with neon-atlas profile.' }
 if (($RemoteDatabase -and $databaseMode -eq 'source-neon') -or ($SourceNeon -and $databaseMode -eq 'remote')) { throw 'Database switch conflicts with DATABASE_MODE.' }
 if ($databaseMode -eq 'source-neon') { $SourceNeon = $true }
 if ($databaseMode -eq 'remote') { $RemoteDatabase = $true }
@@ -61,7 +62,7 @@ if ($env:SOURCE_DRIVE_ENABLED) {
 }
 $Drive = $Drive -or ($driveEnabled -eq 'true')
 Write-Output "Docker env: $EnvFile"
-Write-Output "Database profile: $(if ($SourceNeon) {'source-neon'} elseif ($RemoteDatabase) {'remote'} else {'same-host'})"
+Write-Output "Database profile: $databaseMode"
 $composeArgs = @('compose','--env-file',$EnvFile,'-f',(Join-Path $deployDir 'compose.app.yml'))
 if ($env:MEDIA_ENABLED) {
     if ($env:MEDIA_ENABLED -cnotin @('true','false')) { throw 'Invalid MEDIA_ENABLED.' }
@@ -71,6 +72,7 @@ if ($Media -or $mediaEnabled -eq 'true') { $composeArgs += @('-f',(Join-Path $de
 if ($Drive) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.drive.yml')) }
 if ($RemoteDatabase) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.remote-db.yml')) }
 if ($SourceNeon) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.source-neon.yml')) }
+if ($databaseMode -eq 'neon-atlas') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.neon-atlas.yml')) }
 if ($sourceWriteOverrideFile) {
     if (-not (Test-Path -LiteralPath $sourceWriteOverrideFile -PathType Leaf)) {
         throw 'SOURCE_WRITE_COMPOSE_OVERRIDE_FILE does not exist.'

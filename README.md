@@ -180,6 +180,19 @@ Bật lịch Auto Sync trên giao diện nếu cần đồng bộ định kỳ. 
 - Master Data: <http://127.0.0.1:3000/systems/master-data>
 - API health: <http://127.0.0.1:8000/health>
 
+### Chạy ứng dụng bằng Docker
+
+Với cấu hình local đã hoạt động và đủ model/contract được phê duyệt, chuẩn bị cấu hình container từ `.env`:
+
+```powershell
+python deploy/scripts/prepare-project-docker.py
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Build -EnvFile docker.env
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Start -EnvFile docker.env -Workers
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Status -EnvFile docker.env
+```
+
+Mở <http://127.0.0.1:8080>. Profile `neon-atlas` dùng MASTER đang chạy trên network `etl-master-only_default`, SOURCE Neon và MongoDB Atlas; không khởi tạo database hay migration. `docker.env` giữ cấu hình container, còn credential/contract được mount từ `ETL_Secrets/`; model mount chỉ đọc từ `Models/`. Script chuẩn bị giữ phạm vi quyền trong `.env` và contract hiện có, không tự cấp quyền. Khi đổi `.env`, chạy lại bước chuẩn bị và Start; khi đổi code, Build rồi Start. Tránh chạy đồng thời worker local khi đã chuyển sang Docker.
+
 ## 6. OCR và chỉ mục tự động
 
 Luồng xử lý: metadata → kiểm tra OCR → reuse hoặc xử lý trang thiếu → normalize/chunk → content units → ContentBag 1024D → chỉ mục READY → Search/UI.

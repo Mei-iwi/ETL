@@ -9,9 +9,19 @@ if [[ -z "${ETL_DOCKER_ENV_FILE:-}" && ! -f "$env_file" ]]; then env_file="$depl
 [[ -f "$env_file" ]] || { echo 'Docker env file missing. Copy deploy/docker.env.example to docker.env and configure it.' >&2; exit 2; }
 database_mode=same-host
 media_enabled=false
-mode_pattern="^[[:space:]]*DATABASE_MODE[[:space:]]*=[[:space:]]*[\"']?(same-host|remote|source-neon)[\"']?[[:space:]]*(#.*)?$"
+source_override=''
+drive_enabled=false
+mode_pattern="^[[:space:]]*DATABASE_MODE[[:space:]]*=[[:space:]]*[\"']?(same-host|remote|source-neon|neon-atlas)[\"']?[[:space:]]*(#.*)?$"
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
+  if [[ "$line" =~ ^SOURCE_WRITE_COMPOSE_OVERRIDE_FILE=(.*)$ ]]; then
+    source_override="${BASH_REMATCH[1]}"
+    source_override="${source_override#\'}"; source_override="${source_override%\'}"
+    source_override="${source_override#\"}"; source_override="${source_override%\"}"
+  fi
+  if [[ "$line" =~ ^SOURCE_DRIVE_ENABLED=[\"\']?(true|false)[\"\']?$ ]]; then
+    drive_enabled="${BASH_REMATCH[1]}"
+  fi
   if [[ "$line" =~ ^[[:space:]]*MEDIA_ENABLED[[:space:]]*= ]]; then
     media_pattern="^[[:space:]]*MEDIA_ENABLED[[:space:]]*=[\"']?(true|false)[\"']?[[:space:]]*(#.*)?$"
     [[ "$line" =~ $media_pattern ]] || { echo 'Invalid MEDIA_ENABLED in Docker env file.' >&2; exit 2; }
@@ -23,12 +33,15 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   fi
 done < "$env_file"
 database_mode="${DATABASE_MODE:-$database_mode}"
-case "$database_mode" in same-host|remote|source-neon) ;; *) echo 'Invalid DATABASE_MODE.' >&2; exit 2 ;; esac
+case "$database_mode" in same-host|remote|source-neon|neon-atlas) ;; *) echo 'Invalid DATABASE_MODE.' >&2; exit 2 ;; esac
 if [[ ( "${ETL_REMOTE_DB:-false}" == true && "$database_mode" == source-neon ) || ( "${ETL_SOURCE_NEON:-false}" == true && "$database_mode" == remote ) ]]; then
   echo 'Database switch conflicts with DATABASE_MODE.' >&2; exit 2
 fi
 [[ "$database_mode" != source-neon ]] || export ETL_SOURCE_NEON=true
 [[ "$database_mode" != remote ]] || export ETL_REMOTE_DB=true
+if [[ "$database_mode" == neon-atlas && ( "${ETL_SOURCE_NEON:-false}" == true || "${ETL_REMOTE_DB:-false}" == true ) ]]; then
+  echo 'Database switch conflicts with neon-atlas profile.' >&2; exit 2
+fi
 echo "Docker env: $env_file"
 if [[ "${ETL_SOURCE_NEON:-false}" == true ]]; then database_mode=source-neon; fi
 if [[ "${ETL_REMOTE_DB:-false}" == true ]]; then database_mode=remote; fi
@@ -42,9 +55,15 @@ compose=(docker compose --env-file "$env_file" -f "$deploy_dir/compose.app.yml")
 media_enabled="${MEDIA_ENABLED:-$media_enabled}"
 case "$media_enabled" in true|false) ;; *) echo 'Invalid MEDIA_ENABLED.' >&2; exit 2 ;; esac
 [[ "$media_enabled" == true ]] && compose+=(-f "$deploy_dir/compose.media.yml")
-[[ "${ETL_WITH_DRIVE:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.drive.yml")
+[[ "${ETL_WITH_DRIVE:-$drive_enabled}" == true ]] && compose+=(-f "$deploy_dir/compose.drive.yml")
 [[ "${ETL_REMOTE_DB:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.remote-db.yml")
 [[ "${ETL_SOURCE_NEON:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.source-neon.yml")
+[[ "$database_mode" == neon-atlas ]] && compose+=(-f "$deploy_dir/compose.neon-atlas.yml")
+source_override="${SOURCE_WRITE_COMPOSE_OVERRIDE_FILE:-$source_override}"
+if [[ -n "$source_override" ]]; then
+  [[ -f "$source_override" ]] || { echo 'SOURCE override file missing.' >&2; exit 2; }
+  compose+=(-f "$source_override")
+fi
 auth_profile="${ETL_AUTH_PROFILE:-auth}"
 case "$auth_profile" in
   legacy) ;;
