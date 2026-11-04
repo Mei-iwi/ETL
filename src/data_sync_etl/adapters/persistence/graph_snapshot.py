@@ -108,3 +108,14 @@ def verify_bag_roots(snapshot, bags):
         if (bag['_id'], bag['resource_version_id']) in memberships:
             matched += 1
     return {'current_bags': total, 'matched': matched, 'missing_or_wrong_version': total - matched}
+
+
+def verify_content_mapping(snapshot, documents):
+    memberships = {(e[4], e[1]) for e in snapshot.edges if e[2] == 'CONTAINS'}
+    total = matched = 0
+    for doc in documents:
+        total += 1
+        if ((doc['_id'], doc['resource_version_id']) in memberships
+                and doc.get('content_unit_id') in (None, doc['_id'])):
+            matched += 1
+    return {'current_content_units': total, 'matched': matched, 'mapping_drift': total-matched}

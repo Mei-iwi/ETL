@@ -97,7 +97,7 @@ for (const phase of ['headers', 'body']) test(`BoW deadline settles even when ${
             : async () => ({ ok: true, status: 200, json: () => hanging })
         await assert.rejects(searchMaterials({ ...searchRequest, method: 'bow' }),
             error => error.code === 'SEARCH_TIMEOUT')
-        assert.equal(budget, 20000)
+        assert.equal(budget, 45000)
         globalThis.fetch = async () => Response.json(searchResponse({ ...searchRequest, method: 'bow' }))
         assert.equal((await searchMaterials({ ...searchRequest, method: 'bow' })).method, 'bow')
     } finally { clearTimeout(keepAlive); globalThis.fetch = original; AbortSignal.timeout = timeout }

@@ -116,7 +116,7 @@ class GraphSynchronizer:
             self.projection.ensure_schema()
             from neo4j import unit_of_work
 
-            @unit_of_work(timeout=self.projection.timeout)
+            @unit_of_work(timeout=self.projection.driver.settings.neo4j_sync_timeout_seconds)
             def reconcile(tx):
                 actual = self.projection.read(tx=tx)
                 delta = graph_diff(expected, actual)

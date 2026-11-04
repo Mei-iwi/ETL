@@ -13,6 +13,7 @@ param(
     [switch]$Media,
     [switch]$RemoteDatabase,
     [switch]$SourceNeon,
+    [switch]$Graph,
     [ValidateSet('legacy','auth','auth-tls','db-auth','db-auth-tls')][string]$AuthProfile = 'auth',
     [switch]$AcceptModelLicense
 )
@@ -82,6 +83,7 @@ if ($sourceWriteOverrideFile) {
 if ($AuthProfile -like 'db-auth*') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.db-auth.yml')) }
 elseif ($AuthProfile -ne 'legacy') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth.yml')) }
 if ($AuthProfile -in @('auth-tls','db-auth-tls')) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth-tls.yml')) }
+if ($Graph) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.graph-app.yml')) }
 function Invoke-Docker([string[]]$Arguments) {
     & docker @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Docker operation failed; inspect sanitized service status.' }

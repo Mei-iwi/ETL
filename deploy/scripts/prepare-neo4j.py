@@ -21,6 +21,10 @@ def main():
         raise SystemExit('GRAPH_AUTH_FILE_DIFFERS_NO_AUTOMATIC_ROTATION')
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(user + '/' + password, encoding='utf-8')
+    password_path = path.with_name('password.secret')
+    if password_path.exists() and password_path.read_text(encoding='utf-8') != password:
+        raise SystemExit('GRAPH_PASSWORD_FILE_DIFFERS_NO_AUTOMATIC_ROTATION')
+    password_path.write_text(password, encoding='utf-8')
     print('GRAPH_AUTH_FILE_READY')
 
 

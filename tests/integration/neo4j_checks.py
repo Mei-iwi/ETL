@@ -4,6 +4,7 @@ No skipping. Only the isolated test container may be used; never .env production
 """
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,28 @@ def projection():
     driver = GraphDriver(s)
     driver.preflight()
     p = Neo4jProjection(driver)
+    # A previous interrupted test may leave fixture data. Verify Docker ownership
+    # and port before reconciling this dedicated TEST graph (never live graph).
+    import json
+    from types import SimpleNamespace
+
+    from data_sync_etl.application.graph_sync import GraphSynchronizer
+
+    inspected = json.loads(subprocess.run(
+        ['docker', 'inspect', 'etl-neo4j-test-neo4j-1'],
+        capture_output=True, text=True, check=True).stdout)[0]
+    assert inspected['Config']['Labels']['com.docker.compose.project'] == 'etl-neo4j-test'
+    assert inspected['NetworkSettings']['Ports']['7687/tcp'][0]['HostPort'] == '17687'
+    p.ensure_schema()
+    s.neo4j_sync_enabled = True
+    sync = GraphSynchronizer(SimpleNamespace(read=lambda: build_snapshot(graph_tables())), p,
+                             path.parent / 'isolated-owner-state')
+    identity = sync._identity()
+    sync.state_dir.mkdir(parents=True, exist_ok=True)
+    receipt = sync._receipt(identity)
+    if not receipt.exists():
+        receipt.write_text(json.dumps(identity), encoding='utf-8')
+    sync.sync(apply=True)
     yield p
     driver.close()
 

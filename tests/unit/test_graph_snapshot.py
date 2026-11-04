@@ -156,3 +156,16 @@ def test_all_derived_units_included_without_source_counterpart():
                                parent_unit_id=None if i == 0 else 'master-derived-0') for i in range(41)]
     assert build_snapshot(t).counts()['nodes']['ContentUnit'] == 41
     assert build_snapshot(t).counts()['edges']['ContentUnit/HAS_CHILD/ContentUnit'] == 40
+
+
+def test_mongo_content_unit_mapping_uses_master_id_and_version():
+    from data_sync_etl.adapters.persistence.graph_snapshot import verify_content_mapping
+    s = build_snapshot(graph_tables())
+    report = verify_content_mapping(s, [
+        {'_id':'derived-leaf', 'content_unit_id':'derived-leaf', 'resource_version_id':'master-v2'},
+        {'_id':'master-root', 'resource_version_id':'master-v2'},
+        {'_id':'source-root', 'resource_version_id':'master-v2'},
+        {'_id':'master-root', 'content_unit_id':'other', 'resource_version_id':'master-v2'},
+        {'_id':'master-root', 'resource_version_id':'master-v1'},
+    ])
+    assert report == {'current_content_units':5, 'matched':2, 'mapping_drift':3}

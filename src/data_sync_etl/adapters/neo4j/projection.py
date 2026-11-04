@@ -84,7 +84,7 @@ class Neo4jProjection:
             raise GraphContractError('GRAPH_BATCH_INVALID')
         if tx is None:
             with self.driver.session(write=True) as session:
-                return session.execute_write(unit_of_work(timeout=self.timeout)(
+                return session.execute_write(unit_of_work(timeout=self.driver.settings.neo4j_sync_timeout_seconds)(
                     lambda t: self.merge(snapshot, batch_size=batch_size, tx=t,
                                          added_nodes=added_nodes, added_edges=added_edges)))
         nodes = snapshot.nodes if added_nodes is None else added_nodes

@@ -4,12 +4,14 @@ Run with the project virtualenv at the repository root. This only writes
 configuration/secret files; it never migrates databases or changes contracts.
 Existing database network is etl-master-only_default (MASTER-only Compose).
 """
-from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import json
 import shutil
+from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 import yaml
 from dotenv import dotenv_values
+
 from data_sync_etl.config import Settings
 
 root = Path(__file__).resolve().parents[2]
@@ -100,7 +102,8 @@ for key, target in credential_keys.items():
         if existing:
             env[target] = mount_secret('project_' + key.lower(), existing)
         continue
-    if key == 'SOURCE_WRITE_DATABASE_URL': value = linux_url(value)
+    if key == 'SOURCE_WRITE_DATABASE_URL':
+        value = linux_url(value)
     file = private / (key.lower() + '.secret')
     file.write_text(value, encoding='utf-8')
     env[target] = mount_secret('project_' + key.lower(), file)
@@ -150,6 +153,19 @@ config.update({
     'API_MEMORY_LIMIT': '6g', 'OCR_MEMORY_LIMIT': '6g',
     'API_CPUS': raw.get('API_CPUS', '4'),
 })
+# Optional graph profile uses a separate secret/network. Never add it to the
+# four-key database connection file or inject it into OCR worker transactions.
+for key, default in {
+    'NEO4J_ENABLED': 'false', 'NEO4J_SEARCH_ENABLED': 'false',
+    'NEO4J_SEARCH_MODE': 'shadow', 'NEO4J_DATABASE': 'neo4j', 'NEO4J_USER': 'neo4j',
+    'NEO4J_URI_DOCKER': 'bolt://neo4j:7687',
+    'NEO4J_QUERY_TIMEOUT_SECONDS': '3', 'NEO4J_CONNECT_TIMEOUT_SECONDS': '5',
+}.items():
+    config[key] = raw.get(key, default)
+graph_auth = Path(raw.get('NEO4J_AUTH_FILE', '../ETL_Secrets/neo4j/auth.secret'))
+if not graph_auth.is_absolute():
+    graph_auth = root / 'deploy' / graph_auth
+config['NEO4J_PASSWORD_SECRET_FILE'] = graph_auth.resolve().with_name('password.secret').as_posix()
 services = {}
 for name in ['api', 'master-sync-worker', 'source-file-worker', 'ocr-worker', 'reconciliation-worker', 'preflight']:
     per_env = {key: '${' + key + '}' for key in env if not key.startswith('AUTH_') and key != 'ADMIN_ENABLED'}

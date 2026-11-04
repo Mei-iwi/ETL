@@ -6,7 +6,11 @@ from time import sleep
 from sqlalchemy import create_engine
 
 from data_sync_etl.adapters.neo4j.driver import GraphDriver, GraphUnavailable
-from data_sync_etl.adapters.persistence.graph_snapshot import MasterGraphReader, verify_bag_roots
+from data_sync_etl.adapters.persistence.graph_snapshot import (
+    MasterGraphReader,
+    verify_bag_roots,
+    verify_content_mapping,
+)
 from data_sync_etl.application.graph_sync import GraphSynchronizer
 from data_sync_etl.config import Settings
 from data_sync_etl.domain.graph_contract import GraphContractError
@@ -16,8 +20,12 @@ def coverage(settings, snapshot):
     from pymongo import MongoClient
     with MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=5000,
                      connectTimeoutMS=5000, socketTimeoutMS=5000) as client:
-        return verify_bag_roots(snapshot, client[settings.mongo_database].content_bags.find(
+        db = client[settings.mongo_database]
+        bags = verify_bag_roots(snapshot, db.content_bags.find(
             {'is_current': True}, {'_id': 1, 'resource_version_id': 1}).max_time_ms(5000))
+        content = verify_content_mapping(snapshot, db.mongo_content_units.find(
+            {'is_current': True}, {'_id': 1, 'content_unit_id': 1, 'resource_version_id': 1}).max_time_ms(5000))
+        return {**bags, 'content_mapping': content}
 
 
 def run(args, *, settings=None):
@@ -42,7 +50,7 @@ def run(args, *, settings=None):
         while True:
             snapshot = reader.read()
             bags = coverage(s, snapshot)
-            if bags['missing_or_wrong_version']:
+            if bags['missing_or_wrong_version'] or bags.get('content_mapping', {}).get('mapping_drift'):
                 print(json.dumps({'status': 'GRAPH_BAG_MAPPING_DRIFT', 'bags': bags}))
                 return 1
             plan_path = s.neo4j_state_dir / 'dry-run.json'

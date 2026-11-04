@@ -79,3 +79,31 @@ Neo4j configuration references:
 [Docker configuration](https://neo4j.com/docs/operations-manual/current/docker/configuration/),
 [Docker Compose](https://neo4j.com/docs/operations-manual/current/docker/docker-compose-standalone/),
 [Python driver compatibility](https://neo4j.com/docs/python-manual/current/install/).
+
+## Isolated acceptance and existing regression debt
+
+Required Neo4j tests exercise real pinned Community in the isolated test project,
+all edge shapes, exact property/schema audits, keyset snapshots, ID federation,
+parameter binding, replay, delta, rollback, ownership, missing/stale graph,
+Search disabled/shadow/active equality, DRAFT owner/admin/stranger, deletion,
+actual graph stop/start, connection reuse and unchanged Search output.
+The Search and original-file browser fixture checks passed without skips.
+
+The full unit run produced 2,812 passes, 39 failures and eight optional skips.
+All 39 failing node IDs were rerun against a complete archive of the verified
+main base: the same 39 failed. They are existing baseline failures, not a green
+full regression. Raw reports remain private under `.local/neo4j/`.
+Two outdated frontend test doubles were updated to reflect the existing progress
+helper/state layout and existing 45-second BoW transport budget; production UI
+and Search deadlines were not changed. The broad frontend run also exposed older
+browser scenarios for pre-queue reconciliation and pre-SOURCE-viewer behavior;
+these are not counted as Neo4j acceptance passes. Required Search/file-viewer UI
+checks run independently against the current built application.
+
+Live Search/UI authentication is a separate gate. The owner-designated files
+`D:\etl\private\master-search-e2e.json` and
+`D:\etl\private\master-search-e2e-password` were absent when checked.
+Never substitute old chat credentials, mint sessions, create accounts or change
+roles. Keep live graph Search off until authenticated canary is accepted.
+Per the owner's follow-up, independent graph backfill may continue while this
+specific gate is `AUTH_BLOCKED`. Do not claim REAL_E2E_PASS.
