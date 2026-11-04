@@ -237,6 +237,8 @@ def create_source_object_reader(settings):
 
 class Container:
     def close(self):
+        if getattr(self, 'related_learning', None) is not None:
+            self.related_learning.close()
         if getattr(self, 'graph_advisor', None) is not None:
             self.graph_advisor.close()
         if getattr(self, 'graph_driver', None) is not None:
@@ -598,7 +600,7 @@ class Container:
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
                                     query_cache_runtime=self.indexing.embedding, semantic=self.semantic,
                                     metadata=self.metadata_search)
-        self.graph_driver = self.graph_advisor = None
+        self.graph_driver = self.graph_advisor = self.related_learning = None
         if self.settings.neo4j_enabled and self.settings.neo4j_search_enabled:
             from data_sync_etl.adapters.neo4j.driver import GraphDriver
             from data_sync_etl.adapters.neo4j.resolver import Neo4jResolver
@@ -608,6 +610,12 @@ class Container:
             self.graph_advisor = GraphSearchAdvisor(Neo4jResolver(self.graph_driver),
                 PostgresGraphMapping(self.engine, self.settings.neo4j_query_timeout_seconds), self.settings)
             self.search.graph_advisor = self.graph_advisor
+            from data_sync_etl.adapters.persistence.related_learning import RelatedLearningAuthority
+            from data_sync_etl.application.related_learning import RelatedLearning
+            self.related_learning = RelatedLearning(Neo4jResolver(self.graph_driver),
+                RelatedLearningAuthority(self.uow, self.search,
+                    PostgresGraphMapping(self.engine, self.settings.neo4j_query_timeout_seconds),
+                    self.settings), self.settings)
         self.source_resolution.content_authorizer = self.search.file_version
         # No live adapter can attest all PG/Mongo/provider writers yet. A flag
         # alone must never mint authority or enable stale result replay.

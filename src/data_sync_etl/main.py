@@ -12,6 +12,7 @@ from data_sync_etl.api.auth_boundary import AuthBoundary, auth_error
 from data_sync_etl.api.auth_routes import router as auth_router
 from data_sync_etl.api.profile_routes import router as profile_router
 from data_sync_etl.api.reconciliation_routes import router as reconciliation_router
+from data_sync_etl.api.related_learning_routes import router as related_learning_router
 from data_sync_etl.api.resource_deletion_routes import router as resource_deletion_router
 from data_sync_etl.api.resource_description_routes import router as resource_description_router
 from data_sync_etl.api.resource_visibility import ResourceVisibilityBoundary
@@ -249,6 +250,7 @@ def create_app(container=None):
     app.include_router(account_router)
     app.include_router(profile_router)
     app.include_router(reconciliation_router)
+    app.include_router(related_learning_router)
     app.include_router(resource_description_router)
     app.include_router(resource_deletion_router)
     app.add_middleware(

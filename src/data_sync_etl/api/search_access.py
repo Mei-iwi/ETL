@@ -60,7 +60,7 @@ def search_access(request):
                                  and request.url.path.endswith('/source-resolution'))
             source_open = (request.method == 'GET'
                            and request.url.path.startswith('/api/v1/resources/')
-                           and request.url.path.endswith('/open'))
+                           and request.url.path.endswith(('/open', '/related-learning')))
             # Authenticated readers may read published resources, including the
             # default UNREVIEWED extraction state. Domain restrictions and live
             # index validation still apply; management grants stay owner-scoped.

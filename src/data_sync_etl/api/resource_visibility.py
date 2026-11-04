@@ -25,6 +25,7 @@ class ResourceVisibilityBoundary:
         global_read = ((path in ('/api/v1/search', '/api/v1/search/page') and scope['method'] == 'POST')
                        or (path == '/api/v1/resources' and scope['method'] == 'GET'))
         global_read |= bool(re.fullmatch(r'/api/v1/chunks/[^/]+/context', path))
+        global_read |= bool(re.fullmatch(r'/api/v1/resources/[^/]+/related-learning', path))
         if not (global_read or resource_match or version_match or job_match) or (resource_match and scope['method'] == 'DELETE'):
             return await self.app(scope, receive, send)
         request = Request(scope)

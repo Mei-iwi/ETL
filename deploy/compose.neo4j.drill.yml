@@ -1,0 +1,5 @@
+# Add only with a distinct --project-name and private test env/ports.
+# Never apply to the live etl-neo4j project.
+networks:
+  graph:
+    name: ${NEO4J_DRILL_NETWORK:?Set a unique isolated drill network}
