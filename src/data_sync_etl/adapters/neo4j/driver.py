@@ -56,6 +56,9 @@ class GraphDriver:
                 yield s
         except GraphUnavailable:
             raise
+        except ValueError:
+            # Contract validation codes are already sanitized and actionable.
+            raise
         except Exception:
             raise GraphUnavailable() from None
 
