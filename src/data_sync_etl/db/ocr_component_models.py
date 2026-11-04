@@ -4,11 +4,18 @@ These tables are intentionally separate from the writable legacy processing
 tables.  They are not connected to the legacy worker or search path yet.
 """
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, Index, Integer, String
+from sqlalchemy.orm import DeclarativeBase
 
-from data_sync_etl.db.models import Base
+class ComponentReferenceBase(DeclarativeBase):
+    """Experimental replica mappings never participate in MASTER 0020 metadata.
+
+    Importing a dormant adapter must not advertise undeployed tables to schema
+    preflight, migration governance or Base.metadata consumers. There is no
+    runtime create_all call or enabled migration for these isolated mappings.
+    """
 
 
-class ComponentJobRef(Base):
+class ComponentJobRef(ComponentReferenceBase):
     __tablename__ = 'master_component_ocr_jobs'
     namespace = Column(String(255), primary_key=True)
     source_job_id = Column(String(255), primary_key=True)
@@ -28,7 +35,7 @@ class ComponentJobRef(Base):
     __table_args__ = (Index('ix_component_job_version', 'master_version_id', 'generation', 'status'),)
 
 
-class ComponentPageRef(Base):
+class ComponentPageRef(ComponentReferenceBase):
     __tablename__ = 'master_component_ocr_pages'
     namespace = Column(String(255), primary_key=True)
     source_task_id = Column(String(255), primary_key=True)
@@ -46,7 +53,7 @@ class ComponentPageRef(Base):
     __table_args__ = (Index('ix_component_page_job', 'namespace', 'source_job_id', 'generation', 'page_num'),)
 
 
-class ComponentUnitRef(Base):
+class ComponentUnitRef(ComponentReferenceBase):
     __tablename__ = 'master_component_content_units'
     namespace = Column(String(255), primary_key=True)
     source_unit_id = Column(String(255), primary_key=True)
