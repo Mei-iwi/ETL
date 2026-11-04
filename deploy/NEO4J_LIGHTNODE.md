@@ -1,5 +1,18 @@
 # Neo4j Light Node: contract and rollout
 
+## Active acceptance continuation (2026-11-05)
+
+Stage 00 inventory verified feature HEAD `db3c1b8` against fetched main
+`d69f73e6`. All thirteen required continuation evidence files are present.
+A new read-only graph diff is MATCH with zero writes; projection was not reset
+or reapplied. Existing private evidence remains under `.local/neo4j/`.
+
+The rollout stays Shadow until fresh backend/frontend regression, supervised
+workers, authorized DRAFT-owner/file checks, isolated related-learning UI,
+restore and measured performance gates pass. Historical counts below describe
+their recorded snapshots, never required constants. Private credentials must
+be current and explicitly authorized; no exposed password may be reused.
+
 Base verified against `origin/main`: `d69f73e6e8df43da2749ec809f8760fd7d9097c4`.
 Neo4j is a disposable graph projection of MASTER, never a third SOURCE.
 PostgreSQL owns metadata, lifecycle and authority; MongoDB owns content and bags.
@@ -100,13 +113,43 @@ browser scenarios for pre-queue reconciliation and pre-SOURCE-viewer behavior;
 these are not counted as Neo4j acceptance passes. Required Search/file-viewer UI
 checks run independently against the current built application.
 
-Live Search/UI authentication is a separate gate. The owner-designated files
-`D:\etl\private\master-search-e2e.json` and
-`D:\etl\private\master-search-e2e-password` were absent when checked.
-Never substitute old chat credentials, mint sessions, create accounts or change
-roles. Keep live graph Search off until authenticated canary is accepted.
-Per the owner's follow-up, independent graph backfill may continue while this
-specific gate is `AUTH_BLOCKED`. Do not claim REAL_E2E_PASS.
+Live Search/UI authentication is a separate gate. It was initially AUTH_BLOCKED;
+the authorized continuation below records its resolution. Do not bypass official
+authentication, create accounts or change roles to pass acceptance.
+
+## Authenticated Shadow continuation (2026-11-04)
+
+This section supersedes the earlier AUTH_BLOCKED notes and deployment status
+below. The owner explicitly authorized existing test accounts; their credentials
+are private. Official `AUTH_MODE=master_users` login passed for federated ADMIN
+and VIEWER. No account, password or role was changed.
+
+- Preserved graph: 726 nodes, 842 relationships; zero missing/extra objects.
+  All 460 current ContentBag roots and 584 content-unit mappings match.
+- ADMIN and VIEWER: BoW, Vector and Hybrid Search plus context HTTP 200.
+  All six responses match graph-disabled baseline on the same application/data.
+- Real browser: ADMIN renders all three methods; VIEWER renders BoW and context.
+- Private DRAFT: ADMIN search/read allowed; non-owner VIEWER gets zero Search
+  hits and metadata 403. This VIEWER owns no DRAFT, so live owner-positive
+  coverage is unavailable (isolated coverage passed). The selected original
+  file returns 404 even for ADMIN; successful live file retrieval is not claimed.
+- Actual graph stop/start: three Search methods fall back with unchanged
+  results; recovery reports PARITY/SHADOW. Graph diff stays zero. Diagnostics
+  emit static status codes only, never identity, candidates or query content.
+- Same 39 failing cases on feature and main `d69f73e6`, with the same interpreter,
+  dependencies, reference files, hash seed and test parallelism. Zero new failing
+  cases; full regression remains red. 25 focused Shadow/client tests pass.
+
+API now runs the verified dependency image plus the Neo4j/source layer. The
+dedicated official `run-users-refresh-worker --source-id postgresql` daemon
+restores normal MASTER authentication freshness without bypassing checks. In
+this verification it runs inside the API container and must be restarted if
+that container is recreated. Normal SOURCE-writing workers remain stopped.
+
+**Keep Shadow and fail-open.** Active and overall REAL_E2E_PASS remain blocked by
+the regression gate and live coverage limits above. Search canaries take roughly
+13–22 seconds; this work does not claim a speedup or different ranking.
+Detailed evidence is in `.local/neo4j/CONTINUATION_REPORT.md`.
 
 ## Verified full backfill (2026-11-04)
 
@@ -194,8 +237,8 @@ optional graph driver, mounts a password file and joins the explicit external
 `etl-neo4j-graph` network. `NEO4J_RUNTIME=docker` selects
 `NEO4J_URI_DOCKER=bolt://neo4j:7687`; never use container loopback for the server.
 This overlay starts no database and does not change OCR worker configuration.
-It does not implicitly enable Search or populate a graph. The current app images
-were not rebuilt/deployed for a live authenticated canary while AUTH_BLOCKED.
+It does not implicitly enable Search or populate a graph. The API now runs the verified dependency image plus the graph/source layer
+for the authenticated Shadow canaries described above.
 
 V1 active mode consumes verified graph identity resolution, preserving the same
 ranking and filters. PostgreSQL validates all relationship IDs; final SOURCE/PG/
@@ -231,4 +274,5 @@ Preparatory scripts refuse to replace differing existing secret files.
   dependency. Keep FAIL_OPEN enabled.
 
 Local evidence: `.local/neo4j/` and `.local/neo4j/FINAL_REPORT.md`, ignored by Git.
-Stages 9 and complete final acceptance remain AUTH_BLOCKED; no REAL_E2E_PASS.
+Authenticated Shadow is verified within the stated scope. Complete acceptance
+remains REGRESSION_BLOCKED / LIVE_COVERAGE_INCOMPLETE; no overall REAL_E2E_PASS.

@@ -171,6 +171,9 @@ Nếu dùng `AUTH_MODE=master_users`, mở **thêm một terminal** cho worker l
 | Tiến trình bổ sung | Lệnh khởi động local |
 | --- | --- |
 | Làm mới danh tính khi `AUTH_MODE=master_users` | `python -m data_sync_etl.cli run-users-refresh-worker --source-id postgresql` |
+| Đồng bộ graph Neo4j từ MASTER (tùy chọn) | `python -m data_sync_etl.cli run-graph-worker` |
+
+Nếu dùng Neo4j, mở thêm một terminal riêng cho graph worker; cần Neo4j đang chạy, dependencies `.[graph]` đã cài và `.env` có `NEO4J_ENABLED=true`, `NEO4J_SYNC_ENABLED=true` cùng cấu hình kết nối hợp lệ. Worker tự đối soát định kỳ theo `NEO4J_SYNC_INTERVAL_SECONDS` (mặc định 300 giây), độc lập với chế độ Search Shadow/Active. Xem [hướng dẫn Neo4j](deploy/NEO4J_LIGHTNODE.md).
 
 Worker users-refresh là hướng dẫn bổ sung cho cấu hình hiện tại, không thuộc bảng 4 worker của bản base. Các hướng dẫn `.env` trong dự án, Docker chỉ MASTER và FULL sync với `--source-id postgresql` được giữ theo yêu cầu cấu hình mới.
 
@@ -225,8 +228,8 @@ Mang theo mã nguồn, `.env`, `ETL_Secrets/`, `Models/`; cài lại dependencie
 Dùng CLI và worker trong mã nguồn để vận hành; các script chẩn đoán một lần trong `.local/` không phải thành phần khởi động.
 
 
-## Neo4j Light Node (t?y ch?n)
+## Neo4j Light Node (tùy chọn)
 
-Neo4j l? graph projection ri?ng t? MASTER, kh?ng thay SOURCE, ContentBag ho?c
-quy?n truy c?p. Xem [contract, k?t qu? backfill v? l?nh v?n h?nh](deploy/NEO4J_LIGHTNODE.md).
-M?c ??nh t?t; ch? b?t graph Search sau khi nghi?m thu ??ng nh?p th?c t?.
+Neo4j là graph projection riêng từ MASTER, không thay SOURCE, ContentBag hoặc
+quyền truy cập. Xem [contract, kết quả backfill và lệnh vận hành](deploy/NEO4J_LIGHTNODE.md).
+Template mặc định tắt. Shadow chỉ đối soát; Active phải qua các gate nghiệm thu.
