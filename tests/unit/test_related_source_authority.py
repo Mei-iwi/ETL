@@ -12,7 +12,7 @@ from tests.unit.test_source_file_import import importing as importing
 
 
 @pytest.mark.parametrize('revocation', ['source_inactive', 'source_deleted', 'source_hash',
-                                      'publication', 'mapping_inactive', 'derived_grant', 'missing_publication'])
+                                      'publication', 'lifecycle', 'mapping_inactive', 'derived_grant', 'missing_publication'])
 def test_related_source_authority_requires_current_fields_and_rechecks_every_request(importing, revocation):
     container, source_rows, _ = importing
     row = discover_and_import(container)
@@ -32,6 +32,8 @@ def test_related_source_authority_requires_current_fields_and_rechecks_every_req
         source_rows[0]['source_hash'] = '0' * 64
     elif revocation == 'publication':
         source_rows[0]['resource_publication_status'] = 'DRAFT'
+    elif revocation == 'lifecycle':
+        source_rows[0]['source_lifecycle_status'] = 'REJECTED'
     elif revocation == 'missing_publication':
         source_rows[0].pop('resource_publication_status')
     elif revocation == 'mapping_inactive':
