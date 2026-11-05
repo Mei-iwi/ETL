@@ -313,6 +313,7 @@ Mang theo mã nguồn, `.env`, `ETL_Secrets/`, `Models/`; cài lại dependencie
 | Cổng 3000/8000 đang được dùng | Kiểm tra tiến trình cũ; dừng bộ local trước khi chuyển cách chạy, không bật API trùng |
 | Đồng bộ không tự chạy | Kiểm tra lịch Auto Sync và worker metadata/reconciliation; chạy worker không tự bật lịch |
 | Docker đang chạy code/cấu hình cũ | Chuẩn bị lại `docker.env`, kiểm tra image tag, Build rồi Start với đúng switch |
+| Worker restart với `SOURCE_NEON_ATLAS_TLS_REQUIRED` sau khi chuyển Mongo local | Container còn profile Atlas cũ. Chạy lại launcher `-Action Start -EnvFile docker.env -Workers -GraphServices` theo bảng B để Compose tạo lại container đúng cấu hình; nút Start/Restart trong Docker Desktop không cập nhật environment/image của container cũ. Nếu không dùng graph, bỏ `-GraphServices`. |
 | Graph không cập nhật / UI không có liên quan | Worker, flags sync/related, ownership, graph-diff và ACL; Search Shadow không tự bật Related Active |
 
 Dùng CLI và worker trong mã nguồn để vận hành; các script chẩn đoán một lần trong `.local/` không phải thành phần khởi động.
