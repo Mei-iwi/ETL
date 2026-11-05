@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     neo4j_sync_enabled: bool = False
     neo4j_search_enabled: bool = False
     neo4j_search_mode: Literal['shadow', 'active'] = 'shadow'
+    neo4j_related_mode: Literal['disabled', 'shadow', 'active'] | None = None
+    neo4j_related_timeout_seconds: float = Field(default=8, gt=0, le=15)
     neo4j_fail_open: bool = True
     neo4j_user: str = 'neo4j'
     neo4j_password: str = Field(default='', repr=False)

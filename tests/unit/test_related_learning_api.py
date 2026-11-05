@@ -46,3 +46,29 @@ def test_authority_excludes_private_draft_for_stranger_and_revalidates_owner(sea
     with container.uow() as repo:
         repo.update('master_learning_resources', 'resource-1', {'created_by': 'user-2'})
     assert authority.read('resource-1', owner) == {}
+
+
+def test_graph_authority_never_loads_contentbag_or_content_search(searchable, monkeypatch):
+    container, version = searchable
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError('related API must not load the Search corpus')
+    monkeypatch.setattr(container.indexing, '_snapshot', forbidden)
+    monkeypatch.setattr(container.search, '_content_search', forbidden)
+    monkeypatch.setattr(container.indexing.bags, 'search_candidates', forbidden)
+    authority = RelatedLearningAuthority(container.uow, container.search,
+        PostgresGraphMapping(container.engine), container.settings)
+    assert version['resource_id'] in authority.read(version['resource_id'],
+                                                  SearchAccess('authenticated_admin'))
+
+
+def test_changed_identity_after_graph_io_is_forbidden_not_empty_success(master_auth, monkeypatch):
+    container = master_auth[0]
+    container.related_learning = SimpleNamespace(run=Mock(return_value=[{'title': 'protected'}]), close=Mock())
+    with make_client(master_auth) as api:
+        assert login(api, master_auth).status_code == 200
+        monkeypatch.setattr('data_sync_etl.api.related_learning_routes.search_access', Mock(side_effect=[
+            SearchAccess('authenticated_user', actor_id='master:first'),
+            SearchAccess('authenticated_user', actor_id='master:changed')]))
+        response = api.get('/api/v1/resources/resource-1/related-learning')
+        assert response.status_code == 403
+        assert response.json() == {'detail': {'code': 'AUTHORIZATION_CHANGED'}}

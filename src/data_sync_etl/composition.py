@@ -609,15 +609,17 @@ class Container:
                 self.search, ExactTextVectors(self.metadata_search.live_embedding,
                     cache_file=self.settings.search_normalized_vector_cache_file))
         self.graph_driver = self.graph_advisor = self.related_learning = None
-        if self.settings.neo4j_enabled and self.settings.neo4j_search_enabled:
+        if self.settings.neo4j_enabled and (self.settings.neo4j_search_enabled
+                or self.settings.neo4j_related_mode in ('shadow', 'active')):
             from data_sync_etl.adapters.neo4j.driver import GraphDriver
             from data_sync_etl.adapters.neo4j.resolver import Neo4jResolver
             from data_sync_etl.adapters.persistence.graph_mapping import PostgresGraphMapping
             from data_sync_etl.application.graph_search import GraphSearchAdvisor
             self.graph_driver = GraphDriver(self.settings)  # Lazy: no startup connection.
-            self.graph_advisor = GraphSearchAdvisor(Neo4jResolver(self.graph_driver),
-                PostgresGraphMapping(self.engine, self.settings.neo4j_query_timeout_seconds), self.settings)
-            self.search.graph_advisor = self.graph_advisor
+            if self.settings.neo4j_search_enabled:
+                self.graph_advisor = GraphSearchAdvisor(Neo4jResolver(self.graph_driver),
+                    PostgresGraphMapping(self.engine, self.settings.neo4j_query_timeout_seconds), self.settings)
+                self.search.graph_advisor = self.graph_advisor
             from data_sync_etl.adapters.persistence.related_learning import RelatedLearningAuthority
             from data_sync_etl.application.related_learning import RelatedLearning
             self.related_learning = RelatedLearning(Neo4jResolver(self.graph_driver),
