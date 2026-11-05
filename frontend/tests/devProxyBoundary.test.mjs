@@ -41,7 +41,9 @@ test('local auth proxy preserves browser host and overwrites client proxy creden
     const directory = mkdtempSync(join(tmpdir(), 'etl-vite-auth-'))
     const originalMode = process.env.AUTH_MODE
     const originalPath = process.env.AUTH_PROXY_KEY_FILE
+    const originalInline = process.env.AUTH_PROXY_KEY
     try {
+        process.env.AUTH_PROXY_KEY = '' // Exercise file fallback independently of the operator's .env.
         const key = 'a'.repeat(64)
         const path = join(directory, 'proxy-key')
         writeFileSync(path, key)
@@ -66,6 +68,8 @@ test('local auth proxy preserves browser host and overwrites client proxy creden
         else process.env.AUTH_MODE = originalMode
         if (originalPath === undefined) delete process.env.AUTH_PROXY_KEY_FILE
         else process.env.AUTH_PROXY_KEY_FILE = originalPath
+        if (originalInline === undefined) delete process.env.AUTH_PROXY_KEY
+        else process.env.AUTH_PROXY_KEY = originalInline
         rmSync(join(directory, 'proxy-key'), { force: true })
         rmdirSync(directory)
     }
@@ -76,7 +80,9 @@ test('auth proxy resolves project-relative secrets when Vite runs from frontend'
     const directory = mkdtempSync(join(tmpdir(), 'etl-vite-relative-auth-'))
     const originalMode = process.env.AUTH_MODE
     const originalPath = process.env.AUTH_PROXY_KEY_FILE
+    const originalInline = process.env.AUTH_PROXY_KEY
     try {
+        process.env.AUTH_PROXY_KEY = ''
         const keyPath = join(directory, 'proxy-key')
         writeFileSync(keyPath, 'b'.repeat(64))
         process.env.AUTH_MODE = 'master_users'
@@ -94,7 +100,33 @@ test('auth proxy resolves project-relative secrets when Vite runs from frontend'
         else process.env.AUTH_MODE = originalMode
         if (originalPath === undefined) delete process.env.AUTH_PROXY_KEY_FILE
         else process.env.AUTH_PROXY_KEY_FILE = originalPath
+        if (originalInline === undefined) delete process.env.AUTH_PROXY_KEY
+        else process.env.AUTH_PROXY_KEY = originalInline
         rmSync(directory, { recursive: true, force: true })
+    }
+})
+
+test('inline auth proxy key stays server-side and does not need a file', async () => {
+    const before = { mode: process.env.AUTH_MODE, key: process.env.AUTH_PROXY_KEY, file: process.env.AUTH_PROXY_KEY_FILE }
+    try {
+        process.env.AUTH_MODE = 'master_users'
+        process.env.AUTH_PROXY_KEY = 'c'.repeat(64)
+        process.env.AUTH_PROXY_KEY_FILE = '/missing/unused-secret'
+        const loaded = await loadConfigFromFile({ command: 'serve', mode: 'test' }, 'frontend/vite.config.ts')
+        let handler
+        loaded.config.server.proxy['/api'].configure({ on(event, callback) { handler = callback } })
+        const headers = {}
+        handler({ setHeader(name, value) { headers[name] = value } })
+        assert.equal(headers['x-etl-proxy-key'], 'c'.repeat(64))
+        assert.equal(JSON.stringify(loaded.config.define ?? {}).includes('c'.repeat(64)), false)
+        process.env.AUTH_PROXY_KEY = 'invalid-test-key'
+        const invalid = await loadConfigFromFile({ command: 'serve', mode: 'test' }, 'frontend/vite.config.ts')
+        assert.throws(() => invalid.config.server.proxy['/api'].configure({ on() {} }), /invalid format/)
+    } finally {
+        for (const [key, value] of [['AUTH_MODE', before.mode], ['AUTH_PROXY_KEY', before.key], ['AUTH_PROXY_KEY_FILE', before.file]]) {
+            if (value === undefined) delete process.env[key]
+            else process.env[key] = value
+        }
     }
 })
 

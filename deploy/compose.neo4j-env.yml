@@ -1,0 +1,4 @@
+# NEO4J_AUTH contains the existing user/password; this does not rotate accounts.
+secrets:
+  neo4j_auth: !override
+    file: ${ENV_SECRETS_DIR:?Run the project launcher}/neo4j_auth.secret

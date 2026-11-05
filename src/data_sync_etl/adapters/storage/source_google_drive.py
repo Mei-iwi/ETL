@@ -47,7 +47,7 @@ class SourceGoogleDriveFileReader:
             raise SourceFileError('DRIVE_DISABLED')
         if not self.roots:
             raise SourceFileError('DRIVE_BUCKETS_REQUIRED')
-        if self.session_factory is None and (
+        if self.session_factory is None and not self.settings.source_drive_credentials_json and (
                 self.settings.source_drive_credentials_file is None
                 or not self.settings.source_drive_credentials_file.is_file()):
             raise SourceFileError('DRIVE_CREDENTIALS_UNAVAILABLE')
@@ -72,8 +72,11 @@ class SourceGoogleDriveFileReader:
         except ImportError:
             raise SourceFileError('DRIVE_RUNTIME_UNAVAILABLE') from None
         try:
-            with self.settings.source_drive_credentials_file.open(encoding='utf-8') as file:
-                config = json.load(file)
+            if self.settings.source_drive_credentials_json:
+                config = json.loads(self.settings.source_drive_credentials_json)
+            else:
+                with self.settings.source_drive_credentials_file.open(encoding='utf-8') as file:
+                    config = json.load(file)
             if (config.get('type') != self.settings.source_drive_auth_type
                     or config.get('token_uri', 'https://oauth2.googleapis.com/token') != 'https://oauth2.googleapis.com/token'):
                 raise ValueError('Invalid credential type/endpoint')

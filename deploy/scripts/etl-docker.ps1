@@ -33,7 +33,12 @@ $databaseMode = 'same-host'
 $mediaEnabled = 'false'
 $driveEnabled = 'false'
 $sourceWriteOverrideFile = $null
+$envSecretsEnabled = $false
 foreach ($line in Get-Content -LiteralPath $EnvFile) {
+    if ($line -match '^\s*DOCKER_ENV_SECRETS\s*=') {
+        if ($line -notmatch '^\s*DOCKER_ENV_SECRETS\s*=\s*["'']?(true|false)["'']?\s*(?:#.*)?$') { throw 'Invalid DOCKER_ENV_SECRETS.' }
+        $envSecretsEnabled = $Matches[1] -eq 'true'
+    }
     if ($line -match '^\s*MEDIA_ENABLED\s*=') {
         if ($line -notmatch '^\s*MEDIA_ENABLED\s*=\s*["'']?(true|false)["'']?\s*(?:#.*)?$') { throw 'Invalid MEDIA_ENABLED in Docker env file.' }
         $mediaEnabled = $Matches[1]
@@ -89,6 +94,13 @@ elseif ($AuthProfile -ne 'legacy') { $composeArgs += @('-f',(Join-Path $deployDi
 if ($AuthProfile -in @('auth-tls','db-auth-tls')) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth-tls.yml')) }
 if ($Graph) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.graph-app.yml')) }
 if ($GraphServices) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.graph-workers.yml'),'--profile','graph-services') }
+if ($envSecretsEnabled) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.env-secrets.yml')) }
+if ($envSecretsEnabled -and $Action -in @('Build','Check','Start')) {
+    $envPython = Join-Path (Split-Path -Parent $deployDir) '.venv/Scripts/python.exe'
+    if (-not (Test-Path -LiteralPath $envPython)) { $envPython = 'python' }
+    & $envPython (Join-Path $PSScriptRoot 'materialize-env-secrets.py') --env-file $EnvFile
+    if ($LASTEXITCODE -ne 0) { throw 'Private env runtime secret preparation failed.' }
+}
 function Invoke-Docker([string[]]$Arguments) {
     & docker @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Docker operation failed; inspect sanitized service status.' }
@@ -118,9 +130,11 @@ switch ($Action) {
     Check { Test-Deployment }
     Start {
         Test-Deployment
-        if ($Workers) { Invoke-Docker ($composeArgs + @('--profile','workers','up','-d','--no-build','api','frontend','master-sync-worker','source-file-worker','ocr-worker','reconciliation-worker')) }
-        else { Invoke-Docker ($composeArgs + @('up','-d','--no-build','api','frontend')) }
-        if ($GraphServices) { Invoke-Docker ($composeArgs + @('up','-d','--no-build','--no-deps','users-refresh-worker','graph-worker')) }
+        $recreateArgs = @()
+        if ($envSecretsEnabled) { $recreateArgs = @('--force-recreate') }
+        if ($Workers) { Invoke-Docker ($composeArgs + @('--profile','workers','up','-d','--no-build') + $recreateArgs + @('api','frontend','master-sync-worker','source-file-worker','ocr-worker','reconciliation-worker')) }
+        else { Invoke-Docker ($composeArgs + @('up','-d','--no-build') + $recreateArgs + @('api','frontend')) }
+        if ($GraphServices) { Invoke-Docker ($composeArgs + @('up','-d','--no-build','--no-deps') + $recreateArgs + @('users-refresh-worker','graph-worker')) }
         Write-Output "Application started with profile: $AuthProfile. Inspect health and acceptance report."
     }
     Status { Invoke-Docker ($composeArgs + @('--profile','workers','ps')) }

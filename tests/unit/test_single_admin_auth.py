@@ -364,3 +364,39 @@ def test_non_ascii_csrf_header_is_rejected_without_server_error(configured):
         response = api.post('/api/v1/auth/login', headers={'X-CSRF-Token': b'\xff'},
                             json={'email': 'admin@etl.test', 'password': configured[1]})
         assert response.status_code == 403 and response.json()['detail']['code'] == 'AUTH_CSRF_INVALID'
+
+
+def test_inline_auth_credentials_preserve_login_without_secret_files(configured):
+    container, password, files = configured
+    proxy = files['proxy'].read_text()
+    original = AuthService(container.settings)
+    values = {'admin_password_hash': files['hash'].read_text(),
+              'session_signing_key': files['key'].read_text(), 'auth_proxy_key': proxy}
+    container.settings = container.settings.model_copy(update={
+        **values, 'admin_password_hash_file': None,
+        'session_signing_key_file': None, 'auth_proxy_key_file': None,
+    })
+    for path in files.values():
+        path.unlink()
+    replacement = AuthService(container.settings)
+    assert replacement.key == original.key and replacement.proxy_key == original.proxy_key
+    assert replacement.password_hash == original.password_hash
+    assert replacement.store.active() and original.store.active()
+    assert all(value not in repr(container.settings) for value in values.values())
+    with TestClient(create_app(container), base_url='http://127.0.0.1', headers={
+        'X-ETL-Proxy-Key': proxy, 'Origin': 'http://127.0.0.1',
+    }) as api:
+        assert login(api, password).status_code == 200
+        assert api.get('/api/v1/auth/me').json()['role'] == 'ADMIN'
+
+
+@pytest.mark.parametrize(('field', 'value', 'code'), [
+    ('admin_password_hash', 'invalid-test-hash', 'AUTH_PASSWORD_HASH_INVALID'),
+    ('session_signing_key', 'short', 'AUTH_SECRET_FORMAT_INVALID'),
+    ('auth_proxy_key', 'not-a-valid-proxy-key', 'AUTH_SECRET_FORMAT_INVALID'),
+])
+def test_invalid_inline_auth_fails_closed_without_echoing_secret(configured, field, value, code):
+    settings = configured[0].settings.model_copy(update={field: value})
+    with pytest.raises(ValueError, match=code) as caught:
+        AuthService(settings)
+    assert value not in str(caught.value)

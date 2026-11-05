@@ -253,6 +253,8 @@ class Settings(BaseSettings):
     source_local_buckets: tuple[str, ...] = ()
     source_drive_auth_type: Literal['service_account', 'authorized_user'] = 'service_account'
     source_drive_credentials_file: Path | None = Field(default=None, repr=False)
+    source_drive_credentials_json: str = Field(default='', repr=False)
+    source_search_authorization_workers: int = Field(default=1, ge=1, le=4)
     source_drive_timeout_seconds: int = Field(default=15, ge=1, le=60)
     source_drive_total_seconds: int = Field(default=90, ge=5, le=300)
     source_drive_max_attempts: int = Field(default=3, ge=1, le=5)
@@ -441,6 +443,9 @@ class Settings(BaseSettings):
     auth_deployment_profile: Literal['none', 'localhost', 'multi_machine'] = 'none'
     auth_state_path: Path = Field(default=Path('/var/lib/etl/auth/sessions.sqlite3'), repr=False)
     admin_login_email: str = 'admin@example.invalid'
+    admin_password_hash: str = Field(default='', repr=False)
+    session_signing_key: str = Field(default='', repr=False)
+    auth_proxy_key: str = Field(default='', repr=False)
     admin_password_hash_file: Path | None = Field(default=None, repr=False)
     session_signing_key_file: Path | None = Field(default=None, repr=False)
     auth_proxy_key_file: Path | None = Field(default=None, repr=False)

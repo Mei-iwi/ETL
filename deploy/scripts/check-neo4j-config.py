@@ -22,13 +22,18 @@ def main():
                  [('NEO4J_BOLT_PORT', '7687'), ('NEO4J_HTTP_PORT', '7474')]]
         if any(not 1024 <= p <= 65535 for p in ports) or len(set(ports)) != 2:
             raise ValueError()
-        secret = Path(values.get('NEO4J_AUTH_FILE', ''))
-        if not secret.is_absolute():
-            secret = Path('deploy') / secret
-        if secret.is_symlink() or not secret.is_file() or secret.stat().st_size > 4096:
-            raise ValueError()
-        user, password = secret.read_text(encoding='utf-8').split('/', 1)
+        auth = values.get('NEO4J_AUTH')
+        if not auth:
+            secret = Path(values.get('NEO4J_AUTH_FILE', ''))
+            if not secret.is_absolute():
+                secret = Path('deploy') / secret
+            if secret.is_symlink() or not secret.is_file() or secret.stat().st_size > 4096:
+                raise ValueError()
+            auth = secret.read_text(encoding='utf-8')
+        user, password = auth.split('/', 1)
         if user != 'neo4j' or len(password) < 12 or '\n' in password:
+            raise ValueError()
+        if values.get('NEO4J_PASSWORD') and password != values['NEO4J_PASSWORD']:
             raise ValueError()
     except (OSError, ValueError, UnicodeError):
         raise SystemExit('GRAPH_PRIVATE_RUNTIME_CONFIG_INVALID') from None

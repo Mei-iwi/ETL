@@ -516,10 +516,13 @@ def resource_file(id: ResourceId, request: Request, download: bool = False, view
         private_access = (access.scope == 'authenticated_admin' or
                           (version is not None and access.actor_id and version['resource_id'] in access.resource_ids))
         if private_access:
-            bilingual_access(request, id)
+            # Original bytes have their own current SOURCE hash/capability
+            # checks. An OCR library upgrade must not invalidate file viewing;
+            # processed OCR pages/translations retain the stronger run check.
+            bilingual_access(request, id, verify_processing_identity=False)
             reference = container.source_resolver.resolve(id)
             return verified_source_response(container.source_resolver, reference,
-                                            lambda: bilingual_access(request, id), version_id=id,
+                                            lambda: bilingual_access(request, id, verify_processing_identity=False), version_id=id,
                                             range_header=request.headers.get('range'), download=download)
     if view != 'text':
         source_response = source_view_response(container, id, access, embedded=view == 'preview')
@@ -1871,7 +1874,7 @@ class ProcessingOptions(BaseModel):
     visual_enabled: bool = False
 
 
-def bilingual_access(request, version_id):
+def bilingual_access(request, version_id, *, verify_processing_identity=True):
     from data_sync_etl.domain.resource_deletion import resource_deleted
 
     container = services(request)
@@ -1881,7 +1884,7 @@ def bilingual_access(request, version_id):
         access = search_access(request)
         try:
             readable = container.source_resolver.derived_index_authorized(version_id, access=access)
-            if readable:
+            if readable and verify_processing_identity:
                 readable = container.ocr.authorize_identity(source_processing['identity'])
         except SourceFileError as exc:
             raise HTTPException(503 if exc.transient else 403,

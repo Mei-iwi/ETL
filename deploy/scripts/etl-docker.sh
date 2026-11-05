@@ -11,9 +11,13 @@ database_mode=same-host
 media_enabled=false
 source_override=''
 drive_enabled=false
+env_secrets_enabled=false
 mode_pattern="^[[:space:]]*DATABASE_MODE[[:space:]]*=[[:space:]]*[\"']?(same-host|remote|source-neon|neon-atlas|neon-native-mongo)[\"']?[[:space:]]*(#.*)?$"
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
+  if [[ "$line" =~ ^DOCKER_ENV_SECRETS=[\"\']?(true|false)[\"\']?$ ]]; then
+    env_secrets_enabled="${BASH_REMATCH[1]}"
+  fi
   if [[ "$line" =~ ^SOURCE_WRITE_COMPOSE_OVERRIDE_FILE=(.*)$ ]]; then
     source_override="${BASH_REMATCH[1]}"
     source_override="${source_override#\'}"; source_override="${source_override%\'}"
@@ -77,6 +81,12 @@ case "$auth_profile" in
   db-auth-tls) compose+=(-f "$deploy_dir/compose.db-auth.yml" -f "$deploy_dir/compose.auth-tls.yml") ;;
   *) echo 'Invalid auth profile' >&2; exit 2 ;;
 esac
+[[ "$env_secrets_enabled" != true ]] || compose+=(-f "$deploy_dir/compose.env-secrets.yml")
+if [[ "$env_secrets_enabled" == true && "$action" =~ ^(build|check|start)$ ]]; then
+  env_python="$root_dir/.venv/bin/python"
+  [[ -x "$env_python" ]] || env_python=python
+  "$env_python" "$deploy_dir/scripts/materialize-env-secrets.py" --env-file "$env_file"
+fi
 case "$action" in
   build) "${compose[@]}" build api frontend ;;
   network)
@@ -94,10 +104,12 @@ case "$action" in
     ;;
   start)
     bash "$0" check
+    recreate_args=()
+    [[ "$env_secrets_enabled" != true ]] || recreate_args+=(--force-recreate)
     if [[ "${1:-}" == --workers ]]; then
-      "${compose[@]}" --profile workers up -d --no-build api frontend master-sync-worker source-file-worker ocr-worker reconciliation-worker
+      "${compose[@]}" --profile workers up -d --no-build "${recreate_args[@]}" api frontend master-sync-worker source-file-worker ocr-worker reconciliation-worker
     else
-      "${compose[@]}" up -d --no-build api frontend
+      "${compose[@]}" up -d --no-build "${recreate_args[@]}" api frontend
     fi
     echo "Application started with profile: $auth_profile. Inspect health and acceptance report."
     ;;
