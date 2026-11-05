@@ -1,9 +1,13 @@
 """Independent graph-feature gate; never promotes the broader Search rollout."""
 
+import json
+import logging
+
 import pytest
 
 from data_sync_etl.application.related_learning import RelatedSeedDenied
 from data_sync_etl.domain.search_access import SearchAccess
+from data_sync_etl.logging import flow
 from tests.unit.test_related_learning import fixture
 
 
@@ -67,3 +71,25 @@ def test_stale_graph_returns_unavailable_without_authorized_traversal():
         assert service.response('seed', SearchAccess('authenticated_admin')) == {'items': [], 'status': 'unavailable'}
     finally:
         service.close()
+
+
+def test_traversal_trace_keeps_request_correlation_without_ids(caplog):
+    service, _ = fixture()
+    caplog.set_level(logging.INFO, logger='etl')
+    try:
+        with flow() as request_id:
+            assert service.response('seed', SearchAccess('authenticated_admin'))['items']
+        events = [json.loads(record.message) for record in caplog.records]
+        trace = next(row for row in events if row.get('action') == 'AUTHORIZED_TRAVERSAL')
+        assert trace['correlation_id'] == request_id
+        assert trace['coverage'] == {'graph_candidates': 1, 'authorized_items': 1}
+        assert not {'resource_id', 'resource_version_id', 'target_id'} & trace.keys()
+    finally:
+        service.close()
+
+
+def test_stopped_executor_fails_open_without_leaking_a_slot():
+    service, _ = fixture()
+    service.close()
+    for _ in range(4):
+        assert service.response('seed', SearchAccess('authenticated_admin')) == {'items': [], 'status': 'unavailable'}
