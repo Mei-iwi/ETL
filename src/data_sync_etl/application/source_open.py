@@ -77,7 +77,7 @@ class SourceOpenResolver:
             resource = repo.get('master_learning_resources', resource_id)
             version = repo.get('resource_versions', result['version_id']) if result['version_id'] else None
             if (not metadata_allowed(resource, version, access) or not resource.get('is_active')
-                    or resource_deleted(resource) or resource.get('publication_status') != 'PUBLISHED'
+                    or resource_deleted(resource) or not access.publication_allowed(resource)
                     or denied(resource)):
                 raise SourceResolutionError('RESOURCE_NOT_FOUND', 404)
             if resource.get('source_origin') != 'POSTGRESQL' or version is None:
@@ -241,7 +241,7 @@ class SourceOpenResolver:
                 or current_source_version.get('source_lifecycle_status') != source_version.get('source_lifecycle_status')
                 or not current_source_version.get('resource_active', True)
                 or current_source_version.get('resource_deleted_at') is not None
-                or current_source_version.get('resource_publication_status', 'PUBLISHED') != 'PUBLISHED'):
+                or current_source_version.get('resource_publication_status', 'PUBLISHED') != resource.get('publication_status')):
             result.update(status='VERSION_STALE', files=[])
             return result
         # Revalidate MASTER ACL, version and source mapping after SOURCE I/O.

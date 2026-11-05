@@ -6,6 +6,22 @@ import { searchResponse, contextResponse } from './helpers/searchResponses.mjs'
 import { normalizeSearchQuery } from '../src/services/searchQuery.ts'
 import { SEARCH_QUERY_MAX_LENGTH } from '../src/pages/search/searchParams.ts'
 
+test('content data timeout displays a local message without adapter details', async () => {
+    const old = globalThis.fetch
+    try {
+        globalThis.fetch = async () => Response.json({ detail: {
+            code: 'SEARCH_DATA_TIMEOUT', message: 'private-uri-and-query',
+        } }, { status: 503, headers: { 'Retry-After': '15' } })
+        await assert.rejects(searchMaterials({ query: 'x', method: 'hybrid', filters: {}, page: 1, size: 10 }), error => {
+            assert.equal(error.code, 'SEARCH_DATA_TIMEOUT')
+            assert.equal(error.status, 503)
+            assert.match(error.message, /thu hẹp bộ lọc/)
+            assert.ok(!error.message.includes('private-uri-and-query'))
+            return true
+        })
+    } finally { globalThis.fetch = old }
+})
+
 test('query normalization and additive planner diagnostics match the API contract', async t => {
     const query = '  C++\t và\n C# CO₂  '
     const normalized = normalizeSearchQuery(query)

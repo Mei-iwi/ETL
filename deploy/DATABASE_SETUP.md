@@ -1,6 +1,32 @@
 # Database local: chỉ PostgreSQL MASTER
 
-Mô hình: **SOURCE Neon + MASTER Docker + MongoDB Atlas**. API, giao diện và worker chạy trên host theo [README](../README.md).
+Mô hình: **SOURCE Neon + MASTER Docker + MongoDB Windows native**. API, giao diện và worker có thể chạy trên host hoặc Docker theo [README](../README.md). Không cần Mongo container.
+
+## MongoDB Windows native
+
+MongoDB trên máy host dùng `mongodb://127.0.0.1:27017/`, database `etl_content`.
+Đặt `MONGO_URI` và `MONGO_DATABASE` trong `.env`. Với ứng dụng chạy trong Docker,
+file kết nối riêng tư phải dùng `mongodb://host.docker.internal:27017/`;
+`localhost` bên trong container không phải máy Windows.
+
+Chạy `deploy/scripts/prepare-project-docker.py` bằng Python virtualenv để tạo cấu
+hình Docker từ `.env`: script tự đổi loopback Mongo sang host gateway và chọn
+`DATABASE_MODE=neon-native-mongo`. Launcher nạp
+`deploy/compose.neon-native-mongo.yml`; SOURCE vẫn là Neon và MASTER vẫn là
+PostgreSQL Docker. Giữ Mongo bind trên loopback, không mở cổng không xác thực ra LAN.
+
+Khởi động Mongo bằng Windows service (PowerShell Administrator):
+
+```powershell
+Start-Service MongoDB
+Get-Service MongoDB
+```
+
+Nếu dùng tiến trình native thủ công, dừng đúng tiến trình đó trước khi bật
+service để tránh hai tiến trình cùng dùng dbPath/port. Không xóa dbPath hoặc
+volume MASTER để chuyển Mongo. Sao lưu BSON cùng collection options/validators/
+indexes trước cutover; kiểm tra đủ năm collection và hash BSON sau restore.
+Backup cũ thiếu ContentBag hoặc cấu hình 384D không thay thế bản hiện hành 1024D.
 
 ## Cấu hình
 
@@ -15,7 +41,7 @@ POSTGRES_PASSWORD=CHANGE_ME
 DATABASE_URL=postgresql+psycopg://etl:CHANGE_ME@127.0.0.1:5434/etl
 ```
 
-Thay mật khẩu trước khi khởi tạo và percent-encode trong URI. `DATABASE_URL` phải khớp thông tin MASTER. SOURCE dùng `SOURCE_DATABASE_URL`; Atlas dùng `MONGO_URI`, `MONGO_DATABASE=etl_content` trong cùng `.env`.
+Thay mật khẩu trước khi khởi tạo và percent-encode trong URI. `DATABASE_URL` phải khớp thông tin MASTER. SOURCE dùng `SOURCE_DATABASE_URL`; Mongo dùng `MONGO_URI`, `MONGO_DATABASE=etl_content` trong cùng `.env`.
 
 ## Khởi tạo MASTER
 
@@ -41,7 +67,7 @@ Chỉ với **MASTER mới/trống đã xác minh**, tạo schema bằng kết n
 
 Giữ revision `0020`; không dùng `upgrade head` hoặc nâng `0021`. Không migration/seed SOURCE. Không tự DROP bảng OCR cũ trên MASTER: ORM hoặc lịch sử tác vụ có thể còn tham chiếu. OCR của luồng mới ghi job/page task/content units vào SOURCE, nội dung vào Atlas, MASTER giữ projection và trạng thái.
 
-## Đồng bộ và Atlas
+## Đồng bộ và MongoDB
 
 SOURCE phải sẵn sàng và được cấp quyền. FULL sync với registry ID thực tế, ví dụ:
 
@@ -51,7 +77,7 @@ SOURCE phải sẵn sàng và được cấp quyền. FULL sync với registry I
 
 MASTER mới có thể sinh user ID khác: xác minh mapping SOURCE ADMIN trước khi cập nhật danh tính trong owner contract, giữ nguyên phạm vi quyền đã phê duyệt.
 
-Atlas giữ đúng 5 collection: `users`, `learning_resources`, `ocr_pages`, `mongo_content_units`, `content_bags`; validator `strict/error`, indexes theo contract và embedding 1024D. Kiểm tra bằng:
+MongoDB giữ đúng 5 collection: `users`, `learning_resources`, `ocr_pages`, `mongo_content_units`, `content_bags`; validator `strict/error`, indexes theo contract và embedding 1024D. Kiểm tra bằng:
 
 ```powershell
 .venv\Scripts\python.exe -m data_sync_etl.adapters.mongo.schema --inventory

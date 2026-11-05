@@ -34,11 +34,14 @@ def test_exact_normalization_and_large_bounded_soak():
     model = Runtime384()
     clock = [0.]
     cache = HttpQueryVectorCache(model, clock=lambda: clock[0])
-    words = ['học liệu', 'Học liệu', 'hoc lieu', 'học  liệu']
+    # normalize_query canonicalizes whitespace; distinct content/case/accents
+    # must still have distinct vectors. Repeated whitespace is not new content.
+    words = ['học liệu', 'Học liệu', 'hoc lieu', 'học liệu số']
     for text in words:
         encode(cache, model, text)
     assert model.encodes == 4
     encode(cache, model, '  ' + normalize('NFD', words[0]) + '  ')
+    encode(cache, model, 'học  liệu')
     assert model.encodes == 4
     for index in range(1000):
         encode(cache, model, 'novel ' + str(index))
@@ -232,7 +235,9 @@ def test_invalid_requests_and_untrusted_scope_do_not_consult_cache(searchable):
     encoded = model.encodes
     before = c.search._http_query_vectors.stats()
     with TestClient(create_app(c), base_url='http://127.0.0.1', client=('127.0.0.1', 50000)) as api:
-        for query in ('x' * 301, '', '   ', None, ['page']):
+        # SearchRequest supports long queries; 300 is the vector cache's
+        # admission limit, not the public HTTP query validation limit.
+        for query in ('x' * 8001, '', '   ', None, ['page']):
             assert api.post('/api/v1/search', json={'query': query, 'method': 'vector'}).status_code == 422
         for field in ('scope', 'role', 'user_id'):
             assert api.post('/api/v1/search', json={'query': 'page', field: 'local_demo'}).status_code == 422

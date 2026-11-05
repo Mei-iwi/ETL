@@ -9,6 +9,64 @@ from data_sync_etl.domain.concepts import ExpansionPolicy
 
 
 class Settings(BaseSettings):
+    neo4j_enabled: bool = False
+    neo4j_sync_enabled: bool = False
+    neo4j_search_enabled: bool = False
+    neo4j_search_mode: Literal['shadow', 'active'] = 'shadow'
+    neo4j_related_mode: Literal['disabled', 'shadow', 'active'] | None = None
+    neo4j_related_timeout_seconds: float = Field(default=8, gt=0, le=15)
+    neo4j_fail_open: bool = True
+    neo4j_user: str = 'neo4j'
+    neo4j_password: str = Field(default='', repr=False)
+    neo4j_password_file: Path | None = Field(default=None, repr=False)
+    neo4j_database: str = 'neo4j'
+    neo4j_uri_host: str = Field(default='bolt://127.0.0.1:7687', repr=False)
+    neo4j_uri_docker: str = Field(default='bolt://neo4j:7687', repr=False)
+    neo4j_runtime: Literal['host', 'docker'] = 'host'
+    neo4j_batch_size: int = Field(default=200, ge=1, le=1000)
+    neo4j_connect_timeout_seconds: float = Field(default=5, gt=0, le=30)
+    neo4j_query_timeout_seconds: float = Field(default=3, gt=0, le=30)
+    neo4j_sync_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    neo4j_sync_interval_seconds: int = Field(default=300, ge=30)
+    neo4j_graph_log_level: Literal['INFO', 'WARNING', 'ERROR'] = 'INFO'
+    neo4j_state_dir: Path = Path('.local/neo4j')
+
+    @model_validator(mode='after')
+    def validate_graph_settings(self):
+        from urllib.parse import urlsplit
+
+        for uri in (self.neo4j_uri_host, self.neo4j_uri_docker):
+            try:
+                parsed = urlsplit(uri)
+                port = parsed.port
+            except ValueError:
+                raise ValueError('GRAPH_URI_INVALID') from None
+            if (parsed.scheme not in {'bolt', 'bolt+s', 'neo4j', 'neo4j+s'}
+                    or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.query or parsed.fragment or parsed.path not in {'', '/'}
+                    or (port is not None and not 1 <= port <= 65535)
+                    or (parsed.scheme in {'bolt', 'neo4j'}
+                        and parsed.hostname not in {'127.0.0.1', 'localhost', 'neo4j', '::1'})):
+                raise ValueError('GRAPH_URI_INVALID')
+        import re
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,62}', self.neo4j_database):
+            raise ValueError('GRAPH_DATABASE_INVALID')
+        if (self.neo4j_sync_enabled or self.neo4j_search_enabled) and not self.neo4j_enabled:
+            raise ValueError('GRAPH_DISABLED')
+        if self.neo4j_search_enabled and not self.neo4j_fail_open:
+            raise ValueError('GRAPH_FAIL_OPEN_REQUIRED')
+        if self.neo4j_enabled and self.neo4j_password_file is not None:
+            try:
+                path = self.neo4j_password_file
+                if path.is_symlink() or not path.is_file() or path.stat().st_size > 4096:
+                    raise ValueError()
+                self.neo4j_password = path.read_text(encoding='utf-8').strip()
+            except (OSError, ValueError, UnicodeError):
+                raise ValueError('GRAPH_PRIVATE_PASSWORD_FILE_INVALID') from None
+        if self.neo4j_enabled and (not self.neo4j_user or len(self.neo4j_password) < 12):
+            raise ValueError('GRAPH_CREDENTIAL_REQUIRED')
+        return self
+
     search_result_sessions_enabled: bool = False
     # SOURCE-owned OCR requires an approved contract and MASTER migration 0020.
     ocr_component_pipeline_enabled: bool = False
@@ -295,6 +353,14 @@ class Settings(BaseSettings):
     # Opt-in parallel index. Legacy bag vectors/BoW remain the default.
     semantic_enabled: bool = False
     search_metadata_enabled: bool = False
+    search_metadata_live_lexical_fallback_enabled: bool = False
+    search_metadata_live_dense_fallback_enabled: bool = False
+    search_metadata_live_dense_max_resources: int = Field(default=64, ge=1, le=200)
+    search_metadata_live_dense_min_similarity: float = Field(default=.5, ge=.35, le=1, allow_inf_nan=False)
+    search_normalized_shortlist_enabled: bool = False
+    search_normalized_max_chunks: int = Field(default=2048, ge=1, le=10000)
+    search_normalized_min_similarity: float = Field(default=.45, ge=.35, le=1, allow_inf_nan=False)
+    search_normalized_vector_cache_file: str | None = None
     search_metadata_indexed_candidates_enabled: bool = False
     search_metadata_authority_limit: int = Field(default=10000, ge=201, le=20000)
     search_metadata_match_limit: int = Field(default=2000, ge=1, le=2000)

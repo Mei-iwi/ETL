@@ -28,13 +28,15 @@ from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search import SearchError, cosine, ranks, rrf
 from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.domain.vector_admission import anchored_dense_match
+from data_sync_etl.logging import event as log_event
 from data_sync_etl.ports.metadata_search import MetadataIndexPort
 
 
 class MetadataSearchService:
-    def __init__(self, uow, documents, store: MetadataIndexPort, embedding, settings):
+    def __init__(self, uow, documents, store: MetadataIndexPort, embedding, settings, *, live_embedding=None):
         self.uow, self.documents, self.store = uow, documents, store
         self.embedding, self.settings = embedding, settings
+        self.live_embedding = live_embedding
 
     def propagate_deletions(self, limit=50):
         # PG audit doubles as a durable outbox. RPC is outside the PG transaction;
@@ -257,14 +259,58 @@ class MetadataSearchService:
         report['wall_seconds'] = monotonic() - started
         return report
 
-    def retrieve(self, query, method, filters, access, *, dictionary, policy, checkpoint=lambda: None):
-        self.store.ensure_ready()
+    def retrieve(self, query, method, filters, access, *, dictionary, policy, checkpoint=lambda: None,
+                 allow_live_fallback=False):
+        live_lexical = False
+        live_dense = False
+        try:
+            self.store.ensure_ready()
+        except IndexingError as exc:
+            lexical_allowed = method in ('bow', 'hybrid') and self.settings.search_metadata_live_lexical_fallback_enabled
+            dense_allowed = method in ('vector', 'hybrid') and self.settings.search_metadata_live_dense_fallback_enabled
+            if (not allow_live_fallback or exc.code != 'METADATA_SCHEMA_NOT_READY'
+                    or not (lexical_allowed or dense_allowed)):
+                raise
+            # Optional title/description/tag retrieval from fresh authorized
+            # metadata. No stored index, embedding, cache or schema is created.
+            live_lexical = True
+            live_dense = dense_allowed
+        embedding = (self.live_embedding or self.embedding) if live_dense else self.embedding
+        live_dense_error = None
         variant = (approved_accent_variant(query, dictionary, policy=policy, domain=filters.get('domain'))
                    if method != 'vector' and self.settings.search_approved_accent_variants_enabled else None)
-        indexed = self.settings.search_metadata_indexed_candidates_enabled
+        indexed = self.settings.search_metadata_indexed_candidates_enabled and not live_lexical
         snapshots = self.indexed_snapshots(filters, access, checkpoint=checkpoint) if indexed else self.snapshots(filters, access, checkpoint=checkpoint)
-        dense_blocked = indexed and len(snapshots.ready_keys) > self.settings.search_metadata_max_resources
-        if indexed:
+        dense_blocked = ((indexed and len(snapshots.ready_keys) > self.settings.search_metadata_max_resources)
+                         or (live_dense and len(snapshots) > self.settings.search_metadata_live_dense_max_resources))
+        if live_lexical:
+            stored = {key: {**snap, 'status': 'READY',
+                           'lexical': {name: doc.model_dump() for name, doc in lexical_fields(snap).items()},
+                           'dense_status': 'NOT_INDEXED'}
+                      for key, (_, snap) in snapshots.items()}
+            if live_dense and not dense_blocked and stored:
+                try:
+                    identity = embedding.model_identity()
+                    keys = list(stored)
+                    for offset in range(0, len(keys), 16):
+                        checkpoint()
+                        batch = keys[offset:offset + 16]
+                        titles = [stored[key]['fields']['title'] for key in batch]
+                        vectors = embedding.embed_documents(titles)
+                        if len(vectors) != len(batch):
+                            raise IndexingError('INVALID_EMBEDDING', 503)
+                        for key, title, vector in zip(batch, titles, vectors, strict=True):
+                            stored[key].update(vector=validate_vector(vector['vector'], 1024),
+                                model_identity=identity, dense_status='READY', dense_text=title,
+                                dense_input_fingerprint=digest(['metadata-title-v1', identity, title]))
+                        checkpoint()
+                    if embedding.model_identity() != identity:
+                        raise IndexingError('SEMANTIC_MODEL_IDENTITY_CHANGED', 503)
+                except IndexingError as error:
+                    live_dense_error = error.code
+                    for record in stored.values():
+                        record['dense_status'] = 'FAILED'
+        elif indexed:
             if method != 'bow' and not dense_blocked:
                 keys = sorted(snapshots.ready_keys)
             elif method == 'vector':
@@ -289,7 +335,11 @@ class MetadataSearchService:
                 continue
             snap = current[1]
             if any(record.get(field) != snap[field] for field in (
-                    'projection_fingerprint', 'lexical_fingerprint', 'dense_input_fingerprint', 'fields', 'text')):
+                    'projection_fingerprint', 'lexical_fingerprint', 'fields', 'text')):
+                continue
+            expected_dense = (digest(['metadata-title-v1', record.get('model_identity'), snap['fields']['title']])
+                              if live_dense and record.get('dense_status') == 'READY' else snap['dense_input_fingerprint'])
+            if record.get('dense_input_fingerprint') != expected_dense and not (live_dense and live_dense_error):
                 continue
             if record.get('lexical') != {name: doc.model_dump() for name, doc in lexical_fields(snap).items()}:
                 continue
@@ -320,21 +370,25 @@ class MetadataSearchService:
                     matched.setdefault(key, []).append(field.upper())
             lexical = rrf(*fields)
         dense_status = 'BLOCKED_SCALE' if dense_blocked and method != 'bow' else 'NOT_REQUESTED'
-        if method in ('vector', 'hybrid') and not dense_blocked:
-            identity = self.embedding.model_identity()
+        dense_floor = (self.settings.search_metadata_live_dense_min_similarity if live_dense
+                       else self.settings.search_vector_min_similarity)
+        maximum_similarity = None
+        if method in ('vector', 'hybrid') and not dense_blocked and not live_dense_error:
+            identity = embedding.model_identity()
             eligible = {key: row for key, row in verified.items()
                         if row.get('dense_status') == 'READY' and row.get('model_identity') == identity}
             dense_status = 'NOT_READY'
             if eligible:
                 try:
-                    query_vector = validate_vector(self.embedding.embed_queries([query])[0]['vector'], 1024)
+                    query_vector = validate_vector(embedding.embed_queries([query])[0]['vector'], 1024)
                     dense_expansion = dictionary.expand(query, domain=filters.get('domain'), policy=policy)
                     for key, row in eligible.items():
                         checkpoint()
                         score = cosine(query_vector, validate_vector(row['vector'], 1024))
-                        if (score >= self.settings.search_vector_min_similarity
+                        maximum_similarity = max(maximum_similarity, score) if maximum_similarity is not None else score
+                        if (score >= dense_floor
                                 or (self.settings.search_vector_anchor_fallback_enabled
-                                    and anchored_dense_match(query, row['text'], score,
+                                    and anchored_dense_match(query, row.get('dense_text', row['text']), score,
                                         floor=self.settings.search_vector_anchor_min_similarity,
                                         dictionary=dictionary, policy=policy, expansion=dense_expansion))):
                             dense[key] = score
@@ -342,11 +396,20 @@ class MetadataSearchService:
                 except IndexingError as exc:
                     dense = {}
                     dense_status = exc.code
+        if live_dense_error:
+            dense_status = live_dense_error
+        if live_dense:
+            log_event(stage='metadata_search', action='LIVE_DENSE_SCORED', coverage={
+                'candidates': len(verified), 'accepted': len(dense),
+                'maximum_similarity': round(maximum_similarity, 6) if maximum_similarity is not None else None,
+                'minimum_similarity': dense_floor})
         scores = lexical if method == 'bow' else dense if method == 'vector' else rrf(lexical, dense)
         items = []
         for key in sorted(scores, key=lambda key: (-scores[key], key)):
             row, snap = snapshots[key]
             fields = matched.get(key, [])
+            if live_dense and key in dense and not fields:
+                fields = ['TITLE']
             field = fields[0].lower() if fields else next(name for name in ('description', 'title', 'tags') if snap['fields'].get(name))
             text = snap['fields'][field]
             items.append({**{name: value for name, value in row.items() if name != 'version_id'},
@@ -363,6 +426,10 @@ class MetadataSearchService:
                   'dense': dense_status,
                   'extension': 'PARTIAL' if any('description' not in snap['fields'] and 'tags' not in snap['fields']
                                                for _, snap in snapshots.values()) else 'READY'}
+        if live_lexical:
+            status['storage'] = 'LIVE_METADATA' if live_dense else 'LIVE_LEXICAL'
+        if live_dense:
+            status['dense_representation'] = 'TITLE'
         return items, snapshots, status, {'metadata_lexical': lexical, 'metadata_dense': dense}
 
     def final_validate(self, items, snapshots, filters, access, *, checkpoint=lambda: None, content=False,

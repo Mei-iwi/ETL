@@ -27,7 +27,9 @@ test('resource extension display, form, CSRF, conflict, permissions and file ord
         if (path === '/api/v1/auth/me') return json({ id: 'master:user-1', role: admin ? 'ADMIN' : 'VIEWER', roles: [admin ? 'admin' : 'viewer'], mode: 'master_users',
             display_name: 'Teacher', email: 'teacher@example.test', admin_feature_enabled: true, resource_ids: ['r1'] })
         if (path === '/api/v1/auth/csrf') return json({ csrf_token: 'isolated-resource-csrf' })
-        if (path === '/api/v1/resources/r1') return json({ id: 'r1', title: 'Tin học 7 – Bảng tính thống kê lượt mượn thư viện', source_origin: 'POSTGRESQL',
+        // Byte preview/download is the LOCAL contract. SOURCE remote viewer
+        // and original-link security are covered by sourceViewerUi.test.mjs.
+        if (path === '/api/v1/resources/r1') return json({ id: 'r1', title: 'Tin học 7 – Bảng tính thống kê lượt mượn thư viện', source_origin: 'LOCAL',
             provider_name: 'School', resource_type_name_vi: 'PDF', publication_status: 'PUBLISHED', is_active: true,
             created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
             subjects: [{ id: 's1', name: 'Tin học', is_primary: true }],
@@ -141,7 +143,8 @@ test('resource extension display, form, CSRF, conflict, permissions and file ord
         files = true
         await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1050, deviceScaleFactor: 1, mobile: false })
         await open()
-        await wait(() => evaluate("!!document.querySelector('a[title=\"Xem tệp trực tiếp tại nguồn trong tab mới\"]')"))
+        await wait(() => evaluate("!!document.querySelector('a[download]')"))
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('a')).some(a => a.href.includes('drive.google.com'))"), false)
         assert.equal(await evaluate("document.querySelector('select[aria-label=\"Phiên bản tệp\"]').value"), 'v3')
         assert.equal(await evaluate("document.querySelector('a[download]').getAttribute('href')"), '/api/v1/resource-versions/v3/file?download=true')
         await evaluate("document.querySelector('#resource-file-title').scrollIntoView({block:'start'})")
@@ -180,14 +183,14 @@ test('resource extension display, form, CSRF, conflict, permissions and file ord
         historyError = false
         await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1050, deviceScaleFactor: 1, mobile: false })
         await call('Page.navigate', { url: origin + '/overview/summary' })
-        await wait(() => evaluate("!!document.querySelector('aside[aria-label=\"Giới thiệu kho học liệu\"]')"))
-        assert.equal(await evaluate("document.querySelector('h1').textContent"), 'Tổng quan hệ thống')
+        await wait(() => evaluate("document.querySelector('h1')?.textContent.includes('tra cứu học liệu')"))
+        assert.equal(await evaluate("document.querySelector('h1').textContent.replace(/\\s+/g, ' ').trim()"), 'Quản lý và tra cứu học liệu')
         assert.equal(await evaluate("!!document.querySelector('main a[href=\"/library/indexing\"]')"), true)
         assert.equal(await evaluate("document.querySelectorAll('.sub-menu a').length"), 2)
         await capture('overview-admin-desktop')
         admin = false
         await call('Page.navigate', { url: origin + '/overview/summary' })
-        await wait(() => evaluate("!!document.querySelector('aside[aria-label=\"Giới thiệu kho học liệu\"]')"))
+        await wait(() => evaluate("document.querySelector('h1')?.textContent.includes('tra cứu học liệu')"))
         assert.equal(await evaluate("!!document.querySelector('main a[href=\"/library/indexing\"]')"), false)
         assert.equal(await evaluate("!!document.querySelector('main a[href=\"/systems/status\"]')"), false)
         assert.equal(await evaluate("!!document.querySelector('main a[href=\"/search/query-methods\"]')"), true)
@@ -196,10 +199,14 @@ test('resource extension display, form, CSRF, conflict, permissions and file ord
         assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true)
         await capture('overview-mobile')
         await call('Page.navigate', { url: origin + '/overview/process' })
-        await wait(() => evaluate("document.querySelector('h1')?.textContent==='Quy trình hoạt động'"))
-        assert.equal(await evaluate("document.querySelectorAll('table tbody tr:not(:has(th[colspan]))').length"), 8)
+        await wait(() => evaluate("document.querySelector('h1')?.textContent.includes('đến kết quả tìm kiếm')"))
+        await evaluate("Array.from(document.querySelectorAll('summary')).find(e => e.textContent.includes('Xem chi tiết các bước')).click()")
+        assert.equal(await evaluate("document.querySelectorAll('table tbody tr:not(:has(th[colspan]))').length"), 9)
+        assert.equal(await evaluate("document.querySelector('table').textContent.includes('Thực nghiệm và đánh giá')"), true)
         assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true)
-        assert.equal(await evaluate("document.querySelector('[aria-label=\"Sơ đồ quy trình, có thể cuộn ngang\"]').scrollWidth > document.querySelector('[aria-label=\"Sơ đồ quy trình, có thể cuộn ngang\"]').clientWidth"), true)
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('[role=region][tabindex]')).filter(e => e.querySelector('ol')).length"), 2)
+        const flowRegions = await evaluate("Array.from(document.querySelectorAll('[role=region][tabindex]')).filter(e => e.querySelector('ol')).map(e => ({tabIndex:e.tabIndex, overflow:getComputedStyle(e).overflowX, right:e.getBoundingClientRect().right, viewport:innerWidth, width:e.clientWidth, scroll:e.scrollWidth}))")
+        assert.ok(flowRegions.every(e => e.tabIndex === 0 && e.overflow === 'auto' && e.right <= e.viewport), JSON.stringify(flowRegions))
         await capture('overview-process-mobile')
         await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1050, deviceScaleFactor: 1, mobile: false })
         await capture('overview-process-desktop')

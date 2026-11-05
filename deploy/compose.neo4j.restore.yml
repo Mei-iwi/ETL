@@ -1,0 +1,8 @@
+# Isolated donor/restore projects only; backup directory must already exist.
+services:
+  neo4j:
+    volumes:
+      - type: bind
+        source: ${NEO4J_DRILL_BACKUP_DIR:?Set a private isolated backup directory}
+        target: /backups
+        bind: {create_host_path: false}

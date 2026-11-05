@@ -1,4 +1,4 @@
-from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
+from data_sync_etl.application.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.ports.document_store import ContentDocumentPort
 from data_sync_etl.ports.repositories import UnitOfWork

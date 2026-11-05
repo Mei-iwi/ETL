@@ -47,7 +47,10 @@ def test_identity_is_corpus_derived_and_no_cooccurrence_auto_relation():
     assert definition['relations'][0]['status'] == 'pending'
 
 
-def test_one_hundred_versions_do_not_inflate_concept_count_or_runtime_provenance(tmp_path):
+def test_one_hundred_versions_do_not_inflate_concept_count_or_runtime_provenance(tmp_path, monkeypatch):
+    # This verifies deduplication/provenance, not host CPU throughput. The
+    # production CPU limit is checked separately with a deterministic clock.
+    monkeypatch.setattr('data_sync_etl.application.concept_discovery.process_time', lambda: 0.)
     inventory = FixtureCorpus([resource(index) for index in range(100)])
     store = ArtifactStore(tmp_path / 'dedup', create=True)
     worker = ConceptDiscoveryWorker(inventory, store, batch_size=100, tick_seconds=30., clock=lambda: 100.)
@@ -58,6 +61,20 @@ def test_one_hundred_versions_do_not_inflate_concept_count_or_runtime_provenance
     assert manifest['count'] == 1 and manifest['coverage']['approved_relations'] == 100
     concept = store.load(manifest['generation']).lookup(['cache'], budget_ms=100)[0]
     assert len(concept['sources']) <= 8
+
+
+def test_cpu_budget_stops_discovery_before_persisting_a_contribution(tmp_path, monkeypatch):
+    inventory = FixtureCorpus([resource(1)])
+    store = ArtifactStore(tmp_path / 'cpu-budget', create=True)
+    worker = ConceptDiscoveryWorker(inventory, store, clock=lambda: 100.)
+    times = iter((0., 2.))
+    monkeypatch.setattr('data_sync_etl.application.concept_discovery.process_time', lambda: next(times))
+    result = worker.tick()
+    assert result['status'] == 'RETRY_REQUIRED'
+    assert result['error_code'] == 'TICK_RESOURCE_BUDGET_REPLAY'
+    assert result['writes'] == result['processed'] == 0
+    assert result['after'] == ''
+    assert list(worker.contributions()) == []
 
 
 def test_candidate_modified_after_review_cannot_reuse_old_approval(pipeline):

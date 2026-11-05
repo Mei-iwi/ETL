@@ -72,7 +72,8 @@ def test_cleanup_failure_and_no_legacy_fallback(importing):
 def test_source_mutates_during_processing_blocks_results(importing):
     c, rows, _ = importing
     row = discover_and_import(c)
-    with pytest.raises(Exception, match='SOURCE_CAPABILITY_BLOCKED'):
+    # Capability grants alone do not authorize the legacy MASTER OCR writer.
+    with pytest.raises(Exception, match='SOURCE_OCR_OWNER_REQUIRED'):
         c.ocr.create_job(row['target_version_id'])
     rows[0]['source_hash'] = '0' * 64
     with pytest.raises(SourceFileError, match='SOURCE_VERSION_MUTATED'):
@@ -308,7 +309,7 @@ def test_external_source_is_never_ocr_processed(importing):
     from data_sync_etl.domain.core import DomainError
     c, _, _ = importing
     row = discover_and_import(c)
-    with pytest.raises(DomainError, match='SOURCE_CAPABILITY_BLOCKED'):
+    with pytest.raises(DomainError, match='SOURCE_OCR_OWNER_REQUIRED'):
         c.ocr.create_job(row['target_version_id'])
     with c.uow() as repo:
         assert repo.count('ocr_jobs', {}) == 0
@@ -440,7 +441,7 @@ def test_source_reference_flag_blocks_open_file_and_info_before_source_io(source
 def test_source_tesseract_scratch_stays_in_leased_attempt(importing, monkeypatch):
     c, rows, original = importing
     row = discover_and_import(c)
-    with pytest.raises(Exception, match='SOURCE_CAPABILITY_BLOCKED'):
+    with pytest.raises(Exception, match='SOURCE_OCR_OWNER_REQUIRED'):
         c.ocr.create_job(row['target_version_id'])
     assert not original.with_name('sample.png').exists()
     assert not list(c.settings.source_temp_root.glob('attempt-*'))
@@ -491,11 +492,16 @@ def test_source_viewer_and_ocr_routes_use_verified_links_and_derived_text(source
         assert response.status_code == 200 and response.json()['can_open_original'] is True
         assert response.json()['original_url'].endswith('/view')
         response = api.get(f"/api/v1/resource-versions/{version['id']}/bilingual?include_items=false")
-        assert response.status_code == 200, response.text
-        assert response.json()['source_backed'] is True
-        assert response.json()['summary']['total'] > 0
+        # This fixture has legacy MASTER text, not owner-proven SOURCE OCR.
+        # Viewer-reference permission never authorizes reuse of that raw text.
+        # Positive SOURCE text reads are covered by test_source_ocr_runtime.
+        assert response.status_code == 403
+        assert response.json()['detail']['code'] == 'SOURCE_CAPABILITY_BLOCKED'
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file?view=text")
-        assert response.status_code == 200 and response.text
+        # file_version hides versions without an authorized derived index;
+        # the reference viewer grant must not expose legacy MASTER text.
+        assert response.status_code == 404
+        assert 'original_text' not in response.text
         with c.uow() as repo:
             repo.update('master_learning_resources', version['resource_id'], {'is_active': False})
         response = api.get(f"/api/v1/resource-versions/{version['id']}/file", follow_redirects=False)

@@ -121,7 +121,7 @@ class SourceResolutionService:
         with self.uow() as repo:
             resource = repo.get('master_learning_resources', resource_id)
             if (not resource or not resource.get('is_active') or resource_deleted(resource)
-                    or resource.get('publication_status') != 'PUBLISHED' or denied(resource)):
+                    or not access.publication_allowed(resource) or denied(resource)):
                 raise SourceResolutionError('RESOURCE_NOT_FOUND', 404)
             if version_id is not None:
                 version = repo.get('resource_versions', version_id)
@@ -229,7 +229,7 @@ class SourceResolutionService:
             return result
         source_lifecycle_status = normalize_source_status(source.get('source_lifecycle_status'))
         if (not source.get('resource_active', True) or source.get('resource_deleted_at') is not None
-                or source.get('resource_publication_status', 'PUBLISHED') != 'PUBLISHED'
+                or source.get('resource_publication_status', 'PUBLISHED') != resource.get('publication_status')
                 or not (self.source_status_policy(source, namespace=locator.namespace)
                         if callable(getattr(self, 'source_status_policy', None))
                         else source_status_allowed(source.get('source_lifecycle_status'),

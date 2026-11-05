@@ -65,7 +65,7 @@ def authorize(request, principal):
     if ((path in ('/api/v1/search', '/api/v1/search/page') and method == 'POST')
             or (path.startswith('/api/v1/chunks/') and path.endswith('/context') and method == 'GET')):
         return  # SearchAccess verifies explicit resource grants and eligibility.
-    if method == 'GET' and re.fullmatch(r'/api/v1/resources/[^/]+/(source-resolution|open)', path):
+    if method == 'GET' and re.fullmatch(r'/api/v1/resources/[^/]+/(source-resolution|open|related-learning)', path):
         return  # SourceResolutionService validates the same published metadata policy as search.
     if ('/source-writeback' in path or '/source-delete' in path
             or '/source-versions' in path

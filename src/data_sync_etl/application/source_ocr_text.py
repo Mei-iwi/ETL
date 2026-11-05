@@ -1,8 +1,8 @@
 """OCR/text ports for SOURCE mode. MASTER receives metadata and checksums only."""
 from hashlib import sha256
 
-from data_sync_etl.application.source_ocr_runtime import source_owned_id, stable_id
 from data_sync_etl.domain.core import DomainError, normalize_text, now
+from data_sync_etl.domain.source_ocr_ids import source_owned_id, stable_id
 
 
 def metadata_without_raw(metadata):

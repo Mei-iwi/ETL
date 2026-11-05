@@ -173,7 +173,7 @@ def test_source_version_sync_namespaces_colliding_ids_and_reuses_existing_tables
             row = next((row for row in self.rows if row['source_version_id'] == source_version_id), None)
             if row is None:
                 return None
-            return {**row, 'resource_publication_status': 'PUBLISHED'}
+            return {**row, 'resource_publication_status': row.get('resource_publication_status', 'PUBLISHED')}
 
         def list_file_references(self, source_version_id):
             row = self.get_version(source_version_id)
@@ -233,6 +233,27 @@ def test_source_version_sync_namespaces_colliding_ids_and_reuses_existing_tables
     assert 'source_resource_id' not in open_a['files'][0] and 'source_version_id' not in open_a['files'][0]
     assert open_a['files'][0]['viewer_url'] == 'https://viewer.school-a.edu/open/VER001'
     assert open_b['files'][0]['viewer_url'] == 'https://viewer.school-b.edu/open/VER001'
+    # The same file broker must honor already-established DRAFT owner/admin
+    # metadata policy, rather than unconditionally requiring PUBLISHED.
+    from data_sync_etl.application.source_resolution import SourceResolutionError
+    with container.uow() as repo:
+        before_draft = repo.get('master_learning_resources', 'resource-1')
+        repo.update('master_learning_resources', 'resource-1',
+                    {'publication_status': 'DRAFT', 'created_by': 'user-1',
+                     'source_state_hash': state_hash({**before_draft, 'publication_status': 'DRAFT', 'created_by': 'user-1'})})
+    source_a.rows[0]['resource_publication_status'] = 'DRAFT'
+    owner_access = SearchAccess('authenticated_user', frozenset({'resource-1'}),
+        actor_id='master:user-1', owner_id='user-1', allow_owned_unreviewed=True)
+    for draft_access in (SearchAccess('authenticated_admin', actor_id='master:admin'), owner_access):
+        assert opener.resolve('resource-1', draft_access, versions_a['VER001']['id'])['status'] == 'EXTERNAL_VIEWER_AVAILABLE'
+    with pytest.raises(SourceResolutionError, match='RESOURCE_NOT_FOUND'):
+        opener.resolve('resource-1', SearchAccess('authenticated_user',
+            actor_id='master:stranger', owner_id='stranger', allow_public=True), versions_a['VER001']['id'])
+    source_a.rows[0]['resource_publication_status'] = 'PUBLISHED'
+    with container.uow() as repo:
+        repo.update('master_learning_resources', 'resource-1', {
+            'publication_status': before_draft['publication_status'], 'created_by': before_draft['created_by'],
+            'source_state_hash': before_draft['source_state_hash']})
     source_a.rows[0].update(storage_bucket='DRIVE', storage_object_key='files/blob/book.pdf')
     source_a.list_file_references = None
     source_a_registration = SourceRegistration(

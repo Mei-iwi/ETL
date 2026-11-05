@@ -1,0 +1,216 @@
+"""Required opt-in live checks: run this path explicitly with ETL_GRAPH_TEST_ENV.
+
+No skipping. Only the isolated test container may be used; never .env production.
+"""
+
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+from dotenv import dotenv_values
+
+from data_sync_etl.adapters.neo4j.driver import GraphDriver
+from data_sync_etl.adapters.neo4j.projection import Neo4jProjection
+from data_sync_etl.config import Settings
+from data_sync_etl.domain.graph_contract import GraphContractError, build_snapshot
+from tests.unit.test_graph_snapshot import graph_tables
+
+
+@pytest.fixture(scope='module')
+def projection():
+    path = Path(os.environ['ETL_GRAPH_TEST_ENV'])
+    assert path.name == 'test.env' and path.parent.name == 'neo4j'
+    values = dotenv_values(path)
+    assert values['NEO4J_URI_HOST'] == 'bolt://127.0.0.1:17687'
+    s = Settings(_env_file=None, neo4j_enabled=True, neo4j_password=values['NEO4J_PASSWORD'],
+                 neo4j_uri_host=values['NEO4J_URI_HOST'])
+    driver = GraphDriver(s)
+    driver.preflight()
+    p = Neo4jProjection(driver)
+    # A previous interrupted test may leave fixture data. Verify Docker ownership
+    # and port before reconciling this dedicated TEST graph (never live graph).
+    import json
+    from types import SimpleNamespace
+
+    from data_sync_etl.application.graph_sync import GraphSynchronizer
+
+    inspected = json.loads(subprocess.run(
+        ['docker', 'inspect', 'etl-neo4j-test-neo4j-1'],
+        capture_output=True, text=True, check=True).stdout)[0]
+    assert inspected['Config']['Labels']['com.docker.compose.project'] == 'etl-neo4j-test'
+    assert inspected['NetworkSettings']['Ports']['7687/tcp'][0]['HostPort'] == '17687'
+    p.ensure_schema()
+    s.neo4j_sync_enabled = True
+    sync = GraphSynchronizer(SimpleNamespace(read=lambda: build_snapshot(graph_tables())), p,
+                             path.parent / 'isolated-owner-state')
+    identity = sync._identity()
+    sync.state_dir.mkdir(parents=True, exist_ok=True)
+    receipt = sync._receipt(identity)
+    if not receipt.exists():
+        receipt.write_text(json.dumps(identity), encoding='utf-8')
+    sync.sync(apply=True)
+    yield p
+    driver.close()
+
+
+def test_schema_exact_and_parameterized_merge_idempotent(projection):
+    p = projection
+    p.ensure_schema()
+    expected = build_snapshot(graph_tables())
+    p.merge(expected, batch_size=1)
+    assert p.read() == expected
+    p.merge(expected, batch_size=2)
+    assert p.read() == expected
+    p.verify_schema()
+
+
+def test_transaction_rollback_preserves_graph(projection):
+    before = projection.read()
+    with pytest.raises(RuntimeError):
+        with projection.driver.session(write=True) as s, s.begin_transaction() as tx:
+            tx.run('CREATE (:Subject {id:$id})', id='rollback-only').consume()
+            raise RuntimeError('TEST_ONLY_ROLLBACK')
+    assert projection.read() == before
+
+
+def test_orphan_and_id_rejection_before_write(projection):
+    from data_sync_etl.domain.graph_contract import GraphSnapshot
+    before = projection.read()
+    with pytest.raises(GraphContractError):
+        GraphSnapshot(frozenset({('Subject', '')}), frozenset())
+    with pytest.raises(GraphContractError):
+        GraphSnapshot(frozenset(), frozenset({('ContentUnit', 'missing', 'HAS_CHILD', 'ContentUnit', 'missing2')}))
+    assert projection.read() == before
+
+
+def test_empty_input_is_non_destructive_and_business_ids_are_parameters(projection):
+    from data_sync_etl.domain.graph_contract import GraphSnapshot
+    before = projection.read()
+    projection.merge(GraphSnapshot(frozenset(), frozenset()))
+    assert projection.read() == before
+    weird = "x'\"})-[:ANY]->(x)"
+    snapshot = GraphSnapshot(frozenset({('Subject', weird)}), frozenset())
+    with projection.driver.session(write=True) as s, s.begin_transaction() as tx:
+        projection.merge(snapshot, tx=tx)
+        assert ('Subject', weird) in projection.read(tx=tx).nodes
+        tx.rollback()
+    assert projection.read() == before
+
+
+@pytest.mark.parametrize('cypher', [
+    'CREATE (:Unexpected {id:"invalid"})',
+    'CREATE (:Subject {id:"unexpected-prop", title:"not allowed"})',
+    'MATCH (a:ContentUnit),(b:ContentUnit) WITH a,b LIMIT 1 CREATE (a)-[:UNKNOWN]->(b)',
+    'MATCH (a:ContentUnit),(b:ContentUnit) WITH a,b LIMIT 1 CREATE (a)-[:HAS_CHILD {x:1}]->(b)',
+])
+def test_extra_label_property_relation_rejected(projection, cypher):
+    with projection.driver.session(write=True) as s, s.begin_transaction() as tx:
+        tx.run(cypher).consume()
+        with pytest.raises(GraphContractError):
+            projection.read(tx=tx)
+        tx.rollback()
+
+
+def test_projector_full_delta_noop_rollback_and_ownership(projection, tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from data_sync_etl.application.graph_sync import GraphSynchronizer
+    from data_sync_etl.domain.graph_contract import GraphSnapshot
+
+    original = build_snapshot(graph_tables())
+    assert projection.read() == original  # Dedicated test container, known fixture.
+    reader = SimpleNamespace(read=lambda: original)
+    sync = GraphSynchronizer(reader, projection, tmp_path)
+    assert sync.sync()['status'] == 'MATCH'
+    with pytest.raises(GraphContractError, match='GRAPH_NONEMPTY_OWNERSHIP_UNPROVEN'):
+        sync.claim_empty()
+    with pytest.raises(GraphContractError, match='GRAPH_OWNERSHIP_UNPROVEN'):
+        sync.sync(apply=True)
+    # Test-only attestation of this known fixture, never used on live data.
+    identity = sync._identity()
+    sync._receipt(identity).write_text(json.dumps(identity), encoding='utf-8')
+    monkeypatch.setattr(projection.driver.settings, 'neo4j_sync_enabled', True)
+    assert sync.sync(apply=True)['writes'] == 0
+    t = graph_tables()
+    t['content_units'][1]['parent_unit_id'] = None
+    t['resource_subjects'] = []
+    t['subjects'].append(dict(id='new-test-subject', grade_id=None))
+    changed = build_snapshot(t)
+    reader.read = lambda: changed
+    assert sync.sync(apply=False)['status'] == 'DIFF'
+    with pytest.raises(GraphContractError, match='GRAPH_SNAPSHOT_CHANGED'):
+        sync.sync(apply=True, expected_fingerprint='wrong')
+    assert projection.read() == original
+    merge = projection.merge
+
+    def fail_after_merge(*args, **kwargs):
+        merge(*args, **kwargs)
+        raise RuntimeError('SIMULATED_INTERRUPTION')
+
+    with monkeypatch.context() as m:
+        m.setattr(projection, 'merge', fail_after_merge)
+        with pytest.raises(RuntimeError):
+            sync.sync(apply=True)
+    assert projection.read() == original
+    report = sync.sync(apply=True, expected_fingerprint=changed.fingerprint)
+    assert report['status'] == 'MATCH' and report['writes'] > 0
+    assert projection.read() == changed
+    assert sync.sync(apply=True)['writes'] == 0
+    reader.read = lambda: GraphSnapshot(frozenset(), frozenset())
+    assert sync.sync(apply=True)['status'] == 'MATCH'
+    assert not projection.read().nodes
+    reader.read = lambda: original
+    sync.sync(apply=True)
+    assert projection.read() == original
+
+
+def test_cli_bootstrap_dry_run_apply_diff_and_noop(projection, tmp_path, monkeypatch, capsys):
+    import json
+    from types import SimpleNamespace
+
+    from data_sync_etl.adapters.persistence.graph_snapshot import verify_bag_roots
+    from data_sync_etl.application.graph_sync import GraphSynchronizer
+    from data_sync_etl.cli import graph as cli
+    from data_sync_etl.domain.graph_contract import GraphSnapshot
+
+    expected = build_snapshot(graph_tables())
+    assert projection.read() == expected
+    settings = projection.driver.settings.model_copy(update={
+        'database_url':'sqlite://', 'neo4j_state_dir':tmp_path, 'neo4j_sync_enabled':True})
+    sync = GraphSynchronizer(SimpleNamespace(read=lambda: expected), projection, tmp_path)
+    identity = sync._identity()
+    sync._receipt(identity).write_text(json.dumps(identity), encoding='utf-8')
+    # Clear only the owned, isolated test fixture via normal reconcile.
+    sync.reader = SimpleNamespace(read=lambda: GraphSnapshot(frozenset(), frozenset()))
+    old_flag = projection.driver.settings.neo4j_sync_enabled
+    projection.driver.settings.neo4j_sync_enabled = True
+    sync.sync(apply=True)
+    projection.driver.settings.neo4j_sync_enabled = old_flag
+    monkeypatch.setattr(cli, 'MasterGraphReader', lambda *a, **kw: SimpleNamespace(read=lambda: expected))
+    monkeypatch.setattr(cli, 'coverage', lambda s, snap: verify_bag_roots(snap, [
+        {'_id':'master-root', 'resource_version_id':'master-v2'}]))
+    assert cli.run(SimpleNamespace(command='graph-sync', apply=True), settings=settings) == 1
+    assert 'GRAPH_FRESH_DRY_RUN_REQUIRED' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-sync', apply=False, dry_run=True), settings=settings) == 0
+    assert '"missing_nodes": 8' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-diff'), settings=settings) == 1
+    assert '"status": "DIFF"' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-sync', apply=True), settings=settings) == 0
+    assert '"status": "MATCH"' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-sync', apply=True), settings=settings) == 0
+    assert '"writes": 0' in capsys.readouterr().out
+    assert cli.run(SimpleNamespace(command='graph-diff'), settings=settings) == 0
+    assert '"missing_edges": 0' in capsys.readouterr().out
+    assert projection.read() == expected
+
+
+def test_resolver_returns_only_requested_business_ids_and_relationships(projection):
+    from data_sync_etl.adapters.neo4j.resolver import Neo4jResolver
+    result = Neo4jResolver(projection.driver).resolve(['master-root', 'derived-leaf'])
+    assert result == [
+        dict(content_unit_id=key, resource_version_id='master-v2', resource_id='master-resource',
+             subject_ids=['master-subject'], grade_ids=['master-grade'])
+        for key in ['derived-leaf', 'master-root']]
+    assert Neo4jResolver(projection.driver).resolve(['not-in-graph']) == []

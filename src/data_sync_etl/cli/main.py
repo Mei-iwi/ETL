@@ -18,6 +18,17 @@ class SafeArgumentParser(argparse.ArgumentParser):
 def parser():
     root = SafeArgumentParser(description="Standalone Data Sync + ETL")
     commands = root.add_subparsers(dest="command", required=True)
+    graph_preflight = commands.add_parser('graph-preflight', help='Private graph connectivity; never initializes data implicitly')
+    graph_preflight.add_argument('--claim-empty', action='store_true', help='Record local ownership only if graph is empty')
+    graph_sync = commands.add_parser('graph-sync', help='Read-only MASTER scan; graph-only apply with verified ownership')
+    graph_sync.add_argument('--full', action='store_true', required=True)
+    graph_action = graph_sync.add_mutually_exclusive_group(required=True)
+    graph_action.add_argument('--dry-run', action='store_true')
+    graph_action.add_argument('--apply', action='store_true')
+    commands.add_parser('graph-diff', help='Exact graph versus MASTER parity; nonzero on drift')
+    commands.add_parser('graph-status', help='Private operator graph counts, no business IDs')
+    graph_worker = commands.add_parser('run-graph-worker', help='Independent full anti-entropy; no OCR/Sync transaction coupling')
+    graph_worker.add_argument('--once', action='store_true')
     sync = commands.add_parser("sync-master")
     sync.add_argument(
         "--stream", choices=["all", "resources", "users", "grades", "subjects"], default="all"
@@ -210,7 +221,8 @@ def dispatch(container, args):
         raise DomainError('MONGO_METADATA_APPLY_REQUIRES_DEV')
     match args.command:
         case "sync-master":
-            return container.sync.run(args.stream, args.full, source_id=args.source_id)
+            options = {'source_id': args.source_id} if args.source_id is not None else {}
+            return container.sync.run(args.stream, args.full, **options)
         case 'reconcile-master':
             return container.reconcile_master.run(args.stream, apply=args.apply, fingerprint=args.fingerprint)
         case 'project-master-mongo':
@@ -257,8 +269,12 @@ def main():
     args = parser().parse_args()
     container = None
     try:
+        if args.command in {'graph-preflight', 'graph-sync', 'graph-diff', 'graph-status', 'run-graph-worker'}:
+            from data_sync_etl.cli.graph import run
+            return run(args)
         if args.command == 'validate-source-ocr-contract':
             from pathlib import Path
+
             from data_sync_etl.domain.source_ocr_contract import SourceOCRContract
             path = Path(args.file)
             with path.open('rb') as stream:

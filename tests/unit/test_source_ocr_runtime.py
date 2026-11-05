@@ -18,12 +18,11 @@ from source_ocr_fakes import Content, MemoryUow, SourceEngine
 
 from data_sync_etl import composition
 from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
-from data_sync_etl.adapters.source import postgresql_ocr_write
+from data_sync_etl.adapters.source import postgresql_ocr_write, source_ocr_runtime
 from data_sync_etl.adapters.source.postgresql_ocr_queue import JOB_FIELDS, TASK_FIELDS
 from data_sync_etl.adapters.source.registry import ConfiguredSourceRegistry
+from data_sync_etl.adapters.source.source_ocr_runtime import stable_id
 from data_sync_etl.api import routes
-from data_sync_etl.application import source_ocr_runtime
-from data_sync_etl.application.source_ocr_runtime import stable_id
 from data_sync_etl.config import Settings
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.search_access import SearchAccess

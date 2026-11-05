@@ -13,10 +13,13 @@ param(
     [switch]$Media,
     [switch]$RemoteDatabase,
     [switch]$SourceNeon,
+    [switch]$Graph,
+    [switch]$GraphServices,
     [ValidateSet('legacy','auth','auth-tls','db-auth','db-auth-tls')][string]$AuthProfile = 'auth',
     [switch]$AcceptModelLicense
 )
 $ErrorActionPreference = 'Stop'
+if ($GraphServices) { $Graph = $true }
 if ($RemoteDatabase -and $SourceNeon) { throw 'SourceNeon and RemoteDatabase are mutually exclusive.' }
 $deployDir = Split-Path -Parent $PSScriptRoot
 if (-not $EnvFile) { $EnvFile = $env:ETL_DOCKER_ENV_FILE }
@@ -36,7 +39,7 @@ foreach ($line in Get-Content -LiteralPath $EnvFile) {
         $mediaEnabled = $Matches[1]
     }
     if ($line -match '^\s*DATABASE_MODE\s*=') {
-        if ($line -notmatch '^\s*DATABASE_MODE\s*=\s*["'']?(same-host|remote|source-neon|neon-atlas)["'']?\s*(?:#.*)?$') { throw 'Invalid DATABASE_MODE in Docker env file.' }
+        if ($line -notmatch '^\s*DATABASE_MODE\s*=\s*["'']?(same-host|remote|source-neon|neon-atlas|neon-native-mongo)["'']?\s*(?:#.*)?$') { throw 'Invalid DATABASE_MODE in Docker env file.' }
         $databaseMode = $Matches[1]
     }
     if ($line -match '^\s*SOURCE_DRIVE_ENABLED\s*=') {
@@ -51,7 +54,8 @@ foreach ($line in Get-Content -LiteralPath $EnvFile) {
     }
 }
 if ($env:DATABASE_MODE) { $databaseMode = $env:DATABASE_MODE }
-if ($databaseMode -notin @('same-host','remote','source-neon','neon-atlas')) { throw 'Invalid DATABASE_MODE.' }
+if ($databaseMode -notin @('same-host','remote','source-neon','neon-atlas','neon-native-mongo')) { throw 'Invalid DATABASE_MODE.' }
+if ($databaseMode -eq 'neon-native-mongo' -and ($RemoteDatabase -or $SourceNeon)) { throw 'Database switch conflicts with native Mongo profile.' }
 if ($databaseMode -eq 'neon-atlas' -and ($RemoteDatabase -or $SourceNeon)) { throw 'Database switch conflicts with neon-atlas profile.' }
 if (($RemoteDatabase -and $databaseMode -eq 'source-neon') -or ($SourceNeon -and $databaseMode -eq 'remote')) { throw 'Database switch conflicts with DATABASE_MODE.' }
 if ($databaseMode -eq 'source-neon') { $SourceNeon = $true }
@@ -73,6 +77,7 @@ if ($Drive) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.drive.yml'))
 if ($RemoteDatabase) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.remote-db.yml')) }
 if ($SourceNeon) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.source-neon.yml')) }
 if ($databaseMode -eq 'neon-atlas') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.neon-atlas.yml')) }
+if ($databaseMode -eq 'neon-native-mongo') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.neon-native-mongo.yml')) }
 if ($sourceWriteOverrideFile) {
     if (-not (Test-Path -LiteralPath $sourceWriteOverrideFile -PathType Leaf)) {
         throw 'SOURCE_WRITE_COMPOSE_OVERRIDE_FILE does not exist.'
@@ -82,6 +87,8 @@ if ($sourceWriteOverrideFile) {
 if ($AuthProfile -like 'db-auth*') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.db-auth.yml')) }
 elseif ($AuthProfile -ne 'legacy') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth.yml')) }
 if ($AuthProfile -in @('auth-tls','db-auth-tls')) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth-tls.yml')) }
+if ($Graph) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.graph-app.yml')) }
+if ($GraphServices) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.graph-workers.yml'),'--profile','graph-services') }
 function Invoke-Docker([string[]]$Arguments) {
     & docker @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Docker operation failed; inspect sanitized service status.' }
@@ -99,7 +106,11 @@ function Test-Deployment {
     Invoke-Docker ($composeArgs + @('--profile','ops','run','--rm','--no-deps','preflight'))
 }
 switch ($Action) {
-    Build { Invoke-Docker ($composeArgs + @('build','api','frontend')) }
+    Build {
+        $buildServices = @('api','frontend')
+        if ($GraphServices) { $buildServices += @('users-refresh-worker','graph-worker') }
+        Invoke-Docker ($composeArgs + @('build') + $buildServices)
+    }
     Network {
         & docker network inspect $NetworkName *> $null
         if ($LASTEXITCODE -ne 0) { Invoke-Docker @('network','create',$NetworkName) }
@@ -109,6 +120,7 @@ switch ($Action) {
         Test-Deployment
         if ($Workers) { Invoke-Docker ($composeArgs + @('--profile','workers','up','-d','--no-build','api','frontend','master-sync-worker','source-file-worker','ocr-worker','reconciliation-worker')) }
         else { Invoke-Docker ($composeArgs + @('up','-d','--no-build','api','frontend')) }
+        if ($GraphServices) { Invoke-Docker ($composeArgs + @('up','-d','--no-build','--no-deps','users-refresh-worker','graph-worker')) }
         Write-Output "Application started with profile: $AuthProfile. Inspect health and acceptance report."
     }
     Status { Invoke-Docker ($composeArgs + @('--profile','workers','ps')) }

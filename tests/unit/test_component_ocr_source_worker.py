@@ -12,8 +12,8 @@ from data_sync_etl.adapters.persistence.component_ocr_outbox import (
     component_metadata,
     component_tables,
 )
-from data_sync_etl.application.component_ocr_postprocess import ComponentOCRPostprocessor
-from data_sync_etl.application.component_ocr_source import ComponentOCRSourceBridge
+from data_sync_etl.adapters.processing.component_ocr_postprocess import ComponentOCRPostprocessor
+from data_sync_etl.adapters.processing.component_ocr_source import ComponentOCRSourceBridge
 from data_sync_etl.domain.core import DomainError, normalize_text
 from data_sync_etl.workers.ocr import OCRWorker
 from tests.unit.test_component_ocr_stores import FakeDatabase

@@ -124,17 +124,31 @@ def test_probe_empty_page_is_valid_but_missing_or_corrupt_is_not():
     assert probe_ocr(**(args | {'expected_hash': 'c' * 64}), pages={}).status == 'STALE'
 
 
-def test_migration_creates_only_three_tables_on_isolated_database():
+@pytest.mark.parametrize('approval', [None, 'unapproved'])
+def test_disabled_migration_preserves_master_0020(approval, monkeypatch):
+    # MASTER-only deployment explicitly retired the experimental 0021 schema.
+    # Protect the same isolation/no-unintended-DDL requirement at revision0020
+    # instead of requiring the disabled migration to create undeployed tables.
+    from conftest import migrate
+
+    if approval is None:
+        monkeypatch.delenv('ETL_APPROVE_COMPONENT_OCR_0021', raising=False)
+    else:
+        monkeypatch.setenv('ETL_APPROVE_COMPONENT_OCR_0021', approval)
     path = Path(__file__).parents[2] / 'alembic/versions/0021_component_ocr_read_models.py'
     spec = importlib.util.spec_from_file_location('isolated_ocr_migration', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     engine = create_engine('sqlite:///:memory:')
+    migrate(engine, revision='0020')
     with engine.begin() as conn, Operations.context(MigrationContext.configure(conn)):
-        module.upgrade()
-        assert set(inspect(conn).get_table_names()) == {
-            'master_component_ocr_jobs', 'master_component_ocr_pages', 'master_component_content_units'
-        }
-        with pytest.raises(RuntimeError, match='data-preserving rollback'):
+        before = set(inspect(conn).get_table_names())
+        with pytest.raises(RuntimeError, match='Revision 0021 is disabled'):
+            module.upgrade()
+        assert set(inspect(conn).get_table_names()) == before
+        assert not {'master_component_ocr_jobs', 'master_component_ocr_pages',
+                    'master_component_content_units'}.intersection(before)
+        with pytest.raises(RuntimeError, match='transactional PostgreSQL MASTER'):
             module.downgrade()
+        assert set(inspect(conn).get_table_names()) == before
     engine.dispose()

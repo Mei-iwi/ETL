@@ -14,7 +14,7 @@ WORKERS = {'run-master-sync-worker': 'master-sync', 'run-source-file-worker': 's
 SOURCE_CA_FILE = Path('/run/secrets/source-database-ca.pem')
 
 
-def validate_source_neon(values, *, atlas=False):
+def validate_source_neon(values, *, atlas=False, native=False):
     """Remote SOURCE only; local service names cannot hide other remote databases."""
     source = urlsplit(values['SOURCE_DATABASE_URL'])
     query = parse_qs(source.query, keep_blank_values=True)
@@ -46,6 +46,13 @@ def validate_source_neon(values, *, atlas=False):
             raise ValueError('SOURCE_NEON_ATLAS_TLS_REQUIRED')
         if values['MONGO_DATABASE'] != 'etl_content':
             raise ValueError('SOURCE_NEON_ATLAS_DATABASE_REQUIRED')
+    elif native:
+        if (mongo.scheme != 'mongodb' or mongo.hostname != 'host.docker.internal'
+                or mongo.port != 27017 or ',' in mongo.netloc
+                or mongo.username is not None or mongo.password is not None
+                or mongo.query or mongo.path not in ('', '/')
+                or values['MONGO_DATABASE'] != 'etl_content'):
+            raise ValueError('SOURCE_NEON_NATIVE_MONGO_REQUIRED')
     elif mongo.scheme != 'mongodb' or mongo.hostname != 'mongo' or ',' in mongo.netloc:
         raise ValueError('SOURCE_NEON_MONGO_LOCAL_REQUIRED')
 
@@ -89,7 +96,7 @@ def load_connections():
     if 'SOURCE_MIGRATION_DATABASE_URL' in os.environ:
         raise ValueError('SOURCE_MIGRATION_CREDENTIAL_FORBIDDEN')
     mode = os.environ.get('ETL_DATABASE_MODE', 'same-host')
-    if mode not in ('same-host', 'remote', 'source-neon', 'neon-atlas'):
+    if mode not in ('same-host', 'remote', 'source-neon', 'neon-atlas', 'neon-native-mongo'):
         raise ValueError('DATABASE_MODE_INVALID')
     for key in ('DATABASE_URL', 'SOURCE_DATABASE_URL', 'MONGO_URI'):
         url = urlsplit(values[key])
@@ -101,8 +108,8 @@ def load_connections():
                 raise ValueError('REMOTE_POSTGRES_TLS_REQUIRED')
             if key == 'MONGO_URI' and (query.get('tls') != ['true'] or any(k.lower().startswith(('tlsallowinvalid', 'tlsinsecure')) for k in query)):
                 raise ValueError('REMOTE_MONGO_TLS_REQUIRED')
-    if mode in ('source-neon', 'neon-atlas'):
-        validate_source_neon(values, atlas=mode == 'neon-atlas')
+    if mode in ('source-neon', 'neon-atlas', 'neon-native-mongo'):
+        validate_source_neon(values, atlas=mode == 'neon-atlas', native=mode == 'neon-native-mongo')
     os.environ.update(values)
 
 
@@ -135,7 +142,8 @@ def verify_runtime(role):
 def health_worker():
     marker = Path(os.environ.get('ETL_WORKER_HEARTBEAT_FILE', '/run/etl/worker-heartbeat.json'))
     data = json.loads(marker.read_text(encoding='utf-8'))
-    if data['role'] != os.environ['ETL_SERVICE_ROLE'] or time.time() - marker.stat().st_mtime > 450:
+    maximum_age = int(os.environ.get('ETL_WORKER_HEARTBEAT_MAX_AGE_SECONDS', '450'))
+    if maximum_age < 1 or data['role'] != os.environ['ETL_SERVICE_ROLE'] or time.time() - marker.stat().st_mtime > maximum_age:
         raise ValueError('WORKER_HEARTBEAT_STALE')
     os.kill(int(data['pid']), 0)
 
@@ -225,6 +233,21 @@ def main():
             verify_runtime('reconciliation')
             os.environ['RECONCILIATION_WORKER_HEARTBEAT_FILE'] = '/run/etl/worker-heartbeat.json'
             os.execvp('python', ['python', '-m', 'data_sync_etl.workers.reconciliation'])
+        if action == 'graph-services-worker' and len(sys.argv) == 3:
+            command = sys.argv[2]
+            if command not in ('run-users-refresh-worker', 'run-graph-worker'):
+                raise ValueError('CONTAINER_ACTION_NOT_ALLOWED')
+            role = 'users-refresh' if command == 'run-users-refresh-worker' else 'graph'
+            verify_runtime(role)
+            os.environ['ETL_SERVICE_ROLE'] = role
+            os.environ['ETL_WORKER_HEARTBEAT_FILE'] = '/run/etl/worker-heartbeat.json'
+            arguments = ['python', '-m', 'data_sync_etl.cli', command]
+            if role == 'users-refresh':
+                source_id = os.environ.get('USERS_REFRESH_SOURCE_ID', '').strip()
+                if not source_id:
+                    raise ValueError('SOURCE_ID_REQUIRED')
+                arguments += ['--source-id', source_id]
+            os.execvp('python', arguments)
         if action == 'worker' and len(sys.argv) == 3 and sys.argv[2] in WORKERS:
             command = sys.argv[2]
             role = WORKERS[command]

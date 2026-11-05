@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { extname, join, resolve, sep } from 'node:path'
+import { tmpdir } from 'node:os'
 import test from 'node:test'
 import { searchResponse } from './helpers/searchResponses.mjs'
 
@@ -17,8 +18,7 @@ test('focus preserves an in-flight search for the same verified user; expiry sti
     timeout: 90000, skip: !existsSync(executable) || (!dev && !existsSync(join(dist, 'index.html'))),
 }, async () => {
     const vite = dev ? await (await import('vite')).createServer({ configFile: false, root: resolve('.'),
-        cacheDir: await mkdtemp(resolve('../.test-tmp/vite-focus-deps-')),
-        cacheDir: await mkdtemp(resolve('../.test-tmp/vite-focus-deps-')),
+        cacheDir: await mkdtemp(join(tmpdir(), 'etl-vite-focus-deps-')),
         plugins: [(await import('@vitejs/plugin-react')).default()], appType: 'spa',
         server: { middlewareMode: true, hmr: false } }) : null
     let postCount = 0, authChecks = 0, expired = false, release
@@ -53,7 +53,7 @@ test('focus preserves an in-flight search for the same verified user; expiry sti
     })
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     const origin = `http://127.0.0.1:${server.address().port}`
-    const directory = await mkdtemp(resolve('../.test-tmp/search-focus-browser-'))
+    const directory = await mkdtemp(join(tmpdir(), 'etl-search-focus-browser-'))
     const browser = spawn(executable, ['--headless=new', '--no-first-run', '--disable-extensions', '--disable-gpu',
         '--remote-debugging-port=0', `--user-data-dir=${directory}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' })
     let ws, sequence = 0

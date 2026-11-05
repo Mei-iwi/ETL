@@ -9,6 +9,7 @@ from sqlalchemy.engine import make_url
 from data_sync_etl.adapters.bge_m3 import BgeM3Embedding
 from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
 from data_sync_etl.adapters.extraction import NativeDocumentExtractor
+from data_sync_etl.adapters.live_metadata_embedding import LiveMetadataEmbedding
 from data_sync_etl.adapters.media import MediaExtractor, local_model_task, probe
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
 from data_sync_etl.adapters.mongo.foundation_store import (
@@ -237,6 +238,12 @@ def create_source_object_reader(settings):
 
 class Container:
     def close(self):
+        if getattr(self, 'related_learning', None) is not None:
+            self.related_learning.close()
+        if getattr(self, 'graph_advisor', None) is not None:
+            self.graph_advisor.close()
+        if getattr(self, 'graph_driver', None) is not None:
+            self.graph_driver.close()
         if hasattr(self, 'reconciliation_jobs'):
             self.reconciliation_jobs.close()
         source = getattr(self, 'source', None)
@@ -273,7 +280,7 @@ class Container:
         if component_projection_worker is not None:
             raise DomainError('BLOCKED_LEGACY_COMPONENT_PROJECTION')
         if self.settings.ocr_component_pipeline_enabled:
-            from data_sync_etl.application.source_ocr_runtime import load_source_ocr_contract
+            from data_sync_etl.adapters.source.source_ocr_runtime import load_source_ocr_contract
             source_ocr_contract = load_source_ocr_contract(self.settings)
         if self.settings.master_mongo_identity_projection and (
                 self.settings.app_environment not in ('development', 'test')
@@ -588,12 +595,37 @@ class Container:
 
         self.metadata_search = (MetadataSearchService(
             self.uow, self.metadata_documents, MongoMetadataIndex(mongo_database),
-            self.semantic.embedding, self.settings) if self.semantic is not None else None)
+            self.semantic.embedding, self.settings,
+            live_embedding=LiveMetadataEmbedding(self.indexing.embedding)) if self.semantic is not None else None)
         self.master_sync_worker.metadata_refresh = MetadataRefresh(self.metadata_search, self.settings, self.semantic)
         # Attest only the fixed LocalSentenceEmbedding used by HTTP Search.
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
                                     query_cache_runtime=self.indexing.embedding, semantic=self.semantic,
                                     metadata=self.metadata_search)
+        if self.metadata_search is not None:
+            from data_sync_etl.adapters.exact_text_vectors import ExactTextVectors
+            from data_sync_etl.application.normalized_search import NormalizedContentSearch
+            self.search.normalized_search = NormalizedContentSearch(
+                self.search, ExactTextVectors(self.metadata_search.live_embedding,
+                    cache_file=self.settings.search_normalized_vector_cache_file))
+        self.graph_driver = self.graph_advisor = self.related_learning = None
+        if self.settings.neo4j_enabled and (self.settings.neo4j_search_enabled
+                or self.settings.neo4j_related_mode in ('shadow', 'active')):
+            from data_sync_etl.adapters.neo4j.driver import GraphDriver
+            from data_sync_etl.adapters.neo4j.resolver import Neo4jResolver
+            from data_sync_etl.adapters.persistence.graph_mapping import PostgresGraphMapping
+            from data_sync_etl.application.graph_search import GraphSearchAdvisor
+            self.graph_driver = GraphDriver(self.settings)  # Lazy: no startup connection.
+            if self.settings.neo4j_search_enabled:
+                self.graph_advisor = GraphSearchAdvisor(Neo4jResolver(self.graph_driver),
+                    PostgresGraphMapping(self.engine, self.settings.neo4j_query_timeout_seconds), self.settings)
+                self.search.graph_advisor = self.graph_advisor
+            from data_sync_etl.adapters.persistence.related_learning import RelatedLearningAuthority
+            from data_sync_etl.application.related_learning import RelatedLearning
+            self.related_learning = RelatedLearning(Neo4jResolver(self.graph_driver),
+                RelatedLearningAuthority(self.uow, self.search,
+                    PostgresGraphMapping(self.engine, self.settings.neo4j_query_timeout_seconds),
+                    self.settings), self.settings)
         self.source_resolution.content_authorizer = self.search.file_version
         # No live adapter can attest all PG/Mongo/provider writers yet. A flag
         # alone must never mint authority or enable stale result replay.
@@ -677,7 +709,7 @@ class Container:
         self.ocr.resolver = self.source_resolver
         self.source_ocr_engine = None
         if self.settings.ocr_component_pipeline_enabled:
-            from data_sync_etl.application.source_ocr_runtime import wire_source_ocr
+            from data_sync_etl.adapters.source.source_ocr_runtime import wire_source_ocr
             try:
                 wire_source_ocr(self, source_ocr_contract, _source_writer_database_url(self.settings))
             except Exception:

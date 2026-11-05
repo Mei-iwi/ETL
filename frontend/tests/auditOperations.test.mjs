@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import vm from 'node:vm'
 import { queueAudit, getAuditJobs, getDiscrepancies, getLatestReconciliationReport, getFileEvidence } from '../src/services/reconciliationApi.ts'
-import { auditJobLabel, auditViewJobs, metadataMatchLabel, sha256CoverageLabel } from '../src/pages/system/reconciliationDisplay.ts'
+import { auditJobLabel, auditViewJobs, fileScanProgressLabel, metadataMatchLabel, sha256CoverageLabel } from '../src/pages/system/reconciliationDisplay.ts'
 import { startVisiblePolling } from '../src/pages/system/visiblePolling.ts'
 
 test('all audit actions use queue endpoints with exact scope and no file repair', async t => {
@@ -120,7 +120,7 @@ function render(overrides = {}, apiOverrides = {}) {
         }
         if (name.includes('reconciliationDisplay')) return {
             auditJobInProgress: job => ['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(job.status),
-            auditJobLabel, auditViewJobs, metadataMatchLabel, sha256CoverageLabel,
+            auditJobLabel, auditViewJobs, fileScanProgressLabel, metadataMatchLabel, sha256CoverageLabel,
             auditSummary: () => ({ unverified: 0, hashPending: 0, onlyHashPending: false, observedBytes: null, observedFiles: 0 }),
             formatAuditBytes: () => '—', pendingHash: () => false,
         }
@@ -214,7 +214,7 @@ test('latest LIGHT and retained SHA coverage render separately without changing 
     const light = { job_id: 'light', audit_type: 'LIGHT', stream: 'files', status: 'PARTIAL', progress: {}, created_at: '2026-10-28T01:00:00Z' }
     const deep = { ...light, job_id: 'deep', audit_type: 'DEEP', status: 'COMPLETED' }
     const coverage = { total_files: 38, recent_sha256_evidence_count: 38, not_verified_count: 0, mismatched: 0 }
-    const view = render({ 6: 'files', 12: 'FULL', 15: deep, 16: coverage, 17: light }, {
+    const view = render({ 6: 'files', 12: 'FULL', 15: deep, 16: deep, 17: coverage, 18: light }, {
         getAuditJobs: async () => ({ items: [light, deep] }),
         getAuditCoverage: async () => coverage,
     })
@@ -225,15 +225,15 @@ test('latest LIGHT and retained SHA coverage render separately without changing 
     assert.match(html, /38\/38 tệp \(100%\)/)
     assert.match(html, /value="FULL" selected/)
     await view.callbacks[0]()
-    assert.equal(view.updates.get(16), coverage)
-    assert.equal(view.updates.get(17), light)
+    assert.equal(view.updates.get(17), coverage)
+    assert.equal(view.updates.get(18), light)
     assert.equal(view.updates.has(12), false)
 })
 
 test('missing optional coverage and partial evidence never invent full repository verification', () => {
     for (const coverage of [null, {}, { total_files: 2, recent_sha256_evidence_count: 1 },
         { total_files: 2, recent_sha256_evidence_count: 0, mismatched: 1, not_verified_count: 2 }]) {
-        const html = renderToStaticMarkup(render({ 6: 'files', 16: coverage }).tree)
+        const html = renderToStaticMarkup(render({ 6: 'files', 17: coverage }).tree)
         assert.match(html, /Độ bao phủ SHA-256/)
         assert.doesNotMatch(html, /100%/)
     }

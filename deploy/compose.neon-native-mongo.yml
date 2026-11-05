@@ -1,0 +1,18 @@
+# Existing SOURCE Neon, Docker MASTER, native Windows MongoDB (no Mongo container).
+# Windows Mongo listens on loopback; Docker Desktop reaches it through its host
+# gateway. Do not change mongod bindIp to 0.0.0.0 or expose an unauthenticated LAN port.
+services:
+  api: &neon-native-mongo
+    environment:
+      ETL_DATABASE_MODE: neon-native-mongo
+    secrets:
+      - source: source-database-ca
+        target: source-database-ca.pem
+  master-sync-worker: *neon-native-mongo
+  source-file-worker: *neon-native-mongo
+  ocr-worker: *neon-native-mongo
+  reconciliation-worker: *neon-native-mongo
+  preflight: *neon-native-mongo
+secrets:
+  source-database-ca:
+    file: ${SOURCE_DATABASE_CA_FILE:?Set SOURCE_DATABASE_CA_FILE to the trusted Neon CA bundle}

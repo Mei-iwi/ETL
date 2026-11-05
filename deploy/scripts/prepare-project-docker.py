@@ -4,12 +4,14 @@ Run with the project virtualenv at the repository root. This only writes
 configuration/secret files; it never migrates databases or changes contracts.
 Existing database network is etl-master-only_default (MASTER-only Compose).
 """
-from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import json
 import shutil
+from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 import yaml
 from dotenv import dotenv_values
+
 from data_sync_etl.config import Settings
 
 root = Path(__file__).resolve().parents[2]
@@ -31,10 +33,17 @@ def linux_url(value):
         query['sslrootcert'] = '/run/secrets/source-database-ca.pem'
     return urlunsplit(url._replace(query=urlencode(query)))
 
+mongo_url = urlsplit(settings.mongo_uri)
+native_mongo = (mongo_url.scheme == 'mongodb' and mongo_url.hostname in ('127.0.0.1', 'localhost')
+                and mongo_url.port == 27017)
+container_mongo_uri = (urlunsplit(mongo_url._replace(netloc='host.docker.internal:27017'))
+                       if native_mongo else settings.mongo_uri)
+if native_mongo and (mongo_url.username or mongo_url.password or mongo_url.query):
+    raise ValueError('NATIVE_MONGO_CONNECTION_OPTIONS_UNSUPPORTED')
 connections = {
     'DATABASE_URL': str(settings.database_url).replace('@127.0.0.1:5434/', '@master-postgres:5432/'),
     'SOURCE_DATABASE_URL': linux_url(str(settings.source_database_url)),
-    'MONGO_URI': settings.mongo_uri,
+    'MONGO_URI': container_mongo_uri,
     'MONGO_DATABASE': settings.mongo_database,
 }
 assert '@master-postgres:5432/' in connections['DATABASE_URL']
@@ -100,7 +109,8 @@ for key, target in credential_keys.items():
         if existing:
             env[target] = mount_secret('project_' + key.lower(), existing)
         continue
-    if key == 'SOURCE_WRITE_DATABASE_URL': value = linux_url(value)
+    if key == 'SOURCE_WRITE_DATABASE_URL':
+        value = linux_url(value)
     file = private / (key.lower() + '.secret')
     file.write_text(value, encoding='utf-8')
     env[target] = mount_secret('project_' + key.lower(), file)
@@ -132,8 +142,9 @@ for prefix in ['source_file_storage', 'etl_file_storage', 'source_storage_write'
     viewer_origins.add('https://' + authority)
 config['ETL_VIEWER_FRAME_ORIGINS'] = ' '.join(sorted(viewer_origins))
 config.update({
-    'APP_PROJECT': 'etl-app', 'BACKEND_IMAGE': 'etl-portable-backend:local',
-    'FRONTEND_IMAGE': 'etl-portable-frontend:local', 'DATABASE_MODE': 'neon-atlas',
+    'APP_PROJECT': 'etl-app', 'BACKEND_IMAGE': raw.get('BACKEND_IMAGE', 'etl-portable-backend:local'),
+    'FRONTEND_IMAGE': raw.get('FRONTEND_IMAGE', 'etl-portable-frontend:local'),
+    'DATABASE_MODE': 'neon-native-mongo' if native_mongo else 'neon-atlas',
     'ETL_DATA_NETWORK': 'etl-master-only_default', 'WEB_PORT': '8080',
     'CONNECTIONS_FILE': (private / 'connections.json').as_posix(),
     'SOURCE_DATABASE_CA_FILE': ca.as_posix(),
@@ -150,6 +161,25 @@ config.update({
     'API_MEMORY_LIMIT': '6g', 'OCR_MEMORY_LIMIT': '6g',
     'API_CPUS': raw.get('API_CPUS', '4'),
 })
+# Optional graph profile uses a separate secret/network. Never add it to the
+# four-key database connection file or inject it into OCR worker transactions.
+for key, default in {
+    'NEO4J_ENABLED': 'false', 'NEO4J_SEARCH_ENABLED': 'false',
+    'NEO4J_SEARCH_MODE': 'shadow', 'NEO4J_DATABASE': 'neo4j', 'NEO4J_USER': 'neo4j',
+    'NEO4J_URI_DOCKER': 'bolt://neo4j:7687',
+    'NEO4J_QUERY_TIMEOUT_SECONDS': '3', 'NEO4J_CONNECT_TIMEOUT_SECONDS': '5',
+    'NEO4J_SYNC_INTERVAL_SECONDS': '300',
+    'USERS_REFRESH_SOURCE_ID': 'postgresql',
+    'USERS_REFRESH_HEALTH_MAX_AGE_SECONDS': '80',
+    'GRAPH_WORKER_HEALTH_MAX_AGE_SECONDS': '420',
+    'GRAPH_SERVICES_IMAGE': 'etl-portable-backend:local',
+}.items():
+    config[key] = raw.get(key, default)
+graph_auth = Path(raw.get('NEO4J_AUTH_FILE', '../ETL_Secrets/neo4j/auth.secret'))
+if not graph_auth.is_absolute():
+    graph_auth = root / 'deploy' / graph_auth
+config['NEO4J_PASSWORD_SECRET_FILE'] = graph_auth.resolve().with_name('password.secret').as_posix()
+config['NEO4J_STATE_HOST_DIR'] = host(raw.get('NEO4J_STATE_HOST_DIR', '.local/neo4j')).as_posix()
 services = {}
 for name in ['api', 'master-sync-worker', 'source-file-worker', 'ocr-worker', 'reconciliation-worker', 'preflight']:
     per_env = {key: '${' + key + '}' for key in env if not key.startswith('AUTH_') and key != 'ADMIN_ENABLED'}
@@ -183,5 +213,6 @@ lines = ['# Private Docker configuration generated from the current authorized .
 for key,value in config.items():
     lines.append(key+'='+(str(value) if key=='SOURCE_WRITE_COMPOSE_OVERRIDE_FILE' else quoted(value)))
 (root/'docker.env').write_text('\n'.join(lines)+'\n',encoding='utf-8')
-print('Configured docker.env; project-private runtime mounts; Neon + Docker MASTER + Atlas.')
+print('Configured docker.env; project-private runtime mounts; Neon + Docker MASTER + '
+      + ('Windows native MongoDB.' if native_mongo else 'Atlas.'))
 print('Approved contracts copied by reference; credential values withheld.')

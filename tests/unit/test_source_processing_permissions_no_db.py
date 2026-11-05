@@ -40,7 +40,11 @@ def test_admin_and_granted_owner_can_process_without_publishing(publication):
         service(resource, version).authorize_source_processing_version('v1', access=access)
     assert resource['publication_status'] == publication
     if publication == 'DRAFT':
-        assert not metadata_allowed(resource, version, SearchAccess(scope='authenticated_admin', actor_id='admin'))
+        # The approved read policy permits ADMIN metadata, while processing
+        # never publishes the DRAFT or grants a stranger access.
+        assert metadata_allowed(resource, version, SearchAccess(scope='authenticated_admin', actor_id='admin'))
+        assert not metadata_allowed(resource, version, SearchAccess(scope='authenticated_user',
+            actor_id='stranger', owner_id='stranger', allow_public=True, allow_shared_unreviewed=True))
 
 
 @pytest.mark.parametrize('access', [

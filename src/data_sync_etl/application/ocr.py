@@ -3,7 +3,7 @@ from datetime import timedelta
 from functools import partial
 from types import SimpleNamespace
 
-from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
+from data_sync_etl.application.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.domain.core import DomainError, SourceFileError, job_terminal, new_id, now
 from data_sync_etl.domain.file_integrity import stream_hash
 from data_sync_etl.domain.format_validation import (

@@ -14,7 +14,7 @@ from data_sync_etl.adapters.persistence.component_ocr_outbox import (
     component_metadata,
     component_tables,
 )
-from data_sync_etl.application.component_ocr_page import ComponentOCRPageExecutor
+from data_sync_etl.adapters.processing.component_ocr_page import ComponentOCRPageExecutor
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.ports.processing import OCRResult
 from data_sync_etl.workers.ocr import OCRWorker

@@ -1,0 +1,5 @@
+# Explicit isolated integration overlay; use separate --project-name and env file.
+name: etl-neo4j-test
+networks:
+  graph:
+    name: etl-neo4j-test-graph

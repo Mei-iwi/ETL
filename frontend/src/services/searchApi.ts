@@ -86,6 +86,7 @@ const messages: Record<string, string> = {
     SEARCH_ACCESS_RESTRICTED: 'Truy cập tìm kiếm nội bộ bị hạn chế.',
     SEARCH_LIMIT_EXCEEDED: 'Kho dữ liệu vượt giới hạn. Hãy thu hẹp bộ lọc.',
     SEARCH_TIMEOUT: 'Tìm kiếm quá thời gian. Vui lòng thử lại.',
+    SEARCH_DATA_TIMEOUT: 'Dữ liệu tìm kiếm phản hồi chậm. Vui lòng thu hẹp bộ lọc hoặc thử lại sau.',
     SEARCH_MODEL_WARMUP_TIMEOUT: 'Chuẩn bị tìm kiếm quá thời gian. Vui lòng thử lại hoặc chọn BoW.',
     BLOCKED_EMBEDDING_RUNTIME: 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.',
     INVALID_EMBEDDING: 'Tìm kiếm theo ngữ nghĩa chưa sẵn sàng. Có thể chọn BoW.',

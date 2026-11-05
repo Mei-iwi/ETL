@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from data_sync_etl.application.processing_state import intake_status, projection_fingerprint
-from data_sync_etl.application.source_ocr_inventory import SourceOCRInventory
+from data_sync_etl.adapters.source.source_ocr_inventory import SourceOCRInventory
 from tests.unit.test_source_ocr_inventory import audit
 from tests.unit.test_source_ocr_namespace_scope import enable_proposed_scope
 from tests.unit.test_source_ocr_runtime import runtime as runtime

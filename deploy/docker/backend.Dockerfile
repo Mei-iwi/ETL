@@ -12,10 +12,12 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 ARG INSTALL_SEMANTIC=false
 ARG INSTALL_MEDIA=false
+ARG INSTALL_GRAPH=false
 RUN if [ "$INSTALL_SEMANTIC" = "true" ]; then \
       pip install -c constraints.semantic.txt '.[embeddings,semantic,google-drive]'; \
     else pip install -c constraints.txt '.[embeddings,google-drive]'; fi && \
     if [ "$INSTALL_MEDIA" = "true" ]; then pip install '.[media,translation]'; fi && \
+    if [ "$INSTALL_GRAPH" = "true" ]; then pip install '.[graph]'; fi && \
     pip check && pip freeze > /opt/venv/dependencies.txt
 
 FROM ${PYTHON_IMAGE} AS runtime

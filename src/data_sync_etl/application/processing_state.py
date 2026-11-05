@@ -1,6 +1,6 @@
 from hashlib import sha256
 
-from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
+from data_sync_etl.application.legacy_ocr_text import LegacyOCRText
 
 
 def projection_fingerprint(job_id: str, postprocess: dict) -> str:

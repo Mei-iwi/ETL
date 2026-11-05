@@ -1,0 +1,87 @@
+# Explicit opt-in. Starts neither API nor the four ordinary processing workers.
+# Requires the existing app/neon-atlas overlays and graph password secret.
+services:
+  users-refresh-worker:
+    image: ${GRAPH_SERVICES_IMAGE:-etl-portable-backend:local}
+    build:
+      args:
+        INSTALL_GRAPH: "true"
+    extends:
+      file: compose.app.yml
+      service: master-sync-worker
+    profiles: [graph-services]
+    command: [graph-services-worker, run-users-refresh-worker]
+    environment:
+      ETL_SERVICE_ROLE: users-refresh
+      ETL_DATABASE_MODE: ${DATABASE_MODE:-neon-atlas}
+      AUTH_MODE: master_users
+      AUTH_MASTER_FRESHNESS_SECONDS: ${AUTH_MASTER_FRESHNESS_SECONDS:-120}
+      SOURCE_FILE_STORAGE_MODE: local
+      USERS_REFRESH_SOURCE_ID: ${USERS_REFRESH_SOURCE_ID:-postgresql}
+      ETL_WORKER_HEARTBEAT_MAX_AGE_SECONDS: ${USERS_REFRESH_HEALTH_MAX_AGE_SECONDS:-80}
+      SOURCE_METADATA_WRITEBACK_ENABLED: "false"
+      SOURCE_METADATA_WRITER_MODE: disabled
+      SOURCE_VERSION_WRITEBACK_ENABLED: "false"
+      SOURCE_STORAGE_WRITE_ENABLED: "false"
+      NEO4J_ENABLED: "false"
+      NEO4J_SYNC_ENABLED: "false"
+      NEO4J_SEARCH_ENABLED: "false"
+    secrets:
+      - source: source-database-ca
+        target: source-database-ca.pem
+      - source: project_etl_file_storage_access_key_id
+        target: project_etl_file_storage_access_key_id
+      - source: project_etl_file_storage_secret_access_key
+        target: project_etl_file_storage_secret_access_key
+    healthcheck:
+      test: [CMD, python, /opt/etl/runtime.py, health-worker]
+      start_period: 180s
+      interval: 20s
+      timeout: 5s
+      retries: 3
+  graph-worker:
+    image: ${GRAPH_SERVICES_IMAGE:-etl-portable-backend:local}
+    build:
+      args:
+        INSTALL_GRAPH: "true"
+    extends:
+      file: compose.app.yml
+      service: master-sync-worker
+    profiles: [graph-services]
+    command: [graph-services-worker, run-graph-worker]
+    networks: [graph]
+    environment:
+      ETL_SERVICE_ROLE: graph
+      SOURCE_FILE_STORAGE_MODE: local
+      ETL_DATABASE_MODE: ${DATABASE_MODE:-neon-atlas}
+      SOURCE_METADATA_WRITEBACK_ENABLED: "false"
+      SOURCE_METADATA_WRITER_MODE: disabled
+      SOURCE_VERSION_WRITEBACK_ENABLED: "false"
+      SOURCE_STORAGE_WRITE_ENABLED: "false"
+      NEO4J_ENABLED: "true"
+      NEO4J_SYNC_ENABLED: "true"
+      NEO4J_SEARCH_ENABLED: "false"
+      NEO4J_RUNTIME: docker
+      NEO4J_URI_DOCKER: ${NEO4J_URI_DOCKER:-bolt://neo4j:7687}
+      NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD_FILE: /run/secrets/neo4j_password
+      NEO4J_STATE_DIR: /var/lib/etl/graph-state
+      NEO4J_SYNC_INTERVAL_SECONDS: ${NEO4J_SYNC_INTERVAL_SECONDS:-300}
+      ETL_WORKER_HEARTBEAT_MAX_AGE_SECONDS: ${GRAPH_WORKER_HEALTH_MAX_AGE_SECONDS:-420}
+    secrets:
+      - source: source-database-ca
+        target: source-database-ca.pem
+      - source: neo4j-password
+        target: neo4j_password
+    volumes:
+      - type: bind
+        source: ${NEO4J_STATE_HOST_DIR:-../.local/neo4j}
+        target: /var/lib/etl/graph-state
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD, python, /opt/etl/runtime.py, health-worker]
+      start_period: 180s
+      interval: 30s
+      timeout: 5s
+      retries: 3

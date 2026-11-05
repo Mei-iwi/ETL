@@ -1,11 +1,10 @@
 """Transient Chunk views and version-locked keyword/ContentBag indexing."""
 
-from time import monotonic
 from hashlib import sha256
+from time import monotonic
 
 from bson import BSON
 
-from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.application.content_bags import (
     ContentBagBuilder,
     StructuredUnit,
@@ -13,6 +12,7 @@ from data_sync_etl.application.content_bags import (
     representation_mode,
 )
 from data_sync_etl.application.leaf_keywords import SaveLeafKeywords
+from data_sync_etl.application.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.application.processing_state import processing_state
 from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.indexing import IndexingError, digest, validate_vector, word_windows
@@ -23,12 +23,12 @@ from data_sync_etl.domain.meaning_bags import verify_meanings
 from data_sync_etl.domain.mongo_documents import normalize_keywords
 from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search_access import SearchAccess
-from data_sync_etl.ports.search import SEARCH_DOCUMENT_VALIDATION
 from data_sync_etl.ports.indexing import IndexContentPort, IndexEmbeddingPort
 from data_sync_etl.ports.mongo_foundation import (
     ContentBagPort,
     KeywordExtractorPort,
 )
+from data_sync_etl.ports.search import SEARCH_DOCUMENT_VALIDATION
 
 
 class IndexingService:
@@ -163,8 +163,18 @@ class IndexingService:
         if self.settings.index_meaning_bags_enabled:
             self.bags.ensure_meanings_ready()
 
-    def _verified(self, snapshot, run, *, expected_bags=None, bag_reader=None):
+    def _verified(self, snapshot, run, *, expected_bags=None, bag_reader=None, selected_roots=None):
         roots = self._roots(snapshot)
+        if selected_roots is not None:
+            # Only the normalized-text retrieval algorithm may verify a Top-K
+            # root. Its ranking uses the complete fresh normalized corpus, not
+            # unvalidated Bag fields. All checks below still apply to that root;
+            # source fingerprint/generation always cover the WHOLE version.
+            selected = tuple(selected_roots)
+            if (not selected or len(selected) != len(set(selected))
+                    or not set(selected) <= roots.keys()):
+                raise IndexingError('INDEX_ARTIFACT_INVALID', 503)
+            roots = {key: roots[key] for key in selected}
         # A bulk Search phase already read the complete current unit BSON and
         # hashed it. Its final phase performs a separate fresh read, so this
         # reuses no content or authority across phases/requests.

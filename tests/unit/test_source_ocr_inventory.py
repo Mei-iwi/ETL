@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from data_sync_etl.application.source_ocr_inventory import AUDIT_KEY
+from data_sync_etl.adapters.source.source_ocr_inventory import AUDIT_KEY
 from data_sync_etl.domain.core import DomainError
 from data_sync_etl.domain.search import SearchError
 from data_sync_etl.domain.search_access import SearchAccess

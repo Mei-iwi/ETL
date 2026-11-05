@@ -1,7 +1,8 @@
 .section { min-width: 0; margin-top: 32px; padding-top: 26px; border-top: 1px solid #e9ebee; }
-.flow { display: grid; gap: 24px; }
+.flow { display: grid; gap: 24px; min-width: 0; }
+.flow > section { min-width: 0; }
 .flow h3 { font-size: 14px; color: #536459; }
-.flowScroll { overflow-x: auto; padding: 4px 0 14px; }
+.flowScroll { overflow-x: auto; min-width: 0; max-width: 100%; padding: 4px 0 14px; }
 .flowSteps { display: flex; gap: 18px; list-style: none; padding: 0; margin: 0; }
 .flowSteps li { position: relative; display: grid; gap: 12px; flex: 1 0 130px; padding: 17px; border: 1px solid #dce3ed; border-radius: 10px; background: #f8fafc; }
 .flowSteps span { color: #8f7c68; font-size: 12px; }

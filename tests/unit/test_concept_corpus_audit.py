@@ -41,7 +41,12 @@ def test_offline_audit_does_not_connect_or_change_seed(monkeypatch):
     monkeypatch.setattr(sqlalchemy, 'create_engine', forbidden)
     settings = Settings(_env_file=None)
     report = static_audit(settings)
-    assert report['seed_concepts'] > 0
+    # Runtime starts empty unless an explicitly reviewed snapshot is supplied.
+    # Offline audit must not fabricate trusted seed concepts or load a model.
+    from data_sync_etl.domain.concepts import empty_dictionary
+    assert report['seed_concepts'] == 0
+    assert report['seed_fingerprint'] == empty_dictionary().fingerprint
+    assert static_audit(settings) == report
     assert set(report['mongo_contracts']) == {'learning_resources', 'users', 'ocr_pages', 'mongo_content_units', 'content_bags'}
     assert report['database_writes'] is report['model_loaded_or_downloaded'] is False
     assert report['revocation_gate']['status'] == 'BLOCKED'

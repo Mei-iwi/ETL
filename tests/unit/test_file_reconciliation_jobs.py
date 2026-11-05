@@ -2,7 +2,6 @@ from contextlib import contextmanager
 from copy import copy
 from threading import Event, Lock
 from time import monotonic, sleep
-from types import SimpleNamespace
 
 import pytest
 
@@ -46,9 +45,11 @@ def test_accepted_response_and_durable_progress_do_not_wait_for_source(source_vi
             assert client.post('/api/v1/reconciliation/runs', json={'stream': 'files'}).status_code == 409
             release.set()
             run = finished(c)
-            assert run.matched_count == 0
-            assert run.status == 'PARTIAL'
-            assert run.summary_meta['verification_reason_counts'] == {'EXTERNAL_SOURCE_CONTENT_DISABLED': 1}
+            # Explicit DEEP audit now streams the approved SOURCE reader; it
+            # never relies on a legacy MASTER copy or the OCR import policy.
+            assert run.matched_count == 1
+            assert run.status == 'COMPLETED'
+            assert run.summary_meta['verification_reason_counts'] == {}
             assert run.summary_meta['processed_files'] == run.summary_meta['total_files'] == 1
     finally:
         release.set()
@@ -56,23 +57,39 @@ def test_accepted_response_and_durable_progress_do_not_wait_for_source(source_vi
 
 
 def test_each_file_has_its_own_deadline(source_viewer, monkeypatch):
-    c, version, _, path = source_viewer
+    c, version, source, _ = source_viewer
     with c.uow() as repo:
         copy = {key: value for key, value in repo.get('resource_versions', version['id']).items()
                 if key not in ('id', 'created_at', 'updated_at')}
         copy['version_number'] += 1
-        repo.insert('resource_versions', copy)
+        second = repo.insert('resource_versions', copy)
+        # Both files need a canonical SOURCE mapping. A bare MASTER version
+        # correctly fails mapping validation before any timed read occurs.
+        second_source = {**source, 'source_version_id': 'source-view-second',
+                         'source_version_number': second['version_number']}
+        imported = repo.find('source_file_imports', {'target_version_id': version['id']})[0]
+        repo.insert('source_file_imports', {
+            **{key: value for key, value in imported.items()
+               if key not in ('id', 'created_at', 'updated_at')},
+            'source_version_id': second_source['source_version_id'],
+            'source_version_number': second['version_number'], 'target_version_id': second['id']})
+    sources = {source['source_version_id']: source,
+               second_source['source_version_id']: second_source}
+    monkeypatch.setattr(c.source, 'get_version', lambda key: dict(sources[key]))
     clock = [0.]
     monkeypatch.setattr('data_sync_etl.adapters.persistence.reconciliation_engine.monotonic', lambda: clock[0])
     c.reconciliation_engine.file_read_budget_seconds = 5
-    monkeypatch.setattr(c.source_resolver, 'resolve', lambda _: SimpleNamespace(
-        ownership='SOURCE_BACKED', provider='local'))
+    original_stream = c.source_resolver.files.open_stream
     @contextmanager
-    def read(ref, *, cancelled):
-        clock[0] += 4
-        assert not cancelled.is_set(), 'Previous file consumed this file deadline'
-        yield path
-    monkeypatch.setattr(c.source_resolver, 'temporary_path', read)
+    def read(bucket, object_key, *, cancelled=None):
+        # revision() opens the local file without reading its payload. Only
+        # the bounded audit stream consumes the simulated four-second read.
+        if cancelled is not None:
+            clock[0] += 4
+            assert not cancelled.is_set(), 'Previous file consumed this file deadline'
+        with original_stream(bucket, object_key, cancelled=cancelled) as stream:
+            yield stream
+    monkeypatch.setattr(c.source_resolver.files, 'open_stream', read)
     with c.uow() as repo:
         result = c.reconciliation_engine.verify_file_blobs(repo.session)
     assert len(result) == 2 and all(row['discrepancy_flag'] == 'SYNCED' for row in result)
@@ -98,9 +115,9 @@ def test_database_fence_prevents_second_api_owner(source_viewer, monkeypatch):
             other.start()
         release.set()
         run = finished(c)
-        assert run.matched_count == 0
-        assert run.status == 'PARTIAL'
-        assert run.summary_meta['verification_reason_counts'] == {'EXTERNAL_SOURCE_CONTENT_DISABLED': 1}
+        assert run.matched_count == 1
+        assert run.status == 'COMPLETED'
+        assert run.summary_meta['verification_reason_counts'] == {}
     finally:
         release.set()
         c.reconciliation_jobs.close()

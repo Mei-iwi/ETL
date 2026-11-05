@@ -10,7 +10,7 @@ from data_sync_etl.application.source_file_import import (
     METADATA_ONLY_ERROR,
     SourceImportConflict,
 )
-from data_sync_etl.domain.core import now
+from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.source_registry import SourceCapabilities, SourceRegistration
 from data_sync_etl.main import create_app
 from tests.local_admin_client import TestClient
@@ -344,7 +344,7 @@ def test_ocr_manual_retry_keeps_file_and_job(importing, monkeypatch):
     assert before['processing_job_id'] is None and not before['retry_eligible']
     with pytest.raises(SourceImportConflict, match='EXTERNAL_SOURCE_CONTENT_DISABLED'):
         c.source_file_import.retry(row['id'])
-    with pytest.raises(SourceFileError, match='SOURCE_CAPABILITY_BLOCKED'):
+    with pytest.raises(DomainError, match='SOURCE_OCR_OWNER_REQUIRED'):
         c.ocr.create_job(row['target_version_id'])
     after = c.source_file_import.list_files()["items"][0]
     assert after['import_status'] == 'METADATA_ONLY' and not after['retry_eligible']

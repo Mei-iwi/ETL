@@ -1,0 +1,6 @@
+.panel { margin-top: 1.5rem; padding: 1.25rem; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+.panel h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+.panel ul { display: grid; gap: .75rem; margin: 0; padding-left: 1.25rem; }
+.panel li { overflow-wrap: anywhere; line-height: 1.6; }
+.panel span { color: #526079; font-size: .9rem; }
+.panel a:focus-visible { outline: 2px solid #28499a; outline-offset: 3px; }

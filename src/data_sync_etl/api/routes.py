@@ -1798,8 +1798,9 @@ def reindex_version(id: ResourceId, request: Request, body: ReindexRequest | Non
 def status(id: ResourceId, request: Request):
     result = services(request).orchestrator.status(id)
     audit = ((result.get('version') or {}).get('processing_options') or {}).get('_source_ocr_audit')
-    result['ocr_audit'] = ({key: audit.get(key) for key in ('status', 'observed_status', 'reason',
-        'checked_at', 'next_check_at', 'execution_authorized')} if isinstance(audit, dict) else None)
+    if isinstance(audit, dict):
+        result['ocr_audit'] = {key: audit.get(key) for key in ('status', 'observed_status', 'reason',
+            'checked_at', 'next_check_at', 'execution_authorized')}
     # A processing-status response is not a file-open capability. Source
     # locators must stay behind the authenticated source resolver.
     for key in ('version', 'latest_version'):

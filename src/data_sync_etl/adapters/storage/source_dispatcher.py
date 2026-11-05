@@ -24,7 +24,10 @@ class SourceFileDispatcher:
         if self.local_buckets and bucket not in self.local_buckets:
             raise SourceFileError('SOURCE_BUCKET_NOT_ALLOWED')
         if self.local is None:
-            raise SourceFileError('SOURCE_LOCAL_FILES_DISABLED')
+            # An unknown bucket is never implicitly a local storage route.
+            code = ('SOURCE_BUCKET_NOT_ALLOWED' if self.object is not None
+                    and bucket not in self.local_buckets else 'SOURCE_LOCAL_FILES_DISABLED')
+            raise SourceFileError(code)
         return 'local'
 
     def open_stream(self, bucket, object_key, *, cancelled=None):
