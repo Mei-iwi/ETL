@@ -5,7 +5,7 @@ from hashlib import sha256
 
 from bson import BSON
 
-from data_sync_etl.adapters.persistence.legacy_ocr_text import LegacyOCRText
+from data_sync_etl.application.legacy_ocr_text import LegacyOCRText
 from data_sync_etl.application.content_bags import (
     ContentBagBuilder,
     StructuredUnit,

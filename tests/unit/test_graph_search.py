@@ -50,6 +50,21 @@ def test_shadow_and_active_parity_preserves_input():
     a.close()
 
 
+def test_shadow_diagnostic_emits_only_internal_status_codes(caplog):
+    import logging
+    a = advisor()
+    try:
+        with caplog.at_level(logging.INFO, logger='etl'):
+            assert a.inspect(items()) == {}
+        assert '"stage": "graph_search"' in caplog.text
+        assert '"action": "PARITY"' in caplog.text
+        assert '"action": "SHADOW"' in caplog.text
+        assert 'root' not in caplog.text
+        assert 'test-only-private-secret' not in caplog.text
+    finally:
+        a.close()
+
+
 @pytest.mark.parametrize('bad', [[], mapping()*2,
     [{**mapping()[0], 'resource_version_id':'wrong-version'}],
     [{**mapping()[0], 'resource_id':'private-other-resource'}],

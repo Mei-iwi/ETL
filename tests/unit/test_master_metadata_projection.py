@@ -289,7 +289,11 @@ def test_keyset_multiple_pages_without_auth_or_source_reader(container):
     with container.uow() as repo:
         template = repo.get('master_users', 'user-1')
         for key in ['A', 'Z', 'a', 'z', *[f'extra-{n:03d}' for n in range(17)]]:
-            repo.insert('master_users', {**template, 'id': key, 'hashed_password': 'private-test-only'})
+            from data_sync_etl.domain.source_ids import SourceLocator, source_identity_hash
+            locator = SourceLocator(backend=template['source_backend'], namespace=template['source_namespace'],
+                                    entity_type='users', source_record_id=key)
+            repo.insert('master_users', {**template, 'id': key, 'hashed_password': 'private-test-only',
+                'source_record_key': key, 'source_identity_hash': source_identity_hash(locator)})
         expected = repo.count('master_users', {})
         assert set(repo.master_metadata_page('users', None, 1)[0]) == {
             'id', 'mongo_id', 'created_at', 'updated_at', 'source_origin', 'is_active', 'deleted_at'}

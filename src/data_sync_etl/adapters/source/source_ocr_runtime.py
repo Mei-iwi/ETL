@@ -29,18 +29,11 @@ from data_sync_etl.domain.core import DomainError, now
 from data_sync_etl.domain.resource_deletion import resource_deleted
 from data_sync_etl.domain.search_access import SearchAccess
 from data_sync_etl.domain.source_ocr_contract import SourceOCRContract
+from data_sync_etl.domain.source_ocr_ids import source_owned_id as source_owned_id
+from data_sync_etl.domain.source_ocr_ids import stable_id as stable_id
 
 STATE_KEY = '_source_ocr'
 _PROCESSING_CALLER = ContextVar('source_ocr_processing_caller', default=None)
-
-
-def stable_id(kind, *parts):
-    return kind + sha256(json.dumps(parts, separators=(',', ':')).encode()).hexdigest()[:28]
-
-
-def source_owned_id(value, kind):
-    return (isinstance(value, str) and len(value) == 30 and value.startswith(kind)
-            and all(character in '0123456789abcdef' for character in value[2:]))
 
 
 def load_source_ocr_contract(settings):
@@ -91,7 +84,7 @@ class SourceOCRPipeline:
         self._reconcile_cursor = 0
         self._claim_cursor = 0
         self._schedule_cursor = 0
-        from data_sync_etl.application.source_ocr_inventory import SourceOCRInventory
+        from data_sync_etl.adapters.source.source_ocr_inventory import SourceOCRInventory
         self.inventory = SourceOCRInventory(self)
 
     def _scheduler_identity(self):

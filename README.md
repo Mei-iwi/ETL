@@ -233,3 +233,6 @@ Dùng CLI và worker trong mã nguồn để vận hành; các script chẩn đo
 Neo4j là graph projection riêng từ MASTER, không thay SOURCE, ContentBag hoặc
 quyền truy cập. Xem [contract, kết quả backfill và lệnh vận hành](deploy/NEO4J_LIGHTNODE.md).
 Template mặc định tắt. Shadow chỉ đối soát; Active phải qua các gate nghiệm thu.
+
+Lệnh vận hành hai worker bằng Docker, endpoint “Học liệu liên quan”, khôi phục
+graph và các gate Active còn thiếu: [hướng dẫn vận hành Neo4j](deploy/NEO4J_ACTIVE_OPERATIONS.md).

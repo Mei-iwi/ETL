@@ -9,6 +9,7 @@ from sqlalchemy.engine import make_url
 from data_sync_etl.adapters.bge_m3 import BgeM3Embedding
 from data_sync_etl.adapters.embeddings import LocalSentenceEmbedding
 from data_sync_etl.adapters.extraction import NativeDocumentExtractor
+from data_sync_etl.adapters.live_metadata_embedding import LiveMetadataEmbedding
 from data_sync_etl.adapters.media import MediaExtractor, local_model_task, probe
 from data_sync_etl.adapters.mongo.content_store import MongoContentStore
 from data_sync_etl.adapters.mongo.foundation_store import (
@@ -279,7 +280,7 @@ class Container:
         if component_projection_worker is not None:
             raise DomainError('BLOCKED_LEGACY_COMPONENT_PROJECTION')
         if self.settings.ocr_component_pipeline_enabled:
-            from data_sync_etl.application.source_ocr_runtime import load_source_ocr_contract
+            from data_sync_etl.adapters.source.source_ocr_runtime import load_source_ocr_contract
             source_ocr_contract = load_source_ocr_contract(self.settings)
         if self.settings.master_mongo_identity_projection and (
                 self.settings.app_environment not in ('development', 'test')
@@ -594,7 +595,8 @@ class Container:
 
         self.metadata_search = (MetadataSearchService(
             self.uow, self.metadata_documents, MongoMetadataIndex(mongo_database),
-            self.semantic.embedding, self.settings) if self.semantic is not None else None)
+            self.semantic.embedding, self.settings,
+            live_embedding=LiveMetadataEmbedding(self.indexing.embedding)) if self.semantic is not None else None)
         self.master_sync_worker.metadata_refresh = MetadataRefresh(self.metadata_search, self.settings, self.semantic)
         # Attest only the fixed LocalSentenceEmbedding used by HTTP Search.
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
@@ -699,7 +701,7 @@ class Container:
         self.ocr.resolver = self.source_resolver
         self.source_ocr_engine = None
         if self.settings.ocr_component_pipeline_enabled:
-            from data_sync_etl.application.source_ocr_runtime import wire_source_ocr
+            from data_sync_etl.adapters.source.source_ocr_runtime import wire_source_ocr
             try:
                 wire_source_ocr(self, source_ocr_contract, _source_writer_database_url(self.settings))
             except Exception:

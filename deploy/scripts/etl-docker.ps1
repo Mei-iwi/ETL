@@ -14,10 +14,12 @@ param(
     [switch]$RemoteDatabase,
     [switch]$SourceNeon,
     [switch]$Graph,
+    [switch]$GraphServices,
     [ValidateSet('legacy','auth','auth-tls','db-auth','db-auth-tls')][string]$AuthProfile = 'auth',
     [switch]$AcceptModelLicense
 )
 $ErrorActionPreference = 'Stop'
+if ($GraphServices) { $Graph = $true }
 if ($RemoteDatabase -and $SourceNeon) { throw 'SourceNeon and RemoteDatabase are mutually exclusive.' }
 $deployDir = Split-Path -Parent $PSScriptRoot
 if (-not $EnvFile) { $EnvFile = $env:ETL_DOCKER_ENV_FILE }
@@ -84,6 +86,7 @@ if ($AuthProfile -like 'db-auth*') { $composeArgs += @('-f',(Join-Path $deployDi
 elseif ($AuthProfile -ne 'legacy') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth.yml')) }
 if ($AuthProfile -in @('auth-tls','db-auth-tls')) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.auth-tls.yml')) }
 if ($Graph) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.graph-app.yml')) }
+if ($GraphServices) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.graph-workers.yml'),'--profile','graph-services') }
 function Invoke-Docker([string[]]$Arguments) {
     & docker @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Docker operation failed; inspect sanitized service status.' }
@@ -101,7 +104,11 @@ function Test-Deployment {
     Invoke-Docker ($composeArgs + @('--profile','ops','run','--rm','--no-deps','preflight'))
 }
 switch ($Action) {
-    Build { Invoke-Docker ($composeArgs + @('build','api','frontend')) }
+    Build {
+        $buildServices = @('api','frontend')
+        if ($GraphServices) { $buildServices += @('users-refresh-worker','graph-worker') }
+        Invoke-Docker ($composeArgs + @('build') + $buildServices)
+    }
     Network {
         & docker network inspect $NetworkName *> $null
         if ($LASTEXITCODE -ne 0) { Invoke-Docker @('network','create',$NetworkName) }
@@ -111,6 +118,7 @@ switch ($Action) {
         Test-Deployment
         if ($Workers) { Invoke-Docker ($composeArgs + @('--profile','workers','up','-d','--no-build','api','frontend','master-sync-worker','source-file-worker','ocr-worker','reconciliation-worker')) }
         else { Invoke-Docker ($composeArgs + @('up','-d','--no-build','api','frontend')) }
+        if ($GraphServices) { Invoke-Docker ($composeArgs + @('up','-d','--no-build','--no-deps','users-refresh-worker','graph-worker')) }
         Write-Output "Application started with profile: $AuthProfile. Inspect health and acceptance report."
     }
     Status { Invoke-Docker ($composeArgs + @('--profile','workers','ps')) }

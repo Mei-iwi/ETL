@@ -15,7 +15,7 @@ from data_sync_etl.adapters.persistence.component_ocr_outbox import (
     project_pending,
     record_snapshot,
 )
-from data_sync_etl.application.component_ocr_page import ComponentOCRPageExecutor
+from data_sync_etl.adapters.processing.component_ocr_page import ComponentOCRPageExecutor
 from data_sync_etl.db.ocr_component_models import (
     ComponentJobRef,
     ComponentPageRef,

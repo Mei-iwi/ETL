@@ -38,7 +38,7 @@ class RetryProcessingJob:
                 raise ProcessingRetryConflict('SOURCE_OCR_OWNER_REQUIRED')
         source = pipeline.state(version_id) if pipeline is not None else None
         if source:
-            from data_sync_etl.application.source_ocr_runtime import stable_id
+            from data_sync_etl.domain.source_ocr_ids import stable_id
             if access is None:
                 actor, role = pipeline._scheduler_identity()
                 with self.uow() as repo:

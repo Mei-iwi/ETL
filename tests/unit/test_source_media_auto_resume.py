@@ -108,7 +108,7 @@ def test_manual_job_is_linked_instead_of_created_again(metadata_media):
     # METADATA_ONLY version.  This fixture intentionally has no content grant,
     # so it must fail closed there rather than being rejected solely by the
     # Master lifecycle marker.
-    with pytest.raises(Exception, match='SOURCE_CAPABILITY_BLOCKED'):
+    with pytest.raises(Exception, match='SOURCE_OCR_OWNER_REQUIRED'):
         c.process_version.run(before['target_version_id'])
     assert c.source_file_worker.once('automatic-worker') is False
     with c.uow() as repo:

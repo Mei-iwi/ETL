@@ -1,7 +1,6 @@
 """Graph CLI deliberately bypasses Container: no OCR/SOURCE writer composition."""
 
 import json
-from time import sleep
 
 from sqlalchemy import create_engine
 
@@ -14,6 +13,7 @@ from data_sync_etl.adapters.persistence.graph_snapshot import (
 from data_sync_etl.application.graph_sync import GraphSynchronizer
 from data_sync_etl.config import Settings
 from data_sync_etl.domain.graph_contract import GraphContractError
+from data_sync_etl.workers.lifecycle import tick, worker_lifecycle
 
 
 def coverage(settings, snapshot):
@@ -29,6 +29,11 @@ def coverage(settings, snapshot):
 
 
 def run(args, *, settings=None):
+    with worker_lifecycle() as stop:
+        return _run(args, settings=settings, stop=stop)
+
+
+def _run(args, *, settings, stop):
     driver = engine = None
     try:
         s = settings or Settings()
@@ -47,7 +52,8 @@ def run(args, *, settings=None):
             result = (sync.claim_empty() if args.claim_empty else {'status': 'GRAPH_CONNECTED'})
             print(json.dumps(result))
             return 0
-        while True:
+        unavailable_attempts = 0
+        while not stop.is_set():
             snapshot = reader.read()
             bags = coverage(s, snapshot)
             if bags['missing_or_wrong_version'] or bags.get('content_mapping', {}).get('mapping_drift'):
@@ -77,17 +83,24 @@ def run(args, *, settings=None):
                 if args.command != 'run-graph-worker' or args.once:
                     raise
                 print(json.dumps({'status': 'GRAPH_UNAVAILABLE_RETRY'}), flush=True)
-                sleep(s.neo4j_sync_interval_seconds)
+                unavailable_attempts += 1
+                if unavailable_attempts >= 3:
+                    return 1  # Supervisor restarts; never heartbeat a failed refresh.
+                stop.wait(s.neo4j_sync_interval_seconds)
                 continue
+            unavailable_attempts = 0
             result['bags'] = bags
             if getattr(args, 'dry_run', False):
                 s.neo4j_state_dir.mkdir(parents=True, exist_ok=True)
                 plan_path.write_text(json.dumps({'fingerprint': snapshot.fingerprint,
                     'database_id': projection.database_identity()}), encoding='utf-8')
             print(json.dumps(result), flush=True)
+            if args.command == 'run-graph-worker':
+                tick()
             if args.command != 'run-graph-worker' or args.once:
                 return 1 if args.command == 'graph-diff' and result['status'] != 'MATCH' else 0
-            sleep(s.neo4j_sync_interval_seconds)
+            stop.wait(s.neo4j_sync_interval_seconds)
+        return 0
     except (GraphContractError, GraphUnavailable) as exc:
         print(json.dumps({'status': str(exc)}))
         return 1

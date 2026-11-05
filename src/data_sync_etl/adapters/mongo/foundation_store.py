@@ -11,10 +11,11 @@ from bson.codec_options import CodecOptions
 from bson.errors import BSONError
 from pydantic import TypeAdapter, ValidationError
 from pymongo import UpdateOne
-from pymongo.errors import BulkWriteError, DuplicateKeyError, OperationFailure
+from pymongo.errors import BulkWriteError, DuplicateKeyError, NetworkTimeout, OperationFailure
 
 from data_sync_etl.adapters.mongo.content_store import generation_filter, invalidate_bags
 from data_sync_etl.domain.core import DomainError, now
+from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.domain.mongo_documents import (
     ContentBagDocument,
     ContentUnitDocument,
@@ -26,6 +27,7 @@ from data_sync_etl.domain.mongo_documents import (
     UserProfileDocument,
     normalize_keywords,
 )
+from data_sync_etl.logging import event
 from data_sync_etl.ports.search import SEARCH_DOCUMENT_VALIDATION
 
 
@@ -39,12 +41,19 @@ def _copy_search_bag(document):
 
 
 def _search_cursor(collection, selector, limit):
-    cursor = collection.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000)
-    # Avoid the default 101-document first batch on complete bounded corpora.
-    # Mongo still enforces its response byte limit; the cap+1 guard is unchanged.
-    if callable(getattr(type(cursor), 'batch_size', None)):
-        cursor = cursor.batch_size(limit)
-    return cursor
+    try:
+        cursor = collection.find(selector).sort('_id', 1).limit(limit).max_time_ms(5000)
+        # Avoid the default 101-document first batch on complete bounded corpora.
+        # Mongo still enforces its response byte limit; the cap+1 guard is unchanged.
+        if callable(getattr(type(cursor), 'batch_size', None)):
+            cursor = cursor.batch_size(limit)
+        yield from cursor
+    except NetworkTimeout:
+        # Iteration, including getMore, can fail after a successful find. Never
+        # return the partially read corpus or retry a large transfer here.
+        event(stage='search_content', action='READ_TIMEOUT', error_type='NetworkTimeout',
+              failure_phase='mongo_search_cursor', error_code='SEARCH_DATA_TIMEOUT')
+        raise IndexingError('SEARCH_DATA_TIMEOUT', 503) from None
 
 
 def _record_validation(scope, key, document):

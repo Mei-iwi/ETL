@@ -68,6 +68,42 @@ def test_shutdown_wait_is_interruptible_and_uses_existing_lifecycle(monkeypatch)
     assert sync.run.call_count == 1
 
 
+def test_repeated_refresh_failures_exit_without_healthy_heartbeat(monkeypatch):
+    worker, sync = setup()
+    sync.run.side_effect = RuntimeError('private connection details')
+    stop, heartbeat = Mock(), Mock()
+    stop.is_set.return_value = False
+
+    @contextmanager
+    def lifecycle():
+        yield stop
+
+    monkeypatch.setattr('data_sync_etl.workers.users_refresh.worker_lifecycle', lifecycle)
+    monkeypatch.setattr('data_sync_etl.workers.users_refresh.tick', heartbeat)
+    with pytest.raises(DomainError, match='USERS_REFRESH_UNHEALTHY'):
+        worker.run()
+    assert sync.run.call_count == 3
+    assert stop.wait.call_count == 2
+    heartbeat.assert_not_called()
+
+
+def test_only_completed_refresh_advances_health_and_resets_failure_budget(monkeypatch):
+    worker, sync = setup()
+    sync.run.side_effect = [RuntimeError(), RuntimeError(), {'users': {'status': 'COMPLETED'}},
+                            RuntimeError(), RuntimeError()]
+    stop, heartbeat = Mock(), Mock()
+    stop.is_set.side_effect = [False] * 5 + [True]
+
+    @contextmanager
+    def lifecycle():
+        yield stop
+
+    monkeypatch.setattr('data_sync_etl.workers.users_refresh.worker_lifecycle', lifecycle)
+    monkeypatch.setattr('data_sync_etl.workers.users_refresh.tick', heartbeat)
+    assert worker.run() == {'status': 'STOPPED'}
+    heartbeat.assert_called_once_with()
+
+
 def test_missing_source_wrong_auth_or_registry_denial_fail_before_sync():
     settings = SimpleNamespace(auth_mode='master_users', auth_master_freshness_seconds=120)
     sync = SimpleNamespace(federation_enabled=True, source_registry=Mock(), run=Mock())

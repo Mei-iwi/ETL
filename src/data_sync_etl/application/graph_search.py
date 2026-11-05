@@ -4,6 +4,8 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from threading import BoundedSemaphore, Lock
 
+from data_sync_etl.logging import event
+
 
 class GraphSearchAdvisor:
     def __init__(self, graph, authority, settings):
@@ -15,6 +17,8 @@ class GraphSearchAdvisor:
     def _count(self, key):
         with self._lock:
             self.metrics[key] += 1
+        # Operator evidence only: never log candidate IDs, content or identity.
+        event(stage='graph_search', action=key.upper())
 
     @staticmethod
     def _canonical(rows, requested):

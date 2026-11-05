@@ -70,7 +70,12 @@ def test_public_reader_cannot_edit_and_owner_transfer_revokes(description, monke
             repo.insert('resource_versions', {'id': 'public-version', 'resource_id': 'resource-1',
                 'version_number': 1, 'lifecycle_status': 'INGESTED', 'storage_bucket': 'input',
                 'storage_object_key': 'sample.pdf', 'source_hash': 'a' * 64})
-        assert api.get(URL).status_code == 401  # Ownership changes revoke the old session.
+        # Ownership transfer removes edit authority immediately, but does not
+        # revoke unrelated published metadata reads or the user's whole session.
+        transferred = api.get(URL)
+        assert transferred.status_code == 200 and transferred.json()['editable'] is False
+        assert api.patch(URL, headers=csrf(api), json={
+            'revision': user_profile_revision(document), 'description': 'Old owner'}).status_code == 403
         assert login(api, configured).status_code == 200
         response = api.get(URL)
         assert response.status_code == 200, response.text
@@ -79,6 +84,9 @@ def test_public_reader_cannot_edit_and_owner_transfer_revokes(description, monke
             'revision': user_profile_revision(document), 'description': 'Foreign'}).status_code == 403
         metadata.update_resource_description.assert_not_called()
         monkeypatch.setattr('data_sync_etl.security.authorization.can_read_public_file', lambda *args: False)
+        assert api.get(URL).status_code == 403  # No remaining public-read proof after revocation.
+        with configured[0].uow() as repo:
+            repo.update('master_learning_resources', 'resource-1', {'publication_status': 'DRAFT'})
         assert api.get(URL).status_code == 403
 
 

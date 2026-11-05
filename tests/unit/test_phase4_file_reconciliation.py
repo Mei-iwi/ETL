@@ -42,7 +42,7 @@ def test_unverified_source_rows_are_visible_but_not_counted_as_corrupt(source_vi
         assert report['summary_meta']['unverified_source_files'] == 1
         rows = client.get('/api/v1/reconciliation/discrepancies?latest_only=true&stream=files&discrepancy_flag=NOT_VERIFIED').json()
         assert rows['total'] == 1 and rows['items'][0]['record_id'] == version['id']
-        assert rows['items'][0]['target_value']['reason_code'] == 'SOURCE_REFERENCE_DISABLED'
+        assert rows['items'][0]['target_value']['reason_code'] == 'SHA256_NOT_CHECKED'
 
 
 def test_corrupt_source_cannot_be_masked_by_a_managed_copy(source_viewer):

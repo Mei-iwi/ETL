@@ -2,8 +2,8 @@
 from contextlib import contextmanager
 from pathlib import PurePosixPath
 
+from data_sync_etl.adapters.processing.component_ocr_page import ComponentOCRPageExecutor
 from data_sync_etl.application.bilingual import paired_result
-from data_sync_etl.application.component_ocr_page import ComponentOCRPageExecutor
 from data_sync_etl.domain.core import DomainError
 
 

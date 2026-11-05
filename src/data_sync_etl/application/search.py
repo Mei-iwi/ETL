@@ -3,7 +3,7 @@
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from hashlib import sha256
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock
 from time import monotonic
 
 from data_sync_etl.application.content_bags import bag_structure, representation_mode
@@ -88,6 +88,8 @@ class SearchService:
         self.graph_advisor = graph_advisor
         self.source_content_authorizer = None
         self.source_content_authorizer_many = None
+        self._content_timeout_lock = Lock()
+        self._content_retry_at = 0.
 
         self._http_inference = SearchInferenceQueue()
         # Retain worker leases after HTTP timeout: repeated cancellations cannot
@@ -469,12 +471,28 @@ class SearchService:
                        representation_unit='content_bag', access_scope=access.scope, message='NO_READY_INDEX')
         content_branches = {}
         if self.settings.search_metadata_content_enabled:
+            # A short availability backoff only for opt-in unfiltered fallback.
+            # Retain no candidates/results/rights; filtered content searches can
+            # still succeed while the large whole-corpus transfer is unhealthy.
+            bounded_backoff = ((self.settings.search_metadata_live_lexical_fallback_enabled
+                                or self.settings.search_metadata_live_dense_fallback_enabled)
+                               and not any(value is not None and value != '' for value in filters.values()))
+            cooling = False
             try:
+                if bounded_backoff:
+                    with self._content_timeout_lock:
+                        cooling = monotonic() < self._content_retry_at
+                    if cooling:
+                        status['content_retry'] = 'BACKOFF'
+                        raise IndexingError('SEARCH_DATA_TIMEOUT', 503)
                 content = self._content_search(query, method, filters, 1, self.settings.search_max_bags,
                                                 **options, _branch_capture=content_branches)
                 status['content'] = content['message']
             except (SearchError, IndexingError) as exc:
-                if exc.code not in ('SEARCH_SCHEMA_UNAVAILABLE', 'BLOCKED_INDEX_SCHEMA', 'BLOCKED_EMBEDDING_RUNTIME',
+                if exc.code == 'SEARCH_DATA_TIMEOUT' and bounded_backoff and not cooling:
+                    with self._content_timeout_lock:
+                        self._content_retry_at = monotonic() + 10.
+                if exc.code not in ('SEARCH_SCHEMA_UNAVAILABLE', 'SEARCH_DATA_TIMEOUT', 'BLOCKED_INDEX_SCHEMA', 'BLOCKED_EMBEDDING_RUNTIME',
                                     'SEMANTIC_SCHEMA_NOT_READY', 'SEMANTIC_MODEL_UNAVAILABLE',
                                     'SEMANTIC_INFERENCE_FAILED', 'SEMANTIC_MODEL_IDENTITY_CHANGED',
                                     'SEMANTIC_INDEX_STALE', 'SEMANTIC_INDEX_NOT_READY',
@@ -482,6 +500,27 @@ class SearchService:
                         self.settings.search_metadata_indexed_candidates_enabled and exc.code == 'SEARCH_LIMIT_EXCEEDED'):
                     raise
                 status['content'] = exc.code
+                if (exc.code == 'SEARCH_DATA_TIMEOUT' and self.metadata is not None
+                        and ((self.settings.search_metadata_live_lexical_fallback_enabled and method in ('bow', 'hybrid'))
+                             or (self.settings.search_metadata_live_dense_fallback_enabled and method in ('vector', 'hybrid')))
+                        and status.get('metadata') == 'METADATA_SCHEMA_NOT_READY'):
+                    # Only enter live lexical mode after a content failure.
+                    # A healthy content search keeps its original ranking and
+                    # missing-index behavior; no extra metadata votes appear.
+                    try:
+                        with (self._inference(metadata=True) if method != 'bow' else nullcontext()):
+                            metadata_items, snapshots, metadata_status, branch_scores = self.metadata.retrieve(
+                                query, method, filters, access, dictionary=self.dictionary,
+                                policy=self.settings.search_expansion, allow_live_fallback=True,
+                                checkpoint=lambda: self._deadline(started))
+                        status.update({f'metadata_{key}': value for key, value in metadata_status.items()})
+                        status['metadata'] = 'READY'
+                    except (SearchError, IndexingError) as error:
+                        if isinstance(error, SearchError) and error.code != 'METADATA_CANDIDATE_LIMIT':
+                            raise
+                        status['metadata'] = error.code
+                    except Exception:
+                        status['metadata'] = 'METADATA_UNAVAILABLE'
                 if method == 'hybrid' and exc.code in ('SEMANTIC_INDEX_STALE', 'SEMANTIC_INDEX_NOT_READY',
                         'SEMANTIC_INDEX_INCOMPLETE', 'SEMANTIC_MODEL_UNAVAILABLE',
                         'SEMANTIC_INFERENCE_FAILED', 'SEMANTIC_MODEL_IDENTITY_CHANGED'):
@@ -521,6 +560,10 @@ class SearchService:
         metadata_ready = bool(snapshots) and status.get('metadata') == 'READY' and (
             (method in ('bow', 'hybrid') and status.get('metadata_lexical') == 'READY')
             or (method in ('vector', 'hybrid') and status.get('metadata_dense') == 'READY'))
+        if status.get('content') == 'SEARCH_DATA_TIMEOUT' and not metadata_ready:
+            # A healthy, freshly authorized metadata branch may stand alone.
+            # Two unavailable branches must not look like an empty full search.
+            raise SearchError('SEARCH_DATA_TIMEOUT', 503)
         return {**content, 'page': page, 'size': size, 'items': rows[offset:offset + size],
                 'total': total, 'total_pages': (total + size - 1) // size, 'branch_status': status,
                 'ranking_algorithm': 'metadata-content-four-source-version-rrf-opt-in-v1',

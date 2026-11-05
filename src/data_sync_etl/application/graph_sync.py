@@ -85,12 +85,47 @@ class GraphSynchronizer:
         return {'status': 'EMPTY_GRAPH_OWNERSHIP_RECORDED'}
 
     def _verify_owner(self, identity):
-        try:
-            path = self._receipt(identity)
-            if path.is_symlink() or json.loads(path.read_text(encoding='utf-8')) != identity:
-                raise ValueError()
-        except (OSError, ValueError):
-            raise GraphContractError('GRAPH_OWNERSHIP_UNPROVEN') from None
+        paths = [self._receipt(identity), self._endpoint_receipt(identity)]
+        for path in paths:
+            try:
+                if not path.is_symlink() and json.loads(path.read_text(encoding='utf-8')) == identity:
+                    return
+            except (OSError, ValueError):
+                pass
+        raise GraphContractError('GRAPH_OWNERSHIP_UNPROVEN') from None
+
+    def _endpoint_receipt(self, identity):
+        return self.state_dir / ('endpoint-owner-' + identity['database_id'] + '-'
+                                 + identity['endpoint_digest'] + '.json')
+
+    def authorize_same_database_endpoint(self, target_projection):
+        """Explicit operator handoff, requiring live proofs at both endpoints.
+
+        Never adopt a nonempty graph from counts or a supplied database ID.
+        Both projection adapters must connect and read their actual databases.
+        Preserve the original receipt; authorize only the verified new endpoint.
+        """
+        source = self._identity()
+        target_sync = GraphSynchronizer(self.reader, target_projection, self.state_dir)
+        with graph_lock(self.state_dir / ('sync-' + source['database_id'] + '.lock')):
+            self._verify_owner(source)
+            target = target_sync._identity()
+            if target['database_id'] != source['database_id']:
+                raise GraphContractError('GRAPH_ENDPOINT_DATABASE_MISMATCH')
+            self.projection.verify_schema()
+            target_projection.verify_schema()
+            before = self.projection.read()
+            if target_projection.read() != before or self.projection.read() != before:
+                raise GraphContractError('GRAPH_ENDPOINT_SNAPSHOT_MISMATCH')
+            path = self._endpoint_receipt(target)
+            if path.exists() or path.is_symlink():
+                if path.is_symlink() or json.loads(path.read_text(encoding='utf-8')) != target:
+                    raise GraphContractError('GRAPH_OWNERSHIP_UNPROVEN')
+            else:
+                with path.open('x', encoding='utf-8') as stream:
+                    stream.write(json.dumps(target, sort_keys=True))
+            target_sync._verify_owner(target)
+        return {'status': 'GRAPH_SAME_DATABASE_ENDPOINT_AUTHORIZED', 'graph_writes': 0}
 
     def sync(self, *, apply=False, expected_fingerprint=None):
         identity = self._identity()

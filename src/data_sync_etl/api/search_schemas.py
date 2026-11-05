@@ -12,6 +12,7 @@ from pydantic import (
 
 from data_sync_etl.domain.indexing import IndexingError
 from data_sync_etl.domain.search import SearchError, bounded_query
+from data_sync_etl.logging import event
 
 Method = Literal['bow', 'vector', 'hybrid']
 Identifier = Annotated[str, Field(min_length=1, max_length=30, pattern=r'^\S(?:.*\S)?$')]
@@ -224,6 +225,7 @@ MESSAGES = {
     'SEARCH_ACCESS_RESTRICTED': 'Truy cập tìm kiếm nội bộ bị hạn chế.',
     'SEARCH_LIMIT_EXCEEDED': 'Kho dữ liệu vượt giới hạn tìm kiếm. Hãy thu hẹp bộ lọc.',
     'SEARCH_TIMEOUT': 'Tìm kiếm quá thời gian. Hãy thu hẹp bộ lọc.',
+    'SEARCH_DATA_TIMEOUT': 'Dữ liệu tìm kiếm phản hồi chậm. Vui lòng thu hẹp bộ lọc hoặc thử lại sau.',
     'SEARCH_MODEL_WARMUP_TIMEOUT': 'Chuẩn bị tìm kiếm quá thời gian. Vui lòng thử lại.',
     'SEARCH_INDEX_STALE': 'Chỉ mục vừa thay đổi. Vui lòng tìm lại.',
     'BLOCKED_EMBEDDING_RUNTIME': 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.',
@@ -240,7 +242,21 @@ MESSAGES = {
 def search_error(exc):
     known = isinstance(exc, (SearchError, IndexingError))
     code = exc.code if known else 'SEARCH_UNAVAILABLE'
+    if not known:
+        # Exception messages/tracebacks may contain DSNs or document content.
+        # Keep the public error generic; record only the server exception type.
+        phase = None
+        trace = exc.__traceback__
+        while trace is not None:
+            module = trace.tb_frame.f_globals.get('__name__', '')
+            if module.startswith('data_sync_etl.adapters.mongo.'):
+                phase = module.rsplit('.', 1)[-1] + '.' + trace.tb_frame.f_code.co_name
+                break
+            trace = trace.tb_next
+        event(stage='search', action='UNEXPECTED_FAILURE', error_code=code,
+              error_type=type(exc).__name__, failure_phase=phase)
     return HTTPException(exc.status if known else 503, detail={
         'code': code, 'phase': 'search',
         'message': MESSAGES.get(code, 'Không thể truy cập dữ liệu tìm kiếm. Vui lòng thử lại.')},
-        headers={'Retry-After': '2'} if code == 'SEARCH_MODEL_LOADING' else None)
+        headers=({'Retry-After': '2'} if code == 'SEARCH_MODEL_LOADING' else
+                 {'Retry-After': '15'} if code == 'SEARCH_DATA_TIMEOUT' else None))

@@ -135,7 +135,8 @@ def verify_runtime(role):
 def health_worker():
     marker = Path(os.environ.get('ETL_WORKER_HEARTBEAT_FILE', '/run/etl/worker-heartbeat.json'))
     data = json.loads(marker.read_text(encoding='utf-8'))
-    if data['role'] != os.environ['ETL_SERVICE_ROLE'] or time.time() - marker.stat().st_mtime > 450:
+    maximum_age = int(os.environ.get('ETL_WORKER_HEARTBEAT_MAX_AGE_SECONDS', '450'))
+    if maximum_age < 1 or data['role'] != os.environ['ETL_SERVICE_ROLE'] or time.time() - marker.stat().st_mtime > maximum_age:
         raise ValueError('WORKER_HEARTBEAT_STALE')
     os.kill(int(data['pid']), 0)
 
@@ -225,6 +226,21 @@ def main():
             verify_runtime('reconciliation')
             os.environ['RECONCILIATION_WORKER_HEARTBEAT_FILE'] = '/run/etl/worker-heartbeat.json'
             os.execvp('python', ['python', '-m', 'data_sync_etl.workers.reconciliation'])
+        if action == 'graph-services-worker' and len(sys.argv) == 3:
+            command = sys.argv[2]
+            if command not in ('run-users-refresh-worker', 'run-graph-worker'):
+                raise ValueError('CONTAINER_ACTION_NOT_ALLOWED')
+            role = 'users-refresh' if command == 'run-users-refresh-worker' else 'graph'
+            verify_runtime(role)
+            os.environ['ETL_SERVICE_ROLE'] = role
+            os.environ['ETL_WORKER_HEARTBEAT_FILE'] = '/run/etl/worker-heartbeat.json'
+            arguments = ['python', '-m', 'data_sync_etl.cli', command]
+            if role == 'users-refresh':
+                source_id = os.environ.get('USERS_REFRESH_SOURCE_ID', '').strip()
+                if not source_id:
+                    raise ValueError('SOURCE_ID_REQUIRED')
+                arguments += ['--source-id', source_id]
+            os.execvp('python', arguments)
         if action == 'worker' and len(sys.argv) == 3 and sys.argv[2] in WORKERS:
             command = sys.argv[2]
             role = WORKERS[command]

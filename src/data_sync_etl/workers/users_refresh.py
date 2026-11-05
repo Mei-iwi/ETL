@@ -41,8 +41,15 @@ class UsersRefreshWorker:
         if once:
             return self.once()
         with worker_lifecycle() as stop:
+            failures = 0
             while not stop.is_set():
-                tick()
-                self.once()
+                result = self.once()
+                if result['status'] == 'COMPLETED':
+                    tick()
+                    failures = 0
+                else:
+                    failures += 1
+                    if failures >= 3:
+                        raise DomainError('USERS_REFRESH_UNHEALTHY')
                 stop.wait(self.interval_seconds)
         return {'status': 'STOPPED'}

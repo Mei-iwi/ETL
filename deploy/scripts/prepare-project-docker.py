@@ -160,12 +160,18 @@ for key, default in {
     'NEO4J_SEARCH_MODE': 'shadow', 'NEO4J_DATABASE': 'neo4j', 'NEO4J_USER': 'neo4j',
     'NEO4J_URI_DOCKER': 'bolt://neo4j:7687',
     'NEO4J_QUERY_TIMEOUT_SECONDS': '3', 'NEO4J_CONNECT_TIMEOUT_SECONDS': '5',
+    'NEO4J_SYNC_INTERVAL_SECONDS': '300',
+    'USERS_REFRESH_SOURCE_ID': 'postgresql',
+    'USERS_REFRESH_HEALTH_MAX_AGE_SECONDS': '80',
+    'GRAPH_WORKER_HEALTH_MAX_AGE_SECONDS': '420',
+    'GRAPH_SERVICES_IMAGE': 'etl-portable-backend:local',
 }.items():
     config[key] = raw.get(key, default)
 graph_auth = Path(raw.get('NEO4J_AUTH_FILE', '../ETL_Secrets/neo4j/auth.secret'))
 if not graph_auth.is_absolute():
     graph_auth = root / 'deploy' / graph_auth
 config['NEO4J_PASSWORD_SECRET_FILE'] = graph_auth.resolve().with_name('password.secret').as_posix()
+config['NEO4J_STATE_HOST_DIR'] = host(raw.get('NEO4J_STATE_HOST_DIR', '.local/neo4j')).as_posix()
 services = {}
 for name in ['api', 'master-sync-worker', 'source-file-worker', 'ocr-worker', 'reconciliation-worker', 'preflight']:
     per_env = {key: '${' + key + '}' for key in env if not key.startswith('AUTH_') and key != 'ADMIN_ENABLED'}

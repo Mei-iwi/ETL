@@ -266,6 +266,11 @@ def test_shared_optin_hooks_existing_projector_after_commit(container, monkeypat
     store = MetadataMemory()
     source = MagicMock(spec=PostgreSQLSourceAdapter)
     source.source_origin = 'POSTGRESQL'
+    # A typed federation registration must receive real identity strings,
+    # never MagicMock-generated attributes from a payload-only test double.
+    source.source_backend = container.source.source_backend
+    source.source_namespace = container.source.source_namespace
+    source.locator.side_effect = container.source.locator
     source.batches.side_effect = container.source.batches
     source.metadata_identity_references.side_effect = lambda stream, ids: dict.fromkeys(ids)
     monkeypatch.setattr('data_sync_etl.composition.create_source', lambda _: source)
