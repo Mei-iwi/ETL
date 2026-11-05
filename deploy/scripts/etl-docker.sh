@@ -11,7 +11,7 @@ database_mode=same-host
 media_enabled=false
 source_override=''
 drive_enabled=false
-mode_pattern="^[[:space:]]*DATABASE_MODE[[:space:]]*=[[:space:]]*[\"']?(same-host|remote|source-neon|neon-atlas)[\"']?[[:space:]]*(#.*)?$"
+mode_pattern="^[[:space:]]*DATABASE_MODE[[:space:]]*=[[:space:]]*[\"']?(same-host|remote|source-neon|neon-atlas|neon-native-mongo)[\"']?[[:space:]]*(#.*)?$"
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
   if [[ "$line" =~ ^SOURCE_WRITE_COMPOSE_OVERRIDE_FILE=(.*)$ ]]; then
@@ -33,7 +33,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   fi
 done < "$env_file"
 database_mode="${DATABASE_MODE:-$database_mode}"
-case "$database_mode" in same-host|remote|source-neon|neon-atlas) ;; *) echo 'Invalid DATABASE_MODE.' >&2; exit 2 ;; esac
+case "$database_mode" in same-host|remote|source-neon|neon-atlas|neon-native-mongo) ;; *) echo 'Invalid DATABASE_MODE.' >&2; exit 2 ;; esac
+if [[ "$database_mode" == neon-native-mongo && ( "${ETL_SOURCE_NEON:-false}" == true || "${ETL_REMOTE_DB:-false}" == true ) ]]; then
+  echo 'Database switch conflicts with native Mongo profile.' >&2; exit 2
+fi
 if [[ ( "${ETL_REMOTE_DB:-false}" == true && "$database_mode" == source-neon ) || ( "${ETL_SOURCE_NEON:-false}" == true && "$database_mode" == remote ) ]]; then
   echo 'Database switch conflicts with DATABASE_MODE.' >&2; exit 2
 fi
@@ -59,6 +62,7 @@ case "$media_enabled" in true|false) ;; *) echo 'Invalid MEDIA_ENABLED.' >&2; ex
 [[ "${ETL_REMOTE_DB:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.remote-db.yml")
 [[ "${ETL_SOURCE_NEON:-false}" == true ]] && compose+=(-f "$deploy_dir/compose.source-neon.yml")
 [[ "$database_mode" == neon-atlas ]] && compose+=(-f "$deploy_dir/compose.neon-atlas.yml")
+[[ "$database_mode" == neon-native-mongo ]] && compose+=(-f "$deploy_dir/compose.neon-native-mongo.yml")
 source_override="${SOURCE_WRITE_COMPOSE_OVERRIDE_FILE:-$source_override}"
 if [[ -n "$source_override" ]]; then
   [[ -f "$source_override" ]] || { echo 'SOURCE override file missing.' >&2; exit 2; }

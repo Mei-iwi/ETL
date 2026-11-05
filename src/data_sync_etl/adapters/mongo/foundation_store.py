@@ -56,6 +56,35 @@ def _search_cursor(collection, selector, limit):
         raise IndexingError('SEARCH_DATA_TIMEOUT', 503) from None
 
 
+def _normalized_rows(collection, selector):
+    """Lossless read-time wire packing, not a projection of the DTO contract.
+
+    Repeated bodies and identical text/markdown are transmitted once. Every
+    other field, including unknown/restriction fields, survives reconstruction
+    and strict validation. Explicit BSON types preserve missing versus null.
+    Binary collation prevents distinct source strings from being grouped.
+    """
+    same = {'$and': [{'$eq': [{'$type': '$text'}, 'string']}, {'$eq': ['$text', '$markdown']}]}
+    pipeline = [{'$match': selector}, {'$sort': {'_id': 1}}, {'$limit': 10001},
+        {'$group': {'_id': {'text': '$text', 'text_type': {'$type': '$text'},
+                           'markdown': {'$cond': [same, None, '$markdown']},
+                           'markdown_type': {'$type': '$markdown'}, 'same': same},
+                    'records': {'$push': {'$arrayToObject': {'$filter': {
+                        'input': {'$objectToArray': '$$ROOT'}, 'as': 'field',
+                        'cond': {'$not': [{'$in': ['$$field.k', ['text', 'markdown']]}]}}}}}}}]
+    try:
+        for group in collection.aggregate(pipeline, maxTimeMS=5000, collation={'locale': 'simple'}):
+            body = group['_id']
+            for record in group['records']:
+                if body['text_type'] != 'missing':
+                    record['text'] = body.get('text')
+                if body['markdown_type'] != 'missing':
+                    record['markdown'] = body.get('text') if body['same'] else body.get('markdown')
+                yield record
+    except NetworkTimeout:
+        raise IndexingError('SEARCH_DATA_TIMEOUT', 503) from None
+
+
 def _record_validation(scope, key, document):
     proofs = scope.get('proofs')
     if proofs is not None and len(proofs) < 10001:
@@ -377,6 +406,34 @@ class MongoContentReader:
     def __init__(self, database):
         self.database = utc_database(database)
 
+    def normalized_phase(self, version_ids, *, max_chars):
+        """Fresh complete content DTOs, with no large Bag vector payload."""
+        ids = tuple(identifier(key) for key in version_ids)
+        if len(ids) > 10000 or len(set(ids)) != len(ids) or not 1 <= max_chars <= 50_000_000:
+            raise DomainError('Search content phase bounds exceeded')
+        documents, seen, chars = {key: [] for key in ids}, set(), 0
+        rows = _normalized_rows(self.database.mongo_content_units,
+                                {'resource_version_id': {'$in': list(ids)}, 'is_current': True})
+        for ordinal, raw in enumerate(rows, 1):
+            document = checked(ContentUnitDocument, raw)
+            chars += len(document.text)
+            if ordinal > 10000 or chars > max_chars:
+                from data_sync_etl.domain.search import SearchError
+                raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
+            if document.resource_version_id not in documents or document.id in seen:
+                raise DomainError('Search content phase identity mismatch')
+            seen.add(document.id)
+            documents[document.resource_version_id].append(document)
+        for records in documents.values():
+            records.sort(key=lambda row: (row.page_from is not None, row.page_from or 0, row.id))
+
+        def units(version_id, *, limit=100, offset=0):
+            bounds(limit, offset)
+            if version_id not in documents:
+                raise DomainError('Search content phase identity mismatch')
+            return documents[version_id][offset:offset + limit]
+        return units
+
     def ocr_pages(self, *, version_id=None, job_id=None, page_num=None, limit=100, offset=0):
         bounds(limit, offset)
         if version_id is None and job_id is None:
@@ -618,6 +675,20 @@ class MongoBagStore:
                     'is_current': True, 'embedding_model': model}
         return [checked(ContentBagDocument, data) for data in
                 _search_cursor(self.database.content_bags, selector, limit)]
+
+    def search_root_candidates(self, roots, version_ids, *, model):
+        """Complete BSON for explicitly ranked roots, never a field projection."""
+        ids = tuple(identifier(key) for key in roots)
+        versions = tuple(identifier(key) for key in version_ids)
+        if not ids or len(ids) > 100 or len(set(ids)) != len(ids) or len(versions) > 100:
+            raise DomainError('Search root bounds exceeded')
+        selector = {'_id': {'$in': list(ids)}, 'resource_version_id': {'$in': list(versions)},
+                    'is_current': True, 'embedding_model': model}
+        rows = [checked(ContentBagDocument, raw) for raw in
+                _search_cursor(self.database.content_bags, selector, len(ids) + 1)]
+        if len(rows) > len(ids) or any(row.id not in ids or row.resource_version_id not in versions for row in rows):
+            raise DomainError('Search root identity mismatch')
+        return rows
 
     def __init__(self, database, dimension: int, *, historical_dimensions=()):
         if type(dimension) is not int or not 1 <= dimension <= 4096:

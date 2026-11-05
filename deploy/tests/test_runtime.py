@@ -130,6 +130,32 @@ def test_neon_source_with_local_master_mongo(source_neon_connections):
     assert os.environ['MONGO_URI'] == values['MONGO_URI']
 
 
+@pytest.mark.parametrize('uri,valid', [
+    ('mongodb://host.docker.internal:27017/', True),
+    ('mongodb://localhost:27017/', False),
+    ('mongodb://external.example:27017/', False),
+    ('mongodb://host.docker.internal:27018/', False),
+    ('mongodb://host.docker.internal:27017/?host=external.example', False),
+    ('mongodb://host.docker.internal:27017,external.example:27017/', False),
+])
+def test_native_host_mongo_preserves_neon_and_local_boundary(source_neon_connections, monkeypatch, uri, valid):
+    from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
+    runtime, secret, values, _ = source_neon_connections
+    url = urlsplit(values['SOURCE_DATABASE_URL'])
+    query = parse_qs(url.query)
+    query['sslrootcert'] = [str(runtime.SOURCE_CA_FILE)]
+    values['SOURCE_DATABASE_URL'] = urlunsplit(url._replace(query=urlencode(query, doseq=True)))
+    values['MONGO_URI'] = uri
+    secret.write_text(json.dumps(values))
+    monkeypatch.setenv('ETL_DATABASE_MODE', 'neon-native-mongo')
+    if valid:
+        runtime.load_connections()
+        assert os.environ['MONGO_URI'] == uri
+    else:
+        with pytest.raises(ValueError):
+            runtime.load_connections()
+
+
 @pytest.mark.parametrize(('key', 'replacement', 'error'), [
     ('source_ssl', 'require', 'SOURCE_NEON_TLS_REQUIRED'),
     ('source_ssl', 'disable', 'SOURCE_NEON_TLS_REQUIRED'),

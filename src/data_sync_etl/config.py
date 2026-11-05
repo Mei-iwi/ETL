@@ -355,6 +355,10 @@ class Settings(BaseSettings):
     search_metadata_live_dense_fallback_enabled: bool = False
     search_metadata_live_dense_max_resources: int = Field(default=64, ge=1, le=200)
     search_metadata_live_dense_min_similarity: float = Field(default=.5, ge=.35, le=1, allow_inf_nan=False)
+    search_normalized_shortlist_enabled: bool = False
+    search_normalized_max_chunks: int = Field(default=2048, ge=1, le=10000)
+    search_normalized_min_similarity: float = Field(default=.45, ge=.35, le=1, allow_inf_nan=False)
+    search_normalized_vector_cache_file: str | None = None
     search_metadata_indexed_candidates_enabled: bool = False
     search_metadata_authority_limit: int = Field(default=10000, ge=201, le=20000)
     search_metadata_match_limit: int = Field(default=2000, ge=1, le=2000)

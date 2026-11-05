@@ -39,7 +39,7 @@ foreach ($line in Get-Content -LiteralPath $EnvFile) {
         $mediaEnabled = $Matches[1]
     }
     if ($line -match '^\s*DATABASE_MODE\s*=') {
-        if ($line -notmatch '^\s*DATABASE_MODE\s*=\s*["'']?(same-host|remote|source-neon|neon-atlas)["'']?\s*(?:#.*)?$') { throw 'Invalid DATABASE_MODE in Docker env file.' }
+        if ($line -notmatch '^\s*DATABASE_MODE\s*=\s*["'']?(same-host|remote|source-neon|neon-atlas|neon-native-mongo)["'']?\s*(?:#.*)?$') { throw 'Invalid DATABASE_MODE in Docker env file.' }
         $databaseMode = $Matches[1]
     }
     if ($line -match '^\s*SOURCE_DRIVE_ENABLED\s*=') {
@@ -54,7 +54,8 @@ foreach ($line in Get-Content -LiteralPath $EnvFile) {
     }
 }
 if ($env:DATABASE_MODE) { $databaseMode = $env:DATABASE_MODE }
-if ($databaseMode -notin @('same-host','remote','source-neon','neon-atlas')) { throw 'Invalid DATABASE_MODE.' }
+if ($databaseMode -notin @('same-host','remote','source-neon','neon-atlas','neon-native-mongo')) { throw 'Invalid DATABASE_MODE.' }
+if ($databaseMode -eq 'neon-native-mongo' -and ($RemoteDatabase -or $SourceNeon)) { throw 'Database switch conflicts with native Mongo profile.' }
 if ($databaseMode -eq 'neon-atlas' -and ($RemoteDatabase -or $SourceNeon)) { throw 'Database switch conflicts with neon-atlas profile.' }
 if (($RemoteDatabase -and $databaseMode -eq 'source-neon') -or ($SourceNeon -and $databaseMode -eq 'remote')) { throw 'Database switch conflicts with DATABASE_MODE.' }
 if ($databaseMode -eq 'source-neon') { $SourceNeon = $true }
@@ -76,6 +77,7 @@ if ($Drive) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.drive.yml'))
 if ($RemoteDatabase) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.remote-db.yml')) }
 if ($SourceNeon) { $composeArgs += @('-f',(Join-Path $deployDir 'compose.source-neon.yml')) }
 if ($databaseMode -eq 'neon-atlas') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.neon-atlas.yml')) }
+if ($databaseMode -eq 'neon-native-mongo') { $composeArgs += @('-f',(Join-Path $deployDir 'compose.neon-native-mongo.yml')) }
 if ($sourceWriteOverrideFile) {
     if (-not (Test-Path -LiteralPath $sourceWriteOverrideFile -PathType Leaf)) {
         throw 'SOURCE_WRITE_COMPOSE_OVERRIDE_FILE does not exist.'

@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
 @pytest.mark.parametrize("mode,overlay", [
     ("source-neon", "compose.source-neon.yml"),
+    ("neon-native-mongo", "compose.neon-native-mongo.yml"),
     ("remote", "compose.remote-db.yml"),
     ("same-host", None),
     ("$(touch unexpected)", "INVALID"),

@@ -602,6 +602,12 @@ class Container:
         self.search = SearchService(self.indexing, self.settings, self.content_bags,
                                     query_cache_runtime=self.indexing.embedding, semantic=self.semantic,
                                     metadata=self.metadata_search)
+        if self.metadata_search is not None:
+            from data_sync_etl.adapters.exact_text_vectors import ExactTextVectors
+            from data_sync_etl.application.normalized_search import NormalizedContentSearch
+            self.search.normalized_search = NormalizedContentSearch(
+                self.search, ExactTextVectors(self.metadata_search.live_embedding,
+                    cache_file=self.settings.search_normalized_vector_cache_file))
         self.graph_driver = self.graph_advisor = self.related_learning = None
         if self.settings.neo4j_enabled and self.settings.neo4j_search_enabled:
             from data_sync_etl.adapters.neo4j.driver import GraphDriver

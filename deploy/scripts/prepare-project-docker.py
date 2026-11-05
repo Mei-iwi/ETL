@@ -33,10 +33,17 @@ def linux_url(value):
         query['sslrootcert'] = '/run/secrets/source-database-ca.pem'
     return urlunsplit(url._replace(query=urlencode(query)))
 
+mongo_url = urlsplit(settings.mongo_uri)
+native_mongo = (mongo_url.scheme == 'mongodb' and mongo_url.hostname in ('127.0.0.1', 'localhost')
+                and mongo_url.port == 27017)
+container_mongo_uri = (urlunsplit(mongo_url._replace(netloc='host.docker.internal:27017'))
+                       if native_mongo else settings.mongo_uri)
+if native_mongo and (mongo_url.username or mongo_url.password or mongo_url.query):
+    raise ValueError('NATIVE_MONGO_CONNECTION_OPTIONS_UNSUPPORTED')
 connections = {
     'DATABASE_URL': str(settings.database_url).replace('@127.0.0.1:5434/', '@master-postgres:5432/'),
     'SOURCE_DATABASE_URL': linux_url(str(settings.source_database_url)),
-    'MONGO_URI': settings.mongo_uri,
+    'MONGO_URI': container_mongo_uri,
     'MONGO_DATABASE': settings.mongo_database,
 }
 assert '@master-postgres:5432/' in connections['DATABASE_URL']
@@ -136,7 +143,8 @@ for prefix in ['source_file_storage', 'etl_file_storage', 'source_storage_write'
 config['ETL_VIEWER_FRAME_ORIGINS'] = ' '.join(sorted(viewer_origins))
 config.update({
     'APP_PROJECT': 'etl-app', 'BACKEND_IMAGE': 'etl-portable-backend:local',
-    'FRONTEND_IMAGE': 'etl-portable-frontend:local', 'DATABASE_MODE': 'neon-atlas',
+    'FRONTEND_IMAGE': 'etl-portable-frontend:local',
+    'DATABASE_MODE': 'neon-native-mongo' if native_mongo else 'neon-atlas',
     'ETL_DATA_NETWORK': 'etl-master-only_default', 'WEB_PORT': '8080',
     'CONNECTIONS_FILE': (private / 'connections.json').as_posix(),
     'SOURCE_DATABASE_CA_FILE': ca.as_posix(),
@@ -205,5 +213,6 @@ lines = ['# Private Docker configuration generated from the current authorized .
 for key,value in config.items():
     lines.append(key+'='+(str(value) if key=='SOURCE_WRITE_COMPOSE_OVERRIDE_FILE' else quoted(value)))
 (root/'docker.env').write_text('\n'.join(lines)+'\n',encoding='utf-8')
-print('Configured docker.env; project-private runtime mounts; Neon + Docker MASTER + Atlas.')
+print('Configured docker.env; project-private runtime mounts; Neon + Docker MASTER + '
+      + ('Windows native MongoDB.' if native_mongo else 'Atlas.'))
 print('Approved contracts copied by reference; credential values withheld.')

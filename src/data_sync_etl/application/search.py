@@ -88,6 +88,7 @@ class SearchService:
         self.graph_advisor = graph_advisor
         self.source_content_authorizer = None
         self.source_content_authorizer_many = None
+        self.normalized_search = None
         self._content_timeout_lock = Lock()
         self._content_retry_at = 0.
 
@@ -485,8 +486,15 @@ class SearchService:
                     if cooling:
                         status['content_retry'] = 'BACKOFF'
                         raise IndexingError('SEARCH_DATA_TIMEOUT', 503)
-                content = self._content_search(query, method, filters, 1, self.settings.search_max_bags,
-                                                **options, _branch_capture=content_branches)
+                if self.settings.search_normalized_shortlist_enabled and self.normalized_search is not None:
+                    content = self.normalized_search.retrieve(query, method, filters, access,
+                        limit=min(100, page * size))
+                    content_branches.update(normalized_content={
+                        row['resource_version_id']: row['score'] for row in content['items']})
+                    status['content_representation'] = 'NORMALIZED_BGE_SHORTLIST'
+                else:
+                    content = self._content_search(query, method, filters, 1, self.settings.search_max_bags,
+                                                    **options, _branch_capture=content_branches)
                 status['content'] = content['message']
             except (SearchError, IndexingError) as exc:
                 if exc.code == 'SEARCH_DATA_TIMEOUT' and bounded_backoff and not cooling:
