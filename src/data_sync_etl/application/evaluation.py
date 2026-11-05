@@ -33,7 +33,7 @@ class EvaluationService:
         if not access.internal:
             raise EvaluationError('EVALUATION_FORBIDDEN', 403)
 
-    def corpus(self, filters, access):
+    def corpus(self, filters, access, resource_ids=None):
         self.authorized(access)
         search, limit = self.search, self.settings.evaluation_max_corpus_versions
         if search.bags is None:
@@ -45,8 +45,19 @@ class EvaluationService:
             raise EvaluationError('EVALUATION_CORPUS_LIMIT')
         versions = []
         for row in rows:
+            if resource_ids is not None and row['resource_id'] not in resource_ids:
+                continue
             with search.indexing.uow() as repo:
-                snapshot = search._ready_snapshot(repo, row['version_id'])
+                # One bounded read per version. Reuse only the exact documents
+                # verified in this phase, never a cross-request artifact cache.
+                documents = {}
+                def read_bags(ids, *, version_id, generation, _documents=documents):
+                    batch = getattr(search.bags, 'search_bags', None)
+                    result = (batch(ids, version_id=version_id, generation=generation)
+                              if callable(batch) else {key: search.bags.get_bag(key) for key in ids})
+                    _documents.update(result)
+                    return result
+                snapshot = search._ready_snapshot(repo, row['version_id'], batch_texts=True, bag_reader=read_bags)
                 if snapshot is None:
                     continue
                 allowed = search._allowed_units(repo, snapshot, access)
@@ -54,7 +65,7 @@ class EvaluationService:
                 for root, leaves in sorted(bag_structure(snapshot[2]).items()):
                     if not set(leaves) <= allowed:
                         continue
-                    bag = search.bags.get_bag(root)
+                    bag = documents.get(root)
                     if bag is not None:
                         bags.append({'id': root, 'hash': checksum(bag.model_dump(mode='json'))})
                 if bags:
@@ -173,6 +184,7 @@ class EvaluationService:
                                    'mrr_cutoff': 'k', 'ndcg_gain': '2^grade-1',
                                    'percentile': 'linear interpolation',
                                    'corpus_validation': 'full before/after run; batched PG marker before/after each search; Search guards unchanged',
+                                   'retrieval_io': 'bounded batch reads; independent fresh initial/final snapshots; no result or permission cache',
                                    'timeout_seconds': self.settings.evaluation_run_timeout_seconds,
                                    'python': platform.python_version(), 'platform': platform.system()}}
             self.store.put('runs', run)
@@ -189,7 +201,8 @@ class EvaluationService:
                         self.deadline(started)
                         self.check_marker(dataset, access, marker)
                         self.search.search(dataset['queries'][index % len(dataset['queries'])]['query'], method,
-                                           filters=dataset['filters'], size=command['max_results'], access=access)
+                                           filters=dataset['filters'], size=command['max_results'], access=access,
+                                           _batch_texts=True, _batch_bags=True)
                         self.check_marker(dataset, access, marker)
                         self.deadline(started)
                         completed += 1
@@ -207,7 +220,8 @@ class EvaluationService:
                             try:
                                 response = self.search.search(query['query'], method, filters=dataset['filters'],
                                                               size=command['max_results'], access=access,
-                                                              _query_context=query_context)
+                                                              _query_context=query_context,
+                                                              _batch_texts=True, _batch_bags=True)
                                 row['latency_ms'] = (perf_counter() - call_start) * 1000
                                 seen = set()
                                 for item in response['items']:
@@ -299,14 +313,17 @@ class EvaluationService:
     def list_runs(self, access, page=1, size=7):
         self.authorized(access)
         snapshots, rows = {}, []
-        for run in self.store.list_runs():
-            if run['scope'] != access.scope or run.get('auth_user_id') != access.actor_id:
-                continue
+        runs = [run for run in self.store.list_runs()
+                if run['scope'] == access.scope and run.get('auth_user_id') == access.actor_id]
+        referenced = {}
+        for run in runs:
+            referenced.setdefault(checksum(run['snapshot']['filters']), set()).update(self.run_resource_ids(run))
+        for run in runs:
             filters = run['snapshot']['filters']
             key = checksum(filters)
             if key not in snapshots:
                 try:
-                    snapshots[key], _ = self.corpus(filters, access)
+                    snapshots[key], _ = self.corpus(filters, access, referenced[key])
                 except EvaluationError as exc:
                     if exc.code != 'EVALUATION_NO_READY_CORPUS':
                         raise
@@ -326,12 +343,17 @@ class EvaluationService:
                 'total_pages': max(1, (len(rows) + size - 1) // size)}
 
     @staticmethod
+    def run_resource_ids(run):
+        referenced = {label['item_id'] for query in run['queries'] for label in query['relevance']}
+        referenced.update(item['resource_id'] for row in run['observations'] for item in row['ranked'])
+        return referenced
+
+    @staticmethod
     def check_run_access(run, access, snapshot):
         if run['scope'] != access.scope or run.get('auth_user_id') != access.actor_id:
             raise EvaluationError('EVALUATION_FORBIDDEN', 403)
         allowed = {row['resource_id'] for row in snapshot['versions']}
-        referenced = {label['item_id'] for query in run['queries'] for label in query['relevance']}
-        referenced.update(item['resource_id'] for row in run['observations'] for item in row['ranked'])
+        referenced = EvaluationService.run_resource_ids(run)
         if not referenced <= allowed:
             raise EvaluationError('EVALUATION_QRELS_DENIED', 403)
 
@@ -341,7 +363,7 @@ class EvaluationService:
         if run['scope'] != access.scope or run.get('auth_user_id') != access.actor_id:
             raise EvaluationError('EVALUATION_FORBIDDEN', 403)
         # GET never runs Search or embeds a query. Recheck current read permissions.
-        snapshot, _ = self.corpus(run['snapshot']['filters'], access)
+        snapshot, _ = self.corpus(run['snapshot']['filters'], access, self.run_resource_ids(run))
         self.check_run_access(run, access, snapshot)
         return run
 

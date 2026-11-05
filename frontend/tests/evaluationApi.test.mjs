@@ -15,6 +15,21 @@ test('hide only the unconfirmed-label notice without changing API warning data',
 
 const id = '01M4ZXS1XJ2B4H42CFY24KJY8C'
 
+test('evaluation transport timeouts expose a safe actionable message', async t => {
+    t.mock.method(globalThis, 'fetch', async () => { throw new DOMException('signal timed out', 'TimeoutError') })
+    await assert.rejects(getEvaluationRun(id), error => error instanceof EvaluationApiError
+        && error.code === 'EVALUATION_REQUEST_TIMEOUT' && !error.message.includes('signal timed out'))
+})
+
+test('long evaluation and result reads have separate bounded transport budgets', async t => {
+    const budgets = []
+    t.mock.method(AbortSignal, 'timeout', value => { budgets.push(value); return new AbortController().signal })
+    t.mock.method(globalThis, 'fetch', async () => Response.json({}))
+    await getEvaluationRun(id)
+    await runEvaluation({ dataset_id: id })
+    assert.deepEqual(budgets, [120000, 3660000])
+})
+
 test('run summary omits observations only on explicit request and keeps the abort signal', async t => {
     const controller = new AbortController()
     t.mock.method(globalThis, 'fetch', async (url, options) => {
