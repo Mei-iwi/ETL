@@ -59,8 +59,8 @@ function configureAuthProxy(proxy: import('vite').HttpProxy.ProxyServer) {
   const env = { ...loadEnv('development', root, 'AUTH_'), ...process.env }
   if (!env.AUTH_MODE || env.AUTH_MODE === 'legacy_local') return
   const keyPath = env.AUTH_PROXY_KEY_FILE
-  if (!keyPath) throw new Error('Local auth proxy requires AUTH_PROXY_KEY_FILE in the Backend .env')
-  const key = readFileSync(resolve(root, keyPath), 'utf8').trim()
+  if (!env.AUTH_PROXY_KEY && !keyPath) throw new Error('Local auth proxy requires AUTH_PROXY_KEY or AUTH_PROXY_KEY_FILE in the Backend .env')
+  const key = env.AUTH_PROXY_KEY?.trim() || readFileSync(resolve(root, keyPath!), 'utf8').trim()
   if (!/^[a-fA-F0-9]{64}$/.test(key)) throw new Error('Local auth proxy key has an invalid format')
   proxy.on('proxyReq', (outgoing) => {
     outgoing.setHeader('x-etl-proxy-key', key)

@@ -81,9 +81,9 @@ def validate_mode(settings):
         raise ValueError('AUTH_COOKIE_ORIGIN_MISMATCH')
 
 
-def read_secret(path, code, max_bytes=4096):
+def read_secret(path, code, max_bytes=4096, *, value=None):
     try:
-        value = Path(path).read_bytes().strip()
+        value = value.encode('utf-8').strip() if value else Path(path).read_bytes().strip()
         if not value or len(value) > max_bytes:
             raise ValueError
         return value
@@ -96,14 +96,17 @@ class AuthService:
         validate_mode(settings)
         self.settings, self.clock = settings, clock
         self.origin = origin_parts(settings.auth_origin)
-        self.key = read_secret(settings.session_signing_key_file, 'AUTH_SESSION_KEY_REQUIRED')
-        self.proxy_key = read_secret(settings.auth_proxy_key_file, 'AUTH_PROXY_KEY_REQUIRED')
+        self.key = read_secret(settings.session_signing_key_file, 'AUTH_SESSION_KEY_REQUIRED',
+                               value=getattr(settings, 'session_signing_key', ''))
+        self.proxy_key = read_secret(settings.auth_proxy_key_file, 'AUTH_PROXY_KEY_REQUIRED',
+                                     value=getattr(settings, 'auth_proxy_key', ''))
         if len(self.key) < 32 or not re.fullmatch(b'[a-fA-F0-9]{64}', self.proxy_key):
             raise ValueError('AUTH_SECRET_FORMAT_INVALID')
         self.password_hash = b''
         self.hasher = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
         if settings.auth_mode == 'single_admin' or (settings.auth_mode == 'master_users' and settings.admin_enabled):
-            self.password_hash = read_secret(settings.admin_password_hash_file, 'AUTH_PASSWORD_HASH_REQUIRED')
+            self.password_hash = read_secret(settings.admin_password_hash_file, 'AUTH_PASSWORD_HASH_REQUIRED',
+                                              value=getattr(settings, 'admin_password_hash', ''))
             try:
                 params = extract_parameters(self.password_hash.decode('ascii'))
                 if (params.type is not Type.ID or params.version != 19

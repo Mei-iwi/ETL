@@ -66,8 +66,9 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 
 | Vị trí | Nội dung |
 | --- | --- |
-| `.env` | Kết nối database, đường dẫn, tùy chọn API/worker |
-| `ETL_Secrets/runtime/` | Khóa xác thực, CA và owner contract đã phê duyệt |
+| `.env` | Cấu hình host và credential hiện hành: database, hash admin local, khóa phiên/proxy, storage, Neo4j |
+| `docker.env` | Cấu hình container được sinh từ `.env`, bao gồm credential riêng tư |
+| `ETL_Secrets/runtime/` | CA và owner contract đã phê duyệt; secret dạng tệp cũ vẫn được hỗ trợ |
 | `Models/` | Model và manifest |
 | `storage/` | Dữ liệu làm việc theo cấu hình |
 
@@ -99,7 +100,11 @@ INDEX_EMBEDDING_DIMENSION=1024
 
 `DATABASE_URL` phải khớp user/database/password MASTER; percent-encode mật khẩu trong URI. Neon reader dùng quyền đọc và TLS/CA theo cấu hình được cấp; SOURCE writer dùng credential riêng. Không đưa URI thật vào file mẫu hoặc log.
 
-Khai báo đường dẫn contract, khóa và công cụ trong `.env`: `SOURCE_OCR_CONTRACT_FILE`, `SESSION_SIGNING_KEY_FILE`, `AUTH_PROXY_KEY_FILE`, `TESSERACT_PATH`, `OFFICE_PDF_EXECUTABLE`, `FFMPEG_PATH`, `FFPROBE_PATH`. Xem đầy đủ tại [.env.example](.env.example).
+Khai báo contract và công cụ trong `.env`: `SOURCE_OCR_CONTRACT_FILE`, `TESSERACT_PATH`, `OFFICE_PDF_EXECUTABLE`, `FFMPEG_PATH`, `FFPROBE_PATH`. Khóa xác thực có thể đặt trực tiếp qua `ADMIN_PASSWORD_HASH`, `SESSION_SIGNING_KEY`, `AUTH_PROXY_KEY`; giá trị inline được ưu tiên hơn các biến `*_FILE` cũ. Xem [.env.example](.env.example).
+
+Mật khẩu người dùng MASTER/SOURCE do database quản lý dưới dạng hash, không được sao chép thành mật khẩu gốc trong env. `ADMIN_PASSWORD_HASH` chỉ cấu hình admin local hiện hành; không thay đổi mật khẩu/quyền người dùng đồng bộ. Không có biến mật khẩu chung để thay thế đăng nhập từng tài khoản.
+
+Google Drive có thể dùng `SOURCE_DRIVE_CREDENTIALS_JSON` chứa nguyên JSON credential hiện hành trên một dòng, thay cho `SOURCE_DRIVE_CREDENTIALS_FILE`; giữ nguyên loại tài khoản và scope readonly. Với Neo4j, `NEO4J_PASSWORD` và `NEO4J_AUTH` dùng chính credential hiện có. `etl-graph.ps1` tự chuẩn bị secret graph runtime khi bật chế độ env-managed.
 
 | Nhóm cấu hình | Yêu cầu trước khi chạy |
 | --- | --- |
@@ -158,6 +163,8 @@ python -m data_sync_etl.security.cli init --directory ETL_Secrets/runtime
 ```
 
 Điền `ADMIN_LOGIN_EMAIL`, `ADMIN_PASSWORD_HASH_FILE`, `SESSION_SIGNING_KEY_FILE`, `AUTH_PROXY_KEY_FILE` theo kết quả. Để dùng admin local, đặt `ADMIN_ENABLED=true`, `AUTH_ORIGIN=http://127.0.0.1:3000`, `AUTH_DEPLOYMENT_PROFILE=localhost`. Không có mật khẩu mặc định.
+
+Nếu chọn quản lý trong env, giữ nguyên nội dung các tệp vừa tạo trong `ADMIN_PASSWORD_HASH`, `SESSION_SIGNING_KEY`, `AUTH_PROXY_KEY` của `.env`, rồi bỏ ba tham chiếu `*_FILE`. Không tạo lại hash hoặc khóa khi chuyển cách lưu. Proxy Vite đọc `AUTH_PROXY_KEY` ở phía server; không đặt khóa vào biến `VITE_*`.
 
 `AUTH_MODE=master_users` dùng tài khoản đồng bộ từ SOURCE: cần FULL sync users và worker users-refresh. Service OCR phải mapping về đúng SOURCE actor có quyền; admin local không tự thay thế danh tính này.
 
@@ -243,6 +250,12 @@ Nếu dùng Neo4j và `master_users`, khởi động Neo4j theo bước 7 trư�
 Không dùng Neo4j thì bỏ `-GraphServices`; users-refresh có thể chạy bằng lệnh local trong bảng A khi API dùng `master_users`. Không chạy thêm users-refresh local nếu container tương ứng đã bật. `Start` có kiểm tra trước và không tự build; sau khi đổi code cần `Build` rồi `Start`. Nếu `.env` ghim image bằng `BACKEND_IMAGE`, `FRONTEND_IMAGE` hoặc `GRAPH_SERVICES_IMAGE`, xác minh các tag đó chính là image vừa build.
 
 Mongo native phải truy cập được từ container qua host gateway. Nếu preflight thất bại, kiểm tra service, bind address và Windows Firewall theo môi trường; không mở Mongo ra Internet hoặc vô hiệu hóa xác thực để chữa lỗi kết nối.
+
+Với cấu hình sinh mới, `DOCKER_ENV_SECRETS=true`: launcher tự tạo secret runtime từ `docker.env` trong `ENV_SECRETS_DIR` trước Build/Check/Start. Thư mục này là dữ liệu sinh tự động, không phải nguồn cấu hình thứ ba và không cần mang theo khi chuyển máy. Compose vẫn mount secret đúng phạm vi từng service và giữ container `read_only`; không nhúng credential vào image. Các launcher dùng overlay `!override`, cần Compose 2.24.4 trở lên.
+
+Kết nối trong `docker.env` được khai báo trực tiếp bằng `DATABASE_URL`, `SOURCE_DATABASE_URL`, `MONGO_URI`, `MONGO_DATABASE`; launcher tự tạo `connections.json` runtime. Không cần giữ thêm một bản JSON credential để chỉnh tay. MASTER trong container dùng `master-postgres:5432`, Mongo Windows dùng `host.docker.internal:27017`; các giá trị trong `.env` vẫn dành cho host.
+
+Sau khi sửa `.env`, chạy lại `prepare-project-docker.py` rồi `Start` với đúng switch. Trong chế độ env-managed, `Start` tạo lại các container được chọn để nhận secret mới; có gián đoạn ngắn. Đừng sửa tệp secret runtime vì lần chuẩn bị tiếp theo sẽ sinh lại từ env. Contract, CA, model và dữ liệu lưu trữ vẫn là tệp thực cần chuẩn bị/backup.
 
 ## 6. OCR và chỉ mục tự động
 

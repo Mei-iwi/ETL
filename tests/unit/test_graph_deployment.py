@@ -6,6 +6,17 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_graph_launcher_can_validate_env_without_an_auth_file(tmp_path, monkeypatch):
+    env = tmp_path / 'graph.env'
+    env.write_text('NEO4J_AUTH=neo4j/test-only-password\nNEO4J_PASSWORD=test-only-password\n', encoding='utf-8')
+    monkeypatch.setattr('sys.argv', ['check-neo4j-config.py', '--env-file', str(env)])
+    module = runpy.run_path(str(ROOT / 'deploy/scripts/check-neo4j-config.py'))
+    module['main']()
+    env.write_text('NEO4J_AUTH=neo4j/test-only-password\nNEO4J_PASSWORD=different-test-only-password\n', encoding='utf-8')
+    with pytest.raises(SystemExit, match='GRAPH_PRIVATE_RUNTIME_CONFIG_INVALID'):
+        module['main']()
+
+
 @pytest.mark.parametrize(('key', 'value', 'code'), [
     ('NEO4J_BIND_ADDRESS', '0.0.0.0', 'GRAPH_LOOPBACK_BIND_REQUIRED'),
     ('NEO4J_DOCKER_IMAGE', 'neo4j:latest', 'GRAPH_PINNED_COMMUNITY_IMAGE_REQUIRED'),

@@ -242,6 +242,9 @@ class Container:
             self.related_learning.close()
         if getattr(self, 'graph_advisor', None) is not None:
             self.graph_advisor.close()
+        resolver_close = getattr(getattr(self, 'source_resolver', None), 'close', None)
+        if callable(resolver_close):
+            resolver_close()
         if getattr(self, 'graph_driver', None) is not None:
             self.graph_driver.close()
         if hasattr(self, 'reconciliation_jobs'):

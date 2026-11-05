@@ -5,10 +5,13 @@ canonical SOURCE eligibility; HTTP additionally retains SearchAccess/index gates
 """
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from contextvars import copy_context
 from hashlib import sha256
 from io import BytesIO
 from pathlib import PurePosixPath
+from threading import BoundedSemaphore, Lock
 
 from data_sync_etl.domain.core import DomainError, SourceFileError
 from data_sync_etl.domain.resource_deletion import resource_deleted
@@ -23,6 +26,54 @@ class SourceFileResolver:
         self.uow, self.source, self.files = uow, source, files
         self.storage, self.formats, self.settings, self.temporary = storage, formats, settings, temporary
         self.source_registry = source_registry
+        self._authority_executor = None
+        self._authority_slots = None
+        self._authority_lock = Lock()
+
+    def close(self):
+        with self._authority_lock:
+            executor = self._authority_executor
+            self._authority_executor = None
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
+
+    def _authorize_source_batch(self, ids, authorities, live, access):
+        def check(key):
+            version, resource, rows = authorities.get(key, (None, None, []))
+            return self._derived_index_authorized(version, resource, rows, access, source=live.get(key))
+
+        workers = getattr(self.settings, 'source_search_authorization_workers', 1)
+        if workers == 1 or len(ids) < 2:
+            return {key: check(key) for key in ids}
+        with self._authority_lock:
+            if self._authority_executor is None:
+                self._authority_executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='source-authority')
+                self._authority_slots = BoundedSemaphore(workers)
+            executor, slots = self._authority_executor, self._authority_slots
+        # One shared bounded pool per resolver, with no unbounded queue or
+        # principal/decision cache. Final phases submit independently fresh data.
+        from data_sync_etl.application.search_runtime import CURRENT_SEARCH
+
+        futures = []
+        try:
+            for key in ids:
+                call = CURRENT_SEARCH.get()
+                if call is not None:
+                    call.check()
+                while not slots.acquire(timeout=.05):
+                    if call is not None:
+                        call.check()
+                try:
+                    future = executor.submit(copy_context().run, check, key)
+                except BaseException:
+                    slots.release()
+                    raise
+                future.add_done_callback(lambda _future: slots.release())
+                futures.append((key, future))
+            return {key: future.result() for key, future in futures}
+        finally:
+            for _key, future in futures:
+                future.cancel()  # Running checks retain slots until they actually finish.
 
     def _enabled(self):
         if not self.settings.source_reference_enabled:
@@ -259,9 +310,7 @@ class SourceFileResolver:
                         live[key] = snapshots.get(source_version_id)
                 except (DomainError, SourceFileError):
                     continue  # Unknown authority never permits stale text replay.
-            for key in ids[offset:offset + 250]:
-                version, resource, rows = authorities.get(key, (None, None, []))
-                result[key] = self._derived_index_authorized(version, resource, rows, access, source=live.get(key))
+            result.update(self._authorize_source_batch(ids[offset:offset + 250], authorities, live, access))
         return result
 
     def _derived_index_authorized(self, version, resource, rows, access, *, source=None):

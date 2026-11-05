@@ -41,6 +41,14 @@ def bag_of_words(text: str):
 
 
 def validate_vector(vector, dimension: int):
+    # BSON/Pydantic readers already produce ordinary Python floats. Keep the
+    # same finite/nonzero checks, but perform the finite pass and copy in C.
+    # Mixed numeric types and subclasses retain the original strict fallback.
+    if (isinstance(vector, (list, tuple)) and len(vector) == dimension and vector
+            and all(type(value) is float for value in vector)):
+        if not all(map(math.isfinite, vector)) or not any(vector):
+            raise IndexingError('INVALID_EMBEDDING', 503)
+        return list(vector)
     if (not isinstance(vector, (list, tuple)) or len(vector) != dimension or not vector or
             any(isinstance(v, bool) or not isinstance(v, (float, int))
                 or not math.isfinite(v) for v in vector) or not any(vector)):
