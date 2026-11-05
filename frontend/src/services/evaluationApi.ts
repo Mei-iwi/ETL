@@ -13,11 +13,14 @@ const validId = (id: string) => {
 }
 
 async function request(path: string, signal?: AbortSignal, body?: DatasetInput | RunInput, accept = 'application/json') {
-    const response = await fetch(root + path, {
-        method: body ? 'POST' : 'GET', signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(body && 'dataset_id' in body ? 660000 : 30000)]),
+    let response: Response
+    try {
+        response = await fetch(root + path, {
+        method: body ? 'POST' : 'GET', signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(body && 'dataset_id' in body ? 3660000 : 120000)]),
         headers: { Accept: accept, ...(body ? { 'Content-Type': 'application/json' } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}),
-    })
+        })
+    } catch (error) { throw transportError(error) }
     if (!response.ok) {
         const payload = await response.json().catch(() => null)
         const detail = payload?.detail
@@ -27,6 +30,14 @@ async function request(path: string, signal?: AbortSignal, body?: DatasetInput |
         throw new EvaluationApiError(response.status, typeof detail?.code === 'string' ? detail.code : 'EVALUATION_UNAVAILABLE', message)
     }
     return response
+}
+
+function transportError(error: unknown): unknown {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+        return new EvaluationApiError(504, 'EVALUATION_REQUEST_TIMEOUT',
+            'Yêu cầu thực nghiệm quá thời gian chờ. Hãy tải lại lịch sử để kiểm tra trạng thái trước khi chạy lại.')
+    }
+    return error
 }
 
 export async function createDataset(input: DatasetInput, signal?: AbortSignal): Promise<DatasetCreated> {
@@ -62,7 +73,8 @@ export async function runEvaluation(input: RunInput, signal?: AbortSignal, onPro
             }
             if (done) throw new Error('Mất kết nối trước khi hoàn tất. Kiểm tra Run ID trước khi chạy lại.')
         }
-    } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
+    } catch (error) { throw transportError(error) }
+    finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
 }
 export async function listEvaluationRuns(page = 1, signal?: AbortSignal): Promise<EvaluationRunList> {
     const data = await (await request(`/runs?page=${page}&size=7`, signal)).json()
