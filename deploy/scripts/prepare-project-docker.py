@@ -142,8 +142,8 @@ for prefix in ['source_file_storage', 'etl_file_storage', 'source_storage_write'
     viewer_origins.add('https://' + authority)
 config['ETL_VIEWER_FRAME_ORIGINS'] = ' '.join(sorted(viewer_origins))
 config.update({
-    'APP_PROJECT': 'etl-app', 'BACKEND_IMAGE': 'etl-portable-backend:local',
-    'FRONTEND_IMAGE': 'etl-portable-frontend:local',
+    'APP_PROJECT': 'etl-app', 'BACKEND_IMAGE': raw.get('BACKEND_IMAGE', 'etl-portable-backend:local'),
+    'FRONTEND_IMAGE': raw.get('FRONTEND_IMAGE', 'etl-portable-frontend:local'),
     'DATABASE_MODE': 'neon-native-mongo' if native_mongo else 'neon-atlas',
     'ETL_DATA_NETWORK': 'etl-master-only_default', 'WEB_PORT': '8080',
     'CONNECTIONS_FILE': (private / 'connections.json').as_posix(),

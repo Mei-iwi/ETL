@@ -1,14 +1,57 @@
-# Neo4j: Shadow operation and Active acceptance
+# Neo4j: related-learning Active and independent Search rollout
 
 ## Current release decision
 
-Keep `NEO4J_SEARCH_MODE=shadow`, `NEO4J_FAIL_OPEN=true`. Active is not approved.
-The related-learning feature is implemented. A candidate API/frontend has been
-deployed in Shadow and official MASTER ADMIN/VIEWER canaries have authenticated
-using the operator-provided private profiles. Active remains blocked by backend
-regression, incomplete current-image Search parity/performance acceptance, and
-the missing live non-admin DRAFT-owner case. An ADMIN who owns a DRAFT does not
-replace that case. Do not create accounts or change ownership/roles to pass it.
+The local related-learning feature has a separate release boundary:
+`NEO4J_RELATED_MODE=active` queries live graph relationships for the resource
+detail page. Keep `NEO4J_SEARCH_MODE=shadow` and `NEO4J_FAIL_OPEN=true`; this does
+not promote Search ranking, global Vector acceptance or the overall system.
+Public deployment defaults for related learning remain `disabled`.
+
+`GRAPH_ACTIVE_GATE` covers official auth, fresh SOURCE/MASTER authority before
+and after graph I/O, exact ID/relationship parity, real UI, outage/recovery,
+restart and rollback. Unrelated baseline failures remain reported separately.
+Missing non-admin DRAFT-owner credentials are `OWNER_LIVE_BLOCKED`; ADMIN-owner
+coverage is recorded separately and never presented as non-admin acceptance.
+Do not create accounts, change ownership or loosen guards to cover that case.
+
+For backward compatibility, direct callers that omit `neo4j_related_mode`
+inherit the previous Search mode behavior. Compose declares the feature mode
+explicitly. `NEO4J_RELATED_TIMEOUT_SECONDS=8` bounds the complete related lookup;
+the Neo4j query timeout remains independently bounded. A two-slot executor
+prevents abandoned timeout work from spawning unlimited tasks.
+
+The endpoint remains `GET /api/v1/resources/{resource_id}/related-learning`.
+`ready` with no items is a genuine empty result; `unavailable` is a transient
+graph/authority failure. Disabled/Shadow return no suggestions. Official
+401/403 remain errors; an inaccessible seed returns a generic 404. No source
+title/ID/count is returned for a denied seed. Responses and frontend requests
+use no-store; no authorization decision survives the request.
+
+UI shows the authorized title, a relationship reason and the normal detail
+link. During graph outage only this section reports unavailability. It never
+substitutes fixture or keyword recommendations. The endpoint reads metadata,
+SOURCE authority and current curriculum relations; it never loads ContentBags,
+OCR text, embeddings or the Search corpus.
+
+Current private local rollout evidence and exact image rollback commands are
+in `.local/neo4j/graph-active-final/`. For that deployment, from repository root:
+
+```powershell
+# Disable the user-visible feature and restore both pre-rollout images.
+.venv\Scripts\python.exe .local/neo4j/graph-active-final/deploy_feature.py --mode disabled --previous-images
+# Restore the tested related-learning release; Search stays Shadow.
+.venv\Scripts\python.exe .local/neo4j/graph-active-final/deploy_feature.py --mode active
+# Recreate the release to verify persisted mode after restart.
+.venv\Scripts\python.exe .local/neo4j/graph-active-final/deploy_feature.py --mode active --restart
+```
+
+The private helper/receipts are intentionally outside Git and apply only to
+this local instance. Portable configuration uses `.env` plus generated
+`docker.env`: pin `BACKEND_IMAGE`, `FRONTEND_IMAGE`, `NEO4J_RELATED_MODE` and the
+existing graph/auth overlays, then use the normal project launcher. The config
+generator preserves explicitly pinned image names. Never reset graph, rerun
+OCR or recreate database volumes for a feature rollback.
 
 An approved DRAFT original was retrieved through the official broker and its
 bytes matched the SOURCE checksum. Other pending-lifecycle originals remained
@@ -36,7 +79,8 @@ corpus authorization/fingerprint checks. It creates no collection, index,
 stored embedding or persisted record. Default isfalse and normal indexed
 retrieval is unchanged. Vector is never silently replaced by lexical retrieval.
 The UI marks partial results; this mode does not certify full content Search
-availability or justify enabling Neo4j Active.
+availability or certify Search Active. The separate related-learning gate does
+not depend on global ContentBag transport succeeding.
 After an unfiltered content transport timeout, this opt-in mode backs off for
 10seconds before another whole-corpus attempt. Skipped requests do not extend
 the window. Every request still rebuilds/revalidates metadata; no protected
@@ -171,11 +215,12 @@ Twenty graph-query samples at each concurrency 1/5/10 measured p95 about
 warmup/noise explains non-monotonic timings. Python allocation peak is measured,
 not process RSS or a full SQL/network round-trip profile.
 
-## Remaining acceptance gates
+## Remaining broader-system acceptance (separate from related learning)
 
-- Fresh full backend run remains red. The full after-fix run had 2,854 pass,
-  34 fail, eight documented optional skips; subsequent targeted comparison of
-  the original 39 cases has 31 fail/eight pass. This is not a new full-suite PASS.
+- The latest recorded full backend run had 2,878 pass, 14 fail and eight
+  optional skips, before subsequent Search/native-Mongo changes. It was not
+  repeated for the scoped graph release. Required graph/auth/affected UI gates
+  are measured separately; this is not a full-suite PASS.
 - Some old tests require enabling disabled 0021, expect historical 0015/384D,
   or expect SOURCE processing without current owner authority. Do not loosen
   guards/change approved 0020/1024D schema to satisfy those expectations.
@@ -190,7 +235,7 @@ not process RSS or a full SQL/network round-trip profile.
   An approved live DRAFT original now passes broker/byte/checksum verification
   for its ADMIN owner; a non-owner VIEWER is denied. Pending-lifecycle originals
   remain blocked by the existing original-file read policy.
-- Full authenticated latency/control measurements and real Active canary,
+- Full authenticated Search latency/control measurements and Search Active canary,
   original-file allowed/denied matrix and release rollback remain unaccepted.
 
 Private current commands, reports and screenshots:
