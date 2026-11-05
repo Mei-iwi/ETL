@@ -8,11 +8,11 @@
 | --- | --- | --- |
 | PostgreSQL SOURCE | Neon | Metadata nguồn, phiên bản, OCR jobs/page tasks và content units |
 | PostgreSQL MASTER | **Một container Docker local** | Metadata, mapping, read-model và trạng thái; migration `0020` |
-| MongoDB | Atlas, database `etl_content` | Đúng 5 collection: `users`, `learning_resources`, `ocr_pages`, `mongo_content_units`, `content_bags` |
+| MongoDB | Windows native, database `etl_content` | Đúng 5 collection: `users`, `learning_resources`, `ocr_pages`, `mongo_content_units`, `content_bags` |
 | Tệp gốc | Object Storage / Google Drive | Truy xuất theo quyền của nguồn |
 | API, giao diện, worker | Windows host | Đồng bộ, xử lý và phục vụ người dùng |
 
-Docker trong hướng dẫn này **chỉ chạy PostgreSQL MASTER**. SOURCE dùng Neon hiện hữu, MongoDB dùng Atlas; không tạo hai database đó ở local.
+Docker trong hướng dẫn này **chỉ chạy PostgreSQL MASTER**. SOURCE dùng Neon hiện hữu, MongoDB chạy native trên Windows; không tạo SOURCE hoặc Mongo container.
 
 ## 1. Chuẩn bị
 
@@ -62,7 +62,7 @@ DATABASE_URL=postgresql+psycopg://etl:CHANGE_ME@127.0.0.1:5434/etl
 SOURCE_ADAPTER=postgresql
 SOURCE_NAMESPACE=postgresql:learning
 SOURCE_DATABASE_URL=REPLACE_WITH_PRIVATE_NEON_READER_URI
-MONGO_URI=REPLACE_WITH_PRIVATE_ATLAS_URI
+MONGO_URI=mongodb://127.0.0.1:27017/
 MONGO_DATABASE=etl_content
 MONGO_METADATA_MODE=shared
 SOURCE_MONGO_ENABLED=false
@@ -114,7 +114,7 @@ docker compose --env-file .env -f deploy/compose.master-only.yml up -d master-po
 
 Cập nhật mã nguồn không cần xóa volume hoặc database. Đổi `POSTGRES_PASSWORD` trong `.env` không đổi mật khẩu của database đã khởi tạo. Xem thêm [hướng dẫn database](deploy/DATABASE_SETUP.md).
 
-## 4. Xác thực, model và Atlas
+## 4. Xác thực, model và MongoDB
 
 Giữ nguyên khóa và contract nếu hệ thống đã được cấu hình. Với cài mới dùng `AUTH_MODE=single_admin`, tạo khóa một lần bằng CLI; mật khẩu được nhập ẩn:
 
@@ -134,7 +134,7 @@ python deploy/runtime/model.py verify --directory Models/bge-m3 --manifest Model
 
 Nếu chưa có model, dùng action `prepare` thay `verify` và thêm `--accept-model-license` sau khi xem, chấp nhận giấy phép.
 
-Atlas cần đúng 5 collection trong bảng kiến trúc, validator `strict/error`, indexes theo contract và embedding 1024 chiều. Kiểm tra schema hiện có:
+MongoDB cần đúng 5 collection trong bảng kiến trúc, validator `strict/error`, indexes theo contract và embedding 1024 chiều. Kiểm tra schema hiện có:
 
 ```powershell
 python -m data_sync_etl.adapters.mongo.schema --inventory
@@ -153,7 +153,7 @@ python -m data_sync_etl.cli sync-master --full --stream all --source-id postgres
 
 ### Chạy local: frontend, backend và 4 worker
 
-Các tiến trình dưới đây chạy trực tiếp trên Windows, **không cần container ứng dụng**. Cần cài dependencies, chuẩn bị model/khóa và cấu hình `.env` ở các bước trên. Database MASTER phải đang truy cập được qua `DATABASE_URL` (ở mô hình hiện tại, chỉ MASTER chạy Docker); SOURCE Neon và MongoDB Atlas phải sẵn sàng.
+Các tiến trình dưới đây chạy trực tiếp trên Windows, **không cần container ứng dụng**. Cần cài dependencies, chuẩn bị model/khóa và cấu hình `.env` ở các bước trên. Database MASTER phải đang truy cập được qua `DATABASE_URL` (ở mô hình hiện tại, chỉ MASTER chạy Docker); SOURCE Neon và MongoDB native phải sẵn sàng.
 
 Các lệnh khởi động trong bảng giữ nguyên bản base tại commit `9c4b743` (`HEAD` khi đối chiếu), gồm cả `--worker-id`. Mở **6 terminal PowerShell** tại gốc repository. Trong mỗi terminal chạy `.\.venv\Scripts\Activate.ps1`, sau đó chạy một lệnh tương ứng; giữ terminal mở khi sử dụng hệ thống.
 
@@ -173,7 +173,9 @@ Nếu dùng `AUTH_MODE=master_users`, mở **thêm một terminal** cho worker l
 | Làm mới danh tính khi `AUTH_MODE=master_users` | `python -m data_sync_etl.cli run-users-refresh-worker --source-id postgresql` |
 | Đồng bộ graph Neo4j từ MASTER (tùy chọn) | `python -m data_sync_etl.cli run-graph-worker` |
 
-Nếu dùng Neo4j, mở thêm một terminal riêng cho graph worker; cần Neo4j đang chạy, dependencies `.[graph]` đã cài và `.env` có `NEO4J_ENABLED=true`, `NEO4J_SYNC_ENABLED=true` cùng cấu hình kết nối hợp lệ. Worker tự đối soát định kỳ theo `NEO4J_SYNC_INTERVAL_SECONDS` (mặc định 300 giây), độc lập với chế độ Search Shadow/Active. Xem [hướng dẫn Neo4j](deploy/NEO4J_LIGHTNODE.md).
+Nếu dùng Neo4j, mở thêm một terminal riêng cho graph worker; cần Neo4j đang chạy, dependencies `.[graph]` đã cài và `.env` có `NEO4J_ENABLED=true`, `NEO4J_SYNC_ENABLED=true` cùng cấu hình kết nối hợp lệ. Worker tự đối soát định kỳ theo `NEO4J_SYNC_INTERVAL_SECONDS` (mặc định 300 giây), độc lập với chế độ Search Shadow/Active. Xem [hướng dẫn Neo4j](deploy/NEO4J_ACTIVE_OPERATIONS.md#host-graph-operations).
+
+Kiểm tra frontend từ gốc repository: `npm.cmd --prefix frontend run build` và `npm.cmd --prefix frontend run lint`. Vite cổng 3000 proxy API tới backend cổng 8000; đăng nhập tại `http://127.0.0.1:3000/login`.
 
 Worker users-refresh là hướng dẫn bổ sung cho cấu hình hiện tại, không thuộc bảng 4 worker của bản base. Các hướng dẫn `.env` trong dự án, Docker chỉ MASTER và FULL sync với `--source-id postgresql` được giữ theo yêu cầu cấu hình mới.
 
@@ -194,7 +196,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docke
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-docker.ps1 -Action Status -EnvFile docker.env
 ```
 
-Mở <http://127.0.0.1:8080>. Profile `neon-atlas` dùng MASTER đang chạy trên network `etl-master-only_default`, SOURCE Neon và MongoDB Atlas; không khởi tạo database hay migration. `docker.env` giữ cấu hình container, còn credential/contract được mount từ `ETL_Secrets/`; model mount chỉ đọc từ `Models/`. Script chuẩn bị giữ phạm vi quyền trong `.env` và contract hiện có, không tự cấp quyền. Khi đổi `.env`, chạy lại bước chuẩn bị và Start; khi đổi code, Build rồi Start. Tránh chạy đồng thời worker local khi đã chuyển sang Docker.
+Mở <http://127.0.0.1:8080>. Profile `neon-native-mongo` dùng MASTER đang chạy trên network `etl-master-only_default`, SOURCE Neon và MongoDB Windows native; không khởi tạo database hay migration. Host dùng `127.0.0.1:27017`, container truy cập Mongo qua `host.docker.internal:27017`. `docker.env` giữ cấu hình container, còn credential/contract được mount từ `ETL_Secrets/`; model mount chỉ đọc từ `Models/`. Script chuẩn bị giữ phạm vi quyền trong `.env` và contract hiện có, không tự cấp quyền. Khi đổi `.env`, chạy lại bước chuẩn bị và Start; khi đổi code, Build rồi Start. Tránh chạy đồng thời worker local khi đã chuyển sang Docker.
 
 ## 6. OCR và chỉ mục tự động
 
@@ -219,7 +221,7 @@ Mang theo mã nguồn, `.env`, `ETL_Secrets/`, `Models/`; cài lại dependencie
 | Hiện tượng | Kiểm tra |
 | --- | --- |
 | Không kết nối MASTER | Container healthy, cổng 5434, user/database/password khớp `.env` |
-| Lỗi Neon/Atlas | Credential, DNS/TLS/CA, network access và quyền; không fallback sang DB local |
+| Lỗi kết nối nguồn/nội dung | Neon: credential, DNS/TLS/CA và quyền; Mongo native: service, port 27017 và host gateway khi chạy Docker |
 | `AUTH_MASTER_STALE` | FULL users và worker users-refresh |
 | Chờ quyền xử lý | Namespace/lifecycle/actor trong owner contract và quyền ứng dụng |
 | Model chưa READY | Đường dẫn, revision, manifest; chờ preload trước Vector/Hybrid |
@@ -231,8 +233,8 @@ Dùng CLI và worker trong mã nguồn để vận hành; các script chẩn đo
 ## Neo4j Light Node (tùy chọn)
 
 Neo4j là graph projection riêng từ MASTER, không thay SOURCE, ContentBag hoặc
-quyền truy cập. Xem [contract, kết quả backfill và lệnh vận hành](deploy/NEO4J_LIGHTNODE.md).
-Template mặc định tắt. Shadow chỉ đối soát; Active phải qua các gate nghiệm thu.
+quyền truy cập. Xem [contract và lệnh vận hành](deploy/NEO4J_ACTIVE_OPERATIONS.md#light-node-contract).
+Template mặc định tắt. Tính năng “Học liệu liên quan” có cờ `NEO4J_RELATED_MODE` riêng; bật Active sau gate nghiệm thu, độc lập với `NEO4J_SEARCH_MODE` của Search.
 
 Lệnh vận hành hai worker bằng Docker, endpoint “Học liệu liên quan”, khôi phục
-graph và các gate Active còn thiếu: [hướng dẫn vận hành Neo4j](deploy/NEO4J_ACTIVE_OPERATIONS.md).
+graph, rollback và phạm vi nghiệm thu: [hướng dẫn vận hành Neo4j](deploy/NEO4J_ACTIVE_OPERATIONS.md).

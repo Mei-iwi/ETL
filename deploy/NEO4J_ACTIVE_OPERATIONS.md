@@ -99,6 +99,88 @@ and revalidates its own metadata; embeddings/permissions are not cached.
 `SEARCH_METADATA_LIVE_DENSE_MIN_SIMILARITY` defaults to0.5 for short titles.
 The full-content threshold and all healthy ranking paths remain unchanged.
 
+## Light Node contract
+
+The graph is a derived MASTER read-model. The executable allowlist lives in
+`src/data_sync_etl/domain/graph_contract.py`: six node labels, seven mandatory
+relationship shapes and optional `DERIVED_FROM`. Nodes contain only business
+`id`; relationships contain no properties.
+
+| Node | MASTER input |
+| --- | --- |
+| EducationLevel | Distinct `master_grade_levels.education_level_id`; assert consistent identity |
+| GradeLevel | `master_grade_levels.id` |
+| Subject | `subjects.id` |
+| LearningResource | `master_learning_resources.id` |
+| ResourceVersion | `resource_versions.id` |
+| ContentUnit | All `content_units.id`, including derived units and history |
+
+| From | Relationship | To | MASTER foreign key/join |
+| --- | --- | --- | --- |
+| EducationLevel | HAS_GRADE | GradeLevel | grade.education_level_id |
+| GradeLevel | HAS_SUBJECT | Subject | subject.grade_id (nullable) |
+| LearningResource | HAS_SUBJECT | Subject | resource_subjects |
+| LearningResource | FOR_GRADE | GradeLevel | resource_grade_levels |
+| LearningResource | HAS_VERSION | ResourceVersion | version.resource_id |
+| ResourceVersion | CONTAINS | ContentUnit | unit.resource_version_id |
+| ContentUnit | HAS_CHILD | ContentUnit | unit.parent_unit_id (same version) |
+| ResourceVersion | DERIVED_FROM | ResourceVersion | version.parent_version_id (optional) |
+
+SOURCE IDs are not substituted for MASTER federation IDs. EducationLevel retains
+the identity recorded by the existing flattened MASTER representation; inconsistent
+identity or namespace collision blocks projection. No new identity is invented.
+ContentBag roots must join to exactly one existing MASTER ContentUnit/version.
+No ContentBag, Chunk, User, ACL, text, score or embedding nodes/properties are allowed.
+
+## Host graph operations
+
+Run from repository root with the virtualenv active and existing private
+credentials configured. Reuse configured secrets; never replace credentials or
+claim a nonempty graph to bypass ownership checks.
+
+| Purpose | Command |
+| --- | --- |
+| Install optional driver | `python -m pip install -e ".[graph]"` |
+| Prepare ignored Docker secrets | `python deploy/scripts/prepare-neo4j.py` |
+| Validate loopback/pin/secrets | `python deploy/scripts/check-neo4j-config.py --env-file .env` |
+| Start only Neo4j | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-graph.ps1 -Action GraphStart` |
+| Stop only Neo4j | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-graph.ps1 -Action GraphStop` |
+| Graph container status | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/etl-graph.ps1 -Action GraphStatus` |
+| Connectivity | `python -m data_sync_etl.cli graph-preflight` |
+| First bootstrap, empty dedicated graph only | `python -m data_sync_etl.cli graph-preflight --claim-empty` |
+| Full preview / refresh approved plan | `python -m data_sync_etl.cli graph-sync --full --dry-run` |
+| Apply the same validated MASTER snapshot | `python -m data_sync_etl.cli graph-sync --full --apply` |
+| Exact parity; nonzero on drift | `python -m data_sync_etl.cli graph-diff` |
+| Private counts / property audit | `python -m data_sync_etl.cli graph-status` |
+| Independent periodic full/delta refresh | `python -m data_sync_etl.cli run-graph-worker` |
+| One scheduled iteration | `python -m data_sync_etl.cli run-graph-worker --once` |
+
+Browser: `http://127.0.0.1:7474`; host Bolt: `bolt://127.0.0.1:7687`.
+The graph worker defaults to a 300-second full scan, applying only differences.
+Run it in a separate terminal/process; stop that process with Ctrl+C. It is a
+fifth, independent worker, never part of the four OCR/metadata workers.
+All graph writers must share the same `NEO4J_STATE_DIR` and run on one host in v1;
+cross-host concurrent writers are unsupported. Losing the ownership receipt
+blocks destructive reconcile; do not forge it or wipe an existing database.
+
+Node/edge diffs are computed automatically on each full scan, including parent
+changes and records removed from MASTER. A soft-deleted record retained in MASTER
+remains in this structural graph; Search still rejects it using live authority.
+There is no event/outbox or resource-scoped incremental subscription in v1.
+Do not change SOURCE/Mongo to track graph freshness.
+
+### Ownership and troubleshooting
+
+- GRAPH_OWNERSHIP_UNPROVEN: verify database identity and the original private
+  receipt. No automatic adoption of nonempty unowned databases.
+- GRAPH_FRESH_DRY_RUN_REQUIRED: rerun dry-run against the current snapshot.
+- GRAPH_BAG_MAPPING_DRIFT: inspect source/index mapping; never synthesize units.
+- GRAPH_SYNC_BUSY: another writer owns the OS lock; do not remove its lock file.
+- GRAPH_UNAVAILABLE: check only graph health/auth/network. Baseline Search and OCR
+  remain independent; graph reads never mint rights.
+- GRAPH_FAIL_OPEN_REQUIRED: this rollout forbids graph becoming a required Search
+  dependency. Keep FAIL_OPEN enabled.
+
 ## Supervised workers
 
 The optional `deploy/compose.graph-workers.yml` overlay adds only users-refresh
@@ -177,6 +259,15 @@ volumes and workers. If using `.env` as authority, update it too before the next
 configuration generation. No schema rollback, reindex or OCR is needed.
 
 ## Private restore and load drills
+
+For an approved offline backup window, stop the graph worker and Neo4j first.
+Use the pinned image's `neo4j-admin database dump neo4j --to-path=/backups`
+with the existing data volume and a verified private backup directory mounted.
+Default volumes are `etl-neo4j_graph-data` and `etl-neo4j_graph-logs`; inspect the
+actual project before mounting. GraphStop preserves them. Never use `down -v`.
+Changing an initial `NEO4J_AUTH` value does not rotate an existing database's
+password. Use the supported rotation procedure; never delete a volume to apply
+new credentials. Preparation refuses to overwrite differing existing secrets.
 
 ```powershell
 python scripts/neo4j_restore_drill.py
