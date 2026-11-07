@@ -355,19 +355,27 @@ class SearchService:
             return [row for row in rows if allowed.get(row['version_id'], False)]
         return [row for row in rows if self.source_content_authorizer(row['version_id'], access=access)]
 
-    def _snippets(self, snapshot, keywords, started, allowed, query=None, expansion=None, policy=None):
+    def _snippet_candidates(self, snapshot, started, allowed):
         roots = bag_structure(snapshot[2])
         # Bag scores include ALL member keywords/vectors. Never expose a Bag that
         # embeds denied descendants, even when another leaf could supply a snippet.
         roots = {root: leaves for root, leaves in roots.items() if set(leaves) <= allowed}
         leaf_root = {leaf: root for root, leaves in roots.items() for leaf in leaves}
-        best, chunks = {}, []
+        first, chunks = {}, []
         for chunk in self.indexing._preview(snapshot):
             self._deadline(started)
             root = leaf_root.get(chunk['content_unit_id'])
             if root is None or chunk['content_unit_id'] not in allowed or len(chunk['text']) > 20000:
                 continue
             chunks.append(chunk)
+            first.setdefault(root, chunk)
+        return roots, first, chunks, leaf_root
+
+    def _snippets(self, snapshot, keywords, started, allowed, query=None, expansion=None, policy=None,
+                  *, candidates=None, target_root=None):
+        roots, _, chunks, leaf_root = (candidates if candidates is not None else
+                                       self._snippet_candidates(snapshot, started, allowed))
+        best = {}
         ranker = ContextRanker(query, keywords, [chunk['text'] for chunk in chunks],
                                checkpoint=lambda: self._deadline(started),
                                expand_concepts=self.settings.search_expansion.enabled,
@@ -375,6 +383,8 @@ class SearchService:
         for ordinal, chunk in enumerate(chunks):
             self._deadline(started)
             root = leaf_root[chunk['content_unit_id']]
+            if target_root is not None and root != target_root:
+                continue
             score = ranker.score(ordinal)
             if root not in best or score > best[root][0]:
                 best[root] = (score, chunk)
@@ -671,7 +681,7 @@ class SearchService:
             candidates_by_version.setdefault(candidate.resource_version_id, []).append(candidate)
         by_bag, bow, semantic, snapshots, ready_count, source_chars = {}, {}, {}, {}, 0, 0
         excluded, semantic_metadata = set(), {}
-        authorized_roots, evidence_by_version = {}, {}
+        authorized_roots, evidence_by_version, bow_candidates = {}, {}, {}
         postgres_phase = None
         if _batch_texts and candidates:
             with self.indexing.uow() as repo:
@@ -693,12 +703,21 @@ class SearchService:
             if source_chars > self.settings.index_max_source_chars:
                 raise SearchError('SEARCH_LIMIT_EXCEEDED', 422)
             snapshots[version_id] = snapshot
-            roots, snippets, preview = self._snippets(snapshot, keywords, started, allowed, query, expansion, policy)
-            for text, (terms, expanded, _) in list(lexical_specs.items())[1:]:
-                _, alternatives, _ = self._snippets(snapshot, terms, started, allowed, text, expanded, policy)
-                for key, candidate in alternatives.items():
-                    if candidate[0] > snippets[key][0]:
-                        snippets[key] = (candidate[0], {**candidate[1], '_retrieval_query': text})
+            if method == 'bow':
+                # Ranking needs the verified lexical bags, not passage scores.
+                # Preserve the full authorized preview and score passages only
+                # for the resources on the requested result page.
+                snippet_candidates = self._snippet_candidates(snapshot, started, allowed)
+                bow_candidates[version_id] = snippet_candidates
+                roots, available, preview, _ = snippet_candidates
+                snippets = available
+            else:
+                roots, snippets, preview = self._snippets(snapshot, keywords, started, allowed, query, expansion, policy)
+                for text, (terms, expanded, _) in list(lexical_specs.items())[1:]:
+                    _, alternatives, _ = self._snippets(snapshot, terms, started, allowed, text, expanded, policy)
+                    for key, candidate in alternatives.items():
+                        if candidate[0] > snippets[key][0]:
+                            snippets[key] = (candidate[0], {**candidate[1], '_retrieval_query': text})
             authorized_roots[version_id] = set(roots)
             evidence_options = {}
             if extra_vectors:
@@ -729,16 +748,19 @@ class SearchService:
                 if bag.id not in roots or bag.id not in snippets:
                     continue
                 ready_count += 1
-                matched = sorted(set(keywords) & set(bag.lexical.terms))
-                for terms, _, _ in list(lexical_specs.values())[1:]:
-                    matched = sorted(set(matched) | (set(terms) & set(bag.lexical.terms)))
-                if policy.enabled:
-                    matched = sorted(set(matched) | equivalent_terms(query, bag.lexical.title_tokens, expansion=expansion, dictionary=self.dictionary, policy=policy)
-                                 | set().union(*(equivalent_terms(query, passage, expansion=expansion, dictionary=self.dictionary, policy=policy)
-                                                 for passage in bag.lexical.passages)))
-                chunk = dict(snippets[bag.id][1])
-                chunk['context_evidence'] = 'lexical' if any(snippets[bag.id][0]) else 'bag'
-                chunk['meaning_variants'] = []
+                if method == 'bow':
+                    matched, chunk = None, None
+                else:
+                    matched = sorted(set(keywords) & set(bag.lexical.terms))
+                    for terms, _, _ in list(lexical_specs.values())[1:]:
+                        matched = sorted(set(matched) | (set(terms) & set(bag.lexical.terms)))
+                    if policy.enabled:
+                        matched = sorted(set(matched) | equivalent_terms(query, bag.lexical.title_tokens, expansion=expansion, dictionary=self.dictionary, policy=policy)
+                                     | set().union(*(equivalent_terms(query, passage, expansion=expansion, dictionary=self.dictionary, policy=policy)
+                                                     for passage in bag.lexical.passages)))
+                    chunk = dict(snippets[bag.id][1])
+                    chunk['context_evidence'] = 'lexical' if any(snippets[bag.id][0]) else 'bag'
+                    chunk['meaning_variants'] = []
                 if use_semantic:
                     hit = semantic_hits.get(bag.id)
                     if hit is not None:
@@ -856,23 +878,27 @@ class SearchService:
                 matches[row['resource_id']] = matches.get(row['resource_id'], 0) + 1
                 if row['resource_id'] in grouped:
                     continue
-                # A reversible, snapshot-bound identifier is added by the context helper.
                 snapshot = snapshots[bag.resource_version_id]
-                token = encode_context(bag.resource_version_id, chunk['content_unit_id'],
-                                       chunk['unit_chunk_sequence'], snapshot[3])
+                # Bow passage selection is deferred until the visible page is
+                # known; its score, total and winning Bag use lexical data only.
+                context = {}
+                if method != 'bow':
+                    token = encode_context(bag.resource_version_id, chunk['content_unit_id'],
+                                           chunk['unit_chunk_sequence'], snapshot[3])
+                    context = {'matched_keywords': matched, 'page_from': chunk['page_from'],
+                               'page_to': chunk['page_to'], 'content_unit_id': chunk['content_unit_id'],
+                               'context_id': token, 'context_evidence': chunk['context_evidence'],
+                               'meaning_variants': chunk['meaning_variants'],
+                               'context_url': f'/api/v1/chunks/{token}/context'}
                 grouped[row['resource_id']] = {
                     **{key: value for key, value in row.items() if key != 'version_id'},
                     'resource_version_id': bag.resource_version_id,
                     'bag_id': bag.id, 'bag_title': bag.title, 'unit_type': bag.unit_type,
-                    'representation_mode': mode, 'matched_keywords': matched, 'score': scores[bag_id],
+                    'representation_mode': mode, 'score': scores[bag_id],
                     'score_components': (fusion.components[bag.resource_version_id] if fusion else
                                          {key: branch[bag_id] for key, branch in
                                           [('bow', bow), ('vector', semantic)] if bag_id in branch}),
-                    'page_from': chunk['page_from'], 'page_to': chunk['page_to'],
-                    'content_unit_id': chunk['content_unit_id'], 'context_id': token,
-                    'context_evidence': chunk['context_evidence'],
-                    'meaning_variants': chunk['meaning_variants'],
-                    'context_url': f'/api/v1/chunks/{token}/context',
+                    **context,
                 }
             # Rendering does not affect rank/total. Hydrate only the visible
             # winners, BEFORE final snapshot/ACL validation, including on rerank.
@@ -883,6 +909,32 @@ class SearchService:
                 bag, chunk, *_ = by_bag[item['bag_id']]
                 version_id = bag.resource_version_id
                 snapshot = snapshots[version_id]
+                if method == 'bow':
+                    _, selected, _ = self._snippets(snapshot, keywords, started, set(), query, expansion, policy,
+                        candidates=bow_candidates[version_id], target_root=bag.id)
+                    for text, (terms, expanded, _) in list(lexical_specs.items())[1:]:
+                        _, alternatives, _ = self._snippets(snapshot, terms, started, set(), text, expanded, policy,
+                            candidates=bow_candidates[version_id], target_root=bag.id)
+                        candidate = alternatives.get(bag.id)
+                        if candidate is not None and candidate[0] > selected[bag.id][0]:
+                            selected[bag.id] = (candidate[0], {**candidate[1], '_retrieval_query': text})
+                    chunk = dict(selected[bag.id][1])
+                    chunk['context_evidence'] = 'lexical' if any(selected[bag.id][0]) else 'bag'
+                    chunk['meaning_variants'] = []
+                    matched = sorted(set(keywords) & set(bag.lexical.terms))
+                    for terms, _, _ in list(lexical_specs.values())[1:]:
+                        matched = sorted(set(matched) | (set(terms) & set(bag.lexical.terms)))
+                    if policy.enabled:
+                        matched = sorted(set(matched) | equivalent_terms(query, bag.lexical.title_tokens,
+                            expansion=expansion, dictionary=self.dictionary, policy=policy)
+                            | set().union(*(equivalent_terms(query, passage, expansion=expansion,
+                                dictionary=self.dictionary, policy=policy) for passage in bag.lexical.passages)))
+                    token = encode_context(version_id, chunk['content_unit_id'],
+                                           chunk['unit_chunk_sequence'], snapshot[3])
+                    item.update(matched_keywords=matched, page_from=chunk['page_from'], page_to=chunk['page_to'],
+                        content_unit_id=chunk['content_unit_id'], context_id=token,
+                        context_evidence=chunk['context_evidence'], meaning_variants=[],
+                        context_url=f'/api/v1/chunks/{token}/context')
                 if use_semantic and self.settings.search_evidence_strategy != 'current' and method != 'bow':
                     selected = select_evidence(evidence_by_version.get(version_id, []), version_id=version_id,
                         strategy='dense' if self.settings.search_evidence_strategy == 'version_dense' else 'context',
