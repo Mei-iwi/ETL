@@ -90,15 +90,15 @@ def test_invalid_live_vector_cannot_become_a_semantic_hit(metadata, monkeypatch)
     assert not embedding.queries
 
 
-@pytest.mark.parametrize('score,expected', [(.55, 1), (.49, 0)])
-def test_title_threshold_is_separate_and_never_forces_a_weak_hit(metadata, monkeypatch, score, expected):
+@pytest.mark.parametrize('score', [.55, .49])
+def test_vector_returns_nearest_live_title_below_threshold(metadata, monkeypatch, score):
     c, _, _, embedding = configure(metadata, monkeypatch)
     c.settings.search_vector_min_similarity = .6
     c.settings.search_metadata_live_dense_min_similarity = .5
     embedding.embed_documents = lambda texts: [
         {'vector': [score, math.sqrt(1 - score * score)] + [0.] * 1022} for _ in texts]
     result = search(c, QUERY, method='vector')
-    assert result['total'] == expected
+    assert result['total'] == 1
     assert c.settings.search_vector_min_similarity == .6
 
 

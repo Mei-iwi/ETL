@@ -374,8 +374,8 @@ def test_chunk_semantic_coexists_with_meaning_bags_and_legacy_threshold(semantic
     c.settings.semantic_enabled = True
     c.settings.search_vector_min_similarity = .99
     original = service.scores
-    def low_semantic_score(*args):
-        return {key: (.2, chunk) for key, (_, chunk) in original(*args).items()}
+    def low_semantic_score(*args, **kwargs):
+        return {key: (.2, chunk) for key, (_, chunk) in original(*args, **kwargs).items()}
     monkeypatch.setattr(service, 'scores', low_semantic_score)
     def wrong_branch(*_):
         pytest.fail('Chunk semantic must not score legacy vectors or meaning bags')

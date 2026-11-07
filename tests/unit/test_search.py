@@ -197,6 +197,53 @@ def test_pagination_after_grouping_and_latest_version_policy(searchable):
     assert c.search.search('page', 'bow', filters={'resource_version_id': other['id']})['total'] == 1
 
 
+def test_bow_scores_passages_only_for_visible_page(searchable, monkeypatch):
+    c, _ = searchable
+    other = c.ingestion.run('resource-2', 'input', 'sample.pdf')['version']
+    c.ocr.create_job(other['id'])
+    while c.worker.once('search-test'):
+        pass
+    c.indexing.enqueue(other['id'])
+    assert c.indexing.once()
+
+    scored_versions = []
+    original = c.search._snippets
+
+    def record(snapshot, *args, **kwargs):
+        scored_versions.append(snapshot[0]['id'])
+        return original(snapshot, *args, **kwargs)
+
+    monkeypatch.setattr(c.search, '_snippets', record)
+    first = c.search.search('page', 'bow', size=1)
+    assert first['total'] == 2
+    assert scored_versions == [first['items'][0]['resource_version_id']]
+    assert first['items'][0]['snippet'].startswith('Page')
+    assert decode_context(first['items'][0]['context_id'])[0] == scored_versions[0]
+
+    scored_versions.clear()
+    second = c.search.search('page', 'bow', page=2, size=1)
+    assert second['total'] == 2
+    assert scored_versions == [second['items'][0]['resource_version_id']]
+    assert first['items'][0]['resource_id'] != second['items'][0]['resource_id']
+
+
+def test_bow_rechecks_authority_after_deferred_snippet(searchable, monkeypatch):
+    from data_sync_etl.domain.search import SearchError
+
+    c, version = searchable
+    original = c.search._snippets
+
+    def revoke(snapshot, *args, **kwargs):
+        result = original(snapshot, *args, **kwargs)
+        with c.uow() as repo:
+            repo.update('master_learning_resources', version['resource_id'], {'is_active': False})
+        return result
+
+    monkeypatch.setattr(c.search, '_snippets', revoke)
+    with pytest.raises(SearchError, match='SEARCH_INDEX_STALE'):
+        c.search.search('page text', 'bow', size=1)
+
+
 def test_timeout_and_adapter_failure_are_safe(searchable):
     c, _ = searchable
     from data_sync_etl.domain.search import SearchError

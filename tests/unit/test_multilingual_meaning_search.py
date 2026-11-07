@@ -42,8 +42,9 @@ def test_dense_near_miss_requires_same_bag_context_without_lexical_overlap(
     monkeypatch.setattr('data_sync_etl.application.search.match_meaning', match)
     monkeypatch.setattr('data_sync_etl.application.search.cosine', lambda *_: context)
     result = container.search.search('foreign-language-description', method)
-    assert result['total'] == expected
-    if expected:
+    admitted = 1 if method == 'vector' else expected
+    assert result['total'] == admitted
+    if admitted:
         item = result['items'][0]
         assert item['score_components'] == {'vector': meaning}
         assert item['matched_keywords'] == []

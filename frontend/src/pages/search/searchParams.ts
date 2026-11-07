@@ -4,9 +4,9 @@ import { normalizeSearchQuery } from '../../services/searchQuery.ts'
 export const SEARCH_QUERY_MAX_LENGTH = 4000
 
 export const methods: { value: SearchMethod; label: string; }[] = [
+    { value: 'vector', label: 'Theo ý nghĩa' },
     { value: 'hybrid', label: 'Tìm kết hợp'},
     { value: 'bow', label: 'Theo từ khóa'},
-    { value: 'vector', label: 'Theo ý nghĩa' },
 ]
 
 export function readSearch(params: URLSearchParams): SearchRequest {
@@ -17,7 +17,7 @@ export function readSearch(params: URLSearchParams): SearchRequest {
     }
     return {
         query: normalizeSearchQuery(params.get('q') || ''),
-        method: methods.some(item => item.value === method) ? method as SearchMethod : 'hybrid',
+        method: methods.some(item => item.value === method) ? method as SearchMethod : 'vector',
         filters: Object.fromEntries(['domain', 'subject_id', 'grade_level_id', 'resource_type_code', 'resource_format', 'resource_id', 'resource_version_id']
             .map(key => [key, params.get(key) || null])),
         page: number('page', 1, 10001), size: 5,
