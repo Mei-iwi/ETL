@@ -370,7 +370,8 @@ class MetadataSearchService:
                     matched.setdefault(key, []).append(field.upper())
             lexical = rrf(*fields)
         dense_status = 'BLOCKED_SCALE' if dense_blocked and method != 'bow' else 'NOT_REQUESTED'
-        dense_floor = (self.settings.search_metadata_live_dense_min_similarity if live_dense
+        dense_floor = (-1. if method == 'vector' else
+                       self.settings.search_metadata_live_dense_min_similarity if live_dense
                        else self.settings.search_vector_min_similarity)
         maximum_similarity = None
         if method in ('vector', 'hybrid') and not dense_blocked and not live_dense_error:

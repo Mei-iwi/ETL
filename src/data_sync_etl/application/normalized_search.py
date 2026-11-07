@@ -100,7 +100,7 @@ class NormalizedContentSearch:
                     raise IndexingError('SEMANTIC_MODEL_IDENTITY_CHANGED', 503)
                 for key, vector in zip(keys, vectors, strict=True):
                     score = cosine(query_vector, vector)
-                    if score >= settings.search_normalized_min_similarity:
+                    if method == 'vector' or score >= settings.search_normalized_min_similarity:
                         dense[key] = score
         checkpoint()
         scores = lexical if method == 'bow' else dense if method == 'vector' else rrf(lexical, dense)
@@ -174,7 +174,8 @@ class NormalizedContentSearch:
             'versions': len(winners), 'seconds': round(monotonic() - started, 3)})
         return {'query': query, 'method': method, 'page': 1, 'size': limit, 'items': items,
                 'ready_bag_count': verified, 'representation_unit': 'content_bag', 'access_scope': access.scope,
-                'ranking_algorithm': 'fresh-normalized-bge-shortlist-v1', 'message': 'OK',
+                'ranking_algorithm': ('fresh-normalized-bge-shortlist-nearest-v1' if method == 'vector'
+                                      else 'fresh-normalized-bge-shortlist-v1'), 'message': 'OK',
                 'total_exact': len(selected) <= limit,
                 'retrieval_diagnostics': {'representation': 'normalized-chunk-bge-m3',
                     'scored_chunks': len(chunks), 'verified_versions': len(winners),

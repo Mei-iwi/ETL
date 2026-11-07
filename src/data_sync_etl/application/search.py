@@ -115,6 +115,8 @@ class SearchService:
             base += '+' + PLANNER_VERSION
         if method != 'vector' and self.settings.search_corpus_accent_candidates_enabled:
             base += '+corpus-accent-candidates-v1'
+        if method == 'vector':
+            base += '+nearest-v1'
         return base + '+approved-accent-max-v1' if self.settings.search_approved_accent_variants_enabled else base
 
     def _base_ranking_algorithm(self, method):
@@ -705,7 +707,8 @@ class SearchService:
                 evidence_by_version[version_id] = []
                 evidence_options['evidence_candidates'] = evidence_by_version[version_id]
             semantic_hits = (self.semantic.scores(snapshot, semantic_metadata[version_id],
-                roots, allowed, vector, lambda: self._deadline(started), semantic_budget, **evidence_options)
+                roots, allowed, vector, lambda: self._deadline(started), semantic_budget,
+                include_low_scores=method == 'vector', **evidence_options)
                 if use_semantic else {})
             version_bags = candidates_by_version[version_id]
             reader = initial_phase or (getattr(self.bags, 'search_bags', None) if _batch_bags else None)
@@ -771,7 +774,9 @@ class SearchService:
                                 winning_vector = extra
                     else:
                         value = max(cosine(v, bag.embedding) for v in [vector, *extra_vectors])
-                    accepted = value >= self.settings.search_vector_min_similarity
+                    # Vector-only search ranks every authorized indexed bag by
+                    # cosine, including the nearest bag below the admission floor.
+                    accepted = method == 'vector' or value >= self.settings.search_vector_min_similarity
                     if not accepted and self.settings.search_vector_anchor_fallback_enabled:
                         # Dense score remains mandatory. Accent-insensitive phrase
                         # evidence is from the selected, freshly authorized source
@@ -1047,6 +1052,7 @@ class SearchService:
                                               expansion.dictionary_fingerprint,
                                               expansion.policy_fingerprint,
                                               self.settings.search_vector_min_similarity,
+                                              'nearest-v1' if method == 'vector' else 'threshold-v1',
                                               VECTOR_ADMISSION_VERSION,
                                               self.settings.search_vector_anchor_fallback_enabled,
                                               self.settings.search_vector_anchor_min_similarity,

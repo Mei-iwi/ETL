@@ -171,7 +171,7 @@ test('cancellation is forwarded; a timeout signal is always supplied', async () 
 test('URL defaults and bounds are safe and methods are never arbitrary', () => {
     const request = readSearch(new URLSearchParams('q=%20abc%20&method=bad&page=-1&size=500'))
     assert.equal(request.query, 'abc')
-    assert.equal(request.method, 'hybrid')
+    assert.equal(request.method, 'vector')
     assert.equal(request.page, 1)
     assert.equal(request.size, 5)
     assert.equal(readSearch(new URLSearchParams('size=50')).size, 5)

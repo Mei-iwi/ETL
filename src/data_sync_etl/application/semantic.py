@@ -177,7 +177,7 @@ class SemanticService:
         return self.build(version_id, apply=True)
 
     def scores(self, snapshot, title, roots, allowed, vector, deadline, budget, *, evidence_candidates=None,
-               query_vectors=()):
+               query_vectors=(), include_low_scores=False):
         """Bounded exact cosine over the filtered versions, no unbounded corpus scan.
 
         This first implementation is exact CPU retrieval, not a Mongo Atlas ANN
@@ -213,7 +213,7 @@ class SemanticService:
             score = max(max(-1., min(1., math.fsum(a*b for a, b in zip(
                 query_vector, rows[spec['chunk_id']]['vector'], strict=True)))) for query_vector in query_vectors)
             chunk = chunks[spec['chunk_id']]
-            if score <= self.settings.semantic_min_score:
+            if not include_low_scores and score <= self.settings.semantic_min_score:
                 continue
             if evidence_candidates is not None:
                 evidence_candidates.append(EvidenceCandidate(snapshot[0]['id'], root, chunk, score))

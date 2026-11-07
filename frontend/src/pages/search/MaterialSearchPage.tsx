@@ -135,6 +135,7 @@ function SearchForm({ params, model }: { params: URLSearchParams; model: ReturnT
             {selectedFilters.length > 0 && <div className={styles.selectedFilters} aria-label="Bộ lọc đã chọn">{selectedFilters.map(item =>
                 <button type="button" key={item.key} aria-label={`Bỏ bộ lọc: ${item.label}`} onClick={() => setFilters({ ...filters, [item.key]: null, ...(item.key === 'grade_level_id' ? { subject_id: null } : {}) })}>{item.label}<X size={13} aria-hidden="true" /></button>)}</div>}
             {hasChanges && <p role="status" className={styles.methodHelp}>Nhấn Tìm kiếm để áp dụng thay đổi.</p>}
+            {method === 'vector' && <p className={styles.methodHelp}>Xếp học liệu theo vector gần nhất, kể cả khi điểm tương đồng thấp.</p>}
             {!model.ready && <div role="status" className={model.state === 'FAILED' || model.state === 'STOPPED' ? styles.error : styles.pending}>
                 {model.error ? 'Chưa kiểm tra được trạng thái tìm kiếm. Có thể chọn BoW.' :
                     model.state === 'FAILED' || model.state === 'STOPPED' ? 'Chưa thể chuẩn bị tìm kiếm. Có thể chọn BoW.' : 'Đang chuẩn bị tìm kiếm…'}

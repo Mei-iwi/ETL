@@ -73,10 +73,12 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                     }}>Ngừng chờ</button></div> : <>
                     <div className={styles.resultSummary}>
                         <div><h2>Kết quả tìm kiếm</h2><p role="status"><strong>{result.total.toLocaleString('vi-VN')}</strong> kết quả cho <strong>“{criteria.query}”</strong></p></div>
-                        {result.items.length > 0 && <span className={styles.metadata}>Phù hợp nhất trước · {Math.min((result.page - 1) * result.size + 1, result.total)}–{Math.min((result.page - 1) * result.size + result.items.length, result.total)} / {result.total}</span>}
+                        {result.items.length > 0 && <span className={styles.metadata}>{criteria.method === 'vector' ? 'Gần nhất theo vector' : 'Phù hợp nhất trước'} · {Math.min((result.page - 1) * result.size + 1, result.total)}–{Math.min((result.page - 1) * result.size + result.items.length, result.total)} / {result.total}</span>}
                         {result.access_scope === 'local_demo' && <p role="status" className={styles.metadata}>Tra cứu thử nghiệm nội bộ</p>}
                         <button type="button" className={styles.textButton} onClick={() => { clearSearchViewCache(); setResult(null); setAttempt(value => value + 1) }}>Cập nhật kết quả</button>
                     </div>
+                    {criteria.method === 'vector' && result.items.length > 0 &&
+                        <p className={styles.metadata}>Kết quả được xếp theo độ gần của vector; điểm thấp có thể ít liên quan đến câu hỏi.</p>}
                     {result.branch_status && Object.values(result.branch_status).some(value =>
                         !['READY', 'NOT_REQUESTED', 'OK', 'DISABLED', 'NO_ACCESSIBLE_CONTENT', 'NO_READY_INDEX', 'METADATA_SCHEMA_NOT_READY'].includes(value)) &&
                         <p role="status" className={styles.metadata}>Một phần tìm kiếm chưa sẵn sàng; kết quả hiện có thể chưa đầy đủ.</p>}
@@ -99,9 +101,12 @@ export function SearchResults({ params, onBusyChange }: { params: URLSearchParam
                         </details>}
                         {item.context_id && <SearchContext id={item.context_id} evidence={item.context_evidence} />}
                         {item.match_origin && <p className={styles.metadata}>
-                            {item.match_origin === 'BOTH' && 'Khớp nội dung và thông tin học liệu · '}{item.matched_fields?.length
-                                ? item.matched_fields.map(field => ({ TITLE: 'Khớp tiêu đề', DESCRIPTION: 'Khớp mô tả', TAGS: 'Khớp thẻ/từ khóa', CONTENT: 'Khớp nội dung' }[field] || field)).join(' · ')
-                                : 'Khớp thông tin học liệu'}</p>}
+                            {criteria.method === 'vector'
+                                ? item.match_origin === 'BOTH' ? 'Gần nhất theo nội dung và thông tin học liệu'
+                                    : item.match_origin === 'METADATA' ? 'Gần nhất theo thông tin học liệu' : 'Gần nhất theo nội dung'
+                                : <>{item.match_origin === 'BOTH' && 'Khớp nội dung và thông tin học liệu · '}{item.matched_fields?.length
+                                    ? item.matched_fields.map(field => ({ TITLE: 'Khớp tiêu đề', DESCRIPTION: 'Khớp mô tả', TAGS: 'Khớp thẻ/từ khóa', CONTENT: 'Khớp nội dung' }[field] || field)).join(' · ')
+                                    : 'Khớp thông tin học liệu'}</>}</p>}
                         {!!item.meaning_variants?.length && <details className={styles.more}><summary>Các cách diễn đạt trong nhóm nghĩa khớp</summary>
                             <ul>{item.meaning_variants.map(value => <li key={value}>{value}</li>)}</ul></details>}
                         {item.context_evidence === 'bag' && <p className={styles.metadata}>Kết quả khớp ở cấp học liệu; đoạn trích là đoạn tham khảo, chưa xác định được đoạn khớp trực tiếp.</p>}

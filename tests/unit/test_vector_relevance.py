@@ -18,13 +18,13 @@ def test_threshold_configuration_rejects_invalid_values(value):
 
 
 @pytest.mark.parametrize('method', ['vector', 'hybrid'])
-def test_positive_but_weak_similarity_can_return_zero_results(searchable, monkeypatch, method):
+def test_vector_returns_nearest_weak_result_while_hybrid_keeps_threshold(searchable, monkeypatch, method):
     c, _ = searchable
     c.settings.search_vector_min_similarity = 0.5
     monkeypatch.setattr(search_module, 'cosine', lambda *_: 0.49)
     result = c.search.search('unmatchedquery', method)
-    assert result['items'] == []
-    assert result['total'] == result['total_pages'] == 0
+    assert result['total'] == result['total_pages'] == (1 if method == 'vector' else 0)
+    assert len(result['items']) == result['total']
     assert result['ready_bag_count'] == 3
     assert result['message'] == 'OK'
 
@@ -48,7 +48,7 @@ def test_hybrid_preserves_lexical_hit_but_rejects_weak_vector_vote(searchable, m
     assert result['total'] == 1
     assert result['items'][0]['score_components']['bow'] > 0
     assert 'vector' not in result['items'][0]['score_components']
-    assert c.search.search('page', 'vector')['total'] == 0
+    assert c.search.search('page', 'vector')['total'] == 1
     assert c.search.search('page', 'bow')['total'] == 1
 
 
@@ -56,9 +56,10 @@ def test_threshold_boundary_is_inclusive_and_configurable(searchable, monkeypatc
     c, _ = searchable
     monkeypatch.setattr(search_module, 'cosine', lambda *_: 0.6)
     c.settings.search_vector_min_similarity = 0.6
-    assert c.search.search('unmatchedquery', 'vector')['total'] == 1
+    assert c.search.search('unmatchedquery', 'hybrid')['total'] == 1
     c.settings.search_vector_min_similarity = 0.61
-    assert c.search.search('unmatchedquery', 'vector')['total'] == 0
+    assert c.search.search('unmatchedquery', 'hybrid')['total'] == 0
+    assert c.search.search('unmatchedquery', 'vector')['total'] == 1
 
 
 @pytest.mark.parametrize('searchable', [{'texts': ['the plants and the sunlight']}], indirect=True)
@@ -82,9 +83,10 @@ def test_filtering_precedes_resource_grouping_counts_and_pagination(searchable, 
         scores = iter([0.8, 0.2, 0.2, 0.2, 0.2, 0.2])
         monkeypatch.setattr(search_module, 'cosine', lambda *_, values=scores: next(values))
         result = c.search.search('unmatchedquery', method, size=1, page=page)
-        assert result['total'] == result['total_pages'] == 1
+        expected = 2 if method == 'vector' else 1
+        assert result['total'] == result['total_pages'] == expected
         assert result['ready_bag_count'] == 6
         if page == 1:
-            assert result['items'][0]['matched_bag_count'] == 1
+            assert result['items'][0]['matched_bag_count'] >= 1
         else:
-            assert result['items'] == []
+            assert len(result['items']) == (1 if method == 'vector' else 0)

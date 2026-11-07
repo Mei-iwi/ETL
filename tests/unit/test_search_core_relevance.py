@@ -56,7 +56,7 @@ def test_metadata_respects_configured_literal_coverage(metadata):
     assert search(c, 'unknown1 unknown2 xylophone')['total'] == 0
 
 
-def test_metadata_dense_uses_same_verified_source_admission(metadata, monkeypatch):
+def test_metadata_vector_returns_nearest_verified_source(metadata, monkeypatch):
     c, _, extension, service = metadata
     with c.uow() as repo:
         repo.update('master_learning_resources', 'resource-1', {'title': 'Cư dân Văn Lang trồng lúa nước'})
@@ -65,10 +65,10 @@ def test_metadata_dense_uses_same_verified_source_admission(metadata, monkeypatc
     vector = [.49, math.sqrt(1 - .49 ** 2), *([0.] * 1022)]
     monkeypatch.setattr(service.embedding, 'embed_queries', lambda _: [{'vector': vector}])
     c.settings.search_vector_anchor_fallback_enabled = False
-    assert search(c, 'Van Lang', method='vector')['total'] == 0
+    assert search(c, 'Van Lang', method='vector')['total'] == 1
     c.settings.search_vector_anchor_fallback_enabled = True
     assert search(c, 'Van Lang', method='vector')['total'] == 1
-    assert search(c, 'unrelated astronomical quantum', method='vector')['total'] == 0
+    assert search(c, 'unrelated astronomical quantum', method='vector')['total'] == 1
 
 
 @pytest.mark.parametrize('query', ['Van Lang', 'Văn Lang', 'văn lang',
@@ -102,7 +102,7 @@ def test_approved_cross_language_core_can_support_dense_hit_without_literal_alia
     {'texts': ['The Van Lang inhabitants grew wet rice and cast bronze tools.'], 'meanings': False},
     {'texts': ['The Van Lang inhabitants grew wet rice and cast bronze tools.'], 'meanings': True},
 ], indirect=True)
-def test_vector_admission_uses_real_verified_passage_and_keeps_dense_score(searchable, monkeypatch):
+def test_vector_nearest_uses_real_verified_passage_and_keeps_dense_score(searchable, monkeypatch):
     c, _ = searchable
     # Fixture vectors are identical. Construct an orthogonal query whose actual
     # cosine is .49, without changing any persisted vector or index fingerprint.
@@ -115,7 +115,7 @@ def test_vector_admission_uses_real_verified_passage_and_keeps_dense_score(searc
     c.settings.search_vector_min_similarity = .6
     c.settings.search_meaning_context_fallback_enabled = False
     c.settings.search_vector_anchor_fallback_enabled = False
-    assert c.search.search('Van Lang', 'vector')['total'] == 0
+    assert c.search.search('Van Lang', 'vector')['total'] == 1
     c.settings.search_vector_anchor_fallback_enabled = True
     for query in ['Van Lang', 'Văn Lang',
                   'How was the life of the Van Lang inhabitants connected to wet-rice cultivation and bronze casting?']:
@@ -123,4 +123,4 @@ def test_vector_admission_uses_real_verified_passage_and_keeps_dense_score(searc
         assert result['total'] == 1
         assert result['items'][0]['score_components']['vector'] == pytest.approx(.49)
         assert 'Van Lang' in result['items'][0]['snippet']
-    assert c.search.search('unrelated astronomical quantum', 'vector')['total'] == 0
+    assert c.search.search('unrelated astronomical quantum', 'vector')['total'] == 1
